@@ -21,7 +21,7 @@ get the repo launch-ready first, then share — a good landing page converts a c
 - [x] CI green + review gate on every PR (#201)
 - [x] LICENSE (MIT)
 - [ ] **Social-preview image uploaded** — Settings → Social preview → upload `.github/assets/social-preview.png` (manual, #212)
-- [ ] **Demo GIF / asciinema** of a real `/board work` run in the README (#210)
+- [x] **Demo GIF / asciinema** of a real `/board work` run in the README (#210) — `board-install.gif` + `board-loop.gif` in README
 - [ ] 2–3 issues tagged `good first issue` for first-time contributors
 - [ ] Cut a tagged release with notes generated from Done issues (`/board changelog`)
 - [ ] Pin the repo on the profile; add it to the profile README
