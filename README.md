@@ -105,6 +105,7 @@ one door, not a wall of commands.
 |---|---|
 | `/board` | Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/triage/complete/bi-checklist. Defaults to the CSalcedoDataBI account. |
 | `/docs` | Publish all wiki pages (product docs + knowledge registry) in a single push. |
+| `/expert` | Auto-expert mode — take a tracked plan and execute it autonomously through a specialized expert persona (research, build, test with recorded evidence, self-drive the board), stopping only at the irreversible line. Two verbs: config (define the contract) and auto (run it). |
 | `/knowledge` | Manage the project knowledge references registry by domain (add/harvest/list/gen/wiki). Versioned in knowledge/registry.json + generated KNOWLEDGE.md. |
 | `/scan` | Scan the CURRENT project for untracked work (code TODOs, doc checklists/pending, plans/specs) and turn the chosen items into issues + a board plan. Targets the current repo, not the tool's. |
 | `/skills` | Manage the Agent Skills lifecycle — organize/catalog, audit for failures, bootstrap best-practice toolkits by profile (quality or bi = Microsoft Fabric / Power BI), or check installed-tool freshness. Part of the skills-ops module. |
