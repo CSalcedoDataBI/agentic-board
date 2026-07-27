@@ -1,0 +1,44 @@
+# The auto-loop — what the launched autonomous session does
+
+`Expert-Auto.ps1` composes a brief (`Format-AutoBrief`) and launches a dedicated session in an
+isolated worktree. That session follows this loop. It is the operational contract behind the
+guiding principle: **total self-use of agentic-board — never improvise your own tooling.**
+
+## Phases
+
+1. **Ingest** — read the epic/issue and its enriched plan (Research, Role seed, Deliverables,
+   Test plan / DoD). The brief file (`.agentic-board/expert-brief-<issue>.md`) carries all of it.
+2. **Become the expert** — adopt the role objective. Research prior-art and docs, and **register
+   findings** via `/knowledge add` / `/knowledge harvest` (read-and-forget is not allowed).
+   Acquire missing tooling via `/skills bootstrap` / `/skills audit`.
+3. **Execute (test-first)** — build guided by tests first, in the worktree.
+4. **Verify + evidence** — run the definition-of-done gates. Write a structured `[abios-evidence]`
+   block (`Expert-Evidence.Format-EvidenceBlock`) to **three places**: the PR body, a durable
+   issue comment, and a versioned `evidence/<issue>.md`. If green → open the PR + run the review
+   gate.
+5. **Self-heal + auto-drive the board**:
+   - in-scope problem → fix it in the loop and continue;
+   - out-of-scope finding → file a sanitized `discovered` issue on the board (`/board`, the
+     `abios-feedback` sanitization criteria) and keep going.
+6. **Loop until done or budget** (`Get-BudgetVerdict`): keep iterating until the DoD is green —
+   then **leave the PR ready and STOP before merge** (the irreversible line) — or the budget is
+   spent → `/board handoff -Save` so a later session resumes.
+7. **Report** — final evidence + updated board + a PR awaiting the human's merge approval.
+
+## The capability map (each need → an agentic-board capability)
+
+| Need | Capability |
+|---|---|
+| Research / prior-art | `/knowledge add`, `/knowledge harvest` |
+| Acquire / verify skills | `/skills bootstrap`, `/skills audit`, `/skills freshness` |
+| Discover latent work | `/scan` |
+| Record work / findings | `/board` issue, `/board plan`, `/board triage` |
+| Report progress / evidence | `/board update`, `/board changelog`, `[abios-evidence]` |
+| Survive budget / interruption | `/board handoff -Save` |
+| Clean up | `/board doctor`, `/board cerrar-ciclo` |
+
+## The brake (never cross without a human)
+
+`Expert-Autonomy.Test-IsIrreversible` — STOP before: **merge, deploy, refresh, publish, delete**.
+Fail-safe: an action the gate does not recognize is treated as irreversible. Reach "PR ready +
+gate green" and stop there.
