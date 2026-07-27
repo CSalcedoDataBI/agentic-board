@@ -1,0 +1,51 @@
+---
+description: Auto-expert mode — take a tracked plan and execute it autonomously through a specialized expert persona (research, build, test with recorded evidence, self-drive the board), stopping only at the irreversible line. Two verbs: config (define the contract) and auto (run it).
+---
+You are running the agentic-board /expert command (typed as `/agentic-board:expert`).
+
+**If $ARGUMENTS is empty or only whitespace, do NOT run anything yet.** Show this menu and wait
+for the user to pick (they can answer with just the number):
+
+```
+¿Qué quieres hacer con el auto-experto?
+
+1. config          → definir el CONTRATO (rol experto, autonomía, definition-of-done, evidencia,
+                     auto-uso del board, presupuesto). No ejecuta nada; deja todo revisable.
+2. auto <issue>    → ejecutar el plan de forma AUTÓNOMA: adopta el rol experto, investiga,
+                     construye, prueba dejando evidencia, se auto-usa agentic-board para el
+                     trabajo lateral que encuentra, y FRENA antes de lo irreversible (merge/
+                     deploy/refresh/publish/delete) — deja el PR listo para tu OK.
+```
+
+First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (default
+CSalcedoDataBI). Then apply the internal `board-expert` skill, which owns the full recipe.
+
+## config
+Run `scripts/Expert-Config.ps1 -PlanText "<plan/epic text>" -PlanGoal "<goal>"`. It detects the
+plan's domain, hooks the installed skills/profiles for it, synthesizes the role-as-objective
+(editable preview), and writes the contract to `.agentic-board/expert.json` with sane defaults:
+autonomy brakes only on the irreversible, evidence goes to three places (PR + `[abios-evidence]`
+issue comment + versioned file), board self-drive is on with a cap, and a budget bounds the run.
+Show the role preview and let the user edit it before running `auto`.
+
+## auto
+Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n>`. It reads the contract, composes the
+autonomous brief (role objective + enriched plan + DoD + the capability map + the irreversible
+line), and launches a dedicated Claude session in an isolated worktree (reusing the fleet/launch
+machinery). You are freed; monitor with `/board work -Sessions -Watch`. The launched session:
+
+- **Becomes the expert** — researches prior-art via `/knowledge`, acquires tooling via `/skills`.
+- **Builds test-first** and, after each verify phase, **records evidence** (three places).
+- **Self-heals**: an in-scope problem it fixes in the loop; an out-of-scope finding it files as a
+  sanitized `discovered` issue on the board and keeps going.
+- **Loops** until the definition-of-done is green (leaves the PR ready and **brakes before merge**)
+  or the budget is exhausted (`/board handoff -Save`).
+
+**Guiding principle — total self-use of agentic-board:** the expert never improvises its own
+tooling. Research → `/knowledge`, tooling → `/skills`, discover → `/scan`, findings → `/board`
+issue, report → `/board update`, survive → `/board handoff`, cleanup → `/board doctor`.
+
+Every response about a board operation must end with the board URL:
+`https://github.com/users/<owner>/projects/<num>`.
+
+Arguments: $ARGUMENTS

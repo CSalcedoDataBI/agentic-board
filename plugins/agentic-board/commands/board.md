@@ -36,6 +36,7 @@ for the user to pick (they can answer with just the number):
 /skills     → ciclo de vida de Agent Skills (organize / audit / bootstrap [bi] / freshness)
 /knowledge  → registro de referencias externas por dominio (add / harvest / wiki)
 /tools      → catálogo unificado de herramientas externas: navegar, investigar e instalar (individual o todas)
+/expert     → auto-experto: toma un plan y lo ejecuta SOLO (config = define el contrato, auto = corre autónomo)
 
 ── canal de feedback (NO se tipea — se dispara solo) ───────────
 abios-feedback → ¿bug o mejora para ESTA herramienta? DILO en lenguaje natural
