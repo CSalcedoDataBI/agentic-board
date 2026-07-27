@@ -29,7 +29,21 @@
 
 .PARAMETER Description
     Epic body text: goal, context, links (full blob URLs on PUSHED refs
-    only - relative paths render broken in issues).
+    only - relative paths render broken in issues). When any of the enriched
+    params below is present, -Description is used as the "Goal" section.
+
+.PARAMETER Research
+    Enriched item: research / prior-art findings (what exists, what to reuse).
+
+.PARAMETER RoleSeed
+    Enriched item: the expert-role objective the /board expert auto-mode adopts.
+
+.PARAMETER Deliverables
+    Enriched item: one or more concrete deliverables (rendered as a bullet list).
+
+.PARAMETER TestPlan
+    Enriched item: the Definition of Done / test plan (rendered as a bullet list).
+    Any omitted enriched section renders a detectable TBD placeholder.
 
 .PARAMETER Repo
     owner/name. Default: derived from the current directory's origin remote.
@@ -49,9 +63,13 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$Title,
-    [Parameter(Mandatory)][string[]]$Tasks,
+    [string]$Title = "",
+    [string[]]$Tasks = @(),
     [string]$Description = "",
+    [string]$Research = "",
+    [string]$RoleSeed = "",
+    [string[]]$Deliverables = @(),
+    [string[]]$TestPlan = @(),
     [string]$Repo = "",
     [string]$Owner = "",
     [int]   $ProjectNum = 0,
@@ -59,6 +77,41 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# ── Pure core (unit-tested via the dot-source guard) ────────────────────────────
+# Format-EnrichedEpicBody renders the four standard items the /board expert auto-mode
+# reads: Research/prior-art, Role seed, Deliverables, Test plan (DoD). An omitted section
+# renders a detectable TBD placeholder so `auto` can tell an unfilled plan from a filled one.
+function Format-EnrichedEpicBody {
+    [CmdletBinding()]
+    param(
+        [string]$Goal = "",
+        [string]$Research = "",
+        [string]$RoleSeed = "",
+        [string[]]$Deliverables = @(),
+        [string[]]$TestPlan = @()
+    )
+    $ph = '_TBD - fill before /board expert auto_'
+    $text = { param($s) if ([string]::IsNullOrWhiteSpace($s)) { $ph } else { $s.Trim() } }
+    $bullets = {
+        param($arr)
+        if (-not $arr -or @($arr).Count -eq 0) { $ph }
+        else { (@($arr) | ForEach-Object { "- $_" }) -join "`n" }
+    }
+    @(
+        "## Goal",                              (& $text $Goal),          "",
+        "## Research / Prior-art",              (& $text $Research),      "",
+        "## Expert role (seed)",                (& $text $RoleSeed),      "",
+        "## Deliverables",                      (& $bullets $Deliverables), "",
+        "## Test plan (Definition of Done)",    (& $bullets $TestPlan)
+    ) -join "`n"
+}
+
+# Dot-source guard: tests set $env:ABIOS_BOARDPLAN_DOTSOURCE to load the pure formatter only.
+if ($env:ABIOS_BOARDPLAN_DOTSOURCE) { return }
+
+if (-not $Title)                          { throw "Board-Plan: -Title is required." }
+if (-not $Tasks -or $Tasks.Count -eq 0)   { throw "Board-Plan: -Tasks is required (one or more task titles)." }
 
 # The single resolver for owner/name from this clone's origin (#281). Do NOT inline the regex
 # again: the copy-pasted version ate any dot in the repo name (midominio.com -> midominio).
@@ -85,8 +138,15 @@ gh label create plan-task --color C2E0C6 --description "Child task of a tracked 
 
 # ── 2. Epic ────────────────────────────────────────────────────────────────────
 $taskOverview = ($Tasks | ForEach-Object { "- $_" }) -join "`n"
+$enriched = $Research -or $RoleSeed -or (@($Deliverables).Count -gt 0) -or (@($TestPlan).Count -gt 0)
 $body = ""
-if ($Description) { $body += "$Description`n`n" }
+if ($enriched) {
+    # The plan carries the four standard items; -Description becomes the Goal text.
+    $body += (Format-EnrichedEpicBody -Goal $Description -Research $Research -RoleSeed $RoleSeed -Deliverables $Deliverables -TestPlan $TestPlan)
+    $body += "`n`n"
+} elseif ($Description) {
+    $body += "$Description`n`n"
+}
 $body += "## Tasks (native sub-issues)`n$taskOverview`n`nCreated by /board plan - work them with /board work."
 
 # Same trap as the children (#281): a failing `gh` does not throw, so without these checks the
