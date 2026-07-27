@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 ### Added
+- **`/agentic-board:expert` — auto-expert mode: run a tracked plan autonomously** (#422; #423–#430).
+  A new command that hands a tracked plan to an agent which adopts the required expert persona and
+  executes it end-to-end, freeing the user from real-time babysitting. Two verbs:
+  `config` (`Expert-Config.ps1`) synthesizes the expert role from the plan's domain — hooking the
+  installed skills/profiles for it (`Expert-RoleSynthesis.ps1`) — and writes a contract
+  (`ExpertContractIo.ps1`, `.agentic-board/expert.json`); `auto` (`Expert-Auto.ps1`) composes an
+  autonomous brief (role + plan + definition-of-done + capability map + the irreversible line) and
+  launches a dedicated session in an isolated worktree (reusing the fleet/`-Launch` machinery),
+  monitored with `-Sessions -Watch`. **Guiding principle — total self-use of agentic-board:** the
+  expert routes every need through existing capabilities (research → `/knowledge`, tooling →
+  `/skills`, discover → `/scan`, findings → `/board` issue, survive → `/board handoff`). It records
+  test **evidence in three places** (PR body + `[abios-evidence]` issue comment + versioned
+  `evidence/<n>.md`, `Expert-Evidence.ps1`), self-heals (in-scope fix / out-of-scope `discovered`
+  issue), and brakes **only on the irreversible** (`Expert-Autonomy.ps1`, fail-safe: an unknown
+  action is treated as irreversible) — reaching "PR ready" and stopping before merge. `/board plan`
+  gains enriched-plan params (`-Research`/`-RoleSeed`/`-Deliverables`/`-TestPlan`) that feed it.
+  Internal `board-expert` skill owns the recipe; `/expert` listed in the `/board` menu.
 - **`Publish-DocsWiki.ps1` is now the single wiki publisher — includes knowledge registry pages** (#405).
   Previously `Publish-DocsWiki.ps1` (product docs) and `Publish-KnowledgeWiki.ps1` (knowledge registry)
   each cloned the wiki, wrote their pages, and pushed independently, creating a race condition.
