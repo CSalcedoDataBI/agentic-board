@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [0.26.0] - 2026-07-27
 ### Added
 - **`/agentic-board:expert` — auto-expert mode: run a tracked plan autonomously** (#422; #423–#430).
   A new command that hands a tracked plan to an agent which adopts the required expert persona and
