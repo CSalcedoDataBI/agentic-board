@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.27.0] - 2026-07-28
 ### Added
 - **Expert roles are now extensible per project** (#444; #445–#454).
   The five built-in roles moved out of `Expert-RoleSynthesis.ps1` into a shipped
