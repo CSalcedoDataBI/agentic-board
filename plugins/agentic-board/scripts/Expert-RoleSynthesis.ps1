@@ -71,12 +71,64 @@ function Get-HookedSkills {
     $hooked.ToArray()
 }
 
+function Find-AgentDefinition {
+    # Agent definitions are <root>/**/agents/<stem>.md. A 'plugin:agent' name resolves by stem —
+    # the namespace is how the Agent tool disambiguates, not part of the filename.
+    [CmdletBinding()]
+    param([string]$Name, [string[]]$SearchRoots)
+    if (-not $Name) { return $null }
+    $stem = ($Name -split ':')[-1]
+    foreach ($root in @($SearchRoots)) {
+        if (-not $root -or -not (Test-Path -LiteralPath $root)) { continue }
+        $hit = Get-ChildItem -LiteralPath $root -Recurse -File -Filter "$stem.md" -ErrorAction SilentlyContinue |
+               Where-Object { ($_.FullName -replace '\\','/') -match '/agents/' } |
+               Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    $null
+}
+
+function Get-DefaultAgentRoots {
+    $userHome = $env:USERPROFILE; if (-not $userHome) { $userHome = $HOME }
+    @(
+        (Join-Path (Get-Location).Path '.claude'),
+        (Split-Path $PSScriptRoot -Parent),
+        (Join-Path $userHome '.claude/agents'),
+        (Join-Path $userHome '.claude/plugins/cache')
+    ) | Where-Object { $_ }
+}
+
+function Resolve-RolePersona {
+    # A role's persona comes from an existing agent definition rather than restating one.
+    # Inline standards are the shortcut for when no definition is worth creating.
+    [CmdletBinding()]
+    param([hashtable]$Role, [string[]]$SearchRoots)
+    if (-not $SearchRoots) { $SearchRoots = Get-DefaultAgentRoots }
+    if ($Role.agent) {
+        $path = Find-AgentDefinition -Name $Role.agent -SearchRoots $SearchRoots
+        if ($path) {
+            # Drop the frontmatter block; the body is the persona.
+            $raw = Get-Content -Raw -LiteralPath $path
+            return ($raw -replace '(?s)^\s*---.*?---\s*', '').Trim()
+        }
+        Write-Warning "roles: role '$($Role.name)' names agent '$($Role.agent)', which is not installed - install it with /tools, or the role falls back to its standards."
+    }
+    if ($Role.standards) { return (@($Role.standards) -join "`n") }
+    ''
+}
+
 function Format-RoleObjective {
-    param([string]$Domain, [string[]]$HookedSkills, [string]$PlanGoal)
+    param([string]$Domain, [string[]]$HookedSkills, [string]$PlanGoal, [string]$Persona)
     # Drop empties before counting: @($null).Count is 1 in PowerShell, so a naive count check
     # skips the fallback and renders a bare "- " bullet.
     $list = @(@($HookedSkills) | Where-Object { $_ })
     $skillList = if ($list.Count) { ($list | ForEach-Object { "- $_" }) -join "`n" } else { "- (none installed — research the domain from scratch via /knowledge)" }
+    $standards = if ($Persona) { $Persona } else {
+@"
+Your standards: you research prior-art before building (register findings via ``/knowledge``),
+you build test-first, you record evidence of every test, and you never ship past a failing gate.
+"@
+    }
     @"
 ## Expert role (objective)
 
@@ -84,8 +136,7 @@ You are an **expert in $Domain**. Your objective for this task:
 
 > $PlanGoal
 
-Your standards: you research prior-art before building (register findings via ``/knowledge``),
-you build test-first, you record evidence of every test, and you never ship past a failing gate.
+$standards
 Engage these installed skills as your working toolset:
 
 $skillList
