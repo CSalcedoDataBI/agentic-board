@@ -24,6 +24,18 @@ typed with a slash.
 Show the role preview and let the user edit before running `auto`. See `references/contract.md`
 for every contract field and its default.
 
+If `config` reports **NO ROLE MATCHED**, research the plan's domain (via `/knowledge`, and
+`/tools` for ready-made agent definitions such as `wshobson/agents`), then propose a complete
+role — `name`, `keywords`, `skills`, and an `agent` pointer when a fitting definition exists.
+Show it to the user and persist it **only on their confirmation**, with `Add-ExpertRole`: writing
+a role changes how every future plan is classified, so it is never a silent side effect of
+`config`.
+
+### roles — see and debug the catalog
+`scripts/Expert-Roles.ps1 -List` prints the effective catalog (factory + local, with each role's
+source and how many installed skills it really hooks); `-Why "<plan text>"` explains which keyword
+in which role decided a match. Schema and merge rules: `references/roles.md`.
+
 ### auto — run it
 `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n>`:
 1. Reads the contract; composes the autonomous brief.
