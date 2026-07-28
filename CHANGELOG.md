@@ -1,6 +1,30 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+- **Expert roles are now extensible per project** (#444; #445–#454).
+  The five built-in roles moved out of `Expert-RoleSynthesis.ps1` into a shipped
+  `presets/roles.json`, alongside the fields/labels/toolkit presets the plugin already ships, and
+  a project may add `.agentic-board/roles.json` (versioned in git) to add, extend or override
+  roles: `keywords`/`skills` union with the factory role of the same name,
+  `agent`/`standards`/`knowledgeDomain` replace it, and `"replace": true` drops the factory values
+  entirely. Local roles are evaluated first, so a project can always outrank a factory role, and a
+  merged role takes the local position. Before this, any project outside Power BI / semantic
+  models / Fabric / plugin-development resolved to `generic`, whose skill list is empty, and the
+  only fix was editing the plugin's source.
+  A role gives its expert a persona by **pointing at an existing agent definition** (`agents/*.md`,
+  the same registry the Agent tool resolves) rather than restating one — inline `standards` remain
+  as the shortcut. A plan matching no role is now reported (`roleMatched`) so the expert can
+  research the domain, propose a role and persist it with `Add-ExpertRole` **on the user's
+  confirmation** — never silently, since it changes how every future plan is classified.
+  New `/agentic-board:expert roles` verb (`Expert-Roles.ps1`): `list` prints the effective catalog
+  with each role's source and **how many installed skills it actually hooks** — a role that hooks
+  zero looks fine on paper and gives the expert no toolset — and `why "<text>"` explains which
+  keyword in which role decided a match. A broken local catalog never degrades the expert below
+  the factory roles (`ExpertRolesIo.ps1`), and `.gitignore` now exempts `roles.json` from the
+  `.agentic-board/` exclusion by excluding the directory's contents, since git cannot re-include a
+  file whose parent directory is excluded.
+
 ### Fixed
 - **`/agentic-board:expert config` produced an unusable role — objective and toolset both empty** (#441, #442).
   Every contract `config` wrote carried a blank objective and no hooked skills; the failure was
