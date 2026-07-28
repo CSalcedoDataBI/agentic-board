@@ -204,8 +204,14 @@ Describe 'Redaction (nothing leaves the machine unscrubbed)' {
         $r | Should -Match 'REDACTED'
     }
 
-    It 'strips a home-directory path that identifies the machine' {
-        (Protect-FieldText -Text 'C:\Users\Cristobal\Repos\secreto') | Should -Not -Match 'Cristobal'
+    It 'strips the home-directory leaf that identifies the machine' {
+        # Derived from the running account, never hardcoded: a literal username passes only on the
+        # machine that wrote it, which is a test that passes for the wrong reason everywhere else.
+        $home_ = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+        $leaf  = Split-Path $home_ -Leaf
+        $r = Protect-FieldText -Text "C:\Users\$leaf\Repos\secreto"
+        $r | Should -Not -Match ([regex]::Escape($leaf))
+        $r | Should -Match '<USER>'
     }
 
     It 'leaves ordinary text untouched - the other direction' {
