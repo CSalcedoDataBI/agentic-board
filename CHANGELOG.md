@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.27.1] - 2026-07-28
+### Fixed
+- **`/agentic-board:expert auto` had no brake — the launched session was *ordered* to merge** (#440).
+  `Expert-Auto.ps1` composed `expert-brief-<n>.md` carrying *"STOP before: merge … do NOT merge on
+  your own"* and then delegated to `Board-Work.ps1 -Launch`, **which never read that file**. The
+  prompt the session actually received came from `Get-SessionBriefing`, which hardcoded
+  `(5) merge it (ruleset-safe): Board-Merge.ps1` and closed with *"When the PR is merged … you are
+  done"*. A run that merged to `main` — and, on a repo wired to a Git-integration host, deployed to
+  production — was not ignoring the brake: it was obeying an explicit instruction. The brake was
+  documentation; the order was code.
+  Two switches, threaded through all four launch sites: `-StopAtPR` omits the merge step,
+  renumbers so `(5)` leaves no gap, and moves the goal to *PR open + review gate green*;
+  `-BriefFile` hands the session the brief it never received, taking precedence over the generic
+  steps. `Expert-Auto.ps1` derives the brake from the **contract**
+  (`Test-IsIrreversible -Action 'merge'`) rather than a default, and prints `Brake ARMED` /
+  `Brake OFF`. Plain `/board work -Launch` is unchanged byte for byte.
+
+### Changed
+- Registered the three prior-art agent-definition catalogs in the knowledge registry (#459):
+  `wshobson/agents` (MIT), `VoltAgent/awesome-claude-code-subagents` (MIT) and
+  `hesreallyhim/awesome-claude-code` (CC BY-NC-ND 4.0). All three had been recorded as
+  *unlicensed*; `gh repo view --json licenseInfo` returns empty for each, and empty had been read
+  as absent.
+
 ## [0.27.0] - 2026-07-28
 ### Added
 - **Expert roles are now extensible per project** (#444; #445–#454).
