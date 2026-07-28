@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- **A closing summary every flow can end with — four blocks, always the same four** (#492, epic #491).
+  Reported first-hand by the product owner, a BI professional and not a programmer: every command
+  ends however its author felt like ending it, so there is no fixed place to look for the only four
+  things a user wants to know — *what I found · what I did · what is left · what I need from you*.
+  `Board-Summary.ps1` renders exactly those, in that order, whatever order the caller passes them
+  in. Two rules make it readable rather than merely present: an **empty block says so out loud**
+  (a blank "what I need from you" is indistinguishable from a summary that was cut off, so it
+  renders *"Nada — esto quedo listo."*), and the **order never changes**, because the point of a
+  fixed shape is that the eye stops reading and starts scanning. Two renderings from one source:
+  plain text for the terminal, and markdown carrying an `[abios-summary]` marker for PR bodies and
+  issue comments. 14 tests pin the contract; threading it through the command surfaces is #493.
+
 ## [0.27.1] - 2026-07-28
 ### Fixed
 - **`/agentic-board:expert auto` had no brake — the launched session was *ordered* to merge** (#440).
