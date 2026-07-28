@@ -23,58 +23,50 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# The role catalog lives in files, not here. Load the reader with ITS guard set so dot-sourcing
+# does not run its CLI.
+$prevRoles = $env:ABIOS_EXPERTROLES_DOTSOURCE
+$env:ABIOS_EXPERTROLES_DOTSOURCE = '1'
+. (Join-Path $PSScriptRoot 'ExpertRolesIo.ps1')
+$env:ABIOS_EXPERTROLES_DOTSOURCE = $prevRoles
+
 # ── Pure core ───────────────────────────────────────────────────────────────────
 
-# Domain keyword map. Order = precedence: the first domain with a keyword hit wins, so the
-# more specific BI domains are checked before the broad 'extension' catch.
-$script:DomainKeywords = [ordered]@{
-    'powerbi-report'  = @('deneb','visual','chart','dashboard','report','pbir','svg')
-    'semantic-model'  = @('tmdl','dax','measure','semantic model','tabular','bpa','relationship')
-    'fabric'          = @('fabric','lakehouse','warehouse','pipeline','notebook','spark','eventhouse')
-    'extension'       = @('extension','plugin','cli','command','vs code','vscode')
-}
-
-# Domain -> skill-name patterns to hook from the installed inventory.
-$script:DomainSkillPatterns = @{
-    'powerbi-report' = @('report','deneb','pbi','svg-visuals','python-visuals','r-visuals','theme')
-    'semantic-model' = @('semantic-model','tmdl','dax','tabular','bpa','power-query','lineage')
-    'fabric'         = @('fabric','spark','warehouse','lakehouse','eventhouse','dataflow','activator')
-    'extension'      = @('frontend-design','skill','writing-skills')
-    'generic'        = @()
-}
-
-# The quality profile — always engaged, whatever the domain (good engineering hygiene).
-$script:QualityProfile = @('skill-creator','writing-skills','skill-improver','second-opinion')
-
 function Get-DomainFromPlan {
-    param([string]$Text)
+    # Order is precedence: local roles first, then factory, most specific first within each.
+    [CmdletBinding()]
+    param([string]$Text, [hashtable]$Catalog)
+    if (-not $Catalog) { $Catalog = Get-ExpertRoles }
     $t = ($Text ?? '').ToLowerInvariant()
-    foreach ($domain in $script:DomainKeywords.Keys) {
-        foreach ($kw in $script:DomainKeywords[$domain]) {
-            if ($t.Contains($kw)) { return $domain }
+    foreach ($role in @($Catalog.roles)) {
+        foreach ($kw in @($role.keywords)) {
+            if ($kw -and $t.Contains(([string]$kw).ToLowerInvariant())) { return $role.name }
         }
     }
     'generic'
 }
 
 function Get-HookedSkills {
-    param([string]$Domain, [string[]]$Inventory)
+    [CmdletBinding()]
+    param([string]$Domain, [string[]]$Inventory, [hashtable]$Catalog)
+    if (-not $Catalog) { $Catalog = Get-ExpertRoles }
     # Dedup: worktrees and nested checkouts make the scanner report the same skill repeatedly.
-    $inv = @(@($Inventory) | Where-Object { $_ } | Select-Object -Unique)
-    $patterns = @($script:DomainSkillPatterns[$Domain])
+    $inv  = @(@($Inventory) | Where-Object { $_ } | Select-Object -Unique)
+    $role = @($Catalog.roles) | Where-Object { $_.name -eq $Domain } | Select-Object -First 1
+    $patterns = @($role.skills)
     $hooked = [System.Collections.Generic.List[string]]::new()
     foreach ($s in $inv) {
         # Match the skill NAME, never the plugin namespace that ships it — otherwise a broad
         # pattern like 'skill' hooks every skill of a plugin merely named "skills-for-*".
         $leaf = ($s -split ':')[-1].ToLowerInvariant()
         foreach ($p in $patterns) {
-            if ($leaf.Contains($p.ToLowerInvariant())) { $hooked.Add($s); break }
+            if ($p -and $leaf.Contains(([string]$p).ToLowerInvariant())) { $hooked.Add($s); break }
         }
     }
     # Always engage the quality profile where it is installed.
     foreach ($s in $inv) {
         $leaf = ($s -split ':')[-1]
-        if (($script:QualityProfile -contains $leaf) -and (-not $hooked.Contains($s))) { $hooked.Add($s) }
+        if ((@($Catalog.qualityProfile) -contains $leaf) -and (-not $hooked.Contains($s))) { $hooked.Add($s) }
     }
     $hooked.ToArray()
 }
