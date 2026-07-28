@@ -37,6 +37,54 @@ function Read-ExpertRoleFile {
     }
 }
 
+function Merge-ExpertRoles {
+    param([hashtable]$Factory, [hashtable]$Local)
+    $factoryRoles = @($Factory.roles)
+    $quality      = @($Factory.qualityProfile)
+    if (-not $Local) { return @{ roles = $factoryRoles; qualityProfile = $quality } }
+
+    if ($Local.ContainsKey('qualityProfile') -and $null -ne $Local.qualityProfile) {
+        $quality = @($Local.qualityProfile)
+    }
+
+    $merged  = [System.Collections.Generic.List[object]]::new()
+    $claimed = [System.Collections.Generic.HashSet[string]]::new()
+
+    foreach ($l in @($Local.roles)) {
+        $f = $factoryRoles | Where-Object { $_.name -eq $l.name } | Select-Object -First 1
+        if ($f -and -not $l.replace) {
+            # Union the list fields; the pointer fields replace wholesale.
+            $role = @{
+                name     = $l.name
+                keywords = @(@(@($f.keywords) + @($l.keywords)) | Where-Object { $_ } | Select-Object -Unique)
+                skills   = @(@(@($f.skills)   + @($l.skills))   | Where-Object { $_ } | Select-Object -Unique)
+            }
+            foreach ($k in 'agent','standards','knowledgeDomain') {
+                if ($l.ContainsKey($k) -and $null -ne $l[$k]) { $role[$k] = $l[$k] }
+                elseif ($f.ContainsKey($k) -and $null -ne $f[$k]) { $role[$k] = $f[$k] }
+            }
+            # An explicit agent supersedes inherited prose, so the two never both apply.
+            if ($l.ContainsKey('agent') -and $l.agent) { $role.Remove('standards') }
+        } else {
+            $role = @{}
+            foreach ($k in $l.Keys) { if ($k -ne 'replace') { $role[$k] = $l[$k] } }
+        }
+        $merged.Add($role) | Out-Null
+        $claimed.Add($l.name) | Out-Null
+    }
+    foreach ($f in $factoryRoles) {
+        if (-not $claimed.Contains($f.name)) { $merged.Add($f) | Out-Null }
+    }
+    @{ roles = $merged.ToArray(); qualityProfile = $quality }
+}
+
+function Get-ExpertRoleLocalPath {
+    . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
+    $dir = Get-AbiosStateDir
+    if (-not $dir) { return $null }
+    Join-Path $dir 'roles.json'
+}
+
 function Get-ExpertRoles {
     param([string]$PresetPath, [string]$LocalPath, [switch]$NoCache)
     $usingDefaults = -not $PresetPath -and -not $PSBoundParameters.ContainsKey('LocalPath')
@@ -48,10 +96,9 @@ function Get-ExpertRoles {
     $factory = Read-ExpertRoleFile -Path $PresetPath
     if (-not $factory) { throw "roles: the shipped preset is missing or unreadable at '$PresetPath' - this is a broken install." }
 
-    $catalog = @{
-        roles          = @($factory.roles)
-        qualityProfile = @($factory.qualityProfile)
-    }
+    if (-not $PSBoundParameters.ContainsKey('LocalPath')) { $LocalPath = Get-ExpertRoleLocalPath }
+    $local = Read-ExpertRoleFile -Path $LocalPath
+    $catalog = Merge-ExpertRoles -Factory $factory -Local $local
     if ($usingDefaults) { $script:ExpertRolesCache = $catalog }
     $catalog
 }
