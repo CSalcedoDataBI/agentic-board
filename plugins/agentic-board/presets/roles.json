@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "qualityProfile": ["skill-creator", "writing-skills", "skill-improver", "second-opinion"],
+  "roles": [
+    {
+      "name": "powerbi-report",
+      "keywords": ["deneb", "visual", "chart", "dashboard", "report", "pbir", "svg"],
+      "skills": ["report", "deneb", "pbi", "svg-visuals", "python-visuals", "r-visuals", "theme"]
+    },
+    {
+      "name": "semantic-model",
+      "keywords": ["tmdl", "dax", "measure", "semantic model", "tabular", "bpa", "relationship"],
+      "skills": ["semantic-model", "tmdl", "dax", "tabular", "bpa", "power-query", "lineage"]
+    },
+    {
+      "name": "fabric",
+      "keywords": ["fabric", "lakehouse", "warehouse", "pipeline", "notebook", "spark", "eventhouse"],
+      "skills": ["fabric", "spark", "warehouse", "lakehouse", "eventhouse", "dataflow", "activator"]
+    },
+    {
+      "name": "extension",
+      "keywords": ["extension", "plugin", "cli", "command", "vs code", "vscode"],
+      "skills": ["frontend-design", "skill", "writing-skills"]
+    },
+    {
+      "name": "generic",
+      "keywords": [],
+      "skills": []
+    }
+  ]
+}
