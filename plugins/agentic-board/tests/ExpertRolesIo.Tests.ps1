@@ -136,6 +136,42 @@ Describe 'Select-ValidExpertRoles' {
     }
 }
 
+Describe 'Add-ExpertRole' {
+    BeforeEach {
+        Clear-ExpertRolesCache
+        $script:New = Join-Path ([System.IO.Path]::GetTempPath()) ("roles-new-" + [guid]::NewGuid().ToString('N') + ".json")
+    }
+    AfterEach { if (Test-Path $script:New) { Remove-Item $script:New -Force } }
+
+    It 'creates the file with the current schema version when it does not exist' {
+        Add-ExpertRole -Role @{ name='infra'; keywords=@('terraform'); skills=@('iac') } -Path $script:New | Out-Null
+        $j = Get-Content -Raw $script:New | ConvertFrom-Json
+        $j.version | Should -Be 1
+        @($j.roles).Count | Should -Be 1
+    }
+    It 'round-trips: what it writes, the loader reads back identically' {
+        Add-ExpertRole -Role @{ name='infra'; keywords=@('terraform','helm'); skills=@('iac') } -Path $script:New | Out-Null
+        $c = Get-ExpertRoles -LocalPath $script:New -NoCache
+        $r = $c.roles | Where-Object { $_.name -eq 'infra' }
+        $r.keywords | Should -Be @('terraform','helm')
+        $r.skills   | Should -Be @('iac')
+    }
+    It 'appends to an existing file without losing the roles already there' {
+        Add-ExpertRole -Role @{ name='one'; keywords=@('a'); skills=@() } -Path $script:New | Out-Null
+        Add-ExpertRole -Role @{ name='two'; keywords=@('b'); skills=@() } -Path $script:New | Out-Null
+        $c = Get-ExpertRoles -LocalPath $script:New -NoCache
+        @($c.roles.name) | Should -Contain 'one'
+        @($c.roles.name) | Should -Contain 'two'
+    }
+    It 'replaces a role of the same name rather than duplicating it' {
+        Add-ExpertRole -Role @{ name='one'; keywords=@('a'); skills=@() } -Path $script:New | Out-Null
+        Add-ExpertRole -Role @{ name='one'; keywords=@('z'); skills=@() } -Path $script:New | Out-Null
+        $j = Get-Content -Raw $script:New | ConvertFrom-Json
+        @($j.roles).Count | Should -Be 1
+        @($j.roles)[0].keywords | Should -Be @('z')
+    }
+}
+
 Describe 'Get-ExpertRoles (degraded local file)' {
     BeforeEach {
         Clear-ExpertRolesCache

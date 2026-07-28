@@ -57,12 +57,17 @@ $env:ABIOS_EXPERTROLE_DOTSOURCE = $prevR
 
 # ── Pure core ───────────────────────────────────────────────────────────────────
 function New-ExpertConfig {
-    param([string]$PlanText, [string]$PlanGoal, [string[]]$Inventory = @())
-    $domain = Get-DomainFromPlan -Text $PlanText
-    $hooked = Get-HookedSkills -Domain $domain -Inventory $Inventory
-    $role   = Format-RoleObjective -Domain $domain -HookedSkills $hooked -PlanGoal $PlanGoal
+    [CmdletBinding()]
+    param([string]$PlanText, [string]$PlanGoal, [string[]]$Inventory = @(), [hashtable]$Catalog)
+    if (-not $Catalog) { $Catalog = Get-ExpertRoles }
+    $domain  = Get-DomainFromPlan -Text $PlanText -Catalog $Catalog
+    $role    = @($Catalog.roles) | Where-Object { $_.name -eq $domain } | Select-Object -First 1
+    $hooked  = Get-HookedSkills -Domain $domain -Inventory $Inventory -Catalog $Catalog
+    $persona = if ($role) { Resolve-RolePersona -Role $role } else { '' }
     $c = New-ExpertContract
-    $c.role = $role
+    $c.role        = Format-RoleObjective -Domain $domain -HookedSkills $hooked -PlanGoal $PlanGoal -Persona $persona
+    $c.roleMatched = ($domain -ne 'generic')
+    if ($role -and $role.agent) { $c.roleAgent = [string]$role.agent }
     $c
 }
 
@@ -80,6 +85,13 @@ Write-Host ""
 Write-Host "Synthesized role (editable preview):" -ForegroundColor Cyan
 Write-Host $contract.role -ForegroundColor Gray
 Write-Host ""
+if (-not $contract.roleMatched) {
+    Write-Host "  NO ROLE MATCHED this plan - the expert would run as 'generic', with no domain toolset." -ForegroundColor Yellow
+    Write-Host "  Research the plan's domain and propose a role, then persist it with:" -ForegroundColor DarkGray
+    Write-Host "    Add-ExpertRole -Role @{ name='<domain>'; keywords=@(...); skills=@(...) }" -ForegroundColor DarkGray
+    Write-Host "  Never write it without the user's confirmation: it changes how every future plan is classified." -ForegroundColor DarkGray
+    Write-Host ""
+}
 $written = Write-ExpertContract -Contract $contract -Path $target
 Write-Host "  OK  contract written -> $written" -ForegroundColor Green
 Write-Host "      autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
