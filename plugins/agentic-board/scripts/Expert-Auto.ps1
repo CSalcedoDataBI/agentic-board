@@ -135,6 +135,16 @@ if ($repo) {
 
 $brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role
 
+# The brake, as a CONTROL rather than prose (#440). The generic launch briefing used to order
+# the merge outright and make it the completion condition, so a session that merged to main was
+# obeying its brief while this file's "STOP before merge" sat in a document nobody handed it.
+# Ask the same gate the expert uses at runtime, then thread the answer into the launcher.
+$prevA = $env:ABIOS_EXPERTAUTONOMY_DOTSOURCE
+$env:ABIOS_EXPERTAUTONOMY_DOTSOURCE = '1'
+. (Join-Path $PSScriptRoot 'Expert-Autonomy.ps1')
+$env:ABIOS_EXPERTAUTONOMY_DOTSOURCE = $prevA
+$stopAtPR = Test-IsIrreversible -Action 'merge' -Contract $contract
+
 # Persist the brief so the launched session can read it.
 . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
 $stateDir = Get-AbiosStateDir
@@ -144,14 +154,21 @@ $brief | Set-Content -Path $briefPath -Encoding utf8
 Write-Host "=== /board expert auto  (issue #$Issue) ===" -ForegroundColor Cyan
 Write-Host "  Brief composed -> $briefPath" -ForegroundColor Green
 Write-Host "  Autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
+if ($stopAtPR) {
+    Write-Host "  Brake ARMED: the launched session is briefed to stop at a reviewed PR (no merge step)." -ForegroundColor Green
+} else {
+    Write-Host "  Brake OFF: 'merge' is not irreversible in this contract - the session WILL merge its own PR." -ForegroundColor Yellow
+}
 Write-Host ""
 
+$launchArgs = "-ProjectNum $ProjectNum -Parallel $Issue -Launch" + $(if ($stopAtPR) { " -StopAtPR -BriefFile `"$briefPath`"" } else { "" })
 if ($DryRun) {
     Write-Host "  [DryRun] would launch a dedicated session in a worktree off origin/main and monitor it." -ForegroundColor DarkYellow
-    Write-Host "  Launch:  scripts/Board-Work.ps1 -ProjectNum $ProjectNum -Parallel $Issue -Launch" -ForegroundColor DarkGray
+    Write-Host "  Launch:  scripts/Board-Work.ps1 $launchArgs" -ForegroundColor DarkGray
 } else {
     Write-Host "  Launching the autonomous session in an isolated worktree..." -ForegroundColor Cyan
-    & (Join-Path $PSScriptRoot 'Board-Work.ps1') -ProjectNum $ProjectNum -Parallel $Issue -Launch -TokenVar $TokenVar
+    & (Join-Path $PSScriptRoot 'Board-Work.ps1') -ProjectNum $ProjectNum -Parallel $Issue -Launch -TokenVar $TokenVar `
+        -StopAtPR:$stopAtPR -BriefFile $briefPath
     Write-Host ""
     Write-Host "  The launched session is briefed by $briefPath — it will research, build, test with" -ForegroundColor DarkGray
     Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray
