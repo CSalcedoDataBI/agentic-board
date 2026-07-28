@@ -1,5 +1,5 @@
 ---
-description: Auto-expert mode — take a tracked plan and execute it autonomously through a specialized expert persona (research, build, test with recorded evidence, self-drive the board), stopping only at the irreversible line. Two verbs: config (define the contract) and auto (run it).
+description: Auto-expert mode — take a tracked plan and execute it autonomously through a specialized expert persona (research, build, test with recorded evidence, self-drive the board), stopping only at the irreversible line. Three verbs: config (define the contract), auto (run it) and roles (browse the role catalog this project can extend, and explain why a plan matched).
 ---
 You are running the agentic-board /expert command (typed as `/agentic-board:expert`).
 
