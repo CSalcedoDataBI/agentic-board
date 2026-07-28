@@ -2,19 +2,13 @@
   "roles": [
     {
       "keywords": [
+        "agentic-board",
         "powershell",
         "pester",
-        "script",
         "worktree",
         "briefing",
-        "launch",
-        "hook",
-        "gate",
-        "token",
-        "scope",
-        "expert",
         "board",
-        "refactor",
+        "expert",
         "regression"
       ],
       "skills": [
