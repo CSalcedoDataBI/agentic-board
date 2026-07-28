@@ -102,6 +102,23 @@ function Merge-ExpertRoles {
     @{ roles = $merged.ToArray(); qualityProfile = $quality }
 }
 
+function Add-ExpertRole {
+    # Writing a role changes how every future plan is classified, so callers must confirm first.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Role, [string]$Path)
+    if (-not $Path) { $Path = Get-ExpertRoleLocalPath }
+    if (-not $Path) { throw "roles: could not resolve a local catalog path." }
+    $doc = Read-ExpertRoleFile -Path $Path
+    if (-not $doc) { $doc = @{ version = $script:ExpertRolesSchemaVersion; roles = @() } }
+    $kept = @(@($doc.roles) | Where-Object { $_.name -ne $Role.name })
+    $doc.roles = @($kept + @($Role))
+    $dir = Split-Path $Path -Parent
+    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $doc | ConvertTo-Json -Depth 8 | Set-Content -Path $Path -Encoding utf8
+    Clear-ExpertRolesCache
+    $Path
+}
+
 function Get-ExpertRoleLocalPath {
     . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
     $dir = Get-AbiosStateDir
