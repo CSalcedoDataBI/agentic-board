@@ -134,6 +134,63 @@ Body.
     }
 }
 
+Describe 'Resolve-RolePersona' {
+    BeforeAll {
+        $script:AgentRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("agents-" + [guid]::NewGuid().ToString('N'))
+        $d = Join-Path $script:AgentRoot 'agents'
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        Set-Content -Path (Join-Path $d 'deneb-reviewer.md') -Encoding utf8 -Value @"
+---
+name: deneb-reviewer
+description: Review a Deneb visual spec before presenting it.
+---
+You never invent a field or dataset. You read the real data first.
+"@
+    }
+    AfterAll { if (Test-Path $script:AgentRoot) { Remove-Item $script:AgentRoot -Recurse -Force } }
+
+    It 'renders the agent body when the role names an installed agent' {
+        $p = Resolve-RolePersona -Role @{ name='r'; agent='deneb-reviewer' } -SearchRoots @($script:AgentRoot)
+        $p | Should -Match 'never invent a field'
+    }
+    It 'resolves a namespaced agent name by its file stem' {
+        $p = Resolve-RolePersona -Role @{ name='r'; agent='reports:deneb-reviewer' } -SearchRoots @($script:AgentRoot)
+        $p | Should -Match 'never invent a field'
+    }
+    It 'strips the frontmatter out of the persona' {
+        $p = Resolve-RolePersona -Role @{ name='r'; agent='deneb-reviewer' } -SearchRoots @($script:AgentRoot)
+        $p | Should -Not -Match 'description:'
+    }
+    It 'falls back to inline standards when the agent is not installed' {
+        $p = Resolve-RolePersona -Role @{ name='r'; agent='nope'; standards=@('Be careful.') } -SearchRoots @($script:AgentRoot) -WarningAction SilentlyContinue
+        $p | Should -Match 'Be careful'
+    }
+    It 'warns when the named agent is not installed' {
+        $w = @()
+        Resolve-RolePersona -Role @{ name='r'; agent='nope' } -SearchRoots @($script:AgentRoot) -WarningVariable w -WarningAction SilentlyContinue | Out-Null
+        $w.Count | Should -BeGreaterThan 0
+    }
+    It 'prefers the agent over inline standards when both are set' {
+        $p = Resolve-RolePersona -Role @{ name='r'; agent='deneb-reviewer'; standards=@('Be careful.') } -SearchRoots @($script:AgentRoot)
+        $p | Should -Match 'never invent a field'
+        $p | Should -Not -Match 'Be careful'
+    }
+    It 'returns empty for a role with neither agent nor standards' {
+        Resolve-RolePersona -Role @{ name='r' } -SearchRoots @($script:AgentRoot) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Format-RoleObjective persona' {
+    It 'renders the supplied persona instead of the generic paragraph' {
+        $b = Format-RoleObjective -Domain 'r' -HookedSkills @('x') -PlanGoal 'g' -Persona 'You read the data first.'
+        $b | Should -Match 'You read the data first'
+    }
+    It 'renders the generic paragraph when no persona is supplied' {
+        $b = Format-RoleObjective -Domain 'r' -HookedSkills @('x') -PlanGoal 'g'
+        $b | Should -Match 'you research prior-art before building'
+    }
+}
+
 Describe 'Format-RoleObjective' {
     It 'embeds the goal and the hooked skills' {
         $block = Format-RoleObjective -Domain 'powerbi-report' `
