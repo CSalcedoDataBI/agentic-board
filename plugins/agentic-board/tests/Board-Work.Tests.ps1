@@ -463,6 +463,59 @@ Describe 'Get-SessionBriefing' {
     }
 }
 
+Describe 'Get-SessionBriefing -StopAtPR (the irreversible brake, #440)' {
+    BeforeAll { $script:Braked = Get-SessionBriefing 42 'owner/repo' 'issue-42-x' 'C:\wt\path' -StopAtPR }
+
+    It 'never orders the merge' {
+        # THE bug: the default briefing commands `Board-Merge.ps1`, so a session obeying its
+        # brief merged to main (and, on a Git-integration host, deployed) while the expert
+        # contract said STOP. With the brake on, the order must not be emitted at all.
+        $script:Braked | Should -Not -Match 'Board-Merge\.ps1'
+    }
+    It 'does not make the merge the completion condition' {
+        $script:Braked | Should -Not -Match 'When the PR is merged'
+    }
+    It 'says explicitly where to stop' {
+        $script:Braked | Should -Match 'STOP'
+        $script:Braked | Should -Match 'do NOT merge'
+    }
+    It 'still delivers everything up to a reviewed PR' {
+        $script:Braked | Should -Match 'New-BoardPR\.ps1 -Issue 42'
+        $script:Braked | Should -Match 'review gate'
+        $script:Braked | Should -Match 'Fleet-Findings\.ps1 -Add'
+        $script:Braked | Should -Match 'Fleet-Ownership\.ps1 -Release'
+    }
+    It 'keeps every step numbered once, with no gap where (5) merge used to be' {
+        # Renumbering regression guard: dropping a step must not leave "(5)" missing or duped.
+        foreach ($n in 1..5) { ([regex]::Matches($script:Braked, "\($n\)")).Count | Should -Be 1 }
+        $script:Braked | Should -Not -Match '\(6\)'
+    }
+    It 'is still a single line' {
+        $script:Braked | Should -Not -Match "`n"
+    }
+    It 'leaves the default briefing untouched when the brake is off' {
+        (Get-SessionBriefing 42 'owner/repo' 'issue-42-x' 'C:\wt') | Should -Match 'Board-Merge\.ps1'
+    }
+}
+
+Describe 'Get-SessionBriefing -BriefFile (the expert brief must reach the session, #440)' {
+    It 'points the session at the brief and gives it precedence' {
+        $b = Get-SessionBriefing 42 'o/r' 'issue-42-x' 'C:\wt' -BriefFile 'C:\s\expert-brief-42.md'
+        $b | Should -Match 'expert-brief-42\.md'
+        $b | Should -Match 'read it FIRST'
+        $b | Should -Match 'overrides'
+    }
+    It 'says nothing about a brief when none is passed' {
+        (Get-SessionBriefing 42 'o/r' 'issue-42-x' 'C:\wt') | Should -Not -Match 'expert-brief'
+    }
+    It 'composes with the brake' {
+        $b = Get-SessionBriefing 42 'o/r' 'issue-42-x' 'C:\wt' -StopAtPR -BriefFile 'C:\s\expert-brief-42.md'
+        $b | Should -Not -Match 'Board-Merge\.ps1'
+        $b | Should -Match 'expert-brief-42\.md'
+        $b | Should -Not -Match "`n"
+    }
+}
+
 Describe 'Get-SessionBriefing adapter-aware' {
     It 'keeps the claude briefing unchanged' {
         (Get-SessionBriefing 5 'o/r' 'issue-5-x' 'C:\wt' -Cli 'claude') | Should -Match 'AUTONOMOUSLY'

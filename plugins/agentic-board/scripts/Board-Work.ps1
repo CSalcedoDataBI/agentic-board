@@ -166,6 +166,12 @@ param(
     [switch]$BaseCurrent,
     [switch]$IgnoreBlocked,
     [switch]$TakeOver,
+    # Irreversible brake (#440): brief the launched session to stop at a reviewed PR instead of
+    # ordering the merge. Set by /expert auto when the contract marks `merge` as irreversible.
+    [switch]$StopAtPR,
+    # Path to the full brief for the launched session (e.g. .agentic-board/expert-brief-<n>.md),
+    # which it is told to read first and treat as overriding the generic steps.
+    [string]$BriefFile     = "",
     [string]$TokenVar      = "GITHUB_TOKEN_PERSONAL",
     # Only a plain env-var identifier - it gets interpolated into the spawned
     # -Command string, so reject anything that could inject (';', quotes, spaces).
@@ -966,15 +972,42 @@ query($o:String!, $r:String!, $n:Int!) {
 # -Cli is threaded (default 'claude') so Phase-2 adapters can specialize the leading
 # autonomy sentence per CLI without another signature change; Phase 1 keeps the
 # body text identical for every repl CLI.
+#
+# -StopAtPR is the irreversible brake (#440). The auto-expert's contract can mark `merge` as
+# irreversible, but that brake used to live ONLY in expert-brief-<n>.md - a file this launcher
+# never read - while THIS briefing ordered the merge outright and made it the completion
+# condition. A session that merged to main was obeying its brief, not defying it. With the
+# brake on, the merge step is never emitted and the finish line moves to a reviewed PR.
+# -BriefFile is the other half: it hands the session the expert brief it was never given.
 function Get-SessionBriefing {
     param(
         [int]$issueNum,
         [string]$repo,
         [string]$branch,
         [string]$workPath,
-        [string]$Cli = 'claude'
+        [string]$Cli = 'claude',
+        [switch]$StopAtPR,
+        [string]$BriefFile = ''
     )
-    return ("You are running AUTONOMOUSLY - permissions are pre-approved, so work this " +
+    # Steps after the review gate are renumbered so the brake never leaves a hole at (5).
+    $mergeStep = if ($StopAtPR) { "" } else {
+        "(5) merge it (ruleset-safe): pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR <pr> ; "
+    }
+    $recordNum = if ($StopAtPR) { "(5)" } else { "(6)" }
+    $closing = if ($StopAtPR) {
+        "Then STOP: leave the PR open and ready for the human to merge. Your contract marks the " +
+        "merge as irreversible - do NOT merge, deploy, publish or delete anything, and do not " +
+        "treat the merge as your finish line. You are done when the PR is open, the review gate " +
+        "is green and your findings are recorded."
+    } else {
+        "When the PR is merged and your findings recorded, you are done."
+    }
+    $briefLine = if ($BriefFile) {
+        "Your full brief for this run is at $BriefFile - read it FIRST and follow it; where it " +
+        "conflicts with the generic steps below, it overrides them. "
+    } else { "" }
+    return ($briefLine +
+            "You are running AUTONOMOUSLY - permissions are pre-approved, so work this " +
             "task end-to-end WITHOUT stopping to ask for confirmation. " +
             "Pick up GitHub issue #$issueNum in $repo. It is already In Progress and claimed, " +
             "on branch $branch in this worktree ($workPath). " +
@@ -990,11 +1023,11 @@ function Get-SessionBriefing {
             "and note the PR number it prints ; " +
             "(4) pass the review gate: pwsh plugins/agentic-board/scripts/Board-ReviewGate.ps1 -PR <pr> ; " +
             "address any feedback and re-run until it is green ; " +
-            "(5) merge it (ruleset-safe): pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR <pr> ; " +
-            "(6) record what you learned for other sessions with " +
+            $mergeStep +
+            "$recordNum record what you learned for other sessions with " +
             "'pwsh plugins/agentic-board/scripts/Fleet-Findings.ps1 -Add -Issue $issueNum -Status done -Files <files touched> -Decisions <key decisions> -Gotchas <pitfalls>' " +
             "and free your files with 'pwsh plugins/agentic-board/scripts/Fleet-Ownership.ps1 -Release -Issue $issueNum' . " +
-            "Work ONLY this issue - never touch other worktrees or issues. When the PR is merged and your findings recorded, you are done.")
+            "Work ONLY this issue - never touch other worktrees or issues. " + $closing)
 }
 
 # -- Fleet session marker (reaper fingerprint) ---------------------------------
@@ -1142,6 +1175,8 @@ function Start-WorktreeSession {
         [string]$ClaudeAuthVar = "ANTHROPIC_API_KEY",
         [string]$Cli = 'claude',
         [string]$FleetSession = '',
+        [switch]$StopAtPR,
+        [string]$BriefFile = '',
         [switch]$Preview
     )
     $abios = Get-AbiosDir
@@ -1163,7 +1198,7 @@ function Start-WorktreeSession {
         return $null
     }
     # Persist the briefing so the spawned session reads it without command-line quoting.
-    Set-Content -LiteralPath $briefingFile -Value (Get-SessionBriefing $IssueNum $Repo $Branch $WorkPath $Cli) -Encoding UTF8
+    Set-Content -LiteralPath $briefingFile -Value (Get-SessionBriefing $IssueNum $Repo $Branch $WorkPath $Cli -StopAtPR:$StopAtPR -BriefFile $BriefFile) -Encoding UTF8
     # Persist the launch script so wt/pwsh runs it via -File (no ';' on wt's command
     # line -> no stray tab-splitting). See Build-WorktreeLaunch header for the why.
     Set-Content -LiteralPath $plan.launchScriptFile -Value $plan.launchScript -Encoding UTF8
@@ -2358,7 +2393,7 @@ if ($Relaunch -gt 0) {
     $oauthPresent = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN','User')
     $authVar      = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
     $marker       = New-FleetSessionMarker $Relaunch (New-FleetRunId)
-    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker
+    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile
     # Start-WorktreeSession returns $null on a failed/missing-worktree spawn. Registering
     # then would fall back to the coordinator PID and poison the registry - so only record a
     # session that actually launched.
@@ -2922,7 +2957,8 @@ if ($Parallel.Count -gt 0) {
                 $actualCli = Resolve-LaunchCli -Chosen $cli -Availability $availability
                 $marker    = New-FleetSessionMarker $entry.issue $runId
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
-                                               -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker
+                                               -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `
+                                               -StopAtPR:$StopAtPR -BriefFile $BriefFile
                 $via = if ($spawn.usesWt) { "wt" } else { "pwsh" }
                 if ($spawn.process -and -not $spawn.usesWt) {
                     Write-SessionRegistryEntry -IssueNum $entry.issue -SessionPid $spawn.process.Id -Via $via -Cli $actualCli -FleetSession $marker
@@ -2955,7 +2991,7 @@ if ($Parallel.Count -gt 0) {
                 # New-IssueWorktree / Get-IssueWorktreePath - the grouped-worktree layout).
                 $previewPath = Get-IssueWorktreePath $r.repo $r.issue (Split-Path (Get-Location) -Parent)
                 $marker = New-FleetSessionMarker $r.issue $runId
-                Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -Preview | Out-Null
+                Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Preview | Out-Null
             }
         } else {
             Write-Host "----- LANZANDO SESIONES CLAUDE -----" -ForegroundColor Cyan
@@ -2982,7 +3018,7 @@ if ($Parallel.Count -gt 0) {
             foreach ($r in $started) {
                 if ($r.workPath) {
                     $marker = New-FleetSessionMarker $r.issue $runId
-                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker
+                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile
                     $launched++
                     # Track the spawned session's own PID (pwsh window is reliable; a wt
                     # launcher forks and exits, so keep the host PID there).
