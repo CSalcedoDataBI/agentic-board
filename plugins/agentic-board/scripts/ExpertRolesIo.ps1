@@ -37,6 +37,30 @@ function Read-ExpertRoleFile {
     }
 }
 
+function Select-ValidExpertRoles {
+    # A structurally broken role costs only itself. The rest of the file still loads.
+    # CmdletBinding makes this an advanced function, so callers can capture or silence its
+    # warnings with -WarningVariable / -WarningAction. Without it those are silently inert.
+    [CmdletBinding()]
+    param([object[]]$Roles)
+    $out = [System.Collections.Specialized.OrderedDictionary]::new()
+    foreach ($r in @($Roles)) {
+        if (-not $r.name) {
+            Write-Warning "roles: a role without a 'name' was skipped."
+            continue
+        }
+        if ($null -eq $r.keywords -or $null -eq $r.skills) {
+            Write-Warning "roles: role '$($r.name)' is missing 'keywords' or 'skills' - skipped."
+            continue
+        }
+        if ($out.Contains($r.name)) {
+            Write-Warning "roles: role '$($r.name)' is declared more than once - the last declaration wins."
+        }
+        $out[$r.name] = $r
+    }
+    @($out.Values)
+}
+
 function Merge-ExpertRoles {
     param([hashtable]$Factory, [hashtable]$Local)
     $factoryRoles = @($Factory.roles)
@@ -98,6 +122,15 @@ function Get-ExpertRoles {
 
     if (-not $PSBoundParameters.ContainsKey('LocalPath')) { $LocalPath = Get-ExpertRoleLocalPath }
     $local = Read-ExpertRoleFile -Path $LocalPath
+    if ($local) {
+        $v = if ($local.ContainsKey('version')) { [int]$local.version } else { 0 }
+        if ($v -ne $script:ExpertRolesSchemaVersion) {
+            Write-Warning "roles: '$LocalPath' declares version '$v'; this build understands version $($script:ExpertRolesSchemaVersion) - ignoring the file."
+            $local = $null
+        } else {
+            $local.roles = Select-ValidExpertRoles -Roles @($local.roles)
+        }
+    }
     $catalog = Merge-ExpertRoles -Factory $factory -Local $local
     if ($usingDefaults) { $script:ExpertRolesCache = $catalog }
     $catalog
