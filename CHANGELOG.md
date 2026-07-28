@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.28.0] - 2026-07-28
+### Added
+- **`/board telemetry` — the tool now measures how it actually behaved in real use** (#476;
+  PRs #477, #500). 945 local session transcripts on the primary machine, 162 of which really
+  invoked the tool, had never been read. Reviewing three of them by hand produced 12 distinct
+  defects, 8 previously unfiled, and **not one had been caught by the tool itself** — every one was
+  found by a human reading carefully. This verb reads those transcripts and reports where
+  agentic-board helped and where it got in the way.
+  Transcripts are a valid source because the on-disk file is append-only: compaction shrinks the
+  model's context, not the file (verified on a session carrying 30 compaction markers — all 4,125
+  events still present). Tool calls are structured records, so "where was the tool invoked and what
+  followed" is an exact query rather than an interpretation.
+  **Incremental by watermark, never a `scanned` flag** (`Get-FieldLedger.ps1`): the ledger records
+  how far each session was read (events + bytes), so "new work" means new sessions *and* grown
+  ones, and only the unread tail is parsed. A boolean would retire a session permanently on first
+  read and silently lose everything appended later. **Two stages** — a deterministic extractor with
+  no model (`Get-FieldEpisodes.ps1`) turns hundreds of megabytes into a few hundred candidate
+  episodes; only those are worth a model's attention. The sweep driver is `Invoke-FieldScan.ps1`
+  (`-WhatIf`, `-Limit`).
+  **Four signals**, all mechanical, none of which reached the board before: **repetition** (an
+  action script re-invoked — resolvers and the gh wrapper are exempt, since re-invoking those is
+  their contract), **abandonment** (a failure followed by the same job done with bare `gh`/`git` —
+  the most valuable and the most invisible: every time the user routed around the tool),
+  **correction** (the user reverses what just happened) and **silence** (a failure that went
+  nowhere at all).
+  Signals were **calibrated against the corpus, not asserted**: `silence` fell from 1,419 hits
+  (41.4 % of episodes, i.e. noise) to 99 by requiring a failure; `repetition` fell from 644 to 557
+  by exempting resolvers (`Get-GhAccount` repeated on 47.4 % of its calls — its contract, not a
+  defect); `abandonment` is deliberately unchanged at 63, which is the evidence the calibration
+  sharpened the noisy signals without breaking the one that matters most.
+  **Safety, each rule answering an observed failure:** read-only over the transcript store; the
+  local record lives at a machine-level root **outside any repo**, so it cannot be committed by
+  construction rather than by `.gitignore` config; the watermark advances only after events are
+  processed; the ledger is written atomically; and **nothing is filed automatically** — the sweep
+  produces candidates for a human to judge.
+  First full sweep: **3,425 episodes, 295 failed invocations**, which re-scoped #419 from a
+  single-script bug to a 65-failure guard misfire and produced #485.
+
+### Fixed
+- **The plugin's own test suite read the checkout's local role catalog** (#460). The classification
+  tests called the domain resolver without an explicit catalog, so they merged whatever
+  `.agentic-board/roles.json` the working directory held — meaning **any project defining a local
+  role broke the plugin's suite**, not just this one. The tests now build the factory catalog from
+  the shipped presets and pass it explicitly, with a regression guard asserting both directions: a
+  local catalog does change classification, the factory one does not.
+  The repo's own `software-engineer` role was also narrowed from 14 keywords to 8, dropping the
+  ordinary English words (`script`, `hook`, `gate`, `token`, `scope`, `refactor`) that let a
+  high-precedence local role swallow unrelated plans — the same defect filed as #474, applied to
+  our own role. Same 15 hooked skills: keywords decide *when* a role is chosen, not what it brings.
+
 ## [0.27.1] - 2026-07-28
 ### Fixed
 - **`/agentic-board:expert auto` had no brake — the launched session was *ordered* to merge** (#440).
