@@ -32,3 +32,35 @@ Describe 'New-ExpertConfig' {
         (Read-ExpertContract -Path $script:Tmp).role | Should -Match 'semantic-model'
     }
 }
+
+Describe 'Expert-Config.ps1 (CLI wiring)' {
+    # The unit tests above call New-ExpertConfig directly, so they never exercise the script's own
+    # argument handling or inventory resolution — where both #441 and #442 lived.
+    BeforeAll {
+        $script:CliOut  = Join-Path ([System.IO.Path]::GetTempPath()) ("expcli-" + [guid]::NewGuid().ToString('N') + ".json")
+        $script:Stdout = & pwsh -NoProfile -File $script:Script `
+            -PlanText 'Refactor the plugin CLI command surface' `
+            -PlanGoal 'ZZZ-GOAL-MARKER' `
+            -Path $script:CliOut 2>&1 | Out-String
+        $script:Cli = if (Test-Path $script:CliOut) { Get-Content -Raw $script:CliOut | ConvertFrom-Json } else { $null }
+    }
+    AfterAll { if (Test-Path $script:CliOut) { Remove-Item $script:CliOut -Force } }
+
+    It 'writes a contract file' {
+        $script:Cli | Should -Not -BeNullOrEmpty
+    }
+    It 'carries the -PlanGoal through into the role objective' {
+        # Regression #441: a dot-sourced param() block reset $PlanGoal in the caller's scope.
+        $script:Cli.role | Should -Match 'ZZZ-GOAL-MARKER'
+    }
+    It 'hooks skills resolved from the real inventory' {
+        # Regression #442: Get-SkillInventory was called as a function that does not exist,
+        # so the swallowed error left the toolset permanently empty. Assert a NAMED skill —
+        # asserting only the absence of the fallback text passes vacuously on a blank bullet.
+        $script:Cli.role | Should -Match '(?m)^- \S'
+    }
+    It 'does not leak the inventory object into stdout' {
+        $script:Stdout | Should -Not -Match 'byScope'
+        $script:Stdout | Should -Not -Match 'is not recognized as a name of a cmdlet'
+    }
+}

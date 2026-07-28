@@ -1,6 +1,23 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+- **`/agentic-board:expert config` produced an unusable role — objective and toolset both empty** (#441, #442).
+  Every contract `config` wrote carried a blank objective and no hooked skills; the failure was
+  invisible because the test suite called the pure functions directly and never exercised the
+  script's own wiring. Three defects: `Expert-Config.ps1` dot-sourced `Expert-RoleSynthesis.ps1`,
+  whose `param()` block executes in the caller's scope and reset `$PlanGoal` to `""` (#441 — the
+  arguments are now captured before any dot-source); both scripts called `Get-SkillInventory` as a
+  function, but the file is a *script* emitting a `{summary, skills, overlaps}` object, so the
+  dot-source ran the scan and dumped it to stdout while the swallowed `CommandNotFound` left the
+  inventory permanently empty (#442 — new `Resolve-SkillInventory` invokes the script with `&` and
+  maps records to names); and `Format-RoleObjective` could never reach its "none installed"
+  fallback, because `@($null).Count` is `1` in PowerShell, rendering a bare `- ` bullet instead.
+  Repaired alongside them, once the toolset became visible: `Get-HookedSkills` matched against the
+  full namespaced string — so the pattern `skill` hooked all 30 skills of a plugin merely named
+  `skills-for-copilot-studio` — and a scan crossing git worktrees listed each skill several times.
+  Matching is now against the skill name only, with deduplication. New CLI-level tests cover
+  `Expert-Config.ps1` end to end.
 
 ## [0.26.0] - 2026-07-27
 ### Added

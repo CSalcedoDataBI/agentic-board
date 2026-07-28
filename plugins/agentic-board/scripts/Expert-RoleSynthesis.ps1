@@ -59,12 +59,16 @@ function Get-DomainFromPlan {
 
 function Get-HookedSkills {
     param([string]$Domain, [string[]]$Inventory)
-    $inv = @($Inventory)
+    # Dedup: worktrees and nested checkouts make the scanner report the same skill repeatedly.
+    $inv = @(@($Inventory) | Where-Object { $_ } | Select-Object -Unique)
     $patterns = @($script:DomainSkillPatterns[$Domain])
     $hooked = [System.Collections.Generic.List[string]]::new()
     foreach ($s in $inv) {
+        # Match the skill NAME, never the plugin namespace that ships it — otherwise a broad
+        # pattern like 'skill' hooks every skill of a plugin merely named "skills-for-*".
+        $leaf = ($s -split ':')[-1].ToLowerInvariant()
         foreach ($p in $patterns) {
-            if ($s.ToLowerInvariant().Contains($p.ToLowerInvariant())) { $hooked.Add($s); break }
+            if ($leaf.Contains($p.ToLowerInvariant())) { $hooked.Add($s); break }
         }
     }
     # Always engage the quality profile where it is installed.
@@ -77,7 +81,10 @@ function Get-HookedSkills {
 
 function Format-RoleObjective {
     param([string]$Domain, [string[]]$HookedSkills, [string]$PlanGoal)
-    $skillList = if (@($HookedSkills).Count) { (@($HookedSkills) | ForEach-Object { "- $_" }) -join "`n" } else { "- (none installed — research the domain from scratch via /knowledge)" }
+    # Drop empties before counting: @($null).Count is 1 in PowerShell, so a naive count check
+    # skips the fallback and renders a bare "- " bullet.
+    $list = @(@($HookedSkills) | Where-Object { $_ })
+    $skillList = if ($list.Count) { ($list | ForEach-Object { "- $_" }) -join "`n" } else { "- (none installed — research the domain from scratch via /knowledge)" }
     @"
 ## Expert role (objective)
 
@@ -93,16 +100,27 @@ $skillList
 "@
 }
 
+# ── Inventory resolver (touches the filesystem; kept out of the pure core) ──────
+function Resolve-SkillInventory {
+    # Get-SkillInventory.ps1 is a SCRIPT emitting a {summary, skills, overlaps} object — there is
+    # no Get-SkillInventory *function*. Invoke it with & and never dot-source it: a dot-sourced
+    # param() block runs in THIS scope and would clobber same-named variables of the caller.
+    param([string]$Root, [string]$Scope = 'all')
+    $inv = Join-Path $PSScriptRoot 'Get-SkillInventory.ps1'
+    if (-not (Test-Path $inv)) { return @() }
+    $splat = @{}
+    if ($Root)  { $splat.Root  = $Root }
+    if ($Scope) { $splat.Scope = $Scope }
+    try { $result = & $inv @splat } catch { return @() }
+    @(@($result.skills) |
+        ForEach-Object { if ($_.namespace) { $_.namespace } elseif ($_.name) { $_.name } } |
+        Where-Object { $_ })
+}
+
 # Dot-source guard: tests set $env:ABIOS_EXPERTROLE_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_EXPERTROLE_DOTSOURCE) { return }
 
 # ── CLI: synthesize the role from the live inventory ────────────────────────────
 $domain = Get-DomainFromPlan -Text $Text
-$inventory = @()
-try {
-    . (Join-Path $PSScriptRoot 'Get-SkillInventory.ps1')
-    $inv = Get-SkillInventory 2>$null
-    $inventory = @($inv | ForEach-Object { if ($_ -is [string]) { $_ } elseif ($_.name) { $_.name } })
-} catch { $inventory = @() }
-$hooked = Get-HookedSkills -Domain $domain -Inventory $inventory
+$hooked = Get-HookedSkills -Domain $domain -Inventory (Resolve-SkillInventory)
 Format-RoleObjective -Domain $domain -HookedSkills $hooked -PlanGoal $PlanGoal

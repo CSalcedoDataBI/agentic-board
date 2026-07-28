@@ -38,6 +38,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Capture our own arguments BEFORE any dot-source. A dot-sourced script's param() block executes
+# in THIS scope: Expert-RoleSynthesis declares $PlanGoal, so dot-sourcing it resets ours to "".
+$myPlanText = $PlanText
+$myPlanGoal = $PlanGoal
+$myPath     = $Path
+
 # Load the sibling pure cores with THEIR guards set, so dot-sourcing does not run their CLIs.
 $prevC = $env:ABIOS_EXPERTCONTRACT_DOTSOURCE
 $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = '1'
@@ -64,15 +70,10 @@ function New-ExpertConfig {
 if ($env:ABIOS_EXPERTCONFIG_DOTSOURCE) { return }
 
 # ── CLI ─────────────────────────────────────────────────────────────────────────
-$inventory = @()
-try {
-    . (Join-Path $PSScriptRoot 'Get-SkillInventory.ps1')
-    $inv = Get-SkillInventory 2>$null
-    $inventory = @($inv | ForEach-Object { if ($_ -is [string]) { $_ } elseif ($_.name) { $_.name } })
-} catch { $inventory = @() }
+$inventory = Resolve-SkillInventory
 
-$contract = New-ExpertConfig -PlanText $PlanText -PlanGoal $PlanGoal -Inventory $inventory
-$target = if ($Path) { $Path } else { Get-ExpertContractPath }
+$contract = New-ExpertConfig -PlanText $myPlanText -PlanGoal $myPlanGoal -Inventory $inventory
+$target = if ($myPath) { $myPath } else { Get-ExpertContractPath }
 
 Write-Host "=== /board expert config ===" -ForegroundColor Cyan
 Write-Host ""
