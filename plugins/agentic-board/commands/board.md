@@ -1,5 +1,5 @@
 ---
-description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/triage/complete/bi-checklist. Defaults to the CSalcedoDataBI account.
+description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/telemetry/triage/complete/bi-checklist. Defaults to the CSalcedoDataBI account.
 ---
 You are running the agentic-board /board command.
 
@@ -27,9 +27,10 @@ for the user to pick (they can answer with just the number):
 16. handoff         → guardar/retomar contexto entre sesiones (save/resume) para continuar días después
 17. doctor          → auditar ramas y worktrees locales (mergeadas, estancadas, fantasma) y limpiarlos
 18. cerrar-ciclo    → clasificar la RAMA ACTUAL y enrutarla (commitear/PR/gate/merge/limpiar) — cierra la sesión individual
-19. triage          → llenar Type/Area/Estimate por evidencia + PROPONER Priority (con confirmación) en los pendientes
-20. complete        → verificar que el board quedó full (0 pendientes) — PASS/FAIL, útil para CI o cierre
-21. bi-checklist    → mostrar el checklist de release para artefactos BI (modelos/reportes)
+19. telemetry       → medir cómo se comportó la herramienta en tus sesiones reales (barrido incremental)
+20. triage          → llenar Type/Area/Estimate por evidencia + PROPONER Priority (con confirmación) en los pendientes
+21. complete        → verificar que el board quedó full (0 pendientes) — PASS/FAIL, útil para CI o cierre
+22. bi-checklist    → mostrar el checklist de release para artefactos BI (modelos/reportes)
 
 ── otros comandos (se tipean) ──────────────────────────────────
 /scan       → escanear ESTE proyecto por trabajo sin trackear (TODOs, checklists, planes) → issues + plan
@@ -325,6 +326,25 @@ matching recipe from the projects-admin references:
   - **PR closed unmerged** → decide: reopen/rescue or discard.
   It operates on the current branch/session only — the repo-wide sweep is `/board doctor`.
   `Board-Merge` now also NOTES when its `--delete-branch` left the local branch behind and points here.
+- **telemetry** — measure how the tool ACTUALLY behaved across the user's real sessions, by running
+  `scripts/Invoke-FieldScan.ps1`. Distinct from `doctor` (which audits this repo's branches) and
+  from `field` (which fills board columns): this reads local session transcripts and reports where
+  agentic-board helped and where it got in the way.
+  - **Incremental by watermark, never a `scanned` flag.** The ledger records how far each session
+    was read (events + bytes), so "new work" means new sessions *and* grown ones, and only the
+    unread tail is parsed. A boolean would retire a session permanently on first read and silently
+    lose everything appended later.
+  - **Two stages.** A deterministic extractor (no model) turns hundreds of megabytes into a few
+    hundred candidate episodes; only those are worth a model's attention.
+  - **Four signals**, each mechanical: **repetition** (the same action script re-invoked — resolvers
+    and wrappers are exempt, since re-invoking those is their contract), **abandonment** (a failure
+    followed by the same job done with bare `gh`/`git` — the most valuable and the most invisible),
+    **correction** (the user reverses what just happened), and **silence** (a failure that went
+    nowhere at all).
+  - **Read-only** over the transcript store; everything it writes goes to a machine-level field root
+    OUTSIDE any repo, so the local record cannot be committed. **Nothing is filed automatically** —
+    it produces candidates for a human to judge.
+  - `-WhatIf` shows what would be read without touching anything; `-Limit <n>` bounds a first run.
 - **triage** — fill an item's triage fields from EVIDENCE and PROPOSE its Priority, via
   `scripts/Board-Triage.ps1` (#306). Not a bulk default — a uniformly-filled board looks prioritised
   without being so; the point is grounded values, not absence of blanks.

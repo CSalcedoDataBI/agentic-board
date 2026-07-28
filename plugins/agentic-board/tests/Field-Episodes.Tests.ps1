@@ -100,18 +100,54 @@ Describe 'Signal: correction' {
     }
 }
 
-Describe 'Signal: silence' {
+Describe 'Signal: silence (calibrated - a FAILURE that went nowhere)' {
+    <#  The first cut fired on 41.4% of all episodes in the real corpus, because "invoked once and
+        moved on" is ordinary work, not a signal. Calibrated to what actually informs: the call
+        FAILED and nothing followed it at all — no retry, no manual fallback, no complaint. That is
+        a user who gave up. #>
 
-    It 'fires when the tool is invoked once and nothing follows' {
-        $ev = @( (E 0 assistant 'Board-Work.ps1 -Sessions') )
-        $ep = @(Get-FieldEpisodes -Events $ev -Window 5)
-        $ep[0].signals | Should -Contain 'silence'
+    It 'fires when a failed invocation is followed by nothing' {
+        $ev = @( (E 0 assistant 'Board-Work.ps1 -Sessions' $true) )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Contain 'silence'
+    }
+
+    It 'does NOT fire when the invocation succeeded and the session moved on' {
+        # The 41.4% case: ordinary work must be silent, not "silence".
+        $ev = @( (E 0 assistant 'Board-Work.ps1 -Sessions' $false) )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'silence'
     }
 
     It 'does not fire when the run continued using the tool' {
-        $ev = @( (E 0 assistant 'Board-Work.ps1 -Start 5'), (E 1 assistant 'New-BoardPR.ps1 -Issue 5') )
-        $ep = @(Get-FieldEpisodes -Events $ev -Window 5)
-        $ep[0].signals | Should -Not -Contain 'silence'
+        $ev = @( (E 0 assistant 'Board-Work.ps1 -Start 5' $true), (E 1 assistant 'New-BoardPR.ps1 -Issue 5') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'silence'
+    }
+}
+
+Describe 'Signal: repetition (calibrated - resolvers are exempt)' {
+    <#  Get-GhAccount.ps1 repeated on 47.4% of its invocations in the real corpus — because it is
+        DESIGNED to be re-invoked per operation to set the token. Counting that as a defect signal
+        made the whole number meaningless. Resolvers and wrappers are exempt; action scripts are
+        not. #>
+
+    It 'exempts a Get- resolver that is meant to be re-invoked' {
+        $ev = @( (E 0 assistant 'Get-GhAccount.ps1'), (E 1 assistant 'Get-GhAccount.ps1') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'repetition'
+    }
+
+    It 'exempts a Resolve- helper' {
+        $ev = @( (E 0 assistant 'Resolve-Board.ps1'), (E 1 assistant 'Resolve-Board.ps1') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'repetition'
+    }
+
+    It 'exempts the gh wrapper' {
+        $ev = @( (E 0 assistant 'Invoke-Gh.ps1'), (E 1 assistant 'Invoke-Gh.ps1') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'repetition'
+    }
+
+    It 'still fires for an ACTION script - the other direction' {
+        # The exemption must not swallow the signal it exists to sharpen.
+        $ev = @( (E 0 assistant 'Board-Plan.ps1 -Issue 5'), (E 1 assistant 'Board-Plan.ps1 -Issue 5') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Contain 'repetition'
     }
 }
 

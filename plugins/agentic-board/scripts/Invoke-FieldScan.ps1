@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    /board field — sweep local session transcripts and report how agentic-board behaved (#476).
+    /board telemetry — sweep local session transcripts and report how agentic-board behaved (#476).
 
 .DESCRIPTION
     Joins stage 1 (Get-FieldLedger: which sessions still owe work) to stage 2 (Get-FieldEpisodes:
@@ -41,7 +41,7 @@ $transcript = Get-TranscriptRoot -Override $ProjectsRoot
 $ledgerPath = Join-Path $root 'ledger.csv'
 $recordDir  = Join-Path $root 'episodes'
 
-Write-Host "=== /board field  —  sweep ===" -ForegroundColor Cyan
+Write-Host "=== /board telemetry  —  sweep ===" -ForegroundColor Cyan
 Write-Host "  transcripts : $transcript  (read-only)"
 Write-Host "  field root  : $root"
 
