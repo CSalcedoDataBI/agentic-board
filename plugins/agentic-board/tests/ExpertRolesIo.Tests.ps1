@@ -112,3 +112,56 @@ Describe 'Merge-ExpertRoles' {
         @($m.roles).Count | Should -Be 2
     }
 }
+
+Describe 'Select-ValidExpertRoles' {
+    It 'keeps a well-formed role' {
+        @(Select-ValidExpertRoles -Roles @(@{ name='a'; keywords=@('k'); skills=@() })).Count | Should -Be 1
+    }
+    It 'drops a role with no name and warns' {
+        $w = @()
+        @(Select-ValidExpertRoles -Roles @(@{ keywords=@('k'); skills=@() }) -WarningVariable w 3>$null).Count | Should -Be 0
+        $w.Count | Should -BeGreaterThan 0
+    }
+    It 'drops a role missing keywords but keeps its siblings' {
+        $r = @(@{ name='bad' }, @{ name='good'; keywords=@('k'); skills=@() })
+        $kept = @(Select-ValidExpertRoles -Roles $r 3>$null)
+        $kept.Count | Should -Be 1
+        $kept[0].name | Should -Be 'good'
+    }
+    It 'keeps the last of two roles sharing a name' {
+        $r = @(@{ name='dup'; keywords=@('one'); skills=@() }, @{ name='dup'; keywords=@('two'); skills=@() })
+        $kept = @(Select-ValidExpertRoles -Roles $r 3>$null)
+        $kept.Count | Should -Be 1
+        $kept[0].keywords | Should -Be @('two')
+    }
+}
+
+Describe 'Get-ExpertRoles (degraded local file)' {
+    BeforeEach {
+        Clear-ExpertRolesCache
+        $script:Bad = Join-Path ([System.IO.Path]::GetTempPath()) ("roles-bad-" + [guid]::NewGuid().ToString('N') + ".json")
+    }
+    AfterEach { if (Test-Path $script:Bad) { Remove-Item $script:Bad -Force } }
+
+    It 'falls back to the factory catalog when the local file is invalid JSON' {
+        Set-Content -Path $script:Bad -Value '{ this is not json' -Encoding utf8
+        $c = Get-ExpertRoles -LocalPath $script:Bad -NoCache 3>$null
+        @($c.roles).Count | Should -Be 5
+    }
+    It 'falls back to the factory catalog on an unknown schema version' {
+        Set-Content -Path $script:Bad -Encoding utf8 -Value '{ "version": 99, "roles": [ { "name": "x", "keywords": ["x"], "skills": [] } ] }'
+        $c = Get-ExpertRoles -LocalPath $script:Bad -NoCache 3>$null
+        @($c.roles.name) | Should -Not -Contain 'x'
+        @($c.roles).Count | Should -Be 5
+    }
+    It 'keeps the valid roles of a file that also contains a broken one' {
+        Set-Content -Path $script:Bad -Encoding utf8 -Value '{ "version": 1, "roles": [ { "name": "broken" }, { "name": "ok", "keywords": ["k"], "skills": [] } ] }'
+        $c = Get-ExpertRoles -LocalPath $script:Bad -NoCache 3>$null
+        @($c.roles.name) | Should -Contain 'ok'
+        @($c.roles.name) | Should -Not -Contain 'broken'
+    }
+    It 'throws when the shipped preset itself is missing' {
+        { Get-ExpertRoles -PresetPath 'C:\no\such\preset.json' -LocalPath 'C:\no\such\local.json' -NoCache } |
+            Should -Throw '*broken install*'
+    }
+}
