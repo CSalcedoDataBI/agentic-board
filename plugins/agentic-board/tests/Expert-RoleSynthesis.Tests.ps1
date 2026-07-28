@@ -66,6 +66,34 @@ Describe 'Get-HookedSkills' {
     }
 }
 
+Describe 'Catalog-driven matching' {
+    It 'matches a role that exists only in a supplied catalog' {
+        $cat = @{
+            qualityProfile = @()
+            roles = @(
+                @{ name='infra'; keywords=@('terraform','helm'); skills=@('iac') },
+                @{ name='generic'; keywords=@(); skills=@() }
+            )
+        }
+        Get-DomainFromPlan -Text 'Refactor the terraform modules' -Catalog $cat | Should -Be 'infra'
+    }
+    It 'falls back to generic when no role in the catalog matches' {
+        $cat = @{ qualityProfile=@(); roles=@(@{ name='infra'; keywords=@('terraform'); skills=@() }) }
+        Get-DomainFromPlan -Text 'Write a haiku' -Catalog $cat | Should -Be 'generic'
+    }
+    It 'hooks skills from the supplied catalog role' {
+        $cat = @{ qualityProfile=@(); roles=@(@{ name='infra'; keywords=@('terraform'); skills=@('iac') }) }
+        Get-HookedSkills -Domain 'infra' -Inventory @('team:iac-helpers','unrelated') -Catalog $cat |
+            Should -Contain 'team:iac-helpers'
+    }
+    It 'takes the quality profile from the catalog, not from code' {
+        $cat = @{ qualityProfile=@('second-opinion'); roles=@(@{ name='infra'; keywords=@('terraform'); skills=@() }) }
+        $h = Get-HookedSkills -Domain 'infra' -Inventory @('second-opinion','skill-creator') -Catalog $cat
+        $h | Should -Contain 'second-opinion'
+        $h | Should -Not -Contain 'skill-creator'   # not in this catalog's quality profile
+    }
+}
+
 Describe 'Resolve-SkillInventory' {
     BeforeAll {
         # A real fixture tree — Get-SkillInventory.ps1 is run for real against it, no mocks.
