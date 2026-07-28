@@ -37,6 +37,8 @@ the whole issue → branch → PR → gate → merge loop.
 
 > **See it run on itself → [SHOWCASE.md](SHOWCASE.md)** — the tool governs its own roadmap board;
 > every fix was found while using it and tracked in the open (the dogfooding loop).
+>
+> Read the measured case study on how the tool runs a real BI project's board → **[Agentic BI Ops on the field](https://csalcedodatabi.com/blog/agentic-bi-ops/)**
 
 BI GitOps (PBIP/Fabric, TMDL diff review, semantic-model agents) is a **future module** on the
 same foundation — see the [roadmap](#module-roadmap).
