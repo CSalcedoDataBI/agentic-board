@@ -212,6 +212,33 @@
       "ref": "https://github.com/newrelic/wiki-sync-action",
       "note": "Apache-2.0, 34 stars, last push 2024-08-27 (stale). Two-way repo<->wiki sync. Same limit: push mechanics only.",
       "added": "2026-07-23"
+    },
+    {
+      "id": "kn_023",
+      "domain": "Claude-Code",
+      "type": "repo",
+      "title": "wshobson/agents - reviewer & architect agent definitions (MIT)",
+      "ref": "https://github.com/wshobson/agents",
+      "note": "38.3k stars, MIT. plugins/comprehensive-review/agents/{code-reviewer,architect-review,security-auditor}.md. Evaluated for expert role #459: strong on app-code review (SonarQube/CodeQL/Snyk/OWASP), poor fit for auditing a PowerShell plugin. Referenced, not vendored.",
+      "added": "2026-07-28"
+    },
+    {
+      "id": "kn_024",
+      "domain": "Claude-Code",
+      "type": "repo",
+      "title": "VoltAgent/awesome-claude-code-subagents - 10-category subagent catalog (MIT)",
+      "ref": "https://github.com/VoltAgent/awesome-claude-code-subagents",
+      "note": "23.8k stars, MIT. categories/04-quality-security/ has code-reviewer, qa-expert, architect-reviewer, powershell-security-hardening. Frontmatter name matches filename, so it resolves cleanly. Body assumes a 'context manager' component that does not exist here (#459).",
+      "added": "2026-07-28"
+    },
+    {
+      "id": "kn_025",
+      "domain": "Claude-Code",
+      "type": "repo",
+      "title": "hesreallyhim/awesome-claude-code - curated list (CC BY-NC-ND 4.0)",
+      "ref": "https://github.com/hesreallyhim/awesome-claude-code",
+      "note": "51.1k stars. NoDerivatives + NonCommercial: reference only, never adapt or vendor. A list, not agent definitions.",
+      "added": "2026-07-28"
     }
   ]
 }
