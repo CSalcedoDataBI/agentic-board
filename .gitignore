@@ -12,8 +12,13 @@ Thumbs.db
 # internal per-repo state (sessions, briefings, handoffs, fleet) — never commit.
 # both names: .agentic-board/ is the current name, .agentic-bi-ops/ the pre-rebrand
 # one still present in repos until the one-time migration runs (Get-AbiosStateDir).
-.agentic-board/
-.agentic-bi-ops/
+# roles.json is the exception: the expert role catalog is shared team knowledge, so it IS
+# versioned. Exclude the directory's CONTENTS rather than the directory itself — git cannot
+# re-include a file whose parent directory is excluded.
+.agentic-board/*
+!.agentic-board/roles.json
+.agentic-bi-ops/*
+!.agentic-bi-ops/roles.json
 **/.backups/
 *.items.json
 *.project.json
