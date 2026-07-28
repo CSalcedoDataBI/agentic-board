@@ -50,11 +50,17 @@ function Format-AutoBrief {
     $irr = @()
     if ($Contract.autonomy -and $Contract.autonomy.irreversible) { $irr = @($Contract.autonomy.irreversible) }
     $irrList = ($irr -join ', ')
+    # A role may name an agent definition; its persona is already folded into $RoleObjective,
+    # and naming it here lets the launched run adopt it as its agent type too.
+    $agentLine = if ($Contract.roleAgent) {
+        "`nAdopt the agent type ``$($Contract.roleAgent)`` for this run — its definition is your persona.`n"
+    } else { '' }
 
     @"
 # Autonomous brief — /board expert auto
 
 $RoleObjective
+$agentLine
 
 ## Plan (what to deliver)
 $PlanBody

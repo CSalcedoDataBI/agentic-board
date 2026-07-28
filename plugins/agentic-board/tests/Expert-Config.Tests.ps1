@@ -33,6 +33,26 @@ Describe 'New-ExpertConfig' {
     }
 }
 
+Describe 'New-ExpertConfig role selection' {
+    It 'uses a role that exists only in a supplied catalog' {
+        $cat = @{ qualityProfile=@(); roles=@(@{ name='infra'; keywords=@('terraform'); skills=@('iac') }) }
+        $c = New-ExpertConfig -PlanText 'Refactor the terraform modules' -PlanGoal 'g' `
+                              -Inventory @('team:iac-helpers') -Catalog $cat
+        $c.role | Should -Match 'infra'
+        $c.role | Should -Match 'team:iac-helpers'
+    }
+    It 'reports when no role matched, so config can offer to synthesize one' {
+        $cat = @{ qualityProfile=@(); roles=@(@{ name='infra'; keywords=@('terraform'); skills=@() }) }
+        $c = New-ExpertConfig -PlanText 'Write a haiku' -PlanGoal 'g' -Inventory @() -Catalog $cat
+        $c.roleMatched | Should -BeFalse
+    }
+    It 'reports a match when one was found' {
+        $cat = @{ qualityProfile=@(); roles=@(@{ name='infra'; keywords=@('terraform'); skills=@() }) }
+        $c = New-ExpertConfig -PlanText 'terraform work' -PlanGoal 'g' -Inventory @() -Catalog $cat
+        $c.roleMatched | Should -BeTrue
+    }
+}
+
 Describe 'Expert-Config.ps1 (CLI wiring)' {
     # The unit tests above call New-ExpertConfig directly, so they never exercise the script's own
     # argument handling or inventory resolution — where both #441 and #442 lived.

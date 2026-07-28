@@ -15,6 +15,11 @@ for the user to pick (they can answer with just the number):
                      construye, prueba dejando evidencia, se auto-usa agentic-board para el
                      trabajo lateral que encuentra, y FRENA antes de lo irreversible (merge/
                      deploy/refresh/publish/delete) — deja el PR listo para tu OK.
+3. roles [why "<texto>"]
+                   → ver el CATÁLOGO de roles efectivo (los de fábrica + los locales del
+                     proyecto, marcando cuál sobreescribe a cuál y cuántas skills engancha de
+                     verdad). Con `why` explica qué rol ganó para un texto de plan y por qué
+                     keyword.
 ```
 
 First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (default
@@ -27,6 +32,20 @@ plan's domain, hooks the installed skills/profiles for it, synthesizes the role-
 autonomy brakes only on the irreversible, evidence goes to three places (PR + `[abios-evidence]`
 issue comment + versioned file), board self-drive is on with a cap, and a budget bounds the run.
 Show the role preview and let the user edit it before running `auto`.
+
+If it reports **NO ROLE MATCHED**, research the plan's domain (via `/knowledge`, and `/tools` for
+ready-made agent definitions such as `wshobson/agents`), propose a complete role — `name`,
+`keywords`, `skills`, and an `agent` pointer when a fitting definition exists — and persist it with
+`Add-ExpertRole` **only after the user confirms**: writing a role changes how every future plan is
+classified, so it is never a silent side effect of `config`.
+
+## roles
+Run `scripts/Expert-Roles.ps1 -List`, or `scripts/Expert-Roles.ps1 -Why "<plan text>"`.
+
+The catalog is `presets/roles.json` (factory) merged with `.agentic-board/roles.json` (this
+project, versioned in git). Local roles are evaluated first, so a project can always outrank a
+factory role. A role hooking **0 skills** is printed in yellow: it will give the expert no
+toolset. See `references/roles.md` for the schema and the merge rules.
 
 ## auto
 Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n>`. It reads the contract, composes the
