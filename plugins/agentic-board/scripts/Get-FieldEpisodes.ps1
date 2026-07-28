@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Stage 2 of /board field (#476) — turn transcript events into candidate episodes.
+    Stage 2 of /board telemetry (#476) — turn transcript events into candidate episodes.
 
 .DESCRIPTION
     The deterministic half of the field sweep: no model. It finds every agentic-board invocation
@@ -61,6 +61,17 @@ function Get-InvokedTool {
     $null
 }
 
+function Test-IsIdempotentHelper {
+    <#  Scripts whose contract is to be called again on every operation: resolvers that answer a
+        question (Get-, Resolve-) and the gh wrapper every other script routes through. Repeating
+        one of these is its intended use, so it must never read as a failed first attempt. #>
+    [CmdletBinding()]
+    param([string]$Tool)
+    if (-not $Tool) { return $false }
+    if ($Tool -eq 'Invoke-Gh.ps1') { return $true }
+    [bool]($Tool -match '^(Get|Resolve)-')
+}
+
 function Test-IsFallbackCommand {
     # Doing the job by hand: bare gh/git, with no plugin script involved.
     [CmdletBinding()]
@@ -114,12 +125,22 @@ function Get-FieldEpisodes {
             if ($ev[$j].role -eq 'user' -and (Test-IsCorrection -Text $ev[$j].text)) { $sawCorrection = $true }
         }
 
-        if ($sawSameTool) { $signals.Add('repetition') }
+        # Repetition means "it did not work the first time" — which is only true for scripts meant
+        # to run once. Resolvers and wrappers are re-invoked per operation BY DESIGN
+        # (Get-GhAccount repeated on 47.4% of its calls in the real corpus, and that is its
+        # contract, not a defect). Exempting them is what makes the number mean anything.
+        if ($sawSameTool -and -not (Test-IsIdempotentHelper -Tool $tool)) { $signals.Add('repetition') }
+
         # Abandonment needs BOTH a failure and a hand-rolled substitute. A failure followed by a
         # retry of the tool is a retry, not abandonment.
         if ($failed -and $sawFallback -and -not $sawSameTool) { $signals.Add('abandonment') }
+
         if ($sawCorrection) { $signals.Add('correction') }
-        if (-not $sawAnyTool -and -not $sawFallback -and -not $sawCorrection) { $signals.Add('silence') }
+
+        # Silence is a FAILURE that went nowhere — no retry, no manual fallback, no complaint.
+        # Without the failure requirement this fired on 41.4% of all episodes, because "invoked
+        # once and moved on" is ordinary work and carries no information at all.
+        if ($failed -and -not $sawAnyTool -and -not $sawFallback -and -not $sawCorrection) { $signals.Add('silence') }
 
         $out.Add([pscustomobject]@{
             index   = $ev[$i].index

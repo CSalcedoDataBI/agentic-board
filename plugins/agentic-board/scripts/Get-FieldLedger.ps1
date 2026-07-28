@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Ledger and incremental watermark for /board field — the field-observation sweep.
+    Ledger and incremental watermark for /board telemetry — the field-observation sweep.
 
 .DESCRIPTION
     Discovers local session transcripts and decides which ones still need reading. The unit of
