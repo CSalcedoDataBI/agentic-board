@@ -52,3 +52,16 @@ Describe 'Get-BudgetVerdict' {
         Get-BudgetVerdict -ElapsedMinutes 5 -Iterations 8 -Contract $script:Contract | Should -Be 'handoff'
     }
 }
+
+Describe 'Agent type in the autonomous brief' {
+    It 'names the role agent when the contract carries one' {
+        $c = $script:Contract.Clone()
+        $c.roleAgent = 'infra-reviewer'
+        $brief = Format-AutoBrief -Contract $c -PlanBody 'do the thing' -RoleObjective 'You are an expert in infra.'
+        $brief | Should -Match 'infra-reviewer'
+    }
+    It 'omits the agent line when the contract names none' {
+        $brief = Format-AutoBrief -Contract $script:Contract -PlanBody 'do the thing' -RoleObjective 'You are an expert.'
+        $brief | Should -Not -Match 'Adopt the agent type'
+    }
+}
