@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **A mature board no longer reports itself empty** (#484). `Board-Work.ps1` read board items with
+  `gh project item-list --limit 200`. That call returns exit 0 and exactly 200 items on a bigger
+  board — **oldest-first**, so on a mature board the cap fills with Done work and the Backlog falls
+  off the end. Against the tool's own 291-item board, `/board work` printed
+  `Sin pendientes. Todo el board esta en progreso o terminado.` over **37 open Backlog items**.
+  Not a truncation warning — a confident **false all-clear**, landing precisely on the mature boards
+  where the stakes are highest, and it silently under-counted the `-ListBoards` board picker the
+  same way.
+  Board reads now go through `Get-BoardItems.ps1`, which returns `{ Items; Read; Limit; Truncated }`
+  and treats a read that reached its cap as **possibly short**. Callers may no longer state an
+  absence off one: `/board work` says how many items it actually saw instead of "sin pendientes",
+  the board picker renders capped counts as `N+` with an explicit `TRUNCADO` line,
+  `Assert-BoardComplete` **fails closed** (a `PASS` is exactly the absence a short read cannot
+  support, and CI would read it as ground truth), and `/board update` publishes the caveat rather
+  than a clean-looking lie. The shared ceiling is 2000 and costs nothing: `gh` pages the underlying
+  GraphQL 100 at a time, so request count tracks the items that exist, not the cap — the old 200
+  bought no savings and cost the truth. A regression test asserts no script returns to a 200-item
+  cap.
+  This is the same defect class `Invoke-Gh.ps1` was written for (#303): a read consumed as fact.
+  `Invoke-Gh` made a **failed** read loud; this makes a **short** one loud. Neither substitutes for
+  the other — a truncated read succeeds.
+
 ## [0.28.0] - 2026-07-28
 ### Added
 - **`/board telemetry` — the tool now measures how it actually behaved in real use** (#476;
