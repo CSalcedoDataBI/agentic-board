@@ -315,7 +315,13 @@ if ($DryRun -or ($Migrate -and ($renames.Count -gt 0 -or $merges.Count -gt 0))) 
       # Show the blast radius BEFORE the prompt: a merge moves every item off the legacy
       # option and then destroys it, so "how many items" is the whole decision.
       foreach ($m in $merges) {
-        $n = try { @(Get-ItemsOnOption $m.Field $m.FromName).Count } catch { '?' }
+        # .Items, not the whole object: Get-ItemsOnOption returns { Items; Truncated }, and
+        # @(<object>).Count is 1 - which would report "1 item(s)" for EVERY merge, on the one
+        # line whose entire job is telling the user how big the destructive move is.
+        $n = try {
+          $r = Get-ItemsOnOption $m.Field $m.FromName
+          "$(@($r.Items).Count)$(if ($r.Truncated) { '+ (lectura truncada - puede haber mas)' } else { '' })"
+        } catch { '?' }
         Write-Host ("  merge:  {0} '{1}' -> '{2}'  ({3} item(s) se mueven, luego se borra '{1}')" -f $m.Field, $m.FromName, $m.ToName, $n) -ForegroundColor Yellow
       }
     } else {

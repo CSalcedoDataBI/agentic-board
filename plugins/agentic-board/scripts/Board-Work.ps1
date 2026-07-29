@@ -2783,7 +2783,9 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
         }
     }
     Write-Host ""
-    Write-Host ("Total: {0} pendiente(s)." -f $pending.Count) -ForegroundColor Yellow
+    # "Total" is an exact claim, and a capped read cannot make one - the warning above says the
+    # list may be short, so the number that closes it must agree with the warning, not contradict it.
+    Write-Host ("Total: {0}{1} pendiente(s)." -f $pending.Count, $(if ($truncWarn) { '+ (vistos; la lectura se corto)' } else { '' })) -ForegroundColor Yellow
 
     # Multi-session: show what other LIVE local sessions are working right now.
     # NOT named $sessions: at SCRIPT scope that is the [switch]$Sessions parameter

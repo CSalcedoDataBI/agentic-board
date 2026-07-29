@@ -187,4 +187,37 @@ Describe 'Regression: no caller may state an absence off a possibly-short read' 
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Export-BoardSnapshot.ps1') -Raw
         $t | Should -Match '\$items\.Count -ge \$itemLimit'
     }
+    It 'Set-BoardField does not exit 0 after a partial sweep' {
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Set-BoardField.ps1') -Raw
+        $t | Should -Match 'if \(\$itemRead\.Truncated\) \{ exit 1 \}'
+    }
+    It 'Assert-BoardComplete reports truncated on every -Json response, not just the fail-closed one' {
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Assert-BoardComplete.ps1') -Raw
+        # Two emitters: the fail-closed branch and the normal one. BOTH must carry the field, or a
+        # consumer reads a floor as an exact count on the path that still found pending items.
+        @([regex]::Matches($t, 'truncated\s*=')).Count | Should -BeGreaterOrEqual 2
+    }
+}
+
+Describe 'Regression: a wrapper return value must never be counted as one item' {
+    <#  This one exists because the fix ITSELF shipped this bug and the suite missed it.
+
+        Get-ItemsOnOption used to return a bare array; making it report truncation turned it into
+        { Items; Truncated }. Two of its three call sites were updated. The third was
+        `@(Get-ItemsOnOption ...).Count`, which counts the WRAPPER — so it reported "1 item(s)" for
+        every merge, on the pre-confirmation line whose only job is telling the user how many items
+        a destructive delete is about to move. Every test still passed: the suite covered the
+        helper's shape and the guard's presence, never a caller's arithmetic.
+
+        `@(<object>).Count -eq 1` is silent, plausible, and PowerShell-specific, so it is pinned by
+        shape rather than left to the next reader to remember. #>
+
+    It 'no call site wraps Get-ItemsOnOption in @() and counts it' {
+        # VERIFIED to fail on the real defect: the bug was reintroduced in the source and this
+        # assertion went red, which is the only reason it is trusted. A companion check that
+        # merely counted `.Items` occurrences file-wide stayed GREEN with the bug present and was
+        # deleted rather than kept as decoration.
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Apply-FieldPreset.ps1') -Raw
+        $t | Should -Not -Match '@\(Get-ItemsOnOption'
+    }
 }

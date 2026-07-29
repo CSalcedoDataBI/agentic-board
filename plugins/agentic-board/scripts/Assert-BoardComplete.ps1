@@ -92,7 +92,13 @@ if ($truncWarn -and $result.Complete) {
 }
 
 if ($Json) {
-    [pscustomobject]@{ complete = $result.Complete; pendingCount = $result.PendingCount; pending = $result.Pending; board = $boardUrl } | ConvertTo-Json -Depth 6
+    # `truncated`/`itemsRead` ride on EVERY response, not just the fail-closed one above. A capped
+    # read that DID find pending items still falls through to here, and a consumer reading
+    # `pendingCount` with no truncation field would take a floor for an exact count (#484).
+    [pscustomobject]@{
+        complete  = $result.Complete; pendingCount = $result.PendingCount; pending = $result.Pending
+        truncated = [bool]$truncWarn;  itemsRead    = $read.Read;           board   = $boardUrl
+    } | ConvertTo-Json -Depth 6
     if ($result.Complete) { exit 0 } else { exit 1 }
 }
 

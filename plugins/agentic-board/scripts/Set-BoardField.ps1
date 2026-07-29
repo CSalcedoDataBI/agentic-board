@@ -104,6 +104,13 @@ foreach ($it in $items) {
   if ($ok) { $set++ } else { $fail++; Write-Warning "failed: $($it.title)" }
 }
 Write-Host "Field '$Field' -> set=$set  skipped=$skip  failed=$fail  (of $($items.Count) items)"
+# The summary above is the line a human (or a CI log) reads as "the sweep is done". It cannot say
+# that off a capped read: the items past the cap were never even considered, so the pass covered a
+# subset while reading like a full one. Repeat it here, after the numbers, and exit non-zero - a
+# partial sweep is not a success for a command whose contract is "every item on the board" (#484).
+if ($itemRead.Truncated) {
+  Write-Warning "BARRIDO PARCIAL: solo lei $($itemRead.Read) items (el tope de lectura), asi que los que estan mas alla NO se tocaron. Sube -Limit y re-corre para cubrirlos."
+}
 
 # Post-fill visibility check — the #1 "the tool didn't work" false alarm: the field IS filled but
 # the board's VIEW doesn't display that column, so the user sees blanks. GitHub Projects view
@@ -126,3 +133,6 @@ try {
 Write-Host "Note: GitHub system columns (Assignees, Linked pull requests, Sub-issues progress, Milestone, Repository, Labels) are auto-derived from real issues/PRs — they stay blank for draft cards and cannot be filled by any tool."
 
 if ($fail -gt 0) { exit 1 }
+# A truncated sweep exits non-zero too: automation asking "did the field get filled across the
+# board?" must not read exit 0 over items this run never looked at.
+if ($itemRead.Truncated) { exit 1 }
