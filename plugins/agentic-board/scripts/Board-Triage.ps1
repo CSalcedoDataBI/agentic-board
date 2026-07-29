@@ -105,6 +105,8 @@ if ($env:ABIOS_TRIAGE_DOTSOURCE) { return }
 
 # ── Side-effecting from here ──────────────────────────────────────────────────
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# Board reads that report their own truncation (#484).
+. (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 
 if (-not $env:GH_TOKEN) {
     $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
@@ -143,8 +145,11 @@ $fields = (Invoke-Gh -GhArgs @('project','field-list',"$Number",'--owner',$Owner
                      -What "leer los campos del board #$Number" -Json).fields
 $proj   = (Invoke-Gh -GhArgs @('project','view',"$Number",'--owner',$Owner,'--format','json') `
                      -What "leer el board #$Number" -Json).id
-$items  = (Invoke-Gh -GhArgs @('project','item-list',"$Number",'--owner',$Owner,'--format','json','--limit','800') `
-                     -What "listar los items del board #$Number" -Json).items
+# A capped read here would print "(no hay items pendientes)" over a board full of untriaged work -
+# the same false all-clear /board work shipped (#484). Get-BoardItems reports the cut.
+$itemRead = Get-BoardItems -Number $Number -Owner $Owner `
+                           -What "listar los items del board #$Number"
+$items    = $itemRead.Items
 
 function Get-FieldDef([string]$name) { $fields | Where-Object { $_.name -eq $name } | Select-Object -First 1 }
 function Get-FieldKey([string]$name) { ($name -replace '[^A-Za-z0-9]','').ToLower() }   # how item-list surfaces the value
@@ -161,8 +166,16 @@ if ($Issue -le 0) {
     $pendingStatuses = @('Backlog', 'In Progress', 'Todo', 'To Do')   # legacy names included
     $pend = @($items | Where-Object { $pendingStatuses -contains "$($_.status)" -and $_.content.number })
     Write-Host "=== Triage: pendientes del board #$Number de $Owner ===" -ForegroundColor Cyan
-    if (-not $pend.Count) { Write-Host "  (no hay items pendientes)" -ForegroundColor DarkGray; Write-Host "Board: $boardUrl" -ForegroundColor Cyan; exit 0 }
-    Write-Host ("  {0} item(s) pendiente(s). Faltantes marcados con []." -f $pend.Count) -ForegroundColor DarkGray
+    $itemTrunc = Get-BoardTruncationWarning $itemRead
+    if (-not $pend.Count) {
+        # Zero matches inside a partial list is no evidence of zero matches on the board (#484).
+        if ($itemTrunc) { Write-Host "  $itemTrunc" -ForegroundColor Yellow }
+        else            { Write-Host "  (no hay items pendientes)" -ForegroundColor DarkGray }
+        Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+        exit $(if ($itemTrunc) { 1 } else { 0 })
+    }
+    if ($itemTrunc) { Write-Host "  $itemTrunc" -ForegroundColor Yellow }
+    Write-Host ("  {0}{1} item(s) pendiente(s). Faltantes marcados con []." -f $pend.Count, $(if ($itemTrunc) { '+' } else { '' })) -ForegroundColor DarkGray
     Write-Host ""
     foreach ($it in ($pend | Sort-Object { [int]$_.content.number })) {
         $v    = Get-ItemTriageValues $it

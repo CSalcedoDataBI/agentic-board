@@ -190,6 +190,9 @@ $ErrorActionPreference = "Stop"
 # not read as an empty board or a write that silently no-op'd. Pure at load; dot-sourced before
 # the guard so unit tests get the seam. Session-monitor reads deliberately stay best-effort.
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# Board reads that report their own truncation (#484). A capped item-list returns exit 0 and a
+# SHORT list, which this script used to print as "sin pendientes" over a board full of Backlog.
+. (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 # owner/name resolver from origin (dot-safe regex) - cerrar-ciclo (#302) resolves the current repo.
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
 
@@ -2653,20 +2656,24 @@ query($o:String!, $r:String!) {
     $rows = @()
     foreach ($b in $boards) {
         try {
-            # -Json throws on a failed read (caught below -> honest "?"): a bare read would yield
-            # $null under pwsh 7 and print "pendientes: 0", a false clean for that board (#314).
-            $items   = (Invoke-Gh -GhArgs @('project','item-list',"$($b.number)",'--owner',$b.ownerLogin,'--format','json','--limit','200') `
-                                  -What "listar los items del board #$($b.number)" -Json).items
-            $pending = @($items | Where-Object { Test-Pending $_ }).Count
-            $total   = @($items).Count
+            # Get-BoardItems throws on a failed read (caught below -> honest "?"): a bare read would
+            # yield $null under pwsh 7 and print "pendientes: 0", a false clean for that board (#314).
+            # It ALSO reports a capped read, which the old --limit 200 swallowed: this picker
+            # under-counted every board past the cap and so looked emptier than it was (#484).
+            $read    = Get-BoardItems -Number $b.number -Owner $b.ownerLogin `
+                                      -What "listar los items del board #$($b.number)"
+            $pending = @($read.Items | Where-Object { Test-Pending $_ }).Count
+            $total   = $read.Read
+            $trunc   = $read.Truncated
         } catch {
-            $pending = "?"; $total = "?"
+            $pending = "?"; $total = "?"; $trunc = $false
         }
         $rows += [PSCustomObject]@{
             Num       = $b.number
             Titulo    = $b.title
             Pendientes = $pending
             Items     = $total
+            Trunc     = $trunc
             Url       = "https://github.com/users/$($b.ownerLogin)/projects/$($b.number)"
         }
     }
@@ -2676,8 +2683,16 @@ query($o:String!, $r:String!) {
 
     foreach ($r in $rows) {
         $color = if ($r.Pendientes -is [int] -and $r.Pendientes -gt 0) { "Yellow" } else { "DarkGray" }
-        Write-Host ("  #{0,-3} {1,-45} pendientes: {2,-4} items: {3}" -f $r.Num, $r.Titulo, $r.Pendientes, $r.Items) -ForegroundColor $color
+        # A capped read makes both numbers a FLOOR, not a count - so they are rendered as "N+".
+        # Printing a bare "pendientes: 0" off a short read is the whole bug (#484).
+        $sfx   = if ($r.Trunc) { "+" } else { "" }
+        Write-Host ("  #{0,-3} {1,-45} pendientes: {2,-4} items: {3}" -f `
+                    $r.Num, $r.Titulo, "$($r.Pendientes)$sfx", "$($r.Items)$sfx") -ForegroundColor $color
         Write-Host ("        {0}" -f $r.Url) -ForegroundColor DarkCyan
+    }
+    if (@($rows | Where-Object { $_.Trunc }).Count -gt 0) {
+        Write-Host ""
+        Write-Host "TRUNCADO: los boards marcados con '+' tienen mas items de los que pude leer - sus cuentas son un minimo, no un total." -ForegroundColor Yellow
     }
     Write-Host ""
     Write-Host "Siguiente paso: Board-Work.ps1 -ProjectNum <num> para ver los pendientes de un board." -ForegroundColor Cyan
@@ -2707,10 +2722,15 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
     $statusOpts = Get-StatusOptionNames $ProjectNum
     Show-StatusSchemaWarning $statusOpts $ProjectNum
 
-    # -Json fails closed: a read failure must THROW, not yield an empty list the script then
-    # reports as "Sin pendientes" - the green all-clear over a board full of open issues (#278/#314).
-    $items   = (Invoke-Gh -GhArgs @('project','item-list',"$ProjectNum",'--owner',$Owner,'--format','json','--limit','200') `
-                          -What "listar los items del board #$ProjectNum" -Json).items
+    # Fails closed TWICE over. A read failure THROWS rather than yielding an empty list the script
+    # would report as "Sin pendientes" (#278/#314) - and a read that hit the cap is flagged, because
+    # `gh project item-list` returns items OLDEST-FIRST: on a mature board the cap fills with Done
+    # work and the Backlog falls off the end. At --limit 200 against a 291-item board this printed a
+    # confident "Sin pendientes" over 37 open Backlog items (#484).
+    $read    = Get-BoardItems -Number $ProjectNum -Owner $Owner `
+                              -What "listar los items del board #$ProjectNum"
+    $items   = $read.Items
+    $truncWarn = Get-BoardTruncationWarning $read
     $pending = @($items | Where-Object { Test-Pending $_ })
 
     if ($pending.Count -eq 0) {
@@ -2718,8 +2738,13 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
         # understands. If ANY item sits in a vocabulary we cannot read, 0 matches means
         # "I cannot tell", not "the board is clean" - say that instead of the green
         # all-clear the script used to print over dozens of open issues (#278).
+        # A truncated read means the same thing for a different reason, and outranks both:
+        # zero matches inside a partial list is no evidence of zero matches on the board.
         $unknown = Get-UnknownStatusValues $items
-        if ($unknown.Count -gt 0) {
+        if ($truncWarn) {
+            Write-Host $truncWarn -ForegroundColor Yellow
+            Write-Host "No hay pendientes ENTRE LOS $($read.Read) items que lei - no afirmo que el board este limpio." -ForegroundColor Yellow
+        } elseif ($unknown.Count -gt 0) {
             Write-Host "No puedo saber que hay pendiente: 0 items en Backlog, pero el board usa estados que no reconozco ($($unknown -join ', '))." -ForegroundColor Yellow
             Write-Host "No afirmo que no haya pendientes - revisa el board, o estandarizalo con /board field apply en --migrate." -ForegroundColor DarkGray
         } else {
@@ -2728,6 +2753,14 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
         Write-Host ""
         Write-Host "Board: $boardUrl" -ForegroundColor Cyan
         exit 0
+    }
+
+    # A truncated read still lists what it found - but the list is a FLOOR, and saying so before it
+    # matters more than after: the user picks an issue off the top of this list.
+    if ($truncWarn) {
+        Write-Host $truncWarn -ForegroundColor Yellow
+        Write-Host "Los pendientes de abajo son los que alcance a ver; pueden faltar." -ForegroundColor Yellow
+        Write-Host ""
     }
 
     # Sort: priority name ascending (P0 < P1 < P2), empty priority last
@@ -2750,7 +2783,9 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
         }
     }
     Write-Host ""
-    Write-Host ("Total: {0} pendiente(s)." -f $pending.Count) -ForegroundColor Yellow
+    # "Total" is an exact claim, and a capped read cannot make one - the warning above says the
+    # list may be short, so the number that closes it must agree with the warning, not contradict it.
+    Write-Host ("Total: {0}{1} pendiente(s)." -f $pending.Count, $(if ($truncWarn) { '+ (vistos; la lectura se corto)' } else { '' })) -ForegroundColor Yellow
 
     # Multi-session: show what other LIVE local sessions are working right now.
     # NOT named $sessions: at SCRIPT scope that is the [switch]$Sessions parameter

@@ -61,18 +61,44 @@ if ($env:ABIOS_BOARDCOMPLETE_DOTSOURCE) { return }
 
 # ── Side-effecting from here ──────────────────────────────────────────────────
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# Board reads that report their own truncation (#484).
+. (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 
 if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User') }
 if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)." }
 
 # Fail closed: a gh error must THROW, never read as an empty board that falsely reports "complete".
-$items = (Invoke-Gh -GhArgs @('project','item-list',"$ProjectNum",'--owner',$Owner,'--format','json','--limit','800') `
-                    -What "listar los items del board #$ProjectNum de $Owner" -Json).items
-$result   = Get-BoardCompletion -Items @($items)
+$read     = Get-BoardItems -Number $ProjectNum -Owner $Owner `
+                           -What "listar los items del board #$ProjectNum de $Owner"
+$result   = Get-BoardCompletion -Items $read.Items
 $boardUrl = "https://github.com/users/$Owner/projects/$ProjectNum"
 
+# A capped read cannot license a PASS. This gate exists to ASSERT an absence ("0 pendientes"), which
+# is exactly the claim a short read cannot support - and CI would read that PASS as ground truth.
+# So truncation fails closed: exit 1 with the reason, never a green "el board esta full" (#484).
+$truncWarn = Get-BoardTruncationWarning $read
+if ($truncWarn -and $result.Complete) {
+    if ($Json) {
+        [pscustomobject]@{
+            complete = $false; pendingCount = $null; truncated = $true
+            itemsRead = $read.Read; reason = $truncWarn; board = $boardUrl
+        } | ConvertTo-Json -Depth 6
+        exit 1
+    }
+    Write-Host "=== Board complete?  #$ProjectNum de $Owner ===" -ForegroundColor Cyan
+    Write-Host "  FAIL  no puedo verificarlo: $truncWarn" -ForegroundColor Red
+    Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+    exit 1
+}
+
 if ($Json) {
-    [pscustomobject]@{ complete = $result.Complete; pendingCount = $result.PendingCount; pending = $result.Pending; board = $boardUrl } | ConvertTo-Json -Depth 6
+    # `truncated`/`itemsRead` ride on EVERY response, not just the fail-closed one above. A capped
+    # read that DID find pending items still falls through to here, and a consumer reading
+    # `pendingCount` with no truncation field would take a floor for an exact count (#484).
+    [pscustomobject]@{
+        complete  = $result.Complete; pendingCount = $result.PendingCount; pending = $result.Pending
+        truncated = [bool]$truncWarn;  itemsRead    = $read.Read;           board   = $boardUrl
+    } | ConvertTo-Json -Depth 6
     if ($result.Complete) { exit 0 } else { exit 1 }
 }
 
@@ -83,6 +109,9 @@ if ($result.Complete) {
     exit 0
 }
 Write-Host ("  FAIL  quedan {0} item(s) pendiente(s):" -f $result.PendingCount) -ForegroundColor Red
+# Already failing, so the verdict does not change - but the COUNT does: a capped read makes this
+# list a floor, and "quedan 37" would otherwise read as exact.
+if ($truncWarn) { Write-Host "  (al menos: $truncWarn)" -ForegroundColor Yellow }
 foreach ($p in $result.Pending) {
     Write-Host ("    #{0,-4} {1}  (Status: {2})" -f $p.number, $p.title, $(if ($p.status) { $p.status } else { '(vacio)' })) -ForegroundColor DarkYellow
 }
