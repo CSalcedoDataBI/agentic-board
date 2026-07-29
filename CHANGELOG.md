@@ -1,6 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## [0.28.1] - 2026-07-29
+### Changed
+- **CI run volume cut ~60 %, and Board Sync no longer triggers itself** (#504; PR #512). The sync
+  workflow listened for `assigned` while `board-sync.sh` assigns unassigned issues itself, so its own
+  write re-triggered it — every new issue cost at least two runs, the second recomputing a state the
+  first had already reconciled. `assigned` is gone, and a burst of issue events now collapses onto one
+  run via `concurrency: cancel-in-progress` (safe precisely because the sync is a full-state
+  reconciler, not an incremental writer; the telemetry snapshot deliberately does NOT cancel, since a
+  half-written run there loses data no later run can rebuild).
+  `ci.yml` gates on the **pull request only** — a push to `main` is always a merge of something those
+  same jobs already passed, so re-running them after the merge doubled the cost of every change
+  without ever catching anything new. `pr-review` and `issue-language` are grouped per PR / per issue
+  and cancel superseded runs: addressing gate feedback with three quick commits used to start three
+  reviews of three diffs, two already obsolete — which protects the Max review quota, not just
+  Actions minutes. Every job now carries an explicit `timeout-minutes` (the default is 360, so one
+  hung job could eat 12 % of the monthly quota), and test-log artifacts drop from 90-day to 7-day
+  retention.
+
 ### Fixed
 - **A mature board no longer reports itself empty** (#484). `Board-Work.ps1` read board items with
   `gh project item-list --limit 200`. That call returns exit 0 and exactly 200 items on a bigger
