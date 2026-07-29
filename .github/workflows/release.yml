@@ -31,6 +31,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15   # R3: the default is 360 - tag + release creation never needs it
     steps:
       - uses: actions/checkout@v4
         with:

@@ -9,11 +9,16 @@ name: CI
 #     be generated from the current README + commands/ without error.
 
 on:
+  # Gate on the PR only. A push to main is always a merge of something these
+  # same two jobs already passed, so re-running them after the merge doubled
+  # the cost of every change without ever catching anything new.
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -21,7 +26,8 @@ permissions:
 jobs:
   test:
     name: Pester
-    runs-on: windows-latest
+    runs-on: windows-latest   # Pester + pwsh on Windows: the platform the plugin targets
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -52,10 +58,12 @@ jobs:
           name: pester-results
           path: testResults.xml
           if-no-files-found: warn
+          retention-days: 7   # default is 90; a test log is only useful while the PR is open
 
   docs:
     name: Docs freshness
     runs-on: ubuntu-latest   # all-LF checkout, no autocrlf: a clean byte-for-byte diff
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
