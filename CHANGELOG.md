@@ -11,15 +11,30 @@
   where the stakes are highest, and it silently under-counted the `-ListBoards` board picker the
   same way.
   Board reads now go through `Get-BoardItems.ps1`, which returns `{ Items; Read; Limit; Truncated }`
-  and treats a read that reached its cap as **possibly short**. Callers may no longer state an
-  absence off one: `/board work` says how many items it actually saw instead of "sin pendientes",
-  the board picker renders capped counts as `N+` with an explicit `TRUNCADO` line,
-  `Assert-BoardComplete` **fails closed** (a `PASS` is exactly the absence a short read cannot
-  support, and CI would read it as ground truth), and `/board update` publishes the caveat rather
-  than a clean-looking lie. The shared ceiling is 2000 and costs nothing: `gh` pages the underlying
-  GraphQL 100 at a time, so request count tracks the items that exist, not the cap — the old 200
-  bought no savings and cost the truth. A regression test asserts no script returns to a 200-item
-  cap.
+  and treats a read that reached its cap as **possibly short**. No caller may state an absence off
+  one. Every board reader was audited, not just the two in the bug report — the caps ranged from 200
+  to 1000 and **six** surfaces were asserting things a short read cannot support:
+  - `/board work` says how many items it actually saw instead of "sin pendientes"; the board picker
+    renders capped counts as `N+` with an explicit `TRUNCADO` line.
+  - `/board complete` **fails closed** — a `PASS` is exactly the absence a short read cannot
+    support, and CI would read it as ground truth.
+  - `/board triage` no longer prints "(no hay items pendientes)" over an untriaged board.
+  - **`/board field apply --merge-conflicts` no longer deletes an option on an unproven verification.**
+    The worst of the six: it moves items off a legacy option, checks that none remain, then deletes
+    it — and its own comment names the stake ("an item silently losing its Status is data loss").
+    The check read with a bare `gh ... --limit 800` and no cap test, so "0 left" could be an
+    artifact of the cap. A truncated verification now aborts on the same grounds as a found item.
+  - `Backup-Board` refuses to write a partial snapshot: it is the safety net taken *before* a
+    destructive operation, so a partial one is worse than none — it would license the delete it
+    exists to make reversible.
+  - `Export-BoardSnapshot` refuses to publish a truncated `N of M`, and `/board update` publishes
+    floors (`N+`) rather than stating a count and retracting it in a footnote.
+  - `Set-BoardField` warns *before* its sweep that the pass is partial, instead of printing a
+    `set=N` summary that reads like a complete one.
+  The shared ceiling is 2000 and costs nothing: `gh` pages the underlying GraphQL 100 at a time, so
+  request count tracks the items that exist, not the cap — the old 200 bought no savings and cost
+  the truth. Regression tests assert that no script hardcodes its own `item-list` cap and that every
+  board reader pulls in the shared one.
   This is the same defect class `Invoke-Gh.ps1` was written for (#303): a read consumed as fact.
   `Invoke-Gh` made a **failed** read loud; this makes a **short** one loud. Neither substitutes for
   the other — a truncated read succeeds.

@@ -79,12 +79,15 @@ if (-not $Body) {
                  if ($_.content.number) { "#$($_.content.number) $($_.title)" } else { $_.title }
              }) -join "; "
 
-    $Body = "**Progreso:** $done Done / $inProg In Progress / $($pending.Count) Backlog ($total items)."
+    # Render the counts as FLOORS when the read hit its cap, rather than stating them and
+    # retracting afterwards: "0 Backlog" followed by a footnote has already made the claim. The
+    # "+" carries the caveat inside every number it applies to, and the note explains it (#484).
+    $sfx  = if ($read.Truncated) { "+" } else { "" }
+    $Body = "**Progreso:** $done$sfx Done / $inProg$sfx In Progress / $($pending.Count)$sfx Backlog ($total$sfx items)."
     if ($next) { $Body += "`n**Siguiente:** $next" }
-    # Publish the caveat rather than a clean-looking lie: these counts are a floor when the read
-    # hit its cap, and the reader of a status update has no way to know that otherwise (#484).
     if ($read.Truncated) {
-        $Body += "`n_Nota: solo pude leer $($read.Read) items del board; las cuentas de arriba son un minimo, no un total._"
+        $Body += "`n_Nota: solo pude leer $($read.Read) items del board, que es el tope de la lectura; " +
+                 "las cuentas de arriba son un minimo (de ahi el '+'), no un total._"
     }
 }
 

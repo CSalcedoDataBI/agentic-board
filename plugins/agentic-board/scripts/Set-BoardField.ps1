@@ -35,7 +35,7 @@ param(
   [string]$TextTemplate,                           # text fields: template with {title} placeholder
   [string]$PrefixMap,                              # single-select: JSON {"prefix-":"OptionName",...,"*":"Default"}
   [string]$Filter = '^[a-z0-9]+(-[a-z0-9]+)*$',    # only items whose title matches (default: skill-name shape; skips long-titled issues)
-  [int]$Limit = 800,
+  [int]$Limit = 0,                                 # 0 = the shared board-read ceiling (Get-BoardItems)
   [switch]$Force                                   # re-set even when the current value already matches
 )
 $ErrorActionPreference = 'Stop'
@@ -44,6 +44,9 @@ $ErrorActionPreference = 'Stop'
 # reports a false "set=0" success, and an empty $proj/$fields would drive the item-edit
 # writes with a bad project id (#303).
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# ...and a CAPPED read silently narrows the sweep: this script claims to fill a field across EVERY
+# item, so items past the cap go untouched while the summary reads like a complete pass (#484).
+. (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 
 function Resolve-FieldValue([string]$title) {
   if ($TextTemplate) { return $TextTemplate.Replace('{title}', $title) }
@@ -70,8 +73,15 @@ $isSelect = [bool]$fdef.options
 $optById  = @{}; if ($isSelect) { foreach ($o in $fdef.options) { $optById[$o.name] = $o.id } }
 $fieldKey = ($Field -replace '[^A-Za-z0-9]','').ToLower()   # how item-list surfaces the value
 
-$items = (Invoke-Gh -GhArgs @('project','item-list',"$Number",'--owner',$Owner,'--format','json','--limit',"$Limit") `
-                    -What "listar los items del board #$Number" -Json).items
+$itemRead = Get-BoardItems -Number $Number -Owner $Owner -Limit $Limit `
+                           -What "listar los items del board #$Number"
+$items    = $itemRead.Items
+# Say it BEFORE the sweep, not after: the user needs to know the pass was partial while the
+# "set=N" summary is still ahead of them, not once it already reads like a full sweep.
+if ($itemRead.Truncated) {
+  Write-Host (Get-BoardTruncationWarning $itemRead) -ForegroundColor Yellow
+  Write-Host "  El barrido de abajo cubre solo esos items - los demas quedan sin tocar. Sube -Limit para cubrirlos." -ForegroundColor Yellow
+}
 $set=0; $skip=0; $fail=0
 foreach ($it in $items) {
   if ($it.title -notmatch $Filter) { $skip++; continue }

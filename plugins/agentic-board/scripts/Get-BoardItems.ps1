@@ -48,6 +48,11 @@
 # across this repo's scripts is how a cap gets forgotten until it lies.
 $script:BoardItemReadLimit = 2000
 
+# Accessor, for the callers that cannot use Get-BoardItems itself. Backup-Board needs gh's RAW
+# text (re-serialising a snapshot would reshape it), so it reads with -RawJson and checks the cap
+# by hand - but it must check against the SAME ceiling, not a second copy of the number.
+function Get-BoardItemReadLimit { return $script:BoardItemReadLimit }
+
 # Read a board's items and report whether the read could have been cut short.
 # Returns { Items; Read; Limit; Truncated } - never a bare array, because the caller has to be
 # handed the truncation flag alongside the data it would otherwise read as complete.

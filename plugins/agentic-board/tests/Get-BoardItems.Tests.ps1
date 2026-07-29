@@ -112,17 +112,79 @@ Describe 'Get-BoardTruncationWarning' {
     }
 }
 
-Describe 'Regression: no board read may go back to a 200-item cap' {
-    <#  The bug was one literal in two call sites. Scripts read boards for different reasons, but
-        NONE of them may cap at 200 again — this asserts it across the whole script directory rather
-        than trusting that the next reader remembers why. #>
-    It 'no script asks gh project item-list with --limit 200' {
-        $scripts = Get-ChildItem (Join-Path $PSScriptRoot '..' 'scripts') -Filter '*.ps1'
-        $bad = @()
-        foreach ($s in $scripts) {
+Describe 'Regression: every board item read must go through the shared reader' {
+    <#  The narrow version of this test banned the literal `'--limit', '200'` and nothing else — it
+        would have passed on `--limit 200` unquoted, on a variable defaulting to 200, and on all the
+        500/800/1000 readers that were STILL asserting absences when this was first written (one of
+        them gating a destructive option delete). The invariant worth pinning is not "not 200", it is
+        "no script hardcodes its own item-list cap": every board read either goes through
+        Get-BoardItems or asks Get-BoardItemReadLimit for the shared ceiling. #>
+
+    BeforeDiscovery {
+        $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts'
+        # Get-BoardItems itself is where the one legitimate item-list call lives.
+        $script:ReaderFile = 'Get-BoardItems.ps1'
+    }
+
+    It 'no script hardcodes a numeric --limit on gh project item-list' {
+        $offenders = @()
+        foreach ($s in (Get-ChildItem $script:ScriptDir -Filter '*.ps1')) {
+            if ($s.Name -eq $script:ReaderFile) { continue }
             $text = Get-Content $s.FullName -Raw
-            if ($text -match "item-list" -and $text -match "'--limit'\s*,\s*'200'") { $bad += $s.Name }
+            if ($text -notmatch 'item-list') { continue }
+            # Any literal digit run following --limit, quoted or not, single or double.
+            if ($text -match "--limit'?\s*,?\s*[`"']?\d") { $offenders += $s.Name }
         }
-        $bad -join ', ' | Should -BeNullOrEmpty
+        $offenders -join ', ' | Should -BeNullOrEmpty
+    }
+
+    It 'every script that reads board items pulls in the shared reader' {
+        $missing = @()
+        foreach ($s in (Get-ChildItem $script:ScriptDir -Filter '*.ps1')) {
+            if ($s.Name -eq $script:ReaderFile) { continue }
+            $text = Get-Content $s.FullName -Raw
+            if ($text -notmatch 'item-list') { continue }
+            if ($text -notmatch 'Get-BoardItems\.ps1') { $missing += $s.Name }
+        }
+        $missing -join ', ' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Regression: no caller may state an absence off a possibly-short read' {
+    <#  The user-visible half of the bug: each of these files prints a sentence asserting that
+        nothing is there, and each must consult the truncation flag before doing so.
+
+        These are COARSE checks — presence of the guard in the same file, not proof that it wraps
+        the right branch. That limit is deliberate: the first version of this block matched the
+        DISTANCE between the guard and the message, which broke the moment a branch grew a line and
+        would have trained the next reader to loosen the assertion rather than fix the code. Branch
+        placement is covered by the helper's own behavioural tests above plus the live check on the
+        291-item board; what these add is "nobody deleted the guard". #>
+
+    It 'Board-Work consults the truncation flag before its "Sin pendientes"' {
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1') -Raw
+        $t | Should -Match 'Sin pendientes'          # the all-clear still exists...
+        $t | Should -Match 'if \(\$truncWarn\)'      # ...and so does the guard on it
+    }
+    It 'Board-Triage consults it before its "(no hay items pendientes)"' {
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Triage.ps1') -Raw
+        $t | Should -Match 'no hay items pendientes'
+        $t | Should -Match 'if \(\$itemTrunc\)'
+    }
+    It 'Assert-BoardComplete refuses to PASS on a truncated read' {
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Assert-BoardComplete.ps1') -Raw
+        $t | Should -Match '\$truncWarn -and \$result\.Complete'
+    }
+    It 'Apply-FieldPreset refuses to DELETE an option verified by a truncated read' {
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Apply-FieldPreset.ps1') -Raw
+        $t | Should -Match '\$postRead\.Truncated'
+    }
+    It 'Backup-Board refuses to write a partial snapshot' {
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Backup-Board.ps1') -Raw
+        $t | Should -Match 'un backup parcial no es un backup'
+    }
+    It 'Export-BoardSnapshot refuses to publish a truncated "N of M"' {
+        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Export-BoardSnapshot.ps1') -Raw
+        $t | Should -Match '\$items\.Count -ge \$itemLimit'
     }
 }

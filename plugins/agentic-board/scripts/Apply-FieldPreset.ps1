@@ -91,6 +91,9 @@ if ($MergeConflicts -and $NoMigrate) { Write-Error "-MergeConflicts y -NoMigrate
 # A gh failure on the field-list read below must THROW, not read as "the board has no fields":
 # that empty result is exactly the premise this script would then CREATE every field from (#303).
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# ...and a CAPPED item read must not read as "the option is empty" - that empty result is the
+# premise --merge-conflicts DELETES an option from, losing those items' field value (#484).
+. (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 
 if (-not $PresetPath) { $PresetPath = Join-Path $PSScriptRoot "..\presets\fields.$Lang.json" }
 # Show the RESOLVED file path, not the raw -Lang/-Preset value: "Preset not found: en" reads as
@@ -143,11 +146,19 @@ function Get-ProjectId {
 # The items currently assigned to $optionName on $fieldName. Always read fresh: this is
 # both the pre-move list and the post-move verification, and a stale answer here is what
 # would let the delete run over items that never moved.
+#
+# Returns { Items; Truncated } rather than a bare array, because the caller uses an EMPTY result
+# as proof that nothing is left before deleting the option - and a capped read cannot prove that
+# (#484). It used to read with a bare `gh ... --limit 800`: on a board whose matching items sit
+# past the cap, "0 left" was a false all-clear licensing a destructive delete.
 function Get-ItemsOnOption($fieldName, $optionName) {
   $key  = ($fieldName -replace '[^A-Za-z0-9]','').ToLower()   # item-list lowercases/strips field names
-  $json = gh project item-list $Number --owner $Owner --format json --limit 800
-  if ($LASTEXITCODE -ne 0) { throw "no pude listar los items del project #$Number (gh exit $LASTEXITCODE)" }
-  return @(($json | ConvertFrom-Json).items | Where-Object { $_.$key -eq $optionName })
+  $read = Get-BoardItems -Number $Number -Owner $Owner `
+                         -What "listar los items del project #$Number"
+  [pscustomobject]@{
+    Items     = @($read.Items | Where-Object { $_.$key -eq $optionName })
+    Truncated = $read.Truncated
+  }
 }
 
 # Collapse a legacy option onto its canonical one: move the items, verify, delete the option.
@@ -156,7 +167,8 @@ function Invoke-OptionMerge($merge) {
   $proj  = Get-ProjectId
   $field = Get-SingleSelectField $merge.Field
   if (-not $field.id) { Write-Host "  (no pude leer '$($merge.Field)' para fusionar)" -ForegroundColor DarkYellow; return $false }
-  $items = @(Get-ItemsOnOption $merge.Field $merge.FromName)
+  $preRead = Get-ItemsOnOption $merge.Field $merge.FromName
+  $items   = @($preRead.Items)
   Write-Host ("  merge: {0} '{1}' -> '{2}' ({3} item(s))" -f $merge.Field, $merge.FromName, $merge.ToName, $items.Count) -ForegroundColor Cyan
 
   # 1. MOVE. This must happen before the delete: GitHub does not reassign the items of a
@@ -176,9 +188,17 @@ function Invoke-OptionMerge($merge) {
 
   # 2. VERIFY before destroying anything. One un-moved item is enough to abort: the option
   #    staying is a cosmetic annoyance, an item silently losing its Status is data loss.
-  $left = @(Get-ItemsOnOption $merge.Field $merge.FromName)
+  $postRead = Get-ItemsOnOption $merge.Field $merge.FromName
+  $left     = @($postRead.Items)
   if ($left.Count -gt 0) {
     Write-Host ("    ABORT: quedan {0} item(s) en '{1}' - NO borro la opcion (se quedarian sin {2})." -f $left.Count, $merge.FromName, $merge.Field) -ForegroundColor Red
+    return $false
+  }
+  # An EMPTY result only proves "nothing left" when the read saw the whole board. If it stopped at
+  # the cap, the items that would lose their $($merge.Field) could be exactly the ones past it - so
+  # a truncated verification aborts on the same grounds as a found item, and for the same stake (#484).
+  if ($postRead.Truncated) {
+    Write-Host ("    ABORT: la verificacion se corto en el tope de lectura - no puedo probar que '{0}' quedo vacia, asi que NO borro la opcion." -f $merge.FromName) -ForegroundColor Red
     return $false
   }
 
