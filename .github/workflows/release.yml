@@ -91,6 +91,44 @@ jobs:
           Write-Host "----- release notes -----"
           Get-Content release-notes.md
 
+      - name: Package the plugin as a release asset
+        if: steps.v.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          # Two reasons, and the weaker one is the one that gets overstated:
+          #
+          #  1. Offline / air-gapped install. Every release so far shipped ZERO assets, so the only
+          #     way to obtain a given version was to clone at a ref. A versioned zip is something a
+          #     user can download, inspect and unpack where git is not available or not allowed.
+          #
+          #  2. A download signal. `download_count` is cumulative and permanent, unlike traffic data
+          #     which GitHub discards after 14 days. But be honest about what it measures: the
+          #     primary install path is the marketplace/git, which never touches an asset, so this
+          #     counts only the people who take the zip. It is a secondary, partial signal — NOT an
+          #     install count. The durable adoption measure is the traffic snapshot, not this.
+          #
+          # tests/ is excluded: it is the CI suite, dead weight in an install artifact.
+          set -euo pipefail
+          zip -q -r "agentic-board-$TAG.zip" plugins/agentic-board \
+            -x 'plugins/agentic-board/tests/*'
+
+          # Assert rather than just print. This step runs BEFORE the release is created, so a
+          # failure here means no release is published at all — which is the safe direction. Without
+          # the assertions a truncated or near-empty archive would ship as a real asset and only be
+          # discovered by whoever downloaded it.
+          test -f "agentic-board-$TAG.zip"
+          size=$(stat -c%s "agentic-board-$TAG.zip")
+          count=$(unzip -l "agentic-board-$TAG.zip" | tail -1 | awk '{print $2}')
+          echo "asset: agentic-board-$TAG.zip  ${size} bytes  ${count} entries"
+          [ "$size" -gt 100000 ] || { echo "::error::asset is only ${size} bytes - expected >100KB"; exit 1; }
+          # 50, not ~120 (the current real count): the assert exists to catch an empty or truncated
+          # archive, not to freeze the file count. A legitimately slimmer plugin must not fail here.
+          [ "$count" -gt 50 ]    || { echo "::error::asset has only ${count} entries - expected >50"; exit 1; }
+          if unzip -l "agentic-board-$TAG.zip" | grep -q '/tests/'; then
+            echo "::error::tests/ leaked into the release asset"; exit 1
+          fi
+
       - name: Create the tag and GitHub Release
         if: steps.v.outputs.release == 'true'
         env:
@@ -101,11 +139,14 @@ jobs:
           # gh release create makes the tag at $SHA when it does not exist (--target is ignored if
           # the tag already exists), so the tag and the release are created together — and when a
           # tag was pre-created by hand, this still attaches the missing Release to it.
+          # The asset is passed positionally so it is attached in the SAME call: a separate
+          # `gh release upload` could leave a published release with no asset if it failed.
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file release-notes.md \
-            --target "$SHA"
-          echo "::notice::Released $TAG at $SHA"
+            --target "$SHA" \
+            "agentic-board-$TAG.zip"
+          echo "::notice::Released $TAG at $SHA with asset agentic-board-$TAG.zip"
 
       - name: Advance the release channel to the released commit
         if: steps.v.outputs.release == 'true'
