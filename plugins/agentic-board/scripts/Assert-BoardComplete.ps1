@@ -79,8 +79,10 @@ $boardUrl = "https://github.com/users/$Owner/projects/$ProjectNum"
 $truncWarn = Get-BoardTruncationWarning $read
 if ($truncWarn -and $result.Complete) {
     if ($Json) {
-        [pscustomobject]@{ complete = $false; pendingCount = $null; truncated = $true
-                           itemsRead = $read.Read; reason = $truncWarn; board = $boardUrl } | ConvertTo-Json -Depth 6
+        [pscustomobject]@{
+            complete = $false; pendingCount = $null; truncated = $true
+            itemsRead = $read.Read; reason = $truncWarn; board = $boardUrl
+        } | ConvertTo-Json -Depth 6
         exit 1
     }
     Write-Host "=== Board complete?  #$ProjectNum de $Owner ===" -ForegroundColor Cyan
@@ -101,6 +103,9 @@ if ($result.Complete) {
     exit 0
 }
 Write-Host ("  FAIL  quedan {0} item(s) pendiente(s):" -f $result.PendingCount) -ForegroundColor Red
+# Already failing, so the verdict does not change - but the COUNT does: a capped read makes this
+# list a floor, and "quedan 37" would otherwise read as exact.
+if ($truncWarn) { Write-Host "  (al menos: $truncWarn)" -ForegroundColor Yellow }
 foreach ($p in $result.Pending) {
     Write-Host ("    #{0,-4} {1}  (Status: {2})" -f $p.number, $p.title, $(if ($p.status) { $p.status } else { '(vacio)' })) -ForegroundColor DarkYellow
 }
