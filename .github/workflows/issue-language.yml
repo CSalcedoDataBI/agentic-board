@@ -12,6 +12,13 @@ on:
   issues:
     types: [opened, edited]
 
+# Grouped per issue, not globally: two different issues must both get scored,
+# but re-editing the SAME issue makes the in-flight scoring of its previous
+# text worthless. Fixing a flagged issue often takes several quick edits.
+concurrency:
+  group: issue-language-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 permissions:
   issues: write
 
@@ -21,6 +28,7 @@ jobs:
     # quote it outside a code fence. The detector is tuned to make this rare, not impossible.
     if: ${{ !contains(github.event.issue.labels.*.name, 'lang-ok') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5   # R3: the default is 360 - scoring one issue body never needs it
     steps:
       - uses: actions/checkout@v4
 

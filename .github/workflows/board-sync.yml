@@ -2,12 +2,28 @@ name: Board Sync
 
 on:
   issues:
-    types: [opened, closed, reopened, assigned]
+    # NO 'assigned': board-sync.sh assigns unassigned issues itself
+    # (scripts/board-sync.sh:94 assign_issue), so listening for 'assigned'
+    # made the workflow re-trigger on its own write - every new issue cost at
+    # least two runs, and the second one recomputed a state the first had
+    # already reconciled.
+    types: [opened, closed, reopened]
   pull_request:
     types: [opened, closed]
   schedule:
     - cron: '0 9 * * 1'   # lunes 9am UTC — health check semanal
   workflow_dispatch:        # disparo manual desde la UI
+
+# A burst of issue events (a /board plan creating an epic + sub-issues, a bulk
+# close) used to start one full sync per event, all computing the same end
+# state. This collapses the burst: cancelling is safe here precisely because
+# board-sync.sh is a full-state reconciler, not an incremental writer - the
+# surviving run reconciles everything the cancelled ones would have.
+# (Contrast the telemetry snapshot, which must NOT cancel: there a half-written
+# run loses accumulated data that no later run can reconstruct.)
+concurrency:
+  group: board-sync
+  cancel-in-progress: true
 
 permissions:
   issues: write
@@ -17,6 +33,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

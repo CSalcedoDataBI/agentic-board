@@ -10,6 +10,16 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
+# `synchronize` fires on every push to an open PR, so addressing gate feedback
+# with three quick commits used to start three reviews of three diffs, two of
+# them already superseded. Grouped per PR and cancelling: what matters is a
+# review of the FINAL diff. This protects the Max quota, not just Actions
+# minutes - a cancelled run still costs whatever it already spent, but far less
+# than reviewing every intermediate state to completion.
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   pull-requests: write
   contents: read
@@ -20,6 +30,7 @@ jobs:
     # No revisa borradores (ahorra cupo Max)
     if: ${{ github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20   # R3: the default is 360 - a model review of a diff never needs it
     steps:
       - uses: actions/checkout@v4
         with:
