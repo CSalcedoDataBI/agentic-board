@@ -29,8 +29,16 @@
          and unresolved review-thread count.
       5. Verdict via exit code:
            0 -> gate PASSED (checks ok, no CHANGES_REQUESTED, no unresolved
-                threads, no TMDL-breaking / BPA-error findings)
+                threads, no TMDL-breaking / BPA-error findings, AND somebody
+                actually reviewed)
            1 -> gate BLOCKED (address the printed feedback, push, re-run)
+           2 -> gate UNREVIEWED (#510): nothing is wrong, but nobody looked.
+                Distinct from 0 on purpose - `claude-review` reported a passing
+                check having left zero reviews, and a caller reading only the
+                exit code could not tell "reviewed, found nothing" from "the
+                reviewer never spoke". Anything testing `-eq 0` fails closed.
+                Clear it by reviewing for real (-RecordReview registers an
+                external review) or, when a review buys nothing, -AllowUnreviewed.
 
     -InstallRuleset (once per repo, optional): installs a repository ruleset
     that requires a PR before merging into the default branch. Repo admins
@@ -64,6 +72,22 @@
     Forget the Copilot-unavailable marker for this repo's owner and request Copilot again this run
     (use when Copilot access is back before the cooldown expires).
 
+.PARAMETER AllowUnreviewed
+    Pass a PR that nobody reviewed (exit 0 instead of 2). For changes where a review buys nothing -
+    a typo in a comment, a regenerated file. It is the deliberate exception, not the way past the
+    gate: it prints that nobody looked at the code.
+
+.PARAMETER RecordReview
+    Register an external review on the PR (with -Reviewer and -Summary) so the gate counts it. This
+    is how a reviewer with no GitHub identity - second-opinion / Codex, or a careful human read -
+    stops being invisible to a gate that can otherwise only see GitHub review objects.
+
+.PARAMETER Reviewer
+    Who performed the external review (e.g. 'codex/gpt-5.5'). Used with -RecordReview.
+
+.PARAMETER Summary
+    What the external review found. Used with -RecordReview.
+
 .PARAMETER TokenVar
     Windows USER env var holding the PAT. Defaults to GITHUB_TOKEN_PERSONAL.
 
@@ -71,6 +95,8 @@
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -InstallRuleset
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -EnableCopilot
+    .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RecordReview -Reviewer 'codex/gpt-5.5' -Summary '4 rondas, 12 hallazgos, todos corregidos'
+    .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -AllowUnreviewed
 #>
 [CmdletBinding()]
 param(
@@ -84,6 +110,15 @@ param(
     [int]   $CopilotCooldownDays = 7,
     # Forget the Copilot-unavailable marker for this repo's owner and try Copilot again now.
     [switch]$EnableCopilot,
+    # Accept a PR that nobody reviewed. Deliberate opt-out for the cases where a review buys
+    # nothing (a typo in a comment, a generated file). Exists so the honest verdict below can be
+    # the DEFAULT without stalling trivial work - never as the routine way past the gate.
+    [switch]$AllowUnreviewed,
+    # Record an external review (second-opinion / Codex / a human read) as a PR comment the gate
+    # will recognise. This is how a reviewer with no GitHub identity gets counted (#510).
+    [switch]$RecordReview,
+    [string]$Reviewer = "external",
+    [string]$Summary  = "",
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL"
 )
 
@@ -109,6 +144,56 @@ function Find-ForeignCommits {
         }
     }
     return @($foreign)
+}
+
+# Marker that identifies a review published as a PR COMMENT rather than as a GitHub review object.
+# Needed because the reviewers that actually show up on this repo do not all submit review objects:
+# the `claude-review` workflow comments, and an external reviewer (second-opinion / Codex) has no
+# GitHub identity at all. Without a way to recognise those, the gate can only ever see "0 reviews".
+$script:ExternalReviewMarker = '[abios-review]'
+
+<#
+    Decide whether this PR was ACTUALLY reviewed, and by whom (#510).
+
+    The distinction the gate was missing: "reviewed, found nothing" and "the reviewer never spoke"
+    both arrived as zero findings, and the second one was reported as a pass. A green check from a
+    reviewer that produced no review is not evidence of anything, and on this repo it was the only
+    reviewer - Copilot has been quota-blocked for weeks.
+
+    Counts two kinds of evidence:
+      - a submitted GitHub review (APPROVED / CHANGES_REQUESTED / COMMENTED / DISMISSED)
+      - a PR comment whose body carries the [abios-review] marker
+
+    Returns @{ reviewed; github; external; reviewers }. Pure.
+#>
+function Get-ReviewEvidence {
+    param(
+        $Reviews = @(),              # nodes with .state and .author.login
+        [string[]]$CommentBodies = @()
+    )
+    $gh = @(@($Reviews) | Where-Object { $_ -and "$($_.state)".Trim() })
+    # Literal containment, NOT -like: the marker's own square brackets are a wildcard character
+    # class to -like, which threw "wildcard pattern is not valid" and would have made every
+    # external review invisible - the exact blindness this function exists to remove.
+    $marker = $script:ExternalReviewMarker
+    $ext = @(@($CommentBodies) | Where-Object { "$_".Contains($marker) })
+
+    $names = @()
+    foreach ($r in $gh) { if ($r.author.login) { $names += "$($r.author.login)" } }
+    foreach ($c in $ext) {
+        # `<!-- [abios-review] codex/gpt-5.5 -->` -> "codex/gpt-5.5"; unnamed markers stay generic.
+        # Non-greedy up to the comment close: excluding '-' from the name (the first attempt) cut
+        # "codex/gpt-5.5" at its own hyphen.
+        $name = ''
+        if ("$c" -match '(?i)\[abios-review\]\s*(.*?)\s*(?:-->|\r|\n|$)') { $name = $Matches[1].Trim() }
+        $names += $(if ($name) { $name } else { 'external' })
+    }
+    return @{
+        reviewed  = (($gh.Count + $ext.Count) -gt 0)
+        github    = $gh.Count
+        external  = $ext.Count
+        reviewers = @($names | Where-Object { $_ } | Select-Object -Unique)
+    }
 }
 
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
@@ -168,6 +253,23 @@ if ($InstallRuleset) {
 }
 
 if ($PR -le 0) { throw "Usa -PR <numero> (o -InstallRuleset)." }
+
+# ── Record an external review so the gate can see it (#510) ───────────────────
+# A reviewer without a GitHub identity (second-opinion / Codex, or a careful human read) leaves no
+# review object, so to the gate it was indistinguishable from nobody looking. This writes the
+# evidence in the one place that survives the session: the PR itself.
+if ($RecordReview) {
+    $body = @"
+<!-- $script:ExternalReviewMarker $Reviewer -->
+## Revision externa - $Reviewer
+
+$(if ($Summary) { $Summary } else { "Revision realizada sobre el diff de este PR." })
+"@
+    $null = Invoke-Gh -GhArgs @('pr','comment',"$PR",'--repo',$Repo,'--body',$body) `
+                      -What "registrar la revision externa en el PR #$PR"
+    Write-Host "OK revision de '$Reviewer' registrada en el PR #$PR - el gate ya la cuenta como review." -ForegroundColor Green
+    exit 0
+}
 
 Write-Host "=== Review gate  $Repo  PR #$PR ===" -ForegroundColor Cyan
 Write-Host ""
@@ -384,6 +486,18 @@ if ($copilotRequested -and (Test-CopilotUnavailableReview $reviews)) {
     }
 }
 
+# Evidence that someone ACTUALLY reviewed (#510). Comments are read separately from reviews because
+# the reviewers that show up on this repo comment instead of submitting review objects.
+$commentBodies = @()
+try {
+    $cj = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','comments') -What "leer los comentarios del PR #$PR"
+    $commentBodies = @(($cj | ConvertFrom-Json).comments | ForEach-Object { "$($_.body)" })
+} catch {
+    # Fail CLOSED: an unreadable comment list must not be able to manufacture "reviewed".
+    Write-Host "  WARN no pude leer los comentarios del PR - la evidencia de revision se cuenta solo por reviews." -ForegroundColor DarkYellow
+}
+$evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies $commentBodies
+
 Write-Host ""
 Write-Host "----- RESULTADO DEL REVIEW -----" -ForegroundColor Cyan
 Write-Host ("Decision      : {0}" -f ($(if ($decision) { $decision } else { "(sin reviews requeridos)" })))
@@ -410,10 +524,29 @@ if ($tmdlBlocked)                          { $blockers += "cambios TMDL BREAKING
 if ($bpaBlocked)                           { $blockers += "violaciones BPA de severidad error (M3.3)" }
 
 if ($blockers.Count -eq 0) {
-    Write-Host "GATE PASSED - seguro mergear (gh pr merge $PR --repo $Repo --squash --delete-branch)." -ForegroundColor Green
-    if ($reviews.Count -eq 0) {
-        Write-Host "RECUERDA: llegaron 0 reviews (solicitud aceptada no garantiza review) -" -ForegroundColor Yellow
-        Write-Host "el self-review de 'gh pr diff $PR' es OBLIGATORIO antes del merge." -ForegroundColor Yellow
+    # THE #510 fix. "Reviewed and found nothing" and "nobody ever looked" used to print the same
+    # GATE PASSED with a reminder underneath - and a caller that reads the exit code saw a pass
+    # either way. Silence is not approval, so the second case gets its own verdict and its own
+    # exit code: anything testing `-eq 0` now fails closed, while still telling it apart from a
+    # real block (exit 1).
+    if (-not $evidence.reviewed -and -not $AllowUnreviewed) {
+        Write-Host "GATE SIN REVISAR - los checks estan en verde, pero NADIE reviso este PR." -ForegroundColor Yellow
+        Write-Host "  0 reviews de GitHub y 0 revisiones externas registradas." -ForegroundColor Yellow
+        Write-Host "  Un check verde de un reviewer que no dejo review no es evidencia de nada (#510)." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  Salidas legitimas, en orden de preferencia:" -ForegroundColor Cyan
+        Write-Host "   1. Que alguien revise de verdad - el revisor externo (second-opinion) sirve," -ForegroundColor Cyan
+        Write-Host "      y se registra con -RecordReview -Reviewer <quien> -Summary <que encontro>." -ForegroundColor DarkGray
+        Write-Host "   2. Si de verdad no amerita revision (typo, archivo generado): -AllowUnreviewed." -ForegroundColor DarkGray
+        Write-Host ""
+        exit 2
+    }
+    Write-Host "GATE PASSED - seguro mergear." -ForegroundColor Green
+    if ($evidence.reviewed) {
+        Write-Host ("  Revisado por: {0} ({1} review(s) de GitHub, {2} externa(s))." -f `
+            ($evidence.reviewers -join ', '), $evidence.github, $evidence.external) -ForegroundColor Green
+    } else {
+        Write-Host "  NOTA: pasa SIN revision porque se pidio -AllowUnreviewed. Nadie miro este codigo." -ForegroundColor DarkYellow
     }
     exit 0
 } else {
@@ -422,3 +555,4 @@ if ($blockers.Count -eq 0) {
     Write-Host "Atiende el feedback, push, y re-ejecuta este gate." -ForegroundColor Yellow
     exit 1
 }
+

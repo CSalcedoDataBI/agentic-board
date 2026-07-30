@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 ### Fixed
+- **A reviewer that never reviewed no longer reads as approval** (#510). On PR #508 the
+  `claude-review` check reported **success** while the PR ended with **zero** reviews and zero
+  comments — twice, on two runs. The gate then printed the same `GATE PASSED` it prints for a
+  genuinely clean review, with the self-review reminder as a footnote nobody had to act on. This
+  landed in the worst possible window: Copilot has been quota-blocked for weeks, so that workflow
+  was the *only* automated reviewer on the repo, and it was passing without reviewing.
+
+  Fixed on both sides:
+  - **The workflow now fails when it produced no review.** Publishing the review is part of the
+    task, not a side effect — the job was running, exiting clean and leaving nothing because it had
+    neither the instruction nor the tool to comment. It now gets both, and a verification step
+    turns the check **red** when no review and no `[abios-review]` comment landed.
+  - **The gate distinguishes "reviewed, found nothing" from "nobody looked."** A new exit code
+    **2 — `GATE SIN REVISAR`** — reports the second case. It is deliberately not 0: any caller
+    testing `-eq 0` now fails closed, while still telling an unreviewed PR apart from a genuinely
+    blocked one (1). Nothing in the repo branched on the gate's exit code programmatically, so this
+    changes no existing behaviour silently.
+  - **A reviewer with no GitHub identity can now be counted.** `second-opinion` (Codex) is the
+    reviewer that actually shows up here, and it submits no review object — so to the gate it was
+    indistinguishable from nobody. `-RecordReview -Reviewer <who> -Summary <what>` writes the
+    evidence onto the PR itself, where it survives the session.
+  - `-AllowUnreviewed` is the deliberate exception for changes where a review buys nothing (a typo,
+    a regenerated file). It prints that nobody read the code rather than implying someone did.
+
+  Found while fixing it, by the tests: the marker check used `-like`, whose wildcard syntax reads
+  the marker's own square brackets as a character class — it threw instead of matching, which would
+  have made **every** external review invisible, i.e. exactly the blindness being removed. 16 tests,
+  mutation-verified: treating everything as reviewed turns 4 red, ignoring marked comments turns 4.
+
 - **The irreversible brake is now a control, not a paragraph** (#516, part of #440). `/board expert
   auto` printed `Brake ARMED` while enforcing nothing: the brake lived only as prose in the launch
   briefing, and an observed run merged its own PR to `main` — closing its epic's sub-issues — while

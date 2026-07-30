@@ -37,8 +37,15 @@ jobs:
           fetch-depth: 0
 
       - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Publicar el review es parte del trabajo, no un efecto secundario: sin la herramienta
+          # para comentar, el job corría, salía limpio y no dejaba nada (#510).
+          claude_args: |
+            --max-turns 20
+            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
           prompt: |
             Revisa este pull request como un senior engineer. Enfócate en:
             - Bugs y errores de lógica
@@ -47,3 +54,29 @@ jobs:
             - Cobertura de tests faltante
             Responde en español, con feedback accionable y concreto. Sé breve;
             si el PR está bien, dilo en una línea en vez de inventar problemas.
+
+            OBLIGATORIO — publicar el review es parte de la tarea:
+            publica tu resultado como comentario del PR con
+            `gh pr comment ${{ github.event.pull_request.number }} --body "<tu review>"`,
+            y que la PRIMERA línea del cuerpo sea exactamente:
+            <!-- [abios-review] claude-review -->
+            Publica SIEMPRE, también cuando no encuentres nada — en ese caso una sola
+            línea diciendo que no hay hallazgos. Un run que no publica nada no es un
+            review sin hallazgos: es un review que no ocurrió, y se trata como fallo.
+
+      # El arreglo de fondo de #510: un reviewer que no revisó debe ponerse ROJO. Antes, este job
+      # salía en verde sin haber dejado nada, y ese verde se leía como "revisado y aprobado" -
+      # justo cuando era el UNICO reviewer del repo (Copilot sin cupo).
+      - name: Verificar que el review realmente se publicó
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          n='${{ github.event.pull_request.number }}'
+          reviews=$(gh pr view "$n" --json reviews --jq '[.reviews[]] | length')
+          marks=$(gh pr view "$n" --json comments --jq '[.comments[] | select(.body | test("\\[abios-review\\]"))] | length')
+          echo "reviews=$reviews  comentarios [abios-review]=$marks"
+          if [ "$reviews" -eq 0 ] && [ "$marks" -eq 0 ]; then
+            echo "::error::claude-review terminó sin dejar ningún review. Un check verde aquí se leería como 'revisado' cuando nadie miró el código (#510)."
+            exit 1
+          fi
