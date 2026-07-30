@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.29.0] - 2026-07-30
 ### Added
 - **`/board expert auto -EndToEnd` — an autonomous run can now finish what it started, under four
   conditions** (#530, part of #526). The brake stops being all-or-nothing: a run the owner *ordered*
@@ -1277,3 +1277,4 @@
 - `/board` command.
 - Plugin manifest + marketplace entry.
 - fix: exclude self-matching lines from secret guard pattern (#1)
+
