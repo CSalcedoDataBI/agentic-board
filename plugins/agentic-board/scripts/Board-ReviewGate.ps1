@@ -572,7 +572,12 @@ if ($blockers.Count -eq 0) {
     # real block (exit 1).
     if (-not $evidence.reviewed -and -not $AllowUnreviewed) {
         Write-Host "GATE SIN REVISAR - los checks estan en verde, pero NADIE reviso ESTE diff." -ForegroundColor Yellow
-        if ($evidence.stale -gt 0) {
+        if (-not "$($prState.headRefOid)".Trim()) {
+            # Fail-closed, but say WHICH failure: blaming the user for not reviewing when the gate
+            # could not even read the head commit would send them chasing the wrong thing.
+            Write-Host "  No pude leer el commit actual del PR, asi que no puedo probar que ninguna" -ForegroundColor Yellow
+            Write-Host "  revision corresponda a este codigo. Se rechaza por precaucion, no por falta de review." -ForegroundColor Yellow
+        } elseif ($evidence.stale -gt 0) {
             Write-Host ("  Hay {0} revision(es) en el PR, pero de commits ANTERIORES - no cubren el codigo actual." -f $evidence.stale) -ForegroundColor Yellow
             Write-Host "  Empujaste cambios despues de que se reviso; esos cambios no los ha visto nadie." -ForegroundColor DarkGray
         } else {

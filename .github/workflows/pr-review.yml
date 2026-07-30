@@ -82,8 +82,11 @@ jobs:
           set -euo pipefail
           n='${{ github.event.pull_request.number }}'
           sha='${{ github.event.pull_request.head.sha }}'
+          # Pipe to real jq: `gh --jq` takes ONE expression and does not pass through jq CLI
+          # options, so `--jq --arg sha ...` was parsed as stray arguments and exited non-zero
+          # before `marks` was set - failing the reviewer job even when the review WAS posted.
           marks=$(gh pr view "$n" --json comments \
-            --jq --arg sha "$sha" '[.comments[] | select(.body | test("\\[abios-review\\]")) | select(.body | contains($sha))] | length')
+            | jq --arg sha "$sha" '[.comments[] | select(.body | test("\\[abios-review\\]")) | select(.body | contains($sha))] | length')
           echo "comentarios [abios-review] para $sha: $marks"
           if [ "$marks" -eq 0 ]; then
             echo "::error::claude-review terminó sin dejar review para el commit $sha. Un check verde aquí se leería como 'revisado' cuando nadie miró este código (#510)."
