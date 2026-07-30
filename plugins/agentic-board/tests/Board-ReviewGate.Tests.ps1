@@ -143,3 +143,58 @@ Describe 'Get-ReviewEvidence - "found nothing" vs "nobody looked" (#510)' {
         }
     }
 }
+
+Describe 'Test-OnlyReviewerChecksFailed - the reviewer-red allowance (#510, review round 4)' {
+    # This gates a MERGE decision, so its failure mode matters more than its happy path. The first
+    # cut scraped the human-readable `gh pr checks` table; any failure printed in a shape the regex
+    # missed dropped out of the list, a reviewer failure was then the only one seen, and a broken
+    # build would have been waved through.
+
+    Context 'fails closed' {
+        It 'never downgrades when the check list could not be parsed' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @('claude-review') -Parsed $false | Should -BeFalse
+        }
+        It 'never downgrades on an empty failure list (nothing to excuse)' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @() -Parsed $true | Should -BeFalse
+        }
+        It 'never downgrades when a list of blanks is all there is' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @('', '   ') -Parsed $true | Should -BeFalse
+        }
+    }
+
+    Context 'a real build failure always blocks' {
+        It 'blocks when tests failed alongside the reviewer' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @('claude-review','Pester') -Parsed $true | Should -BeFalse
+        }
+        It 'blocks when only a build failed' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @('Pester') -Parsed $true | Should -BeFalse
+        }
+        It 'blocks on a check whose name merely mentions review-adjacent words' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @('security-audit') -Parsed $true | Should -BeFalse
+        }
+    }
+
+    Context 'the reviewer alone' {
+        It 'allows the bare job name' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @('claude-review') -Parsed $true | Should -BeTrue
+        }
+        It 'allows the namespaced check-run name GitHub actually reports' {
+            # `gh pr checks` reports the display name, which repos namespace as "<workflow> / <job>".
+            Test-OnlyReviewerChecksFailed -FailedChecks @('PR Review (@claude) / claude-review') -Parsed $true | Should -BeTrue
+        }
+        It 'allows a Copilot-flavoured reviewer name' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @('Copilot review') -Parsed $true | Should -BeTrue
+        }
+        It 'allows several reviewer jobs together' {
+            Test-OnlyReviewerChecksFailed -FailedChecks @('claude-review','copilot-review') -Parsed $true | Should -BeTrue
+        }
+    }
+
+    Context 'Test-IsReviewerCheck' {
+        It 'recognises claude-review'            { Test-IsReviewerCheck 'claude-review'  | Should -BeTrue }
+        It 'recognises pr-review'                { Test-IsReviewerCheck 'pr-review'      | Should -BeTrue }
+        It 'does not recognise an empty name'    { Test-IsReviewerCheck ''               | Should -BeFalse }
+        It 'does not recognise a build job'      { Test-IsReviewerCheck 'Pester'         | Should -BeFalse }
+        It 'does not recognise "Docs freshness"' { Test-IsReviewerCheck 'Docs freshness' | Should -BeFalse }
+    }
+}

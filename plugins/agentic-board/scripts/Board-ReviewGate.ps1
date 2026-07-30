@@ -219,6 +219,44 @@ function Get-ReviewEvidence {
     }
 }
 
+# Names that identify the automated REVIEWER job rather than a build/test job. Matched loosely
+# because `gh pr checks` reports the check-run display name, which repos namespace differently
+# (`PR Review (@claude) / claude-review`, `claude-review`, `Copilot review`...). Being generous
+# here is safe: the only thing this unlocks is ignoring a reviewer's red AFTER a real review is
+# already on record, and every non-reviewer failure still blocks.
+$script:ReviewerCheckPattern = '(?i)(claude|copilot)[-_ /]*review|review[-_ /]*(claude|copilot)|^\s*pr[-_ ]?review\s*$'
+
+function Test-IsReviewerCheck {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Name)
+    if (-not "$Name".Trim()) { return $false }
+    return [bool]("$Name" -match $script:ReviewerCheckPattern)
+}
+
+<#
+    Is the ONLY thing red the automated reviewer?
+
+    Gates a narrow allowance: a reviewer job failing asks "was this reviewed?", not "does the code
+    work?" - and once a real review is on record for the commit, that question is answered. Without
+    it, every PR that edits `pr-review.yml` deadlocks, because `claude-code-action` skips itself on
+    exactly those PRs.
+
+    $Parsed says whether the check list was read from STRUCTURED data. It is not a formality: the
+    first cut scraped the human-readable `gh pr checks` output, so any failure printed in a shape
+    the regex missed would silently vanish from the list, a reviewer failure would then be the only
+    one seen, and a genuinely broken build would be waved through. Unparsed => never downgrade.
+#>
+function Test-OnlyReviewerChecksFailed {
+    param(
+        [string[]]$FailedChecks = @(),
+        [bool]$Parsed = $false
+    )
+    if (-not $Parsed) { return $false }                       # cannot enumerate -> never downgrade
+    $names = @(@($FailedChecks) | Where-Object { "$_".Trim() })
+    if ($names.Count -eq 0) { return $false }                 # nothing named -> nothing to excuse
+    foreach ($n in $names) { if (-not (Test-IsReviewerCheck $n)) { return $false } }
+    return $true
+}
+
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
 if ($env:ABIOS_REVIEWGATE_DOTSOURCE) { return }
 
@@ -466,13 +504,24 @@ $checksOut = gh pr checks $PR --repo $Repo --watch 2>&1
 $checksExit = $LASTEXITCODE
 $checksText = ($checksOut | Out-String).Trim()
 if ($checksText) { Write-Host $checksText }
-# Which checks failed, by name. `gh pr checks` prints TAB-separated name/state/elapsed/url, and
-# the names matter for the verdict: a REVIEWER job failing asks a review question, not a CI one.
+# Which checks failed, by name - read from STRUCTURED output, never scraped from the human-readable
+# table. Scraping was a merge decision made from display text: a failure printed in any shape the
+# regex missed would drop out of the list, leaving a reviewer failure as the only one seen and
+# waving a genuinely broken build through. If this read fails, $checksParsed stays false and the
+# downgrade below is simply never offered.
 $failedChecks = @()
-foreach ($line in @($checksOut)) {
-    $parts = ("$line" -split "`t")
-    if ($parts.Count -ge 2 -and $parts[1].Trim() -match '(?i)^(fail|failure|error)') {
-        $failedChecks += $parts[0].Trim()
+$checksParsed = $false
+$checksJson = gh pr checks $PR --repo $Repo --json name,bucket 2>$null
+if ($checksJson) {
+    try {
+        $parsedChecks = $checksJson | ConvertFrom-Json
+        # 'cancel' counts as failed: a cancelled check did not pass, and treating it as absent
+        # would be the same silent-hole mistake one level down.
+        $failedChecks = @(@($parsedChecks) | Where-Object { "$($_.bucket)" -in @('fail','cancel') } |
+                          ForEach-Object { "$($_.name)" })
+        $checksParsed = $true
+    } catch {
+        Write-Host "  WARN no pude leer los checks en formato estructurado - no se aplicara ninguna excepcion por revisor." -ForegroundColor DarkYellow
     }
 }
 if ($checksExit -ne 0) {
@@ -573,15 +622,11 @@ Write-Host ""
 # file, so its verification correctly reports "nobody reviewed" and would then block that PR
 # forever, no matter how carefully a human or an external reviewer read it.
 # Narrow on purpose: only when EVERY failing check is a reviewer job AND real evidence exists.
-$reviewerCheckNames = @('claude-review','pr-review','copilot','copilot-review')
-if (-not $checksOk -and $evidence.reviewed -and $failedChecks.Count -gt 0) {
-    $nonReviewerFailures = @($failedChecks | Where-Object { $_.ToLowerInvariant() -notin $reviewerCheckNames })
-    if ($nonReviewerFailures.Count -eq 0) {
-        $checksOk = $true
-        Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($failedChecks -join ', ')) -ForegroundColor DarkYellow
-        Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray
-        Write-Host "        contestada, asi que deja de ser motivo de bloqueo." -ForegroundColor DarkGray
-    }
+if (-not $checksOk -and $evidence.reviewed -and (Test-OnlyReviewerChecksFailed -FailedChecks $failedChecks -Parsed $checksParsed)) {
+    $checksOk = $true
+    Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($failedChecks -join ', ')) -ForegroundColor DarkYellow
+    Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray
+    Write-Host "        contestada, asi que deja de ser motivo de bloqueo." -ForegroundColor DarkGray
 }
 
 $blockers = @()
@@ -633,6 +678,7 @@ if ($blockers.Count -eq 0) {
     Write-Host "Atiende el feedback, push, y re-ejecuta este gate." -ForegroundColor Yellow
     exit 1
 }
+
 
 
 

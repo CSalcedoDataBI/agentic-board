@@ -41,6 +41,21 @@
   on a PR nobody read — the same empty assurance as the original bug, with a different author.
   Having to state what the review found is the cheapest available proof that one happened.
 
+  **The root cause, confirmed live** while this very PR was being gated (run 30578175712):
+  `claude-code-action` **skips itself and exits `outcome=success`** on any PR that edits its own
+  workflow file — a GitHub security measure, so a PR cannot rewrite the reviewer that reviews it.
+  Correct as a measure; the problem is that the signal it emits is indistinguishable from "reviewed,
+  found nothing". This repo edits that file whenever it tunes the review engine, so it is not an
+  edge case. The verification step now names this cause in its error output, and the gate stops the
+  deadlock it would otherwise create: **a failing REVIEWER check asks "was this reviewed?", not
+  "does the code work?"** — so once a real review is on record for the commit, the reviewer's own red
+  is no longer a blocker. Narrow on purpose: one non-reviewer failure and it blocks as before, and
+  the failing-check list is read from **structured** data (`gh pr checks --json`) rather than scraped
+  from the printed table. That distinction is load-bearing — the first cut parsed the human-readable
+  output, where any failure printed in an unexpected shape would drop out of the list, leave a
+  reviewer failure as the only one seen, and wave a genuinely broken build through. If the
+  structured read fails, the allowance is simply never offered.
+
   Found while fixing it, by the tests: the marker check used `-like`, whose wildcard syntax reads
   the marker's own square brackets as a character class — it threw instead of matching, which would
   have made **every** external review invisible, i.e. exactly the blindness being removed. 21 tests,
