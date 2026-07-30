@@ -154,7 +154,9 @@ matching recipe from the projects-admin references:
         reviewing for real — the `second-opinion` skill is the reviewer that actually shows up here;
         run it in ROUNDS until one returns nothing, verify every finding in the source, then record
         it with `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n> -RecordReview -Reviewer '<who>'
-        -Summary '<what it found>'` so the gate can see it. Only when a review genuinely buys
+        -Summary '<what it found>'` so the gate can see it. `-Summary` is REQUIRED, and the record
+        is stamped with the head commit — so record LAST: anything you push afterwards invalidates
+        it, correctly, because nobody reviewed those lines. Only when a review genuinely buys
         nothing (a typo, a regenerated file) use `-AllowUnreviewed`, and say so in your report.
      d. Only after the gate passes: `scripts/Board-Merge.ps1 -PR <n>` — merges the PR (squash +
         delete-branch by default) and, if the repo's own `pr-before-merge` ruleset marks the PR

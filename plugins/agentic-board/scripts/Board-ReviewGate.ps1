@@ -153,39 +153,61 @@ function Find-ForeignCommits {
 $script:ExternalReviewMarker = '[abios-review]'
 
 <#
-    Decide whether this PR was ACTUALLY reviewed, and by whom (#510).
+    Decide whether THIS DIFF was actually reviewed, and by whom (#510).
 
     The distinction the gate was missing: "reviewed, found nothing" and "the reviewer never spoke"
     both arrived as zero findings, and the second one was reported as a pass. A green check from a
     reviewer that produced no review is not evidence of anything, and on this repo it was the only
     reviewer - Copilot has been quota-blocked for weeks.
 
-    Counts two kinds of evidence:
-      - a submitted GitHub review (APPROVED / CHANGES_REQUESTED / COMMENTED / DISMISSED)
-      - a PR comment whose body carries the [abios-review] marker
+    EVERY piece of evidence is bound to the PR's head SHA, and that is not a detail. Counting any
+    review ever left on the PR reproduces the original defect one level up: push three more commits
+    after an approval and the gate would authorise a diff nobody had read, on the strength of a
+    review of different code. So a review counts only for the commit it was performed on.
 
-    Returns @{ reviewed; github; external; reviewers }. Pure.
+    The cost is deliberate and small: a new push invalidates the evidence and the reviewer has to
+    look again (or re-record). That is the correct reading - the new commits genuinely have not
+    been reviewed.
+
+    Counts two kinds of evidence, both SHA-bound:
+      - a submitted GitHub review whose commit is the current head
+      - a PR comment carrying `[abios-review] <who> sha=<head>`
+
+    Returns @{ reviewed; github; external; reviewers; stale }. `stale` counts evidence that exists
+    but belongs to an older commit, so the caller can say WHY it does not count. Pure.
 #>
 function Get-ReviewEvidence {
     param(
-        $Reviews = @(),              # nodes with .state and .author.login
-        [string[]]$CommentBodies = @()
+        $Reviews = @(),              # nodes with .state, .author.login, .commit.oid
+        [string[]]$CommentBodies = @(),
+        [string]$HeadSha = ''
     )
-    $gh = @(@($Reviews) | Where-Object { $_ -and "$($_.state)".Trim() })
+    $head = "$HeadSha".Trim()
+
     # Literal containment, NOT -like: the marker's own square brackets are a wildcard character
     # class to -like, which threw "wildcard pattern is not valid" and would have made every
     # external review invisible - the exact blindness this function exists to remove.
-    $marker = $script:ExternalReviewMarker
-    $ext = @(@($CommentBodies) | Where-Object { "$_".Contains($marker) })
+    $marker    = $script:ExternalReviewMarker
+    $allExt    = @(@($CommentBodies) | Where-Object { "$_".Contains($marker) })
+    $allGh     = @(@($Reviews) | Where-Object { $_ -and "$($_.state)".Trim() })
+
+    # With no head SHA to compare against we cannot prove ANY evidence belongs to this diff. Fail
+    # closed: report nothing reviewed rather than accept evidence we cannot place.
+    if (-not $head) {
+        return @{ reviewed = $false; github = 0; external = 0; reviewers = @()
+                  stale = ($allGh.Count + $allExt.Count) }
+    }
+
+    $gh  = @($allGh  | Where-Object { "$($_.commit.oid)".Trim() -eq $head })
+    $ext = @($allExt | Where-Object { "$_" -match ('(?i)sha\s*=\s*' + [regex]::Escape($head)) })
 
     $names = @()
     foreach ($r in $gh) { if ($r.author.login) { $names += "$($r.author.login)" } }
     foreach ($c in $ext) {
-        # `<!-- [abios-review] codex/gpt-5.5 -->` -> "codex/gpt-5.5"; unnamed markers stay generic.
-        # Non-greedy up to the comment close: excluding '-' from the name (the first attempt) cut
-        # "codex/gpt-5.5" at its own hyphen.
+        # `<!-- [abios-review] codex/gpt-5.5 sha=abc… -->` -> "codex/gpt-5.5". Non-greedy up to the
+        # sha; excluding '-' from the name (the first attempt) cut "codex/gpt-5.5" at its hyphen.
         $name = ''
-        if ("$c" -match '(?i)\[abios-review\]\s*(.*?)\s*(?:-->|\r|\n|$)') { $name = $Matches[1].Trim() }
+        if ("$c" -match '(?i)\[abios-review\]\s*(.*?)\s*(?:sha\s*=|-->|\r|\n|$)') { $name = $Matches[1].Trim() }
         $names += $(if ($name) { $name } else { 'external' })
     }
     return @{
@@ -193,6 +215,7 @@ function Get-ReviewEvidence {
         github    = $gh.Count
         external  = $ext.Count
         reviewers = @($names | Where-Object { $_ } | Select-Object -Unique)
+        stale     = (($allGh.Count - $gh.Count) + ($allExt.Count - $ext.Count))
     }
 }
 
@@ -259,15 +282,32 @@ if ($PR -le 0) { throw "Usa -PR <numero> (o -InstallRuleset)." }
 # review object, so to the gate it was indistinguishable from nobody looking. This writes the
 # evidence in the one place that survives the session: the PR itself.
 if ($RecordReview) {
+    # A summary is REQUIRED. Without it this is a one-flag way to stamp "reviewed" on a PR nobody
+    # read - the same empty assurance the whole issue is about, just with a different author.
+    # Having to state what the review found is the cheapest available proof that one happened.
+    if (-not "$Summary".Trim()) {
+        throw "-RecordReview exige -Summary: escribe QUE encontro la revision. Registrar una revision vacia es exactamente el problema que este gate arregla (#510)."
+    }
+    $headJson = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','headRefOid') `
+                          -What "leer el head del PR #$PR"
+    $headSha  = "$(($headJson | ConvertFrom-Json).headRefOid)".Trim()
+    if (-not $headSha) { throw "No pude leer el head del PR #$PR - sin el, la revision no queda atada a este diff." }
+
+    # The SHA is what makes the record mean something: it attests to THIS diff, not to the PR in
+    # general. A later push leaves it behind as stale evidence instead of vouching for code the
+    # reviewer never saw.
     $body = @"
-<!-- $script:ExternalReviewMarker $Reviewer -->
+<!-- $script:ExternalReviewMarker $Reviewer sha=$headSha -->
 ## Revision externa - $Reviewer
 
-$(if ($Summary) { $Summary } else { "Revision realizada sobre el diff de este PR." })
+**Commit revisado:** ``$headSha``
+
+$Summary
 "@
     $null = Invoke-Gh -GhArgs @('pr','comment',"$PR",'--repo',$Repo,'--body',$body) `
                       -What "registrar la revision externa en el PR #$PR"
-    Write-Host "OK revision de '$Reviewer' registrada en el PR #$PR - el gate ya la cuenta como review." -ForegroundColor Green
+    Write-Host "OK revision de '$Reviewer' registrada sobre el commit $($headSha.Substring(0,[Math]::Min(7,$headSha.Length))) del PR #$PR." -ForegroundColor Green
+    Write-Host "   Si empujas commits nuevos, esta revision deja de contar - y debe ser asi." -ForegroundColor DarkGray
     exit 0
 }
 
@@ -446,8 +486,9 @@ function Get-ReviewState {
 query($o:String!, $r:String!, $n:Int!) {
   repository(owner:$o, name:$r) {
     pullRequest(number:$n) {
+      headRefOid
       reviewDecision
-      reviews(last:20) { nodes { author { login } state body submittedAt } }
+      reviews(last:20) { nodes { author { login } state body submittedAt commit { oid } } }
       reviewThreads(first:50) { nodes { isResolved } }
     }
   }
@@ -496,7 +537,7 @@ try {
     # Fail CLOSED: an unreadable comment list must not be able to manufacture "reviewed".
     Write-Host "  WARN no pude leer los comentarios del PR - la evidencia de revision se cuenta solo por reviews." -ForegroundColor DarkYellow
 }
-$evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies $commentBodies
+$evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies $commentBodies -HeadSha "$($prState.headRefOid)"
 
 Write-Host ""
 Write-Host "----- RESULTADO DEL REVIEW -----" -ForegroundColor Cyan
@@ -530,8 +571,13 @@ if ($blockers.Count -eq 0) {
     # exit code: anything testing `-eq 0` now fails closed, while still telling it apart from a
     # real block (exit 1).
     if (-not $evidence.reviewed -and -not $AllowUnreviewed) {
-        Write-Host "GATE SIN REVISAR - los checks estan en verde, pero NADIE reviso este PR." -ForegroundColor Yellow
-        Write-Host "  0 reviews de GitHub y 0 revisiones externas registradas." -ForegroundColor Yellow
+        Write-Host "GATE SIN REVISAR - los checks estan en verde, pero NADIE reviso ESTE diff." -ForegroundColor Yellow
+        if ($evidence.stale -gt 0) {
+            Write-Host ("  Hay {0} revision(es) en el PR, pero de commits ANTERIORES - no cubren el codigo actual." -f $evidence.stale) -ForegroundColor Yellow
+            Write-Host "  Empujaste cambios despues de que se reviso; esos cambios no los ha visto nadie." -ForegroundColor DarkGray
+        } else {
+            Write-Host "  0 reviews de GitHub y 0 revisiones externas registradas." -ForegroundColor Yellow
+        }
         Write-Host "  Un check verde de un reviewer que no dejo review no es evidencia de nada (#510)." -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "  Salidas legitimas, en orden de preferencia:" -ForegroundColor Cyan
@@ -555,4 +601,6 @@ if ($blockers.Count -eq 0) {
     Write-Host "Atiende el feedback, push, y re-ejecuta este gate." -ForegroundColor Yellow
     exit 1
 }
+
+
 

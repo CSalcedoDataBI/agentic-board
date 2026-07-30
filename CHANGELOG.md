@@ -26,10 +26,26 @@
   - `-AllowUnreviewed` is the deliberate exception for changes where a review buys nothing (a typo,
     a regenerated file). It prints that nobody read the code rather than implying someone did.
 
+  **All evidence is bound to the PR's head commit**, and external review found that this was the
+  whole ballgame. The first cut counted *any* review ever left on the PR, which reproduced the
+  original defect one level up: approve, push three more commits, and the gate would authorise a
+  diff nobody had read on the strength of a review of different code. Now a GitHub review counts
+  only for the commit it was performed on, `-RecordReview` stamps the head SHA into the record, and
+  the workflow's verification demands its own marker *for this SHA* — so a run that publishes
+  nothing can no longer coast on an earlier run's comment. When evidence exists but belongs to an
+  older commit the gate says so explicitly ("empujaste cambios después de que se revisó") instead of
+  reporting a bare zero. The cost is deliberate: a new push invalidates the evidence and someone has
+  to look again, which is the correct reading — those commits genuinely have not been reviewed.
+
+  `-RecordReview` now **requires** `-Summary`. Without it, it was a one-flag way to stamp "reviewed"
+  on a PR nobody read — the same empty assurance as the original bug, with a different author.
+  Having to state what the review found is the cheapest available proof that one happened.
+
   Found while fixing it, by the tests: the marker check used `-like`, whose wildcard syntax reads
   the marker's own square brackets as a character class — it threw instead of matching, which would
-  have made **every** external review invisible, i.e. exactly the blindness being removed. 16 tests,
-  mutation-verified: treating everything as reviewed turns 4 red, ignoring marked comments turns 4.
+  have made **every** external review invisible, i.e. exactly the blindness being removed. 21 tests,
+  mutation-verified: treating everything as reviewed turns 4 red, ignoring marked comments 4,
+  unbinding reviews from the commit 2, and dropping the fail-closed-without-a-SHA branch 1.
 
 - **The irreversible brake is now a control, not a paragraph** (#516, part of #440). `/board expert
   auto` printed `Brake ARMED` while enforcing nothing: the brake lived only as prose in the launch

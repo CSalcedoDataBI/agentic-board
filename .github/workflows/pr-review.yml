@@ -58,8 +58,10 @@ jobs:
             OBLIGATORIO — publicar el review es parte de la tarea:
             publica tu resultado como comentario del PR con
             `gh pr comment ${{ github.event.pull_request.number }} --body "<tu review>"`,
-            y que la PRIMERA línea del cuerpo sea exactamente:
-            <!-- [abios-review] claude-review -->
+            y que la PRIMERA línea del cuerpo sea EXACTAMENTE esta, con el sha incluido:
+            <!-- [abios-review] claude-review sha=${{ github.event.pull_request.head.sha }} -->
+            El sha ata tu review a ESTE diff: sin él, tu review se leería como aval de
+            commits posteriores que no viste.
             Publica SIEMPRE, también cuando no encuentres nada — en ese caso una sola
             línea diciendo que no hay hallazgos. Un run que no publica nada no es un
             review sin hallazgos: es un review que no ocurrió, y se trata como fallo.
@@ -67,16 +69,23 @@ jobs:
       # El arreglo de fondo de #510: un reviewer que no revisó debe ponerse ROJO. Antes, este job
       # salía en verde sin haber dejado nada, y ese verde se leía como "revisado y aprobado" -
       # justo cuando era el UNICO reviewer del repo (Copilot sin cupo).
-      - name: Verificar que el review realmente se publicó
+      #
+      # La verificación exige el marcador CON EL SHA DE ESTE HEAD. Contar cualquier review previa
+      # del PR reproducía el mismo defecto un nivel más arriba: un run que no publica nada pasaría
+      # en verde apoyándose en el review de un commit anterior, es decir, avalando código que nadie
+      # miró. Sólo cuenta la evidencia de este diff.
+      - name: Verificar que el review realmente se publicó para este commit
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           n='${{ github.event.pull_request.number }}'
-          reviews=$(gh pr view "$n" --json reviews --jq '[.reviews[]] | length')
-          marks=$(gh pr view "$n" --json comments --jq '[.comments[] | select(.body | test("\\[abios-review\\]"))] | length')
-          echo "reviews=$reviews  comentarios [abios-review]=$marks"
-          if [ "$reviews" -eq 0 ] && [ "$marks" -eq 0 ]; then
-            echo "::error::claude-review terminó sin dejar ningún review. Un check verde aquí se leería como 'revisado' cuando nadie miró el código (#510)."
+          sha='${{ github.event.pull_request.head.sha }}'
+          marks=$(gh pr view "$n" --json comments \
+            --jq --arg sha "$sha" '[.comments[] | select(.body | test("\\[abios-review\\]")) | select(.body | contains($sha))] | length')
+          echo "comentarios [abios-review] para $sha: $marks"
+          if [ "$marks" -eq 0 ]; then
+            echo "::error::claude-review terminó sin dejar review para el commit $sha. Un check verde aquí se leería como 'revisado' cuando nadie miró este código (#510)."
             exit 1
           fi

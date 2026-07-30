@@ -178,6 +178,9 @@ Notes:
      `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n> -RecordReview -Reviewer '<who>' -Summary '<what it found>'`.
      The `second-opinion` skill is the reviewer that actually shows up here; run it in **rounds
      until one returns nothing**, verify each finding in the source, and only then record.
+     `-Summary` is **required** — a record with nothing to say is the same empty assurance the
+     issue is about. The record is stamped with the head SHA, so **record last**: any commit pushed
+     afterwards invalidates it, and correctly so (nobody has reviewed those lines).
   2. **`-AllowUnreviewed`** when a review genuinely buys nothing (a typo, a regenerated file). It
      says out loud that nobody read the code — use it as the exception, never as the routine path.
 - **Step 5 is mandatory**: never commit board-tracked issue work directly to main. `Linked pull
