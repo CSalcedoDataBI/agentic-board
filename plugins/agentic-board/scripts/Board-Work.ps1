@@ -176,6 +176,10 @@ param(
     # guard (#516) refuses exactly what this run's contract brakes on - no more, no less.
     # Empty with -StopAtPR falls back to the default vocabulary rather than arming nothing.
     [string[]]$Irreversible = @(),
+    # The human ORDERED this run to finish end-to-end (#530). Travels with the instruction, not with
+    # a setting on disk: it is recorded in the brake marker so the merge decision -- taken later,
+    # when the facts exist -- still knows what was actually asked for.
+    [switch]$EndToEnd,
     [string]$TokenVar      = "GITHUB_TOKEN_PERSONAL",
     # Only a plain env-var identifier - it gets interpolated into the spawned
     # -Command string, so reject anything that could inject (';', quotes, spaces).
@@ -1185,6 +1189,10 @@ function Start-WorktreeSession {
         [switch]$StopAtPR,
         [string]$BriefFile = '',
         [string[]]$Irreversible = @(),
+    # The human ORDERED this run to finish end-to-end (#530). Travels with the instruction, not with
+    # a setting on disk: it is recorded in the brake marker so the merge decision -- taken later,
+    # when the facts exist -- still knows what was actually asked for.
+    [switch]$EndToEnd,
         [switch]$Preview
     )
     $abios = Get-AbiosDir
@@ -1214,7 +1222,8 @@ function Start-WorktreeSession {
         . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
         $armedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed ([bool]$StopAtPR) -Issue $IssueNum `
-                    -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt
+                    -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
+                    -EndToEnd ([bool]$EndToEnd)
         if ($state -eq 'armed') {
             Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
         } elseif ($state -eq 'disarmed') {
@@ -2426,7 +2435,7 @@ if ($Relaunch -gt 0) {
     $oauthPresent = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN','User')
     $authVar      = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
     $marker       = New-FleetSessionMarker $Relaunch (New-FleetRunId)
-    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible
+    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd
     # Start-WorktreeSession returns $null on a failed/missing-worktree spawn. Registering
     # then would fall back to the coordinator PID and poison the registry - so only record a
     # session that actually launched.
@@ -3023,7 +3032,7 @@ if ($Parallel.Count -gt 0) {
                 $marker    = New-FleetSessionMarker $entry.issue $runId
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
                                                -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `
-                                               -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible
+                                               -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd
                 $via = if ($spawn.usesWt) { "wt" } else { "pwsh" }
                 if ($spawn.process -and -not $spawn.usesWt) {
                     Write-SessionRegistryEntry -IssueNum $entry.issue -SessionPid $spawn.process.Id -Via $via -Cli $actualCli -FleetSession $marker
@@ -3083,7 +3092,7 @@ if ($Parallel.Count -gt 0) {
             foreach ($r in $started) {
                 if ($r.workPath) {
                     $marker = New-FleetSessionMarker $r.issue $runId
-                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible
+                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd
                     $launched++
                     # Track the spawned session's own PID (pwsh window is reliable; a wt
                     # launcher forks and exits, so keep the host PID there).
@@ -3147,3 +3156,4 @@ Write-Host "AL TERMINAR: New-BoardPR.ps1 -Issue $Start  (push + PR 'Closes #$Sta
 Write-Host "(asi GitHub llena solo la columna 'Linked pull requests' del board)" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+

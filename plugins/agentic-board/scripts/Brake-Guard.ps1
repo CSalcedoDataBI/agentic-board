@@ -234,6 +234,12 @@ function Read-BrakeMarker {
                 return @{
                     issue        = if ($o.issue) { [int]$o.issue } else { 0 }
                     irreversible = $irr
+                    # Only a real JSON boolean `true` counts as the order. `[bool]$o.endToEnd`
+                    # would have accepted the STRING "false" - PowerShell casts any non-empty
+                    # string to $true - so a malformed or hand-edited marker granted the very
+                    # permission this field exists to withhold. Absent, null or any other shape
+                    # reads as NOT ordered: a run that predates this mode never received it.
+                    endToEnd     = ($o.endToEnd -is [bool] -and $o.endToEnd)
                     armedAt      = "$($o.armedAt)"
                     path         = $candidate
                     emptied      = $tampered
@@ -270,13 +276,19 @@ function New-BrakeMarkerJson {
         [string[]]$Irreversible = @(),
         [string]$ArmedAt = '',
         [string]$Branch = '',
-        [string]$HostName = ''
+        [string]$HostName = '',
+        # Did the human ORDER this run end-to-end? Recorded here because the permission belongs to
+        # the instruction that launched the run, not to a setting on disk that could be edited
+        # afterwards - and because the merge decision happens later, when this file is the only
+        # thing that still remembers what was asked for (#530).
+        [bool]$EndToEnd = $false
     )
     $irr = @($Irreversible | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
     if ($irr.Count -eq 0) { $irr = @('merge','deploy','refresh','publish','delete') }
     return ([ordered]@{
         issue        = $Issue
         irreversible = $irr
+        endToEnd     = $EndToEnd
         armedAt      = $ArmedAt
         branch       = $Branch
         host         = $HostName
@@ -309,7 +321,8 @@ function Set-BrakeArmedState {
         [string[]]$Irreversible = @(),
         [string]$Branch = '',
         [string]$HostName = '',
-        [string]$ArmedAt = ''
+        [string]$ArmedAt = '',
+        [bool]$EndToEnd = $false
     )
     $path = Get-BrakeMarkerPath -WorkPath $WorkPath
     if (-not $Armed) {
@@ -323,7 +336,7 @@ function Set-BrakeArmedState {
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     Set-Content -LiteralPath $path -Encoding UTF8 -Value (
         New-BrakeMarkerJson -Issue $Issue -Irreversible $Irreversible -ArmedAt $ArmedAt `
-            -Branch $Branch -HostName $HostName)
+            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd)
     return 'armed'
 }
 
@@ -368,6 +381,7 @@ function New-BrakeDenyJson {
 
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_BRAKEGUARD_DOTSOURCE) { return }
+
 
 
 

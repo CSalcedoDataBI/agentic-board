@@ -31,6 +31,11 @@ param(
     [int]$Issue = 0,
     [int]$ProjectNum = 0,
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL",
+    # "Llevalo de punta a punta" (#530): the human ORDERS this run to finish, so it may close CODE
+    # work that carries a real review and recorded tests for the head commit. Not a stored setting --
+    # the permission travels with the instruction and is good for this run only. Anything the owner
+    # judges by looking at it still waits for him, ordered or not.
+    [switch]$EndToEnd,
     [switch]$DryRun
 )
 
@@ -173,7 +178,7 @@ if ($DryRun) {
 } else {
     Write-Host "  Launching the autonomous session in an isolated worktree..." -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot 'Board-Work.ps1') -ProjectNum $ProjectNum -Parallel $Issue -Launch -TokenVar $TokenVar `
-        -StopAtPR:$stopAtPR -BriefFile $briefPath -Irreversible @($contract.autonomy.irreversible)
+        -StopAtPR:$stopAtPR -BriefFile $briefPath -Irreversible @($contract.autonomy.irreversible) -EndToEnd:$EndToEnd
     Write-Host ""
     Write-Host "  The launched session is briefed by $briefPath — it will research, build, test with" -ForegroundColor DarkGray
     Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray
@@ -185,3 +190,4 @@ if ($ProjectNum -gt 0) {
     Write-Host ""
     Write-Host "Board: https://github.com/users/$owner/projects/$ProjectNum" -ForegroundColor Cyan
 }
+
