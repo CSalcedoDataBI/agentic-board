@@ -179,7 +179,7 @@ function Get-EffectiveWorkClassPolicy {
 if ($env:ABIOS_WORKCLASS_DOTSOURCE) { return }
 
 # ── CLI: classify the current branch against the default branch ────────────────
-. (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
+# No Get-AbiosStateDir dot-source here: Read-ExpertContract -> Get-ExpertContractPath already does it.
 $prevC = $env:ABIOS_EXPERTCONTRACT_DOTSOURCE
 $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'ExpertContractIo.ps1')
