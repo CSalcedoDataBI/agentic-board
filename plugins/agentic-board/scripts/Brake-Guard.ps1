@@ -128,7 +128,11 @@ $script:SegmentSeparator = '(;|&&|\|\||\||\r?\n)'
 function ConvertTo-NormalizedCommand {
     param([string]$Command)
     if (-not $Command) { return '' }
-    $withBreaks = $Command -replace '\r?\n', ' ; '
+    # Line continuations are JOINED FIRST, before newlines become separators. The shell runs
+    # `gh pr \<newline>merge 490` as one command; splitting on that newline handed the guard two
+    # harmless-looking halves and let the merge through. Backslash for sh, backtick for PowerShell.
+    $joined = $Command -replace '(\\|`)[ \t]*\r?\n[ \t]*', ' '
+    $withBreaks = $joined -replace '\r?\n', ' ; '
     # Quote characters are removed the way the shell removes them, so `gh pr 'merge' 490` and
     # `gh "pr" merge 490` normalize to the same text the patterns already recognize. Without this
     # the classifier could be stepped around with nothing more exotic than a pair of quotes.
@@ -341,6 +345,7 @@ function New-BrakeDenyJson {
 
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_BRAKEGUARD_DOTSOURCE) { return }
+
 
 
 

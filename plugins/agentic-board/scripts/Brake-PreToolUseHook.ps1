@@ -59,7 +59,10 @@ try {
     # which is the same thing one step earlier. Read/Glob/Grep cannot do either.
     $toolName = "$($payload.tool_name)"
     $shellTools = @('Bash', 'PowerShell')
-    $writeTools = @('Edit', 'Write', 'NotebookEdit')
+    # MultiEdit belongs here too: it is a file-writing path like the others, and leaving it out
+    # left one uncovered route to the marker. Listing a tool this harness may not expose costs
+    # nothing; omitting one it does expose costs the whole control.
+    $writeTools = @('Edit', 'Write', 'NotebookEdit', 'MultiEdit')
     if ($toolName -notin ($shellTools + $writeTools)) { exit 0 }
 
     $cwd = "$($payload.cwd)"

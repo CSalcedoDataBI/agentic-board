@@ -198,6 +198,25 @@ Describe 'Test-IsBrakedCommand — bypasses found by external review (round 2)' 
     }
 }
 
+Describe 'Test-IsBrakedCommand — bypasses found by external review (round 3)' {
+    Context 'a line continuation is one command, not two' {
+        It 'denies a bash backslash continuation' {
+            Test-IsBrakedCommand -Command "gh pr \`nmerge 490" -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'denies a PowerShell backtick continuation' {
+            Test-IsBrakedCommand -Command "gh pr ```nmerge 490" -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'denies a continuation with trailing spaces before the newline' {
+            Test-IsBrakedCommand -Command "gh pr \   `n   merge 490" -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'still treats a PLAIN newline as a separator' {
+            # The continuation fix must not undo the round-1 fix it sits next to.
+            Test-IsBrakedCommand -Command "pwsh Board-Merge.ps1 -PR 1 -DryRun`ngh pr merge 490" -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+    }
+}
+
 Describe 'Read-BrakeMarker — an emptied marker is tampering, not permission' {
     It 'treats an empty irreversible list as the full vocabulary' {
         $dir = Join-Path ([IO.Path]::GetTempPath()) ("brake-empty-" + [Guid]::NewGuid().ToString('N'))
@@ -438,6 +457,11 @@ Describe 'Brake-PreToolUseHook — end to end through the real hook contract' {
         }
         It 'allows editing any ordinary file in the armed worktree' {
             script:Invoke-WriteHook 'Edit' (Join-Path $script:HArmed 'src/app.ps1') $script:HArmed | Should -BeNullOrEmpty
+        }
+        It 'DENIES MultiEdit against the marker (round 3 — an uncovered write path)' {
+            $p = Join-Path $script:HArmed '.agentic-board/brake-armed.json'
+            ($(script:Invoke-WriteHook 'MultiEdit' $p $script:HArmed) | ConvertFrom-Json).hookSpecificOutput.permissionDecision |
+                Should -Be 'deny'
         }
     }
 

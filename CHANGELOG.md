@@ -72,10 +72,23 @@
   launcher printed `Brake OFF`. The marker now follows the contract in both directions — which is
   what makes that message true rather than another claim the code does not honour.
 
-  83 tests, and every protection was verified by reintroducing the exact defect it prevents rather
+  **Two more from the third round:**
+  - **A line continuation is one command, not two.** `gh pr \`<newline>`merge 490` runs as a single
+    command in the shell, but the newline-as-separator rule split it into two harmless-looking
+    halves. Continuations (backslash for sh, backtick for PowerShell) are now joined *before*
+    newlines become separators.
+  - **`MultiEdit` was missing from the hook matcher**, leaving one uncovered write path to the
+    marker. Listing a tool this harness may not expose costs nothing; omitting one it does expose
+    costs the whole control.
+
+  88 tests, and every protection was verified by reintroducing the exact defect it prevents rather
   than by trusting a green suite: stubbing the classifier turns 16 red, a global dry-run exemption
   3, an unprotected marker 6, a `gh api`-anchored REST pattern 4, no quote-stripping 3, no
-  variable-indirection pattern 2, and deciding the armed flag after the dot-source 1.
+  variable-indirection pattern 2, joining no line continuations 3, and deciding the armed flag
+  after the dot-source 1.
+
+  The review ran in rounds until one came back empty — rounds 1, 2 and 3 found 4, 3 and 2 real
+  defects respectively, every one of them in code whose tests were already green.
 
 ## [0.28.1] - 2026-07-29
 ### Changed

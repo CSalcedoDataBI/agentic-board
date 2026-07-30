@@ -22,7 +22,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Edit|Write|NotebookEdit",
+        "matcher": "Bash|PowerShell|Edit|Write|NotebookEdit|MultiEdit",
         "hooks": [
           {
             "type": "command",
