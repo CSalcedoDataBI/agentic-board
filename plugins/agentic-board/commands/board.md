@@ -145,11 +145,19 @@ matching recipe from the projects-admin references:
         and the **Best Practice Analyzer** (`Bpa-GateReview.ps1 -FailOn error` — an error-severity
         BPA violation blocks). Both skip safely when there is no model / no BPA rules / no Tabular
         Editor, so a non-BI repo is unaffected. It then waits for CI checks, waits for the review,
-        and prints decision + feedback + unresolved threads. Exit 0 = gate passed; exit 1 = blocked.
-        Address the printed feedback with new commits, push, and RE-RUN the gate until it
-        passes. If the `second-opinion` skill is available, use it as an extra reviewer.
-        If no reviewer is available at all, an explicit self-review of `gh pr diff <n>` is
-        obligatory before merging — and say so honestly in your report.
+        and prints decision + feedback + unresolved threads. **Exit 0 = passed; 1 = blocked;
+        2 = nobody reviewed.** Address printed feedback with new commits, push, and RE-RUN the gate
+        until it passes.
+        **Exit 2 — "GATE SIN REVISAR" (#510)** means the checks are green but no one read the code:
+        a `claude-review` check can report a PASS having left zero reviews, and that used to print
+        the same `GATE PASSED` as a genuinely clean review. **Never merge on exit 2.** Clear it by
+        reviewing for real — the `second-opinion` skill is the reviewer that actually shows up here;
+        run it in ROUNDS until one returns nothing, verify every finding in the source, then record
+        it with `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n> -RecordReview -Reviewer '<who>'
+        -Summary '<what it found>'` so the gate can see it. `-Summary` is REQUIRED, and the record
+        is stamped with the head commit — so record LAST: anything you push afterwards invalidates
+        it, correctly, because nobody reviewed those lines. Only when a review genuinely buys
+        nothing (a typo, a regenerated file) use `-AllowUnreviewed`, and say so in your report.
      d. Only after the gate passes: `scripts/Board-Merge.ps1 -PR <n>` — merges the PR (squash +
         delete-branch by default) and, if the repo's own `pr-before-merge` ruleset marks the PR
         `blocked`, retries with the `--admin` bypass the ruleset grants admins (announced honestly);

@@ -2,6 +2,66 @@
 
 ## [Unreleased]
 ### Fixed
+- **A reviewer that never reviewed no longer reads as approval** (#510). On PR #508 the
+  `claude-review` check reported **success** while the PR ended with **zero** reviews and zero
+  comments — twice, on two runs. The gate then printed the same `GATE PASSED` it prints for a
+  genuinely clean review, with the self-review reminder as a footnote nobody had to act on. This
+  landed in the worst possible window: Copilot has been quota-blocked for weeks, so that workflow
+  was the *only* automated reviewer on the repo, and it was passing without reviewing.
+
+  Fixed on both sides:
+  - **The workflow now fails when it produced no review.** Publishing the review is part of the
+    task, not a side effect — the job was running, exiting clean and leaving nothing because it had
+    neither the instruction nor the tool to comment. It now gets both, and a verification step
+    turns the check **red** when no review and no `[abios-review]` comment landed.
+  - **The gate distinguishes "reviewed, found nothing" from "nobody looked."** A new exit code
+    **2 — `GATE SIN REVISAR`** — reports the second case. It is deliberately not 0: any caller
+    testing `-eq 0` now fails closed, while still telling an unreviewed PR apart from a genuinely
+    blocked one (1). Nothing in the repo branched on the gate's exit code programmatically, so this
+    changes no existing behaviour silently.
+  - **A reviewer with no GitHub identity can now be counted.** `second-opinion` (Codex) is the
+    reviewer that actually shows up here, and it submits no review object — so to the gate it was
+    indistinguishable from nobody. `-RecordReview -Reviewer <who> -Summary <what>` writes the
+    evidence onto the PR itself, where it survives the session.
+  - `-AllowUnreviewed` is the deliberate exception for changes where a review buys nothing (a typo,
+    a regenerated file). It prints that nobody read the code rather than implying someone did.
+
+  **All evidence is bound to the PR's head commit**, and external review found that this was the
+  whole ballgame. The first cut counted *any* review ever left on the PR, which reproduced the
+  original defect one level up: approve, push three more commits, and the gate would authorise a
+  diff nobody had read on the strength of a review of different code. Now a GitHub review counts
+  only for the commit it was performed on, `-RecordReview` stamps the head SHA into the record, and
+  the workflow's verification demands its own marker *for this SHA* — so a run that publishes
+  nothing can no longer coast on an earlier run's comment. When evidence exists but belongs to an
+  older commit the gate says so explicitly ("empujaste cambios después de que se revisó") instead of
+  reporting a bare zero. The cost is deliberate: a new push invalidates the evidence and someone has
+  to look again, which is the correct reading — those commits genuinely have not been reviewed.
+
+  `-RecordReview` now **requires** `-Summary`. Without it, it was a one-flag way to stamp "reviewed"
+  on a PR nobody read — the same empty assurance as the original bug, with a different author.
+  Having to state what the review found is the cheapest available proof that one happened.
+
+  **The root cause, confirmed live** while this very PR was being gated (run 30578175712):
+  `claude-code-action` **skips itself and exits `outcome=success`** on any PR that edits its own
+  workflow file — a GitHub security measure, so a PR cannot rewrite the reviewer that reviews it.
+  Correct as a measure; the problem is that the signal it emits is indistinguishable from "reviewed,
+  found nothing". This repo edits that file whenever it tunes the review engine, so it is not an
+  edge case. The verification step now names this cause in its error output, and the gate stops the
+  deadlock it would otherwise create: **a failing REVIEWER check asks "was this reviewed?", not
+  "does the code work?"** — so once a real review is on record for the commit, the reviewer's own red
+  is no longer a blocker. Narrow on purpose: one non-reviewer failure and it blocks as before, and
+  the failing-check list is read from **structured** data (`gh pr checks --json`) rather than scraped
+  from the printed table. That distinction is load-bearing — the first cut parsed the human-readable
+  output, where any failure printed in an unexpected shape would drop out of the list, leave a
+  reviewer failure as the only one seen, and wave a genuinely broken build through. If the
+  structured read fails, the allowance is simply never offered.
+
+  Found while fixing it, by the tests: the marker check used `-like`, whose wildcard syntax reads
+  the marker's own square brackets as a character class — it threw instead of matching, which would
+  have made **every** external review invisible, i.e. exactly the blindness being removed. 21 tests,
+  mutation-verified: treating everything as reviewed turns 4 red, ignoring marked comments 4,
+  unbinding reviews from the commit 2, and dropping the fail-closed-without-a-SHA branch 1.
+
 - **The irreversible brake is now a control, not a paragraph** (#516, part of #440). `/board expert
   auto` printed `Brake ARMED` while enforcing nothing: the brake lived only as prose in the launch
   briefing, and an observed run merged its own PR to `main` — closing its epic's sub-issues — while

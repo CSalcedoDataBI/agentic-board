@@ -163,12 +163,26 @@ and wait for; never assume the account or the scope:
 | 2. Pick a board | `Board-Work.ps1 -ListBoards [-Repo <owner/name>]` | With `-Repo`: only boards LINKED to that repo (`repository.projectsV2`) — exactly one result skips this pick. Without: every board of the owner (backups excluded). Both show pending count (Backlog or no Status) + URL, most pending first |
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
-| 5. Finish it | push branch → PR with `Closes #<num>` → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → `Board-Merge.ps1 -PR <n>` only on exit 0 | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. Blocked = fix, push, re-run. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself |
+| 5. Finish it | push branch → PR with `Closes #<num>` → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → `Board-Merge.ps1 -PR <n>` only on exit 0 | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself |
 
 Notes:
 - Step 4 supports `-DryRun` (preview, no mutation). A CLOSED issue is refused with a reopen hint.
   It retries once (4s) if the issue was added to the board seconds ago (eventual consistency).
 - After step 4, the agent continues working the issue in-session — the printed context is the briefing.
+- **Gate exit 2 — "GATE SIN REVISAR" (#510).** Checks are green but *nobody looked at the code*: no
+  GitHub review, no registered external review. This used to print `GATE PASSED` with a reminder
+  underneath, so a green `claude-review` check that had left **zero** reviews read as approved —
+  in the exact window where it was the only reviewer (Copilot quota-blocked). Do **not** merge on
+  exit 2. Resolve it one of two ways:
+  1. **Review it for real**, then record it so the gate can see it:
+     `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n> -RecordReview -Reviewer '<who>' -Summary '<what it found>'`.
+     The `second-opinion` skill is the reviewer that actually shows up here; run it in **rounds
+     until one returns nothing**, verify each finding in the source, and only then record.
+     `-Summary` is **required** — a record with nothing to say is the same empty assurance the
+     issue is about. The record is stamped with the head SHA, so **record last**: any commit pushed
+     afterwards invalidates it, and correctly so (nobody has reviewed those lines).
+  2. **`-AllowUnreviewed`** when a review genuinely buys nothing (a typo, a regenerated file). It
+     says out loud that nobody read the code — use it as the exception, never as the routine path.
 - **Step 5 is mandatory**: never commit board-tracked issue work directly to main. `Linked pull
   requests` and `Sub-issues progress` are system-derived, read-only columns — the ONLY way to fill
   Linked PRs is finishing through a PR that closes the issue; Sub-issues progress only applies to
