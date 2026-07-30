@@ -92,16 +92,34 @@ if (-not $DryRun) {
                 $changed = @(git diff --name-only "$baseRef...HEAD" 2>$null | Where-Object { "$_".Trim() })
                 $wc = Get-WorkClass -ChangedPaths $changed
 
-                # Review + test evidence, both bound to the head commit. Read straight from the PR,
-                # which is where they survive the session.
+                # REVIEW evidence: reuse the gate's own strict parser rather than a looser copy.
+                # Matching "contains the marker AND contains the sha" anywhere in a body let quoted
+                # text, a checklist note or a stale comment satisfy a merge condition. The gate's
+                # parser requires the marker to be BOUND as `sha=<head>`.
                 $headSha = "$(gh pr view $PR --repo $Repo --json headRefOid -q .headRefOid 2>$null)".Trim()
-                $bodies  = @()
+                if (-not $headSha) { throw "no pude leer el commit actual del PR #$PR" }
+                $bodies = @()
                 $cj = gh pr view $PR --repo $Repo --json comments 2>$null
-                if ($cj) { try { $bodies = @(($cj | ConvertFrom-Json).comments | ForEach-Object { "$($_.body)" }) } catch { } }
-                $reviewed = [bool]($headSha -and @($bodies | Where-Object {
-                    $_.Contains('[abios-review]') -and $_.Contains($headSha) }).Count -gt 0)
-                $tested   = [bool]($headSha -and @($bodies | Where-Object {
-                    $_.Contains('[abios-evidence]') -and $_.Contains($headSha) }).Count -gt 0)
+                if ($cj) { $bodies = @(($cj | ConvertFrom-Json).comments | ForEach-Object { "$($_.body)" }) }
+
+                $prevG = $env:ABIOS_REVIEWGATE_DOTSOURCE
+                $env:ABIOS_REVIEWGATE_DOTSOURCE = '1'
+                . (Join-Path $PSScriptRoot 'Board-ReviewGate.ps1') -Repo $Repo
+                $env:ABIOS_REVIEWGATE_DOTSOURCE = $prevG
+                $reviewed = [bool](Get-ReviewEvidence -CommentBodies $bodies -HeadSha $headSha).reviewed
+
+                # TEST evidence: taken from CI, NOT from a block the run wrote about itself.
+                # An [abios-evidence] comment is the run's own account of its testing - useful to
+                # read, worthless as proof, and this is the one place the difference decides a
+                # merge. CI ran the suite on this commit independently; that is the claim that
+                # cannot be self-issued. Green means: checks exist and none is failing or pending.
+                $tested = $false
+                $chk = gh pr checks $PR --repo $Repo --json name,bucket 2>$null
+                if ($chk) {
+                    $arr = @($chk | ConvertFrom-Json)
+                    $bad = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
+                    $tested = ($arr.Count -gt 0 -and $bad.Count -eq 0)
+                }
 
                 $verdict = Test-EndToEndAllowed -Ordered ([bool]$brakeMarker.endToEnd) `
                              -WorkClass $wc.class -ReviewedHead $reviewed -TestsRecorded $tested

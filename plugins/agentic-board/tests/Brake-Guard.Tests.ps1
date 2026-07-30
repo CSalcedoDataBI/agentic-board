@@ -589,3 +589,50 @@ Describe 'The marker remembers whether the human ORDERED end-to-end (#530)' {
             Should -Be 'tamper'
     }
 }
+
+Describe 'The end-to-end order must be a real boolean (external review, round 1)' {
+    # `[bool]$o.endToEnd` accepted the STRING "false": PowerShell casts any non-empty string to
+    # $true, so a malformed or hand-edited marker granted the very permission the field withholds.
+    BeforeAll {
+        $script:BRoot = Join-Path ([IO.Path]::GetTempPath()) ("brake-bool-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:BRoot -Force | Out-Null
+        function script:MarkerWith([string]$name, [string]$json) {
+            $wt = Join-Path $script:BRoot $name
+            New-Item -ItemType Directory -Path (Join-Path $wt '.agentic-board') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $wt '.agentic-board/brake-armed.json') -Value $json
+            return $wt
+        }
+    }
+    AfterAll {
+        if ($script:BRoot -and (Test-Path -LiteralPath $script:BRoot)) {
+            Remove-Item -LiteralPath $script:BRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'the STRING "false" is NOT an order' {
+        $wt = script:MarkerWith 'strfalse' '{"issue":530,"irreversible":["merge"],"endToEnd":"false"}'
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
+    }
+    It 'the STRING "true" is NOT an order either — only a real boolean counts' {
+        $wt = script:MarkerWith 'strtrue' '{"issue":530,"irreversible":["merge"],"endToEnd":"true"}'
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
+    }
+    It 'a number is not an order' {
+        $wt = script:MarkerWith 'num' '{"issue":530,"irreversible":["merge"],"endToEnd":1}'
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
+    }
+    It 'null is not an order' {
+        # NB: the folder is not called 'nul' -- that is a reserved Windows device name and the
+        # directory create fails with a baffling '\\.\nul' error.
+        $wt = script:MarkerWith 'jsonnull' '{"issue":530,"irreversible":["merge"],"endToEnd":null}'
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
+    }
+    It 'a real boolean true IS the order' {
+        $wt = script:MarkerWith 'realtrue' '{"issue":530,"irreversible":["merge"],"endToEnd":true}'
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeTrue
+    }
+    It 'a real boolean false is not' {
+        $wt = script:MarkerWith 'realfalse' '{"issue":530,"irreversible":["merge"],"endToEnd":false}'
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
+    }
+}

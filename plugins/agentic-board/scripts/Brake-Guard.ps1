@@ -234,9 +234,12 @@ function Read-BrakeMarker {
                 return @{
                     issue        = if ($o.issue) { [int]$o.issue } else { 0 }
                     irreversible = $irr
-                    # Absent (an older marker) reads as NOT ordered: a run that predates the
-                    # end-to-end mode never received that permission.
-                    endToEnd     = [bool]$o.endToEnd
+                    # Only a real JSON boolean `true` counts as the order. `[bool]$o.endToEnd`
+                    # would have accepted the STRING "false" - PowerShell casts any non-empty
+                    # string to $true - so a malformed or hand-edited marker granted the very
+                    # permission this field exists to withhold. Absent, null or any other shape
+                    # reads as NOT ordered: a run that predates this mode never received it.
+                    endToEnd     = ($o.endToEnd -is [bool] -and $o.endToEnd)
                     armedAt      = "$($o.armedAt)"
                     path         = $candidate
                     emptied      = $tampered
@@ -378,6 +381,7 @@ function New-BrakeDenyJson {
 
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_BRAKEGUARD_DOTSOURCE) { return }
+
 
 
 
