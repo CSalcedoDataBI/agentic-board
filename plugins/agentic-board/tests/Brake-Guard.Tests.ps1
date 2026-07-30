@@ -166,6 +166,38 @@ Describe 'Test-IsBrakedCommand — bypasses found by external review (round 1)' 
     }
 }
 
+Describe 'Test-IsBrakedCommand — bypasses found by external review (round 2)' {
+    Context 'shell quoting must not hide the subcommand' {
+        It 'denies a quoted subcommand' {
+            Test-IsBrakedCommand -Command "gh pr 'merge' 490" -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'denies double-quoted fragments' {
+            Test-IsBrakedCommand -Command 'gh "pr" "merge" 490' -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'denies a fully quoted invocation' {
+            Test-IsBrakedCommand -Command "'gh' 'pr' 'merge' 490" -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+    }
+
+    Context 'indirection through a variable is refused rather than guessed at' {
+        # A value the shell only produces at runtime is invisible to string matching. An
+        # autonomous run has no legitimate need to reach gh through a variable, so refusing is
+        # the safe side of a call this guard genuinely cannot make.
+        It 'denies a variable subcommand in bash form' {
+            Test-IsBrakedCommand -Command 'gh pr $verb 490' -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'denies a variable subcommand in cmd form' {
+            Test-IsBrakedCommand -Command 'gh pr %verb% 490' -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'denies a variable straight after gh' {
+            Test-IsBrakedCommand -Command 'gh $sub merge 490' -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'still allows an ordinary gh read with a variable argument' {
+            Test-IsBrakedCommand -Command 'gh issue view $n --repo o/r' -Irreversible $script:AllIrr | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Read-BrakeMarker — an emptied marker is tampering, not permission' {
     It 'treats an empty irreversible list as the full vocabulary' {
         $dir = Join-Path ([IO.Path]::GetTempPath()) ("brake-empty-" + [Guid]::NewGuid().ToString('N'))
@@ -244,6 +276,53 @@ Describe 'New-BrakeMarkerJson' {
     It 'lowercases the vocabulary so the guard matches it' {
         $j = New-BrakeMarkerJson -Issue 42 -Irreversible @('MERGE') | ConvertFrom-Json
         @($j.irreversible) | Should -Be @('merge')
+    }
+}
+
+Describe 'Set-BrakeArmedState — the marker must follow the contract in BOTH directions' {
+    BeforeAll {
+        $script:SRoot = Join-Path ([IO.Path]::GetTempPath()) ("brakearm-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:SRoot -Force | Out-Null
+    }
+    AfterAll {
+        if ($script:SRoot -and (Test-Path -LiteralPath $script:SRoot)) {
+            Remove-Item -LiteralPath $script:SRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'arms a fresh worktree, creating the state directory' {
+        $wt = Join-Path $script:SRoot 'fresh'
+        New-Item -ItemType Directory -Path $wt -Force | Out-Null
+        Set-BrakeArmedState -WorkPath $wt -Armed $true -Issue 516 -Irreversible @('merge') | Should -Be 'armed'
+        (Read-BrakeMarker -StartDir $wt).issue | Should -Be 516
+    }
+
+    It 'DISARMS a reused worktree that still carries a previous run''s marker' {
+        # The round-2 finding: without this, the hook keeps refusing merges for a run whose
+        # contract no longer brakes on them, while the launcher prints 'Brake OFF'.
+        $wt = Join-Path $script:SRoot 'reused'
+        New-Item -ItemType Directory -Path $wt -Force | Out-Null
+        Set-BrakeArmedState -WorkPath $wt -Armed $true -Issue 440 -Irreversible @('merge') | Should -Be 'armed'
+        Read-BrakeMarker -StartDir $wt | Should -Not -BeNullOrEmpty
+
+        Set-BrakeArmedState -WorkPath $wt -Armed $false | Should -Be 'disarmed'
+        Read-BrakeMarker -StartDir $wt | Should -BeNullOrEmpty
+    }
+
+    It 'reports nothing to do when disarming an already-unarmed worktree' {
+        $wt = Join-Path $script:SRoot 'never-armed'
+        New-Item -ItemType Directory -Path $wt -Force | Out-Null
+        Set-BrakeArmedState -WorkPath $wt -Armed $false | Should -Be 'none'
+    }
+
+    It 're-arming overwrites the previous run''s marker rather than stacking on it' {
+        $wt = Join-Path $script:SRoot 'rearm'
+        New-Item -ItemType Directory -Path $wt -Force | Out-Null
+        Set-BrakeArmedState -WorkPath $wt -Armed $true -Issue 440 -Irreversible @('merge') | Out-Null
+        Set-BrakeArmedState -WorkPath $wt -Armed $true -Issue 516 -Irreversible @('merge','deploy') | Out-Null
+        $m = Read-BrakeMarker -StartDir $wt
+        $m.issue | Should -Be 516
+        @($m.irreversible) | Should -Be @('merge','deploy')
     }
 }
 
@@ -359,6 +438,40 @@ Describe 'Brake-PreToolUseHook — end to end through the real hook contract' {
         }
         It 'allows editing any ordinary file in the armed worktree' {
             script:Invoke-WriteHook 'Edit' (Join-Path $script:HArmed 'src/app.ps1') $script:HArmed | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'the hook must fail CLOSED when its own guard cannot load (round 2)' {
+        # The severe case: if the armed flag were only set after dot-sourcing Brake-Guard.ps1, a
+        # broken guard would leave the catch believing the run was unarmed and allow everything.
+        BeforeAll {
+            # A private copy of the hook whose sibling guard file is deliberately unparseable.
+            $script:BrokenDir = Join-Path $script:HRoot 'brokenguard'
+            New-Item -ItemType Directory -Path $script:BrokenDir -Force | Out-Null
+            Copy-Item -LiteralPath $script:Hook -Destination (Join-Path $script:BrokenDir 'Brake-PreToolUseHook.ps1')
+            Set-Content -LiteralPath (Join-Path $script:BrokenDir 'Brake-Guard.ps1') -Value 'function Broken { this is not valid powershell ((('
+        }
+        It 'DENIES inside an armed worktree even though the guard fails to load' {
+            $payload = @{
+                hook_event_name = 'PreToolUse'
+                tool_name       = 'Bash'
+                cwd             = $script:HArmed
+                tool_input      = @{ command = 'gh pr merge 490' }
+            } | ConvertTo-Json -Depth 5 -Compress
+            $hook = Join-Path $script:BrokenDir 'Brake-PreToolUseHook.ps1'
+            $out = ($payload | pwsh -NoProfile -File $hook | Out-String).Trim()
+            $out | Should -Not -BeNullOrEmpty
+            ($out | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should -Be 'deny'
+        }
+        It 'still stays silent OUTSIDE an armed worktree when the guard fails to load' {
+            $payload = @{
+                hook_event_name = 'PreToolUse'
+                tool_name       = 'Bash'
+                cwd             = $script:HPlain
+                tool_input      = @{ command = 'gh pr merge 490' }
+            } | ConvertTo-Json -Depth 5 -Compress
+            $hook = Join-Path $script:BrokenDir 'Brake-PreToolUseHook.ps1'
+            ($payload | pwsh -NoProfile -File $hook | Out-String).Trim() | Should -BeNullOrEmpty
         }
     }
 }

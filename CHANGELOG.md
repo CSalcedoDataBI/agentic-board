@@ -54,10 +54,28 @@
     open via `curl`, `Invoke-RestMethod`, python or node — all holding the same token. It is now
     matched by **endpoint**, independent of the client.
 
-  70 tests, and each protection was verified by reintroducing the exact defect it prevents rather
-  than by trusting a green suite: stubbing the classifier turns 16 red, making the dry-run
-  exemption global turns 3 red, unprotecting the marker turns 6 red, and re-anchoring the REST
-  pattern to `gh api` turns 4 red.
+  **Three more the second review round found**, after those four were closed:
+  - **Shell quoting hid the subcommand.** `gh pr 'merge' 490` did not match, and merged. Quote
+    characters are now removed during normalization, the way the shell removes them.
+  - **A runtime variable is invisible to any string matching** — `$verb='merge'; gh pr $verb 490`.
+    Rather than pretend otherwise, a high-risk client reaching for an unresolvable subcommand
+    (`gh pr $x`, `gh $x`) is now refused: an autonomous run has no legitimate need to call `gh`
+    through a variable, and refusing is the safe side of a call the guard genuinely cannot make.
+  - **The hook failed OPEN if its own guard failed to load.** The armed flag was set only after
+    dot-sourcing `Brake-Guard.ps1`, so a broken guard left the error handler believing the run was
+    unarmed — silently restoring the exact capability the control exists to remove. A
+    dependency-free probe now establishes armed-or-not *first*, and everything after it can fail
+    without changing which way it fails.
+
+  Arming also **disarms**: a worktree reused from an earlier braked run kept its marker, so the
+  hook went on refusing merges for a run whose contract no longer braked on them, while the
+  launcher printed `Brake OFF`. The marker now follows the contract in both directions — which is
+  what makes that message true rather than another claim the code does not honour.
+
+  83 tests, and every protection was verified by reintroducing the exact defect it prevents rather
+  than by trusting a green suite: stubbing the classifier turns 16 red, a global dry-run exemption
+  3, an unprotected marker 6, a `gh api`-anchored REST pattern 4, no quote-stripping 3, no
+  variable-indirection pattern 2, and deciding the armed flag after the dot-source 1.
 
 ## [0.28.1] - 2026-07-29
 ### Changed

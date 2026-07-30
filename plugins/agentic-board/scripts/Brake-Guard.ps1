@@ -83,6 +83,15 @@ $script:BrakePatterns = @(
     @{ action = 'delete';  pattern = '\bgh\s+(issue|release)\s+delete\b' }
     @{ action = 'delete';  pattern = '\bgh\s+api\b.*--method\s+delete\b' }
     @{ action = 'delete';  pattern = '\bgit\s+push\b.*--delete\b' }
+
+    # --- indirection through a variable ---------------------------------------------
+    # Quote removal (see ConvertTo-NormalizedCommand) handles `gh pr 'merge'`, but a value the
+    # shell only produces at runtime - `$verb='merge'; gh pr $verb 490` - is not visible to any
+    # amount of string matching. Rather than pretend otherwise, refuse to let a HIGH-RISK CLIENT
+    # take an unresolvable subcommand: an autonomous run has no legitimate need to reach `gh`
+    # through a variable, and refusing is the safe side of a call this guard cannot make.
+    @{ action = 'merge';   pattern = '\bgh\s+(pr|api|repo|release)\s+[$%]' }
+    @{ action = 'merge';   pattern = '\bgh\s+[$%]' }
 )
 
 # A command that only PREVIEWS the action mutates nothing, so denying it buys no safety and
@@ -120,7 +129,11 @@ function ConvertTo-NormalizedCommand {
     param([string]$Command)
     if (-not $Command) { return '' }
     $withBreaks = $Command -replace '\r?\n', ' ; '
-    return ($withBreaks -replace '\s+', ' ').Trim().ToLowerInvariant()
+    # Quote characters are removed the way the shell removes them, so `gh pr 'merge' 490` and
+    # `gh "pr" merge 490` normalize to the same text the patterns already recognize. Without this
+    # the classifier could be stepped around with nothing more exotic than a pair of quotes.
+    $unquoted = $withBreaks -replace "[`"'``]", ''
+    return ($unquoted -replace '\s+', ' ').Trim().ToLowerInvariant()
 }
 
 <#
@@ -244,10 +257,47 @@ function New-BrakeMarkerJson {
     } | ConvertTo-Json -Depth 5)
 }
 
-# Where the marker lives for a given worktree (the caller ensures .agentic-board/ exists).
+# Where the marker lives for a given worktree.
 function Get-BrakeMarkerPath {
     param([Parameter(Mandatory)][string]$WorkPath)
     return (Join-Path (Join-Path $WorkPath '.agentic-board') $script:BrakeMarkerName)
+}
+
+<#
+    Arm or DISARM a worktree, and report which happened.
+
+    Both directions matter. Arming is obvious; disarming is the one that was missing: a worktree
+    reused from an earlier braked run still holds its marker, so the hook would go on refusing
+    merges for a run whose contract no longer brakes on them - while the launcher printed
+    'Brake OFF'. The state on disk has to follow the contract in both directions or the message
+    is a lie again.
+
+    Returns 'armed', 'disarmed', or 'none' (nothing to disarm). Throws if it cannot write.
+#>
+function Set-BrakeArmedState {
+    param(
+        [Parameter(Mandatory)][string]$WorkPath,
+        [Parameter(Mandatory)][bool]$Armed,
+        [int]$Issue = 0,
+        [string[]]$Irreversible = @(),
+        [string]$Branch = '',
+        [string]$HostName = '',
+        [string]$ArmedAt = ''
+    )
+    $path = Get-BrakeMarkerPath -WorkPath $WorkPath
+    if (-not $Armed) {
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Force
+            return 'disarmed'
+        }
+        return 'none'
+    }
+    $dir = Split-Path $path -Parent
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Set-Content -LiteralPath $path -Encoding UTF8 -Value (
+        New-BrakeMarkerJson -Issue $Issue -Irreversible $Irreversible -ArmedAt $ArmedAt `
+            -Branch $Branch -HostName $HostName)
+    return 'armed'
 }
 
 # The PreToolUse deny payload, verbatim per the hook contract: exit 0 with this on stdout.
@@ -291,5 +341,6 @@ function New-BrakeDenyJson {
 
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_BRAKEGUARD_DOTSOURCE) { return }
+
 
 

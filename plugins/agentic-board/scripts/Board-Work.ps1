@@ -1210,23 +1210,25 @@ function Start-WorktreeSession {
     # (Brake-PreToolUseHook.ps1) finds it by walking up from the session's cwd and denies the
     # irreversible call before it runs. Written only for a real launch: a -Preview must not leave
     # a live control behind, and an unarmed run must not find a stale marker from an armed one.
-    if ($StopAtPR) {
-        try {
-            . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
-            $markerPath = Get-BrakeMarkerPath -WorkPath $WorkPath
-            $markerDir  = Split-Path $markerPath -Parent
-            if (-not (Test-Path $markerDir)) { New-Item -ItemType Directory -Path $markerDir -Force | Out-Null }
-            $armedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-            Set-Content -LiteralPath $markerPath -Encoding UTF8 -Value (
-                New-BrakeMarkerJson -Issue $IssueNum -Irreversible $Irreversible -ArmedAt $armedAt `
-                    -Branch $Branch -HostName $env:COMPUTERNAME)
-            Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, $markerPath) -ForegroundColor Green
-        } catch {
+    try {
+        . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
+        $armedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed ([bool]$StopAtPR) -Issue $IssueNum `
+                    -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt
+        if ($state -eq 'armed') {
+            Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
+        } elseif ($state -eq 'disarmed') {
+            Write-Host ("  OK  #{0}: freno DESARMADO (marcador de un run previo retirado)" -f $IssueNum) -ForegroundColor DarkGray
+        }
+    } catch {
+        if ($StopAtPR) {
             # An unarmed run that believes it is armed is the #440 failure. Say so and refuse to
             # launch rather than spawn a session with a brake that exists only on paper.
             Write-Host "  FAIL #${IssueNum}: no se pudo armar el freno ($_). No se lanza la sesion." -ForegroundColor Red
             return $null
         }
+        # A marker we failed to CLEAR only ever over-blocks, so that direction warns and continues.
+        Write-Host "  WARN #${IssueNum}: no pude retirar el marcador de freno previo ($_). El merge seguira bloqueado en ese worktree." -ForegroundColor DarkYellow
     }
     # Persist the briefing so the spawned session reads it without command-line quoting.
     Set-Content -LiteralPath $briefingFile -Value (Get-SessionBriefing $IssueNum $Repo $Branch $WorkPath $Cli -StopAtPR:$StopAtPR -BriefFile $BriefFile) -Encoding UTF8

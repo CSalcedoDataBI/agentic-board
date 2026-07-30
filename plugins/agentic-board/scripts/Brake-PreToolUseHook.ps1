@@ -27,6 +27,28 @@ param()
 # No `throw` on stray native stderr: this runs on every tool call and must be quiet.
 $ErrorActionPreference = 'Continue'
 
+# The literal deny payload, built with no helper that could itself fail. Everything below can
+# fall back to this, which is what makes "fail closed inside an armed run" true rather than
+# aspirational.
+$script:HardDeny = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"BRAKE: refused - this is a brake-armed autonomous run and the guard could not evaluate this command. Stop at a reviewed PR and leave merge/deploy/publish/delete to the human."}}'
+
+# Minimal, dependency-free probe for the armed state. This runs BEFORE Brake-Guard.ps1 is loaded
+# ON PURPOSE: if the armed flag were only set after that dot-source, a failure to load the guard
+# would leave the catch believing the run was unarmed and silently allow everything - the exact
+# fail-open this control exists to remove.
+function Test-ArmedFast {
+    param([string]$StartDir)
+    $dir = $StartDir
+    while ($dir) {
+        if (Test-Path -LiteralPath (Join-Path (Join-Path $dir '.agentic-board') 'brake-armed.json')) { return $true }
+        $parent = Split-Path $dir -Parent
+        if (-not $parent -or $parent -eq $dir) { break }
+        $dir = $parent
+    }
+    return $false
+}
+
+$armed  = $false
 $marker = $null
 try {
     $raw = [Console]::In.ReadToEnd()
@@ -43,9 +65,14 @@ try {
     $cwd = "$($payload.cwd)"
     if (-not $cwd) { $cwd = (Get-Location).Path }
 
+    # Establish armed-or-not FIRST, with no dependencies. Everything after this point may fail;
+    # this flag is what decides which way it fails.
+    $armed = Test-ArmedFast -StartDir $cwd
+    if (-not $armed) { exit 0 }    # not an armed run -> never interfere
+
     . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
     $marker = Read-BrakeMarker -StartDir $cwd
-    if (-not $marker) { exit 0 }   # not an armed run -> never interfere
+    if (-not $marker) { Write-Output $script:HardDeny; exit 0 }  # armed, but unreadable -> refuse
 
     if ($toolName -in $writeTools) {
         # Rewriting the marker disarms the run just as effectively as deleting it - emptying its
@@ -65,13 +92,15 @@ try {
     exit 0
 } catch {
     # Inside an armed run, an error means we could not prove the command safe -> refuse.
-    if ($marker) {
+    # $armed is set by the dependency-free probe above, so this holds even when the failure was
+    # loading Brake-Guard.ps1 itself.
+    if ($armed) {
         try {
-            Write-Output (New-BrakeDenyJson -Action 'merge' -Issue $marker.issue -Unreadable)
+            Write-Output (New-BrakeDenyJson -Action 'merge' -Issue $(if ($marker) { $marker.issue } else { 0 }) -Unreadable)
         } catch {
-            # Last resort: the literal deny payload, built without any helper that could fail.
-            Write-Output '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"BRAKE: refused - brake-armed run and the guard could not evaluate this command. Stop at a reviewed PR and leave irreversible actions to the human."}}'
+            Write-Output $script:HardDeny
         }
     }
     exit 0
 }
+
