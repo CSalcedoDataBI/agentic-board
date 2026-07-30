@@ -117,6 +117,24 @@ Describe 'Glob semantics — a single * must not cross a directory boundary' {
     It 'treats an empty path as not visual' {
         Test-IsVisualPath -Path '' -VisualPatterns @('*.png') | Should -BeFalse
     }
+
+    Context 'leading dots survive normalization (external review, round 1)' {
+        # `TrimStart('./')` takes a CHARACTER SET, not a prefix: it ate the leading dot of a hidden
+        # directory, so '.reports/x.md' became 'reports/x.md' and a '.reports/**' pattern silently
+        # stopped matching -- a visual change reclassified as code.
+        It 'matches a hidden directory pattern' {
+            Test-IsVisualPath -Path '.reports/summary.html' -VisualPatterns @('.reports/**') | Should -BeTrue
+        }
+        It 'does not confuse a hidden directory with its unhidden namesake' {
+            Test-IsVisualPath -Path 'reports/summary.html' -VisualPatterns @('.reports/**') | Should -BeFalse
+        }
+        It 'still strips an explicit ./ prefix' {
+            Test-IsVisualPath -Path './site/index.html' -VisualPatterns @('site/*.html') | Should -BeTrue
+        }
+        It 'strips a repeated ./ prefix' {
+            Test-IsVisualPath -Path './././a.png' -VisualPatterns @('*.png') | Should -BeTrue
+        }
+    }
 }
 
 Describe 'Get-EffectiveWorkClassPolicy — the contract narrows, the defaults fill' {

@@ -96,7 +96,11 @@ function Test-IsVisualPath {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Path,
         [string[]]$VisualPatterns = @()
     )
-    $norm = ("$Path" -replace '\\', '/').Trim().TrimStart('./')
+    # Strip a literal './' prefix only. `TrimStart('./')` takes a CHARACTER SET, not a prefix, so it
+    # also ate the leading dot of '.reports/x.md' -> 'reports/x.md', and a project pattern like
+    # '.reports/**' would then never match: a visual change silently reclassified as code.
+    $norm = ("$Path" -replace '\\', '/').Trim()
+    while ($norm.StartsWith('./')) { $norm = $norm.Substring(2) }
     if (-not $norm) { return $false }
     foreach ($pat in @($VisualPatterns)) {
         if (-not "$pat".Trim()) { continue }
@@ -201,4 +205,5 @@ if (Test-HumanMustApprove -Class $verdict.class -Policy $policy) {
 } else {
     Write-Host "  -> El agente puede cerrarlo solo, si cumple los estandares." -ForegroundColor Green
 }
+
 

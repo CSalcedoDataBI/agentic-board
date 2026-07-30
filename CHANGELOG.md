@@ -30,8 +30,19 @@
   would widen with every subdirectory. A project can declare what is visual *for it* (a website
   where the posts are the product), replacing the defaults rather than silently merging with them.
 
-  32 tests, mutation-verified: classifying nothing as visual turns 8 red, letting `unknown` pass as
-  approved 1, and letting a single `*` cross a directory boundary 1.
+  **This alone changes no behaviour yet** — it adds the vocabulary and the classifier; nothing
+  consults them. Said plainly because the alternative is a release note that implies a capability
+  the code does not have. `merge` remains in every default contract's irreversible list, so no run
+  can merge regardless of class. Wiring it into the merge decision — against the *actual* changed
+  paths, at merge time, where the facts exist — is #530, and its review requirement is recorded on
+  that issue rather than left as a hope.
+
+  36 tests, mutation-verified: classifying nothing as visual turns 8 red, letting `unknown` pass as
+  approved 1, letting a single `*` cross a directory boundary 1, and restoring the
+  `TrimStart('./')` bug 1 — that last one found by external review: `TrimStart` takes a character
+  *set*, so it ate the leading dot of `.reports/x.md`, and a project pattern like `.reports/**`
+  would silently stop matching. A visual change reclassified as code is the one direction that
+  costs trust.
 
 ### Fixed
 - **A reviewer that never reviewed no longer reads as approval** (#510). On PR #508 the
