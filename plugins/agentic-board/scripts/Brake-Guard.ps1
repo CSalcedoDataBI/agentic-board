@@ -56,9 +56,11 @@ $script:BrakePatterns = @(
     # --- merge: putting work on the default branch ---------------------------------
     @{ action = 'merge';   pattern = '\bgh\s+pr\s+merge\b' }
     @{ action = 'merge';   pattern = '\bboard-merge\.ps1\b' }
-    # gh api against the REST merge endpoints (pulls/<n>/merge, /merges)
-    @{ action = 'merge';   pattern = '\bgh\s+api\b.*\bpulls?/\d+/merge\b' }
-    @{ action = 'merge';   pattern = '\bgh\s+api\b.*\brepos/[^\s]+/merges\b' }
+    # The REST merge endpoints, recognized by the ENDPOINT rather than by the client that calls
+    # it. Anchoring these to `gh api` (as the first cut did) left the identical request open via
+    # curl, Invoke-RestMethod, python or node - all of which have the same token available.
+    @{ action = 'merge';   pattern = '\bpulls?/\d+/merge\b' }
+    @{ action = 'merge';   pattern = '\brepos/[^\s]+/merges\b' }
 
     # --- publish: making something public / cutting a release -----------------------
     @{ action = 'publish'; pattern = '\bgh\s+release\s+create\b' }
@@ -85,13 +87,40 @@ $script:BrakePatterns = @(
 
 # A command that only PREVIEWS the action mutates nothing, so denying it buys no safety and
 # costs the run its ability to inspect what it is about to hand the human.
+#
+# Evaluated PER SEGMENT, never over the whole command line. Applied globally it was itself the
+# bypass: `echo --dry-run; gh pr merge 490` contains a dry-run token, so the guard waved through
+# a real merge sitting in the next segment.
 $script:DryRunPattern = '(^|\s)(-dryrun|-whatif|--dry-run)(\s|$)'
 
-# Normalize so patterns can stay readable: lowercase, tabs/newlines/runs of spaces -> one space.
+# Tampering with the marker is denied on its own terms, NOT gated on the contract's list: the
+# marker is what makes the contract enforceable, so "may I disarm the brake?" is never a question
+# the braked run gets to answer. Deleting a local file is otherwise allowed, which is exactly how
+# `rm .agentic-board/brake-armed.json` would have turned the whole control off in one command.
+$script:TamperPatterns = @(
+    '\bbrake-armed\.json\b'
+    # Destroying the state DIRECTORY takes the marker with it. The negative lookahead keeps this
+    # to the directory itself: `rm .agentic-board/briefing-99.txt` is ordinary housekeeping and
+    # must stay allowed, or the guard starts breaking the run's normal work.
+    '\b(rm|del|erase|rd|rmdir|remove-item)\b[^;]*\.agentic-board(?![\\/]\S)'
+    '\b(rm|del|erase|rd|rmdir|remove-item)\b[^;]*\.agentic-bi-ops(?![\\/]\S)'
+)
+
+# Shell separators that start a NEW command. Splitting on these is what makes the per-segment
+# evaluation above sound: each segment is judged on its own, so a harmless prefix cannot vouch
+# for what follows it.
+$script:SegmentSeparator = '(;|&&|\|\||\||\r?\n)'
+
+# Normalize so patterns can stay readable: lowercase, runs of whitespace -> one space.
+#
+# Newlines become an explicit ';' FIRST. Collapsing them into spaces (as the first cut did) welded
+# a multi-line script into a single segment, and one `-DryRun` on line 1 then vouched for a real
+# `gh pr merge` on line 2 - the same bypass the per-segment split exists to close.
 function ConvertTo-NormalizedCommand {
     param([string]$Command)
     if (-not $Command) { return '' }
-    return ($Command -replace '\s+', ' ').Trim().ToLowerInvariant()
+    $withBreaks = $Command -replace '\r?\n', ' ; '
+    return ($withBreaks -replace '\s+', ' ').Trim().ToLowerInvariant()
 }
 
 <#
@@ -109,14 +138,26 @@ function Test-IsBrakedCommand {
     )
     $norm = ConvertTo-NormalizedCommand $Command
     if (-not $norm) { return '' }
-    if ($norm -match $script:DryRunPattern) { return '' }
+
+    # Protecting the control comes before consulting the contract - see $script:TamperPatterns.
+    foreach ($t in $script:TamperPatterns) {
+        if ($norm -match $t) { return 'tamper' }
+    }
 
     $irr = @($Irreversible | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
     if ($irr.Count -eq 0) { return '' }
 
-    foreach ($p in $script:BrakePatterns) {
-        if ($irr -notcontains $p.action) { continue }
-        if ($norm -match $p.pattern) { return $p.action }
+    # One shell invocation can carry several commands. Judge each on its own, so a harmless
+    # segment never licenses the one after it.
+    foreach ($segment in ($norm -split $script:SegmentSeparator)) {
+        $seg = $segment.Trim()
+        if (-not $seg) { continue }
+        if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }  # the separator itself
+        if ($seg -match $script:DryRunPattern) { continue }                            # this segment only
+        foreach ($p in $script:BrakePatterns) {
+            if ($irr -notcontains $p.action) { continue }
+            if ($seg -match $p.pattern) { return $p.action }
+        }
     }
     return ''
 }
@@ -141,12 +182,21 @@ function Read-BrakeMarker {
                 $raw = Get-Content -LiteralPath $candidate -Raw -ErrorAction Stop
                 $o = $raw | ConvertFrom-Json -ErrorAction Stop
                 $irr = @()
-                if ($o.irreversible) { $irr = @($o.irreversible) }
+                if ($o.irreversible) { $irr = @($o.irreversible | Where-Object { "$_".Trim() }) }
+                # An armed marker with nothing in its list brakes on nothing - which is the same
+                # as no brake at all, reached by overwriting the file with `{}`. A present marker
+                # always means armed; fall back to the full vocabulary rather than to silence.
+                $tampered = $false
+                if ($irr.Count -eq 0) {
+                    $irr = @('merge','deploy','refresh','publish','delete')
+                    $tampered = $true
+                }
                 return @{
                     issue        = if ($o.issue) { [int]$o.issue } else { 0 }
                     irreversible = $irr
                     armedAt      = "$($o.armedAt)"
                     path         = $candidate
+                    emptied      = $tampered
                 }
             } catch {
                 # An unreadable marker must not silently disable the brake. Treat it as armed
@@ -208,6 +258,17 @@ function New-BrakeDenyJson {
         [switch]$Unreadable
     )
     $issueClause = if ($Issue -gt 0) { " for issue #$Issue" } else { "" }
+    if ($Action -eq 'tamper') {
+        $reason = "BRAKE: refused - this command would remove or alter the brake marker of a " +
+                  "brake-armed autonomous run$issueClause. Disarming your own safety control is " +
+                  "never part of the task. Leave the marker alone; if the brake is genuinely " +
+                  "wrong here, stop and say so to the human instead of removing it."
+        return (@{ hookSpecificOutput = @{
+            hookEventName            = 'PreToolUse'
+            permissionDecision       = 'deny'
+            permissionDecisionReason = $reason
+        } } | ConvertTo-Json -Depth 5 -Compress)
+    }
     $why = if ($Unreadable) {
         "its brake marker is present but unreadable, so the brake is treated as ARMED"
     } else {
@@ -230,3 +291,5 @@ function New-BrakeDenyJson {
 
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_BRAKEGUARD_DOTSOURCE) { return }
+
+

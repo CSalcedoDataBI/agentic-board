@@ -35,8 +35,29 @@
   Inside an armed run, any error in the guard **denies** rather than allows. Outside one — an
   ordinary human session, which has no marker — the hook is silent and never interferes.
 
-  46 new tests, verified by reintroducing the defect: with the classifier stubbed to refuse nothing,
-  16 go red, including the end-to-end cases that drive the real hook contract over stdin.
+  **Four bypasses the first cut of this control still had**, found by external review and each now
+  closed with its own regression test:
+  - A `-DryRun` token **anywhere** on the command line waved through the whole thing, so
+    `echo --dry-run; gh pr merge 490` merged. The classifier now splits the command on shell
+    separators and judges each segment on its own — a harmless prefix cannot vouch for what
+    follows it.
+  - Newlines were collapsed into spaces *before* that split, welding a multi-line script into one
+    segment and reopening the same hole. A newline is now an explicit separator, which is what it
+    means in a shell.
+  - The run could **disarm itself**: deleting a local file is otherwise allowed, so
+    `rm .agentic-board/brake-armed.json` turned the entire control off in one command. Tampering
+    with the marker — deleting it, overwriting it, wiping the state directory, or editing it
+    through the file-writing tools — is now refused on its own terms, *not* gated on the
+    contract's list. An emptied `irreversible` list reads as tampering too, and falls back to the
+    full vocabulary rather than to silence.
+  - The REST merge endpoint was only recognised behind `gh api`, leaving the identical request
+    open via `curl`, `Invoke-RestMethod`, python or node — all holding the same token. It is now
+    matched by **endpoint**, independent of the client.
+
+  70 tests, and each protection was verified by reintroducing the exact defect it prevents rather
+  than by trusting a green suite: stubbing the classifier turns 16 red, making the dry-run
+  exemption global turns 3 red, unprotecting the marker turns 6 red, and re-anchoring the REST
+  pattern to `gh api` turns 4 red.
 
 ## [0.28.1] - 2026-07-29
 ### Changed

@@ -33,9 +33,12 @@ try {
     if (-not $raw) { exit 0 }
     $payload = $raw | ConvertFrom-Json -ErrorAction Stop
 
-    # Only shell-executing tools can reach an irreversible action. Edit/Read/Glob cannot.
+    # Shell tools can reach an irreversible action; the file-writing tools can reach the MARKER,
+    # which is the same thing one step earlier. Read/Glob/Grep cannot do either.
     $toolName = "$($payload.tool_name)"
-    if ($toolName -notin @('Bash', 'PowerShell')) { exit 0 }
+    $shellTools = @('Bash', 'PowerShell')
+    $writeTools = @('Edit', 'Write', 'NotebookEdit')
+    if ($toolName -notin ($shellTools + $writeTools)) { exit 0 }
 
     $cwd = "$($payload.cwd)"
     if (-not $cwd) { $cwd = (Get-Location).Path }
@@ -43,6 +46,16 @@ try {
     . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
     $marker = Read-BrakeMarker -StartDir $cwd
     if (-not $marker) { exit 0 }   # not an armed run -> never interfere
+
+    if ($toolName -in $writeTools) {
+        # Rewriting the marker disarms the run just as effectively as deleting it - emptying its
+        # list, or pointing it at nothing. Editing it is never part of the task.
+        $target = "$($payload.tool_input.file_path)"
+        if ($target -and ($target -replace '\\', '/') -match '(?i)brake-armed\.json$') {
+            Write-Output (New-BrakeDenyJson -Action 'tamper' -Issue $marker.issue)
+        }
+        exit 0
+    }
 
     $command = "$($payload.tool_input.command)"
     $action  = Test-IsBrakedCommand -Command $command -Irreversible $marker.irreversible

@@ -28,7 +28,12 @@ Describe 'Test-IsBrakedCommand — the merge paths that actually happened (#440)
             Should -Be 'merge'
     }
     It 'denies regardless of spacing and casing' {
-        Test-IsBrakedCommand -Command "GH   PR`n MERGE  12" -Irreversible $script:AllIrr | Should -Be 'merge'
+        Test-IsBrakedCommand -Command "GH   PR`tMERGE  12" -Irreversible $script:AllIrr | Should -Be 'merge'
+    }
+    It 'treats a newline as a command separator, not as whitespace inside one command' {
+        # Deliberate: in a shell a newline ENDS a command. Folding it into a space is what let a
+        # dry-run on one line vouch for a merge on the next.
+        Test-IsBrakedCommand -Command "git status`ngh pr merge 12" -Irreversible $script:AllIrr | Should -Be 'merge'
     }
 }
 
@@ -83,6 +88,98 @@ Describe 'Test-IsBrakedCommand — a preview mutates nothing' {
     }
 }
 
+Describe 'Test-IsBrakedCommand — bypasses found by external review (round 1)' {
+    # Every case here was a working bypass of the first cut of this guard. They are the reason
+    # the classifier judges per SEGMENT and protects its own marker.
+
+    Context 'a dry-run token must not vouch for the rest of the command line' {
+        It 'denies a real merge hiding behind a dry-run echo' {
+            Test-IsBrakedCommand -Command 'echo --dry-run; gh pr merge 490' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'denies a real merge after a genuine dry-run of something else' {
+            Test-IsBrakedCommand -Command 'npm publish --dry-run && gh pr merge 490' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'denies across a newline-separated script' {
+            Test-IsBrakedCommand -Command "pwsh Board-Merge.ps1 -PR 1 -DryRun`ngh pr merge 490" -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'denies across a pipe' {
+            Test-IsBrakedCommand -Command 'echo --dry-run | gh pr merge 490' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'still allows a genuinely preview-only command line' {
+            Test-IsBrakedCommand -Command 'pwsh Board-Merge.ps1 -PR 490 -DryRun' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'still allows several preview-only segments' {
+            Test-IsBrakedCommand -Command 'git status; pwsh Board-Merge.ps1 -PR 490 -DryRun' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'the run must not be able to disarm itself' {
+        It 'denies deleting the marker' {
+            Test-IsBrakedCommand -Command 'rm .agentic-board/brake-armed.json' -Irreversible $script:AllIrr |
+                Should -Be 'tamper'
+        }
+        It 'denies deleting it with the PowerShell verb' {
+            Test-IsBrakedCommand -Command 'Remove-Item .agentic-board\brake-armed.json -Force' -Irreversible $script:AllIrr |
+                Should -Be 'tamper'
+        }
+        It 'denies overwriting it' {
+            Test-IsBrakedCommand -Command 'echo {} > .agentic-board/brake-armed.json' -Irreversible $script:AllIrr |
+                Should -Be 'tamper'
+        }
+        It 'denies wiping the whole state directory' {
+            Test-IsBrakedCommand -Command 'rm -rf .agentic-board' -Irreversible $script:AllIrr |
+                Should -Be 'tamper'
+        }
+        It 'denies tampering even when the contract brakes on nothing — the marker is not the contract''s to disable' {
+            Test-IsBrakedCommand -Command 'rm .agentic-board/brake-armed.json' -Irreversible @() |
+                Should -Be 'tamper'
+        }
+        It 'still allows deleting an unrelated file in the state directory' {
+            Test-IsBrakedCommand -Command 'rm .agentic-board/briefing-99.txt' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'the merge endpoint is blocked by endpoint, not by client' {
+        It 'denies curl against the REST merge endpoint' {
+            Test-IsBrakedCommand -Command 'curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'denies Invoke-RestMethod against it' {
+            Test-IsBrakedCommand -Command 'Invoke-RestMethod -Method Put -Uri https://api.github.com/repos/o/r/pulls/12/merge' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'denies python/requests against it' {
+            Test-IsBrakedCommand -Command 'python -c "requests.put(''https://api.github.com/repos/o/r/pulls/12/merge'')"' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'still denies through gh api' {
+            Test-IsBrakedCommand -Command 'gh api --method PUT repos/o/r/pulls/12/merge' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+    }
+}
+
+Describe 'Read-BrakeMarker — an emptied marker is tampering, not permission' {
+    It 'treats an empty irreversible list as the full vocabulary' {
+        $dir = Join-Path ([IO.Path]::GetTempPath()) ("brake-empty-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $dir '.agentic-board') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $dir '.agentic-board/brake-armed.json') -Value '{"issue":516,"irreversible":[]}'
+            $m = Read-BrakeMarker -StartDir $dir
+            $m.emptied | Should -BeTrue
+            @($m.irreversible) | Should -Contain 'merge'
+            Test-IsBrakedCommand -Command 'gh pr merge 490' -Irreversible $m.irreversible | Should -Be 'merge'
+        } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 Describe 'Test-IsBrakedCommand — empty input' {
     It 'allows an empty command'      { Test-IsBrakedCommand -Command ''    -Irreversible $script:AllIrr | Should -BeNullOrEmpty }
     It 'allows a whitespace command'  { Test-IsBrakedCommand -Command '   ' -Irreversible $script:AllIrr | Should -BeNullOrEmpty }
@@ -100,7 +197,13 @@ Describe 'Read-BrakeMarker — only an armed worktree is affected' {
         Set-Content -LiteralPath (Join-Path $script:Armed '.agentic-board/brake-armed.json') `
             -Value (New-BrakeMarkerJson -Issue 516 -Irreversible @('merge') -ArmedAt '2026-07-30 10:00:00')
     }
-    AfterAll { Remove-Item -LiteralPath $script:Root -Recurse -Force -ErrorAction SilentlyContinue }
+    # Guarded: if BeforeAll failed, $script:Root is empty and an unguarded Remove-Item resolves to
+    # the filesystem root. Never hand a delete a path you have not checked.
+    AfterAll {
+        if ($script:Root -and (Test-Path -LiteralPath $script:Root)) {
+            Remove-Item -LiteralPath $script:Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     It 'finds the marker in the worktree root' {
         (Read-BrakeMarker -StartDir $script:Armed).issue | Should -Be 516
@@ -187,7 +290,11 @@ Describe 'Brake-PreToolUseHook — end to end through the real hook contract' {
             return ($payload | pwsh -NoProfile -File $script:Hook | Out-String).Trim()
         }
     }
-    AfterAll { Remove-Item -LiteralPath $script:HRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    AfterAll {
+        if ($script:HRoot -and (Test-Path -LiteralPath $script:HRoot)) {
+            Remove-Item -LiteralPath $script:HRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     It 'DENIES the merge inside an armed worktree' {
         $out = script:Invoke-Hook 'Bash' 'gh pr merge 490 --squash' $script:HArmed
@@ -213,5 +320,45 @@ Describe 'Brake-PreToolUseHook — end to end through the real hook contract' {
     }
     It 'allows a deploy because this contract does NOT brake on it' {
         script:Invoke-Hook 'Bash' 'wrangler deploy' $script:HArmed | Should -BeNullOrEmpty
+    }
+    It 'DENIES the composite command that hid a merge behind a dry-run token' {
+        ($(script:Invoke-Hook 'Bash' 'echo --dry-run; gh pr merge 490' $script:HArmed) | ConvertFrom-Json).hookSpecificOutput.permissionDecision |
+            Should -Be 'deny'
+    }
+    It 'DENIES deleting its own marker' {
+        ($(script:Invoke-Hook 'Bash' 'rm .agentic-board/brake-armed.json' $script:HArmed) | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason |
+            Should -Match 'Disarming your own safety control'
+    }
+    It 'DENIES curl against the REST merge endpoint' {
+        ($(script:Invoke-Hook 'Bash' 'curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge' $script:HArmed) | ConvertFrom-Json).hookSpecificOutput.permissionDecision |
+            Should -Be 'deny'
+    }
+
+    Context 'the file-writing tools cannot rewrite the marker either' {
+        BeforeAll {
+            # Feed a write-tool payload (file_path instead of command).
+            function script:Invoke-WriteHook([string]$Tool, [string]$Path, [string]$Cwd) {
+                $payload = @{
+                    hook_event_name = 'PreToolUse'
+                    tool_name       = $Tool
+                    cwd             = $Cwd
+                    tool_input      = @{ file_path = $Path }
+                } | ConvertTo-Json -Depth 5 -Compress
+                return ($payload | pwsh -NoProfile -File $script:Hook | Out-String).Trim()
+            }
+        }
+        It 'DENIES editing the marker' {
+            $p = Join-Path $script:HArmed '.agentic-board/brake-armed.json'
+            ($(script:Invoke-WriteHook 'Edit' $p $script:HArmed) | ConvertFrom-Json).hookSpecificOutput.permissionDecision |
+                Should -Be 'deny'
+        }
+        It 'DENIES writing over the marker' {
+            $p = Join-Path $script:HArmed '.agentic-board/brake-armed.json'
+            ($(script:Invoke-WriteHook 'Write' $p $script:HArmed) | ConvertFrom-Json).hookSpecificOutput.permissionDecision |
+                Should -Be 'deny'
+        }
+        It 'allows editing any ordinary file in the armed worktree' {
+            script:Invoke-WriteHook 'Edit' (Join-Path $script:HArmed 'src/app.ps1') $script:HArmed | Should -BeNullOrEmpty
+        }
     }
 }
