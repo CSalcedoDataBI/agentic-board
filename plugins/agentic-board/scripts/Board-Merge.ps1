@@ -87,16 +87,32 @@ if (-not $DryRun) {
                 . (Join-Path $PSScriptRoot 'Expert-EndToEnd.ps1')
                 $env:ABIOS_ENDTOEND_DOTSOURCE = $prevE
 
-                $baseRef = git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null
-                if (-not $baseRef) { $baseRef = 'origin/main' }
+                # Diff against the PR's OWN base, not the repo default. A PR targeting a release or
+                # feature branch would otherwise be compared to main, quietly omitting files and
+                # letting a report change read as code.
+                $prMeta  = gh pr view $PR --repo $Repo --json headRefOid,baseRefName 2>$null | ConvertFrom-Json
+                $baseRef = if ($prMeta.baseRefName) { "origin/$($prMeta.baseRefName)" } else { '' }
+                if (-not $baseRef) {
+                    $baseRef = git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null
+                    if (-not $baseRef) { $baseRef = 'origin/main' }
+                }
                 $changed = @(git diff --name-only "$baseRef...HEAD" 2>$null | Where-Object { "$_".Trim() })
-                $wc = Get-WorkClass -ChangedPaths $changed
+
+                # Classify with THIS project's policy, not the built-in defaults: a contract that
+                # declares extra visual patterns (a site where the posts are the product) would
+                # otherwise be ignored exactly where it matters.
+                $prevC2 = $env:ABIOS_EXPERTCONTRACT_DOTSOURCE
+                $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = '1'
+                . (Join-Path $PSScriptRoot 'ExpertContractIo.ps1')
+                $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = $prevC2
+                $wcPolicy = Get-EffectiveWorkClassPolicy -Contract (Read-ExpertContract)
+                $wc = Get-WorkClass -ChangedPaths $changed -Policy $wcPolicy
 
                 # REVIEW evidence: reuse the gate's own strict parser rather than a looser copy.
                 # Matching "contains the marker AND contains the sha" anywhere in a body let quoted
                 # text, a checklist note or a stale comment satisfy a merge condition. The gate's
                 # parser requires the marker to be BOUND as `sha=<head>`.
-                $headSha = "$(gh pr view $PR --repo $Repo --json headRefOid -q .headRefOid 2>$null)".Trim()
+                $headSha = "$($prMeta.headRefOid)".Trim()
                 if (-not $headSha) { throw "no pude leer el commit actual del PR #$PR" }
                 $bodies = @()
                 $cj = gh pr view $PR --repo $Repo --json comments 2>$null
@@ -130,9 +146,12 @@ if (-not $DryRun) {
             }
 
             if ($verdict.allowed) {
+                # Remembered so the merge itself can be pinned to this exact commit (see $mergeArgs).
+                $script:E2eHeadSha = $headSha
                 Write-Host ""
                 Write-Host (Format-EndToEndVerdict -Verdict $verdict) -ForegroundColor Green
                 Write-Host "  (Freno armado, pero el dueno ordeno llevarlo hasta el final y se cumplen las condiciones.)" -ForegroundColor DarkGray
+                Write-Host ("  El cierre queda atado al commit {0} - si llega uno nuevo, no se mergea." -f $headSha.Substring(0,7)) -ForegroundColor DarkGray
                 Write-Host ""
             } else {
                 Write-Host ""
@@ -208,6 +227,15 @@ if ($prInfo.state -ne 'OPEN') { throw "PR #$PR esta '$($prInfo.state)' (no OPEN)
 
 $mergeArgs = @('pr','merge',"$PR",'--repo',$Repo,"--$Method")
 if (-not $NoDeleteBranch) { $mergeArgs += '--delete-branch' }
+
+# Bind the merge to the exact commit the four conditions were established against (#530). Between
+# reading the class, the review and the checks and actually merging, a push to the branch would
+# otherwise slip a NEW commit through on the strength of an older one's evidence - the precise
+# failure this control exists to stop, just moved a few seconds later. Only for the autonomous
+# path: a human running this deliberately does not need the interlock.
+if ($script:E2eHeadSha) {
+    $mergeArgs += @('--match-head-commit', $script:E2eHeadSha)
+}
 
 Write-Host "=== Board-Merge  $Repo  PR #$PR ===" -ForegroundColor Cyan
 Write-Host ""
