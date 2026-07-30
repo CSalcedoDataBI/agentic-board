@@ -1,5 +1,43 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **The irreversible brake is now a control, not a paragraph** (#516, part of #440). `/board expert
+  auto` printed `Brake ARMED` while enforcing nothing: the brake lived only as prose in the launch
+  briefing, and an observed run merged its own PR to `main` — closing its epic's sub-issues — while
+  every self-report said the brake was on. Instruction alone is what drifted, so the fix is a
+  backstop that does not depend on the agent's cooperation:
+  - `Start-WorktreeSession` **arms** the run by writing `.agentic-board/brake-armed.json` into the
+    launched worktree, carrying that run's own `autonomy.irreversible` list from the contract (so
+    the guard and the briefing can never disagree). If arming fails, the session is **not launched**
+    — an unarmed run that believes it is armed is precisely the #440 failure.
+  - A new **`PreToolUse` hook** (`Brake-PreToolUseHook.ps1`) walks up from the session's cwd, finds
+    the marker, and **denies** the tool call before it executes — `gh pr merge`, `Board-Merge.ps1`,
+    the REST merge endpoints, and the publish/deploy/refresh/delete paths the contract brakes on.
+  - `Board-Merge.ps1` **refuses on its own** inside an armed worktree, so the refusal survives a
+    session with no hooks installed or a direct call.
+
+  Two design points worth stating, because both are load-bearing:
+
+  **A git hook could not have done this.** The original suggestion was a `pre-push`/`pre-merge`
+  hook, but `gh pr merge` is a server-side API call — no local git operation occurs, so there is
+  nothing for a git hook to intercept. The refusal has to happen at the tool layer.
+
+  **The classifier's fail direction is inverted from `Expert-Autonomy`, deliberately.** That one
+  classifies an action name from a closed vocabulary, so an unknown verb fails safe (stop and ask).
+  This one classifies an arbitrary shell command, where the space of harmless commands is unbounded
+  — failing safe there would deny everything and the run could not work at all. So it recognizes
+  specific dangerous invocations and lets the rest through. Stated plainly rather than papered
+  over: this is a backstop against the known irreversible paths, **not a sandbox**. A novel route to
+  the same effect is not caught here; that is what the companion controls (#517 supervisor-side
+  detection, #518 auto-clean refusing to destroy the evidence) are for.
+
+  Inside an armed run, any error in the guard **denies** rather than allows. Outside one — an
+  ordinary human session, which has no marker — the hook is silent and never interferes.
+
+  46 new tests, verified by reintroducing the defect: with the classifier stubbed to refuse nothing,
+  16 go red, including the end-to-end cases that drive the real hook contract over stdin.
+
 ## [0.28.1] - 2026-07-29
 ### Changed
 - **CI run volume cut ~60 %, and Board Sync no longer triggers itself** (#504; PR #512). The sync

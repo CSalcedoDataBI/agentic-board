@@ -60,6 +60,33 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# ── Brake check (#516) ──────────────────────────────────────────────────────────
+# Defense in depth. The PreToolUse guard already refuses `Board-Merge.ps1` inside a brake-armed
+# worktree, but that guard only exists where the plugin's hooks are installed. This check lives in
+# the merge path itself, so the refusal survives a session with no hooks, a direct pwsh call, or a
+# future launcher that forgets to wire them. -DryRun is exempt: it mutates nothing.
+if (-not $DryRun) {
+    $brakeGuard = Join-Path $PSScriptRoot 'Brake-Guard.ps1'
+    if (Test-Path $brakeGuard) {
+        $prevB = $env:ABIOS_BRAKEGUARD_DOTSOURCE
+        $env:ABIOS_BRAKEGUARD_DOTSOURCE = '1'
+        . $brakeGuard
+        $env:ABIOS_BRAKEGUARD_DOTSOURCE = $prevB
+        $brakeMarker = Read-BrakeMarker -StartDir (Get-Location).Path
+        if ($brakeMarker -and (@($brakeMarker.irreversible) -contains 'merge')) {
+            $forWhat = if ($brakeMarker.issue -gt 0) { " para el issue #$($brakeMarker.issue)" } else { "" }
+            Write-Host ""
+            Write-Host "FRENO ACTIVO: este worktree pertenece a un run autonomo con freno armado$forWhat." -ForegroundColor Red
+            Write-Host "  El merge es irreversible segun el contrato de este run, asi que NO se ejecuta." -ForegroundColor Red
+            Write-Host "  Deja el PR abierto y con el gate en verde; el merge lo hace una persona." -ForegroundColor DarkGray
+            Write-Host "  Marcador: $($brakeMarker.path)" -ForegroundColor DarkGray
+            Write-Host "  (Si de verdad quieres mergear a mano, borra ese archivo primero - a conciencia.)" -ForegroundColor DarkGray
+            Write-Host ""
+            exit 1
+        }
+    }
+}
+
 # The single resolver for owner/name from this clone's origin (#281, #392). Do NOT inline the regex
 # again: the copy-pasted version ate any dot in the repo name (midominio.com -> midominio).
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
