@@ -1,6 +1,49 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+- **The autonomy boundary can finally express the owner's actual rule** (#529, part of #526).
+  Until now `autonomy.irreversible` was a flat list of *actions* — the same for every kind of work —
+  so "code the agent closes by itself; anything I can judge by looking at it waits for me" had
+  nowhere to live. The boundary is now about **what the change produces**, not which action performs
+  it: a new `workClass` policy in the contract plus a pure classifier that reads the touched paths.
+
+  Why this framing rather than a stricter action list: asking someone who does not read code to
+  approve a diff is not caution, it hands them a decision they have no way to make. Asking them to
+  approve a **dashboard** is the opposite — they are the only one who can look at it and say whether
+  it reads right. So reports, pages, themes and images route to the human; scripts, tests, workflows
+  and prose stay with the agent.
+
+  Three decisions worth stating, because each is load-bearing:
+  - **Timing.** The brake marker is written at *launch*, before a line exists, so the class cannot
+    be decided there. The contract carries the *policy*; the *classification* runs later against the
+    paths the run actually touched. Facts first, decision second.
+  - **One visual file makes the whole change visual.** The failures are wildly asymmetric — the
+    owner glancing at something routine costs a minute; an agent shipping a report he wanted to see
+    costs trust.
+  - **"I could not tell what changed" is `unknown`, never `code`,** and `unknown` goes to the human.
+    Conflating "I looked and it was all code" with "I could not look" is precisely the defect this
+    repo keeps finding in its own surfaces.
+
+  Globs are compiled to regex rather than handed to `-like`, which has no `**` and whose `*` crosses
+  `/` — under `-like`, `src/*.css` would swallow `src/deep/nested/main.css` and the classification
+  would widen with every subdirectory. A project can declare what is visual *for it* (a website
+  where the posts are the product), replacing the defaults rather than silently merging with them.
+
+  **This alone changes no behaviour yet** — it adds the vocabulary and the classifier; nothing
+  consults them. Said plainly because the alternative is a release note that implies a capability
+  the code does not have. `merge` remains in every default contract's irreversible list, so no run
+  can merge regardless of class. Wiring it into the merge decision — against the *actual* changed
+  paths, at merge time, where the facts exist — is #530, and its review requirement is recorded on
+  that issue rather than left as a hope.
+
+  36 tests, mutation-verified: classifying nothing as visual turns 8 red, letting `unknown` pass as
+  approved 1, letting a single `*` cross a directory boundary 1, and restoring the
+  `TrimStart('./')` bug 1 — that last one found by external review: `TrimStart` takes a character
+  *set*, so it ate the leading dot of `.reports/x.md`, and a project pattern like `.reports/**`
+  would silently stop matching. A visual change reclassified as code is the one direction that
+  costs trust.
+
 ### Fixed
 - **A reviewer that never reviewed no longer reads as approval** (#510). On PR #508 the
   `claude-review` check reported **success** while the PR ended with **zero** reviews and zero
