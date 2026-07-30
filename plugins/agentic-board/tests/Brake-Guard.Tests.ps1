@@ -541,3 +541,51 @@ Describe 'Brake-PreToolUseHook — end to end through the real hook contract' {
         }
     }
 }
+
+Describe 'The marker remembers whether the human ORDERED end-to-end (#530)' {
+    # The permission belongs to the instruction that launched the run, not to a file that could be
+    # edited afterwards -- and the merge decision happens later, when this marker is the only thing
+    # that still remembers what was actually asked for.
+    BeforeAll {
+        $script:ERoot = Join-Path ([IO.Path]::GetTempPath()) ("brake-e2e-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:ERoot -Force | Out-Null
+    }
+    AfterAll {
+        if ($script:ERoot -and (Test-Path -LiteralPath $script:ERoot)) {
+            Remove-Item -LiteralPath $script:ERoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'records the order when it was given' {
+        $j = New-BrakeMarkerJson -Issue 530 -Irreversible @('merge') -EndToEnd $true | ConvertFrom-Json
+        $j.endToEnd | Should -BeTrue
+    }
+    It 'defaults to NOT ordered' {
+        (New-BrakeMarkerJson -Issue 530 -Irreversible @('merge') | ConvertFrom-Json).endToEnd | Should -BeFalse
+    }
+    It 'reads the order back through the marker' {
+        $wt = Join-Path $script:ERoot 'ordered'
+        New-Item -ItemType Directory -Path $wt -Force | Out-Null
+        Set-BrakeArmedState -WorkPath $wt -Armed $true -Issue 530 -Irreversible @('merge') -EndToEnd $true | Out-Null
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeTrue
+    }
+    It 'reads NOT ordered back when it was not ordered' {
+        $wt = Join-Path $script:ERoot 'plain'
+        New-Item -ItemType Directory -Path $wt -Force | Out-Null
+        Set-BrakeArmedState -WorkPath $wt -Armed $true -Issue 530 -Irreversible @('merge') | Out-Null
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
+    }
+    It 'an OLD marker with no such field reads as NOT ordered' {
+        # A run that predates this mode never received that permission; absence is not consent.
+        $wt = Join-Path $script:ERoot 'legacy'
+        New-Item -ItemType Directory -Path (Join-Path $wt '.agentic-board') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $wt '.agentic-board/brake-armed.json') `
+            -Value '{"issue":440,"irreversible":["merge"]}'
+        (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
+    }
+    It 'the marker still protects itself when the run was ordered end-to-end' {
+        # Ordering the finish is not permission to disarm the control that decides whether you may.
+        Test-IsBrakedCommand -Command 'rm .agentic-board/brake-armed.json' -Irreversible @('merge') |
+            Should -Be 'tamper'
+    }
+}

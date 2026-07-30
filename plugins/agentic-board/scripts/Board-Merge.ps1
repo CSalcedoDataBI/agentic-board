@@ -75,14 +75,56 @@ if (-not $DryRun) {
         $brakeMarker = Read-BrakeMarker -StartDir (Get-Location).Path
         if ($brakeMarker -and (@($brakeMarker.irreversible) -contains 'merge')) {
             $forWhat = if ($brakeMarker.issue -gt 0) { " para el issue #$($brakeMarker.issue)" } else { "" }
-            Write-Host ""
-            Write-Host "FRENO ACTIVO: este worktree pertenece a un run autonomo con freno armado$forWhat." -ForegroundColor Red
-            Write-Host "  El merge es irreversible segun el contrato de este run, asi que NO se ejecuta." -ForegroundColor Red
-            Write-Host "  Deja el PR abierto y con el gate en verde; el merge lo hace una persona." -ForegroundColor DarkGray
-            Write-Host "  Marcador: $($brakeMarker.path)" -ForegroundColor DarkGray
-            Write-Host "  (Si de verdad quieres mergear a mano, borra ese archivo primero - a conciencia.)" -ForegroundColor DarkGray
-            Write-Host ""
-            exit 1
+
+            # END-TO-END (#530). The brake is no longer all-or-nothing: a run the human ORDERED to
+            # finish may close CODE work that carries a real review and recorded tests for THIS
+            # commit. Every one of those is established here, at merge time, because this is the
+            # first moment the facts exist - the marker was written before a line of code did.
+            $verdict = $null
+            try {
+                $prevE = $env:ABIOS_ENDTOEND_DOTSOURCE
+                $env:ABIOS_ENDTOEND_DOTSOURCE = '1'
+                . (Join-Path $PSScriptRoot 'Expert-EndToEnd.ps1')
+                $env:ABIOS_ENDTOEND_DOTSOURCE = $prevE
+
+                $baseRef = git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null
+                if (-not $baseRef) { $baseRef = 'origin/main' }
+                $changed = @(git diff --name-only "$baseRef...HEAD" 2>$null | Where-Object { "$_".Trim() })
+                $wc = Get-WorkClass -ChangedPaths $changed
+
+                # Review + test evidence, both bound to the head commit. Read straight from the PR,
+                # which is where they survive the session.
+                $headSha = "$(gh pr view $PR --repo $Repo --json headRefOid -q .headRefOid 2>$null)".Trim()
+                $bodies  = @()
+                $cj = gh pr view $PR --repo $Repo --json comments 2>$null
+                if ($cj) { try { $bodies = @(($cj | ConvertFrom-Json).comments | ForEach-Object { "$($_.body)" }) } catch { } }
+                $reviewed = [bool]($headSha -and @($bodies | Where-Object {
+                    $_.Contains('[abios-review]') -and $_.Contains($headSha) }).Count -gt 0)
+                $tested   = [bool]($headSha -and @($bodies | Where-Object {
+                    $_.Contains('[abios-evidence]') -and $_.Contains($headSha) }).Count -gt 0)
+
+                $verdict = Test-EndToEndAllowed -Ordered ([bool]$brakeMarker.endToEnd) `
+                             -WorkClass $wc.class -ReviewedHead $reviewed -TestsRecorded $tested
+            } catch {
+                # Could not establish the facts -> no permission. "I could not check" is not a yes.
+                $verdict = @{ allowed = $false; missing = @("no pude verificar las condiciones ($_)")
+                              reason  = "no pude verificar las condiciones ($_)" }
+            }
+
+            if ($verdict.allowed) {
+                Write-Host ""
+                Write-Host (Format-EndToEndVerdict -Verdict $verdict) -ForegroundColor Green
+                Write-Host "  (Freno armado, pero el dueno ordeno llevarlo hasta el final y se cumplen las condiciones.)" -ForegroundColor DarkGray
+                Write-Host ""
+            } else {
+                Write-Host ""
+                Write-Host "FRENO ACTIVO: este worktree pertenece a un run autonomo con freno armado$forWhat." -ForegroundColor Red
+                Write-Host (Format-EndToEndVerdict -Verdict $verdict) -ForegroundColor Yellow
+                Write-Host "  Marcador: $($brakeMarker.path)" -ForegroundColor DarkGray
+                Write-Host "  (Si de verdad quieres mergear a mano, borra ese archivo primero - a conciencia.)" -ForegroundColor DarkGray
+                Write-Host ""
+                exit 1
+            }
         }
     }
 }

@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 ### Added
+- **`/board expert auto -EndToEnd` — an autonomous run can now finish what it started, under four
+  conditions** (#530, part of #526). The brake stops being all-or-nothing: a run the owner *ordered*
+  to finish may close **code** work that carries a real review and recorded tests for the current
+  commit. Everything else still stops for him.
+
+  The four conditions, all established at **merge time** — the first moment the facts exist, since
+  the brake marker is written before a line of code is:
+
+  | Condition | Why it cannot be dropped |
+  |---|---|
+  | The owner ordered it | The permission travels with the instruction, not with a setting written weeks ago |
+  | The change is code-class (#529) | What he judges by *looking* at it stays his, even when he ordered the finish |
+  | A real review exists for this commit (#510) | A green check is not a review |
+  | Automated tests ran and left evidence | "Testable and untested" is not finished work |
+
+  **Why four rather than a priority order.** Each covers a failure the others cannot see: a
+  reviewed, tested change that is a dashboard is still his to approve; an ordered, reviewed,
+  code-class change nobody ran is still unverified. Collapsing them into one flag is exactly how a
+  control ends up meaning less than it says — the defect already found in the brake (#440), the
+  review gate (#510) and the evidence blocks (#479). A refusal names **every** unmet condition, not
+  the first: one reason at a time forces a round trip per condition and misrepresents how far the
+  work actually is.
+
+  The tests requirement reads from the contract's `dod.tests`, **never** from the run's own opinion
+  that its change was untestable — a per-run "no se podía probar" is precisely the self-issued
+  excuse this removes. A project with genuinely no automated tests says so once, in writing.
+
+  Failing to *establish* the facts is not a yes: if the class, the review or the evidence cannot be
+  read, the merge is refused with that as the stated reason.
+
+  Found by its own tests while building: the decision function dot-sourced the classifier without
+  its guard, so **every call** also ran a `git diff` and printed a banner — a decision function with
+  a side effect per call, running git while deciding whether a merge is allowed.
+
+  19 decision tests + 5 marker tests, mutation-verified: removing the order condition turns 3 red,
+  the work-class condition 6, the review condition 4, and the tests condition 5.
+
 - **The autonomy boundary can finally express the owner's actual rule** (#529, part of #526).
   Until now `autonomy.irreversible` was a flat list of *actions* — the same for every kind of work —
   so "code the agent closes by itself; anything I can judge by looking at it waits for me" had
