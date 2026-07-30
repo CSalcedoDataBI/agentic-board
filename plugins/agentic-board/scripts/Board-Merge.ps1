@@ -65,6 +65,12 @@ $ErrorActionPreference = "Stop"
 # worktree, but that guard only exists where the plugin's hooks are installed. This check lives in
 # the merge path itself, so the refusal survives a session with no hooks, a direct pwsh call, or a
 # future launcher that forgets to wire them. -DryRun is exempt: it mutates nothing.
+#
+# DEFINED here, CALLED after the repo and token are resolved (see the call site below). Running it
+# inline at this point read `$Repo` while it was still the empty default and `$env:GH_TOKEN` before
+# it was set, so every PR fact came back blank and a legitimately ordered run was refused for
+# "conditions unmet" that were never actually read.
+function Invoke-BrakeMergeCheck {
 if (-not $DryRun) {
     $brakeGuard = Join-Path $PSScriptRoot 'Brake-Guard.ps1'
     if (Test-Path $brakeGuard) {
@@ -132,9 +138,14 @@ if (-not $DryRun) {
                 $tested = $false
                 $chk = gh pr checks $PR --repo $Repo --json name,bucket 2>$null
                 if ($chk) {
-                    $arr = @($chk | ConvertFrom-Json)
-                    $bad = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
-                    $tested = ($arr.Count -gt 0 -and $bad.Count -eq 0)
+                    $arr    = @($chk | ConvertFrom-Json)
+                    $bad    = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
+                    $passed = @($arr | Where-Object { "$($_.bucket)" -eq 'pass' })
+                    # At least one check must actually have PASSED. Counting "nothing failed" as
+                    # tested let a PR whose only check was SKIPPED satisfy the requirement - no CI
+                    # ran on this commit at all, which is the same "green means nobody looked" this
+                    # whole area keeps producing.
+                    $tested = ($passed.Count -gt 0 -and $bad.Count -eq 0)
                 }
 
                 $verdict = Test-EndToEndAllowed -Ordered ([bool]$brakeMarker.endToEnd) `
@@ -164,6 +175,7 @@ if (-not $DryRun) {
             }
         }
     }
+}
 }
 
 # The single resolver for owner/name from this clone's origin (#281, #392). Do NOT inline the regex
@@ -207,6 +219,11 @@ $token = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
 if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar no esta en el entorno USER de Windows." }
 # On purpose: identity must match the repo owner, not whatever ran last.
 $env:GH_TOKEN = $token
+
+# NOW the brake check can read the PR: $Repo is resolved and the token is in place. Defined far
+# above, called here on purpose - it refuses (exit 1) before anything is merged, and every fact it
+# weighs is one it could actually read.
+Invoke-BrakeMergeCheck
 
 # -- 3. Identity + admin (bypass candidate) ------------------------------------
 $login = "$(gh api user --jq .login 2>$null)".Trim()
