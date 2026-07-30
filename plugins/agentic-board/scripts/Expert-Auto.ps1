@@ -155,7 +155,12 @@ Write-Host "=== /board expert auto  (issue #$Issue) ===" -ForegroundColor Cyan
 Write-Host "  Brief composed -> $briefPath" -ForegroundColor Green
 Write-Host "  Autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
 if ($stopAtPR) {
-    Write-Host "  Brake ARMED: the launched session is briefed to stop at a reviewed PR (no merge step)." -ForegroundColor Green
+    # #516: this line used to claim a brake that was only a paragraph in the brief. It is now a
+    # control - Start-WorktreeSession writes a marker into the worktree and a PreToolUse hook
+    # refuses the irreversible call - so the claim is finally true. Keep the wording honest:
+    # if the arming step fails, Start-WorktreeSession refuses to launch rather than print this.
+    Write-Host "  Brake ARMED: the launched session is briefed to stop at a reviewed PR, AND a" -ForegroundColor Green
+    Write-Host "               PreToolUse guard refuses the merge if it asks anyway." -ForegroundColor Green
 } else {
     Write-Host "  Brake OFF: 'merge' is not irreversible in this contract - the session WILL merge its own PR." -ForegroundColor Yellow
 }
@@ -168,7 +173,7 @@ if ($DryRun) {
 } else {
     Write-Host "  Launching the autonomous session in an isolated worktree..." -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot 'Board-Work.ps1') -ProjectNum $ProjectNum -Parallel $Issue -Launch -TokenVar $TokenVar `
-        -StopAtPR:$stopAtPR -BriefFile $briefPath
+        -StopAtPR:$stopAtPR -BriefFile $briefPath -Irreversible @($contract.autonomy.irreversible)
     Write-Host ""
     Write-Host "  The launched session is briefed by $briefPath — it will research, build, test with" -ForegroundColor DarkGray
     Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray

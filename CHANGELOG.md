@@ -1,5 +1,108 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **The irreversible brake is now a control, not a paragraph** (#516, part of #440). `/board expert
+  auto` printed `Brake ARMED` while enforcing nothing: the brake lived only as prose in the launch
+  briefing, and an observed run merged its own PR to `main` — closing its epic's sub-issues — while
+  every self-report said the brake was on. Instruction alone is what drifted, so the fix is a
+  backstop that does not depend on the agent's cooperation:
+  - `Start-WorktreeSession` **arms** the run by writing `.agentic-board/brake-armed.json` into the
+    launched worktree, carrying that run's own `autonomy.irreversible` list from the contract (so
+    the guard and the briefing can never disagree). If arming fails, the session is **not launched**
+    — an unarmed run that believes it is armed is precisely the #440 failure.
+  - A new **`PreToolUse` hook** (`Brake-PreToolUseHook.ps1`) walks up from the session's cwd, finds
+    the marker, and **denies** the tool call before it executes — `gh pr merge`, `Board-Merge.ps1`,
+    the REST merge endpoints, and the publish/deploy/refresh/delete paths the contract brakes on.
+  - `Board-Merge.ps1` **refuses on its own** inside an armed worktree, so the refusal survives a
+    session with no hooks installed or a direct call.
+
+  Two design points worth stating, because both are load-bearing:
+
+  **A git hook could not have done this.** The original suggestion was a `pre-push`/`pre-merge`
+  hook, but `gh pr merge` is a server-side API call — no local git operation occurs, so there is
+  nothing for a git hook to intercept. The refusal has to happen at the tool layer.
+
+  **The classifier's fail direction is inverted from `Expert-Autonomy`, deliberately.** That one
+  classifies an action name from a closed vocabulary, so an unknown verb fails safe (stop and ask).
+  This one classifies an arbitrary shell command, where the space of harmless commands is unbounded
+  — failing safe there would deny everything and the run could not work at all. So it recognizes
+  specific dangerous invocations and lets the rest through. Stated plainly rather than papered
+  over: this is a backstop against the known irreversible paths, **not a sandbox**. A novel route to
+  the same effect is not caught here; that is what the companion controls (#517 supervisor-side
+  detection, #518 auto-clean refusing to destroy the evidence) are for.
+
+  Inside an armed run, any error in the guard **denies** rather than allows. Outside one — an
+  ordinary human session, which has no marker — the hook is silent and never interferes.
+
+  **Four bypasses the first cut of this control still had**, found by external review and each now
+  closed with its own regression test:
+  - A `-DryRun` token **anywhere** on the command line waved through the whole thing, so
+    `echo --dry-run; gh pr merge 490` merged. The classifier now splits the command on shell
+    separators and judges each segment on its own — a harmless prefix cannot vouch for what
+    follows it.
+  - Newlines were collapsed into spaces *before* that split, welding a multi-line script into one
+    segment and reopening the same hole. A newline is now an explicit separator, which is what it
+    means in a shell.
+  - The run could **disarm itself**: deleting a local file is otherwise allowed, so
+    `rm .agentic-board/brake-armed.json` turned the entire control off in one command. Tampering
+    with the marker — deleting it, overwriting it, wiping the state directory, or editing it
+    through the file-writing tools — is now refused on its own terms, *not* gated on the
+    contract's list. An emptied `irreversible` list reads as tampering too, and falls back to the
+    full vocabulary rather than to silence.
+  - The REST merge endpoint was only recognised behind `gh api`, leaving the identical request
+    open via `curl`, `Invoke-RestMethod`, python or node — all holding the same token. It is now
+    matched by **endpoint**, independent of the client.
+
+  **Three more the second review round found**, after those four were closed:
+  - **Shell quoting hid the subcommand.** `gh pr 'merge' 490` did not match, and merged. Quote
+    characters are now removed during normalization, the way the shell removes them.
+  - **A runtime variable is invisible to any string matching** — `$verb='merge'; gh pr $verb 490`.
+    Rather than pretend otherwise, a high-risk client reaching for an unresolvable subcommand
+    (`gh pr $x`, `gh $x`) is now refused: an autonomous run has no legitimate need to call `gh`
+    through a variable, and refusing is the safe side of a call the guard genuinely cannot make.
+  - **The hook failed OPEN if its own guard failed to load.** The armed flag was set only after
+    dot-sourcing `Brake-Guard.ps1`, so a broken guard left the error handler believing the run was
+    unarmed — silently restoring the exact capability the control exists to remove. A
+    dependency-free probe now establishes armed-or-not *first*, and everything after it can fail
+    without changing which way it fails.
+
+  Arming also **disarms**: a worktree reused from an earlier braked run kept its marker, so the
+  hook went on refusing merges for a run whose contract no longer braked on them, while the
+  launcher printed `Brake OFF`. The marker now follows the contract in both directions — which is
+  what makes that message true rather than another claim the code does not honour.
+
+  **Two more from the third round:**
+  - **A line continuation is one command, not two.** `gh pr \`<newline>`merge 490` runs as a single
+    command in the shell, but the newline-as-separator rule split it into two harmless-looking
+    halves. Continuations (backslash for sh, backtick for PowerShell) are now joined *before*
+    newlines become separators.
+  - **`MultiEdit` was missing from the hook matcher**, leaving one uncovered write path to the
+    marker. Listing a tool this harness may not expose costs nothing; omitting one it does expose
+    costs the whole control.
+
+  **Three more from the fourth round:**
+  - **A preview claim is now only honoured from something that can preview.** The dry-run
+    exemption skipped a whole segment on the token alone, so
+    `curl -H "X-Test: --dry-run" -X PUT .../pulls/12/merge` was allowed — a header does not make a
+    merge stop mutating. The exemption is scoped to commands that actually have a preview mode.
+  - **`gh api` deletes were caught in one spelling only.** `--method=DELETE` and `-X DELETE` issue
+    the identical request and went through.
+  - **`git push origin :branch`** deletes a remote branch through syntax the `--delete` pattern
+    never saw. (`HEAD:main`, an ordinary push refspec, stays allowed.)
+
+  97 tests, and every protection was verified by reintroducing the exact defect it prevents rather
+  than by trusting a green suite: stubbing the classifier turns 16 red, a global dry-run exemption
+  3, an unprotected marker 6, a `gh api`-anchored REST pattern 4, no quote-stripping 3, no
+  variable-indirection pattern 2, joining no line continuations 3, an unscoped preview exemption 2,
+  one delete spelling 2, no refspec deletion 1, and deciding the armed flag after the dot-source 1.
+
+  The review ran in rounds until one came back empty. Rounds 1–4 found **12 real defects** — every
+  one of them in code whose tests were already green, and four of them in the fix for the round
+  before. That is the honest cost of a control this size, and the reason the companion issues
+  (#517 supervisor-side detection, #518 auto-clean refusing to destroy evidence) exist: this is a
+  backstop against known irreversible paths, not a sandbox.
+
 ## [0.28.1] - 2026-07-29
 ### Changed
 - **CI run volume cut ~60 %, and Board Sync no longer triggers itself** (#504; PR #512). The sync
