@@ -217,6 +217,48 @@ Describe 'Test-IsBrakedCommand — bypasses found by external review (round 3)' 
     }
 }
 
+Describe 'Test-IsBrakedCommand — bypasses found by external review (round 4)' {
+    Context 'a preview claim is only honoured from something that can preview' {
+        It 'denies a REST merge carrying a dry-run token in an unrelated argument' {
+            Test-IsBrakedCommand -Command 'curl -H "X-Test: --dry-run" -X PUT https://api.github.com/repos/o/r/pulls/12/merge' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'denies gh pr merge with a bolted-on dry-run token it does not support' {
+            Test-IsBrakedCommand -Command 'gh pr merge 490 --dry-run' -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'still allows the tool''s own script in -DryRun' {
+            Test-IsBrakedCommand -Command 'pwsh Board-Merge.ps1 -PR 490 -DryRun' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'still allows npm publish --dry-run' {
+            Test-IsBrakedCommand -Command 'npm publish --dry-run' -Irreversible $script:AllIrr | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'every spelling of the same destructive request' {
+        It 'denies gh api --method=DELETE' {
+            Test-IsBrakedCommand -Command 'gh api --method=DELETE repos/o/r/issues/1' -Irreversible $script:AllIrr |
+                Should -Be 'delete'
+        }
+        It 'denies gh api -X DELETE' {
+            Test-IsBrakedCommand -Command 'gh api -X DELETE repos/o/r/issues/1' -Irreversible $script:AllIrr |
+                Should -Be 'delete'
+        }
+        It 'denies the refspec form of a remote branch delete' {
+            Test-IsBrakedCommand -Command 'git push origin :feature-x' -Irreversible $script:AllIrr |
+                Should -Be 'delete'
+        }
+        It 'still allows an ordinary push refspec' {
+            Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'still allows a plain push' {
+            Test-IsBrakedCommand -Command 'git push -u origin issue-516-x' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Read-BrakeMarker — an emptied marker is tampering, not permission' {
     It 'treats an empty irreversible list as the full vocabulary' {
         $dir = Join-Path ([IO.Path]::GetTempPath()) ("brake-empty-" + [Guid]::NewGuid().ToString('N'))

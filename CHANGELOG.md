@@ -81,14 +81,27 @@
     marker. Listing a tool this harness may not expose costs nothing; omitting one it does expose
     costs the whole control.
 
-  88 tests, and every protection was verified by reintroducing the exact defect it prevents rather
+  **Three more from the fourth round:**
+  - **A preview claim is now only honoured from something that can preview.** The dry-run
+    exemption skipped a whole segment on the token alone, so
+    `curl -H "X-Test: --dry-run" -X PUT .../pulls/12/merge` was allowed — a header does not make a
+    merge stop mutating. The exemption is scoped to commands that actually have a preview mode.
+  - **`gh api` deletes were caught in one spelling only.** `--method=DELETE` and `-X DELETE` issue
+    the identical request and went through.
+  - **`git push origin :branch`** deletes a remote branch through syntax the `--delete` pattern
+    never saw. (`HEAD:main`, an ordinary push refspec, stays allowed.)
+
+  97 tests, and every protection was verified by reintroducing the exact defect it prevents rather
   than by trusting a green suite: stubbing the classifier turns 16 red, a global dry-run exemption
   3, an unprotected marker 6, a `gh api`-anchored REST pattern 4, no quote-stripping 3, no
-  variable-indirection pattern 2, joining no line continuations 3, and deciding the armed flag
-  after the dot-source 1.
+  variable-indirection pattern 2, joining no line continuations 3, an unscoped preview exemption 2,
+  one delete spelling 2, no refspec deletion 1, and deciding the armed flag after the dot-source 1.
 
-  The review ran in rounds until one came back empty — rounds 1, 2 and 3 found 4, 3 and 2 real
-  defects respectively, every one of them in code whose tests were already green.
+  The review ran in rounds until one came back empty. Rounds 1–4 found **12 real defects** — every
+  one of them in code whose tests were already green, and four of them in the fix for the round
+  before. That is the honest cost of a control this size, and the reason the companion issues
+  (#517 supervisor-side detection, #518 auto-clean refusing to destroy evidence) exist: this is a
+  backstop against known irreversible paths, not a sandbox.
 
 ## [0.28.1] - 2026-07-29
 ### Changed

@@ -81,8 +81,12 @@ $script:BrakePatterns = @(
     # --- delete: destroying remote state --------------------------------------------
     @{ action = 'delete';  pattern = '\bgh\s+repo\s+delete\b' }
     @{ action = 'delete';  pattern = '\bgh\s+(issue|release)\s+delete\b' }
-    @{ action = 'delete';  pattern = '\bgh\s+api\b.*--method\s+delete\b' }
+    # Every spelling gh accepts for the same DELETE request, not just the long one.
+    @{ action = 'delete';  pattern = '\bgh\s+api\b.*(--method[=\s]+delete\b|-x\s+delete\b)' }
     @{ action = 'delete';  pattern = '\bgit\s+push\b.*--delete\b' }
+    # git's other remote-branch deletion syntax: `git push origin :branch`. The leading whitespace
+    # in the lookbehind keeps `HEAD:main` (an ordinary push refspec) out of it.
+    @{ action = 'delete';  pattern = '\bgit\s+push\b[^;]*\s:\S' }
 
     # --- indirection through a variable ---------------------------------------------
     # Quote removal (see ConvertTo-NormalizedCommand) handles `gh pr 'merge'`, but a value the
@@ -101,6 +105,25 @@ $script:BrakePatterns = @(
 # bypass: `echo --dry-run; gh pr merge 490` contains a dry-run token, so the guard waved through
 # a real merge sitting in the next segment.
 $script:DryRunPattern = '(^|\s)(-dryrun|-whatif|--dry-run)(\s|$)'
+
+# ...and only for commands that HAVE a preview mode. The token alone is not enough: it can appear
+# inside an unrelated argument, and treating that as a preview whitelisted a real merge -
+# `curl -H "X-Test: --dry-run" -X PUT .../pulls/12/merge` mutates exactly as much as it would
+# without the header. A preview claim is only honoured from something that can actually preview.
+$script:PreviewCapablePatterns = @(
+    '\S+\.ps1\b'            # this tool's own scripts take -DryRun / -WhatIf
+    '\bnpm\s+publish\b'     # npm publish --dry-run
+)
+
+# True only when the segment BOTH carries a preview flag and is a command that can honour one.
+function Test-IsGenuinePreview {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Segment)
+    if ($Segment -notmatch $script:DryRunPattern) { return $false }
+    foreach ($p in $script:PreviewCapablePatterns) {
+        if ($Segment -match $p) { return $true }
+    }
+    return $false
+}
 
 # Tampering with the marker is denied on its own terms, NOT gated on the contract's list: the
 # marker is what makes the contract enforceable, so "may I disarm the brake?" is never a question
@@ -170,7 +193,7 @@ function Test-IsBrakedCommand {
         $seg = $segment.Trim()
         if (-not $seg) { continue }
         if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }  # the separator itself
-        if ($seg -match $script:DryRunPattern) { continue }                            # this segment only
+        if (Test-IsGenuinePreview -Segment $seg) { continue }                          # this segment only
         foreach ($p in $script:BrakePatterns) {
             if ($irr -notcontains $p.action) { continue }
             if ($seg -match $p.pattern) { return $p.action }
@@ -345,6 +368,7 @@ function New-BrakeDenyJson {
 
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_BRAKEGUARD_DOTSOURCE) { return }
+
 
 
 
