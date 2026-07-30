@@ -89,6 +89,11 @@ jobs:
             | jq --arg sha "$sha" '[.comments[] | select(.body | test("\\[abios-review\\]")) | select(.body | contains($sha))] | length')
           echo "comentarios [abios-review] para $sha: $marks"
           if [ "$marks" -eq 0 ]; then
+            # Causa raíz más común, y la que hace falta nombrar para no perseguir fantasmas:
+            # claude-code-action SE OMITE A SÍ MISMA en cualquier PR que edite su propio archivo
+            # de workflow (validación de GitHub) — y sale con éxito. Ese es literalmente el check
+            # verde sin review que motivó #510.
             echo "::error::claude-review terminó sin dejar review para el commit $sha. Un check verde aquí se leería como 'revisado' cuando nadie miró este código (#510)."
+            echo "::notice::Si este PR modifica .github/workflows/pr-review.yml, la acción se omitió sola por validación de workflow y NO revisó nada. Es esperado: registra una revisión real con Board-ReviewGate -RecordReview y el gate la aceptará."
             exit 1
           fi

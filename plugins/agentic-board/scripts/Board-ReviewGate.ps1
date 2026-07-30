@@ -466,6 +466,15 @@ $checksOut = gh pr checks $PR --repo $Repo --watch 2>&1
 $checksExit = $LASTEXITCODE
 $checksText = ($checksOut | Out-String).Trim()
 if ($checksText) { Write-Host $checksText }
+# Which checks failed, by name. `gh pr checks` prints TAB-separated name/state/elapsed/url, and
+# the names matter for the verdict: a REVIEWER job failing asks a review question, not a CI one.
+$failedChecks = @()
+foreach ($line in @($checksOut)) {
+    $parts = ("$line" -split "`t")
+    if ($parts.Count -ge 2 -and $parts[1].Trim() -match '(?i)^(fail|failure|error)') {
+        $failedChecks += $parts[0].Trim()
+    }
+}
 if ($checksExit -ne 0) {
     if ($checksText -match '(?i)no checks') {
         Write-Host "  (sin checks configurados - cuenta como pass, considera /board automate)" -ForegroundColor DarkGray
@@ -557,6 +566,24 @@ Write-Host "--------------------------------" -ForegroundColor Cyan
 Write-Host ""
 
 # ── 4. Verdict ─────────────────────────────────────────────────────────────────
+# A failing REVIEWER check asks "was this reviewed?", not "does the code work?". Once a real
+# review is on record for this commit, that question is answered and the reviewer job's own red
+# is no longer a reason to block - otherwise the flow deadlocks in a case that is routine:
+# `claude-code-action` SKIPS ITSELF (and exits success) on any PR that edits its own workflow
+# file, so its verification correctly reports "nobody reviewed" and would then block that PR
+# forever, no matter how carefully a human or an external reviewer read it.
+# Narrow on purpose: only when EVERY failing check is a reviewer job AND real evidence exists.
+$reviewerCheckNames = @('claude-review','pr-review','copilot','copilot-review')
+if (-not $checksOk -and $evidence.reviewed -and $failedChecks.Count -gt 0) {
+    $nonReviewerFailures = @($failedChecks | Where-Object { $_.ToLowerInvariant() -notin $reviewerCheckNames })
+    if ($nonReviewerFailures.Count -eq 0) {
+        $checksOk = $true
+        Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($failedChecks -join ', ')) -ForegroundColor DarkYellow
+        Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray
+        Write-Host "        contestada, asi que deja de ser motivo de bloqueo." -ForegroundColor DarkGray
+    }
+}
+
 $blockers = @()
 if (-not $checksOk)                        { $blockers += "checks de CI fallando" }
 if ($decision -eq "CHANGES_REQUESTED")     { $blockers += "review pide cambios (CHANGES_REQUESTED)" }
