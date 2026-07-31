@@ -156,8 +156,11 @@ if (-not $DryRun) {
                 # tested without the network.
                 # Presence and greenness are read separately: a contract that waives the test
                 # REQUIREMENT must not thereby waive a CI run that exists and failed (#539).
+                # $LASTEXITCODE matters here: gh does not throw, so a transient failure returns
+                # empty stdout and would otherwise read as "this project has no CI" (#539).
                 $chk = gh pr checks $prNumber --repo $Repo --json name,bucket 2>$null
-                $ci  = Get-CiEvidence -ChecksJson "$chk"
+                $chkExit = $LASTEXITCODE
+                $ci  = Get-CiEvidence -ChecksJson "$chk" -ExitCode $chkExit
 
                 $verdict = Test-EndToEndAllowed -Ordered ([bool]$brakeMarker.endToEnd) `
                              -WorkClass $wc.class -ReviewedHead $reviewed -TestsRecorded $ci.passed `

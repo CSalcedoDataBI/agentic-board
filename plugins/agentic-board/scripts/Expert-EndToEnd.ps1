@@ -177,7 +177,19 @@ function Test-CiChecksPassed {
     laundered into "this project has no CI", which is the permissive reading.
 #>
 function Get-CiEvidence {
-    param([Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$ChecksJson)
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$ChecksJson,
+        # Exit status of the command that produced $ChecksJson. Native commands do NOT throw in
+        # PowerShell, so a transient `gh pr checks` failure returns empty stdout and looks exactly
+        # like "this project has no CI" - which, under a dod.tests=false contract, was a merge.
+        # Absent (0) keeps every existing caller on the previous behaviour.
+        [int]$ExitCode = 0
+    )
+    # Empty stdout from a FAILED command means we could not read the checks, not that there are
+    # none. Unreadable is present-and-not-green; only a clean run reporting nothing is "no CI".
+    if ([string]::IsNullOrWhiteSpace($ChecksJson) -and $ExitCode -ne 0) {
+        return @{ present = $true; passed = $false }
+    }
     if ([string]::IsNullOrWhiteSpace($ChecksJson)) {
         return @{ present = $false; passed = $false }
     }

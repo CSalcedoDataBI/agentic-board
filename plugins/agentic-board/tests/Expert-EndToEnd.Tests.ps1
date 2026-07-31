@@ -272,3 +272,38 @@ Describe 'Get-CiEvidence — presence and greenness are different questions (#53
         $e.passed  | Should -BeFalse
     }
 }
+
+Describe 'Get-CiEvidence — a failed READ is not an absent CI (#539, external review round 2)' {
+    # Native commands do not throw in PowerShell. A transient `gh pr checks` failure returns empty
+    # stdout, which looked identical to "this project has no CI" - and under a dod.tests=false
+    # contract that difference decided a merge.
+    It 'treats empty output from a FAILED command as present-and-not-green' {
+        $e = Get-CiEvidence -ChecksJson '' -ExitCode 1
+        $e.present | Should -BeTrue
+        $e.passed  | Should -BeFalse
+    }
+    It 'still treats empty output from a CLEAN run as no CI' {
+        $e = Get-CiEvidence -ChecksJson '' -ExitCode 0
+        $e.present | Should -BeFalse
+    }
+    It 'trusts real output even when the command exited non-zero' {
+        # gh exits non-zero when checks are merely FAILING - the payload is still valid.
+        $e = Get-CiEvidence -ChecksJson '[{"bucket":"fail","name":"Pester"}]' -ExitCode 1
+        $e.present | Should -BeTrue
+        $e.passed  | Should -BeFalse
+    }
+    It 'trusts real passing output even when the command exited non-zero' {
+        $e = Get-CiEvidence -ChecksJson '[{"bucket":"pass","name":"Pester"}]' -ExitCode 8
+        $e.passed | Should -BeTrue
+    }
+    It 'keeps callers that do not pass an exit code on the old behaviour' {
+        (Get-CiEvidence -ChecksJson '').present | Should -BeFalse
+    }
+    It 'closes the merge path this opened' {
+        # The end-to-end consequence, stated as a test: no-suite contract + unreadable CI = refuse.
+        $ci = Get-CiEvidence -ChecksJson '' -ExitCode 1
+        $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
+                                  -TestsRecorded $ci.passed -TestsRequired $false -CiPresent $ci.present
+        $v.allowed | Should -BeFalse
+    }
+}

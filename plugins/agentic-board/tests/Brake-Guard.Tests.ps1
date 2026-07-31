@@ -801,3 +801,45 @@ Describe 'Test-IsBrakedCommand — the gate must be the script INVOKED, not one 
             -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Gate | Should -Be ''
     }
 }
+
+Describe 'Test-IsGenuineGateInvocation — the token must END at the gate (#539, external review round 2)' {
+    # The tokeniser matched `...board-merge.ps1` without requiring the token to END there, so a
+    # path that merely STARTS with the real gate captured the gate exactly and passed:
+    #     pwsh -File <gate>-bypass.ps1 -PR 5
+    # A different script ran, with none of the four conditions in it.
+    #
+    # The same whitespace tokenisation refused a GENUINE gate whose path contains spaces — quotes
+    # are stripped before this point, so `C:\Program Files\...` split into fragments. Both are
+    # fixed by anchoring on the gate itself: every occurrence of the script name must be the tail
+    # of the real gate path AND sit on token boundaries.
+    BeforeAll {
+        $script:G      = 'C:\plug\0.29.0\scripts\Board-Merge.ps1'
+        $script:GSpace = 'C:\Program Files\plug\scripts\Board-Merge.ps1'
+    }
+
+    It 'REFUSES a script whose path merely starts with the gate' {
+        Test-IsBrakedCommand -Command "pwsh -File $script:G-bypass.ps1 -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:G | Should -Be 'merge'
+    }
+    It 'REFUSES a sibling file sharing the gate''s directory and prefix' {
+        Test-IsBrakedCommand -Command "pwsh -File C:\plug\0.29.0\scripts\Board-Merge.ps1.bak.ps1 -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:G | Should -Be 'merge'
+    }
+    It 'REFUSES a longer path that merely ENDS with the gate''s own tail' {
+        Test-IsBrakedCommand -Command 'pwsh -File C:\evil\plug\0.29.0\scripts\Board-Merge.ps1 -PR 5' `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:G | Should -Be 'merge'
+    }
+    It 'ALLOWS a genuine gate path containing spaces' {
+        # Legitimate-path regression: quotes are gone by now, so this must not be tokenised apart.
+        Test-IsBrakedCommand -Command "pwsh -File $script:GSpace -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:GSpace | Should -Be ''
+    }
+    It 'still allows the plain genuine gate' {
+        Test-IsBrakedCommand -Command "pwsh -File $script:G -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:G | Should -Be ''
+    }
+    It 'still refuses the mention-as-argument spoof' {
+        Test-IsBrakedCommand -Command "pwsh ./board-merge.ps1 $script:G -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:G | Should -Be 'merge'
+    }
+}

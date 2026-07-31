@@ -98,10 +98,33 @@
   checks" cannot be laundered into "this project has no CI".
 
   Two pre-existing tests had encoded the first half of that defect and were corrected rather than
-  worked around. Mutation-verified: restoring the substring match turns 2 red, waiving red CI
-  again turns 1 red.
+  worked around.
 
-  1,615 tests suite-wide.
+### Fixed (external review, round 2 — on the round-1 fixes)
+- **The gate token had to END at the gate.** The tokeniser matched `…board-merge.ps1` without
+  requiring the token to stop there, so a path merely *starting* with the real gate captured it
+  exactly and passed — `<gate>-bypass.ps1` ran a different script with none of the four conditions
+  in it. The same whitespace tokenisation also refused a **genuine** gate whose path contains
+  spaces (quotes are stripped before this point), breaking the legitimate path on any
+  `C:\Program Files\…` install. Both are fixed by anchoring on the gate itself: every occurrence
+  of the script name must be the tail of the real gate path and sit on token boundaries at both
+  ends.
+- **A failed CI *read* is not an absent CI.** Native commands do not throw in PowerShell, so a
+  transient `gh pr checks` failure returns empty stdout — indistinguishable from "this project has
+  no CI", and under a `dod.tests: false` contract that difference decided a merge. The exit status
+  is now weighed: empty output from a failed command is present-and-not-green; only a clean run
+  reporting nothing counts as no CI. Real output is still trusted when the command exits non-zero,
+  because `gh` exits non-zero merely for *failing* checks.
+
+  Mutation-verified across both rounds: restoring the substring match turns 2 red, waiving red CI
+  turns 1 red, dropping the token boundary turns 2 red, ignoring the exit status turns 2 red.
+
+  **Three external review rounds, each finding something real the previous rounds and the full
+  suite had missed.** Recorded because it is the argument for the practice: every round's findings
+  were live false-permission paths in a control whose whole purpose is to deny them, and the suite
+  was green the entire time.
+
+  1,627 tests suite-wide.
 
 ## [0.29.0] - 2026-07-30
 ### Added

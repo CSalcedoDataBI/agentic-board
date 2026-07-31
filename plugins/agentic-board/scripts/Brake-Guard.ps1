@@ -135,11 +135,27 @@ function Test-IsGenuineGateInvocation {
     )
     if (-not $Gate) { return $false }
     $seg = ConvertTo-ComparablePath $Segment
-    # Tokens are whitespace/separator-delimited; quotes are already gone by normalization time.
-    $tokens = [regex]::Matches($seg, '[^\s;|&]*board-merge\.ps1')
-    if ($tokens.Count -eq 0) { return $false }
-    foreach ($t in $tokens) {
-        if ($t.Value -ne $Gate) { return $false }
+    $gate = ConvertTo-ComparablePath $Gate
+
+    # Anchor on the GATE, not on a whitespace token. Two failures came from doing it the other way:
+    #   - `[^\s;|&]*board-merge\.ps1` stopped matching AT the script name, so `<gate>-bypass.ps1`
+    #     captured exactly `<gate>` and passed while a different script ran;
+    #   - splitting on whitespace refused a genuine gate whose path contains spaces (quotes are
+    #     already stripped by now), breaking the legitimate path on any `C:\Program Files\...`.
+    # So: every occurrence of the script name must be the tail of the real gate path, and must sit
+    # on token boundaries at both ends.
+    $hits = [regex]::Matches($seg, 'board-merge\.ps1')
+    if ($hits.Count -eq 0) { return $false }
+    foreach ($h in $hits) {
+        $end = $h.Index + $h.Length
+        # The token has to END here - otherwise this is `<gate>-bypass.ps1` or `<gate>.bak.ps1`.
+        if ($end -lt $seg.Length -and $seg[$end] -notmatch '[\s;|&]') { return $false }
+        # ...and the text ending here has to BE the gate, spaces and all.
+        $start = $end - $gate.Length
+        if ($start -lt 0) { return $false }
+        if ($seg.Substring($start, $gate.Length) -ne $gate) { return $false }
+        # ...and the gate has to START at a token boundary, so `C:\evil\<gate>` is not the gate.
+        if ($start -gt 0 -and $seg[$start - 1] -notmatch '[\s;|&=]') { return $false }
     }
     return $true
 }
