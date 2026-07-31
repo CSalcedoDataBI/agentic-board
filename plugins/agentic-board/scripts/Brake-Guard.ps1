@@ -46,6 +46,18 @@ $ErrorActionPreference = "Stop"
 # launch and read by the hook, the supervisor (#517) and the teardown (#518).
 $script:BrakeMarkerName = 'brake-armed.json'
 
+# `git` accepts GLOBAL options between the program and the subcommand - `git -C <path> push`,
+# `git -c k=v push`, `git --no-pager push`. Anchoring rules on `\bgit\s+push\b` demanded that
+# `push` follow `git` immediately, so ONE ordinary flag shook off every git rule at once (#542,
+# review round 3). That included the branch-delete rules, which predate this work: the hole was
+# never about the new patterns, it was about the anchor they all copied.
+#
+# Only FLAG-SHAPED tokens may sit in the gap, each with at most one value, so `git commit -m
+# "push to main"` (quotes are stripped by then) is not mistaken for a push. Repetition is BOUNDED
+# rather than `*`: this runs on every tool call, and an unbounded nested quantifier over
+# adversarial input is a stall waiting to happen.
+$script:GitCmd = '\bgit\s+(?:-{1,2}[^\s;|&]+\s+(?:[^\s;|&-][^\s;|&]*\s+)?){0,5}'
+
 # Command patterns that REACH an irreversible action, grouped by the contract's action vocabulary
 # (the same words Expert-Autonomy uses, so one contract drives both).
 #
@@ -105,8 +117,8 @@ $script:BrakePatterns = @(
     #
     # LIMIT: this core is pure (no git access), so it cannot ask the repo what its default branch
     # is. A project whose default is neither `main` nor `master` is not covered.
-    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s\+?[^\s;|&]*[:/](main|master)(?=[\s;&|<>]|$)' }
-    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s(main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s\+?[^\s;|&]*[:/](main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s(main|master)(?=[\s;&|<>]|$)' }
 
     # --- publish: making something public / cutting a release -----------------------
     @{ action = 'publish'; pattern = '\bgh\s+release\s+create\b' }
@@ -129,10 +141,10 @@ $script:BrakePatterns = @(
     @{ action = 'delete';  pattern = '\bgh\s+(issue|release)\s+delete\b' }
     # Every spelling gh accepts for the same DELETE request, not just the long one.
     @{ action = 'delete';  pattern = '\bgh\s+api\b.*(--method[=\s]+delete\b|-x\s+delete\b)' }
-    @{ action = 'delete';  pattern = '\bgit\s+push\b.*--delete\b' }
+    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b.*--delete\b' }
     # git's other remote-branch deletion syntax: `git push origin :branch`. The leading whitespace
     # in the lookbehind keeps `HEAD:main` (an ordinary push refspec) out of it.
-    @{ action = 'delete';  pattern = '\bgit\s+push\b[^;]*\s:\S' }
+    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b[^;]*\s:\S' }
 
     # --- indirection through a variable ---------------------------------------------
     # Quote removal (see ConvertTo-NormalizedCommand) handles `gh pr 'merge'`, but a value the

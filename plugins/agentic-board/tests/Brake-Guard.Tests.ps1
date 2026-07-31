@@ -803,3 +803,53 @@ Describe 'Test-IsBrakedCommand — pushing straight to the default branch IS a m
         }
     }
 }
+
+Describe 'Test-IsBrakedCommand — git global flags must not shake off the guard (#542, review round 3)' {
+    # `\bgit\s+push\b` demands that `push` follow `git` immediately, so ANY global option between
+    # them broke every git rule at once. `-C` and `-c` are everyday flags, not exotica.
+    #
+    # This one was NOT introduced by this PR: the pre-existing `--delete` patterns had the same
+    # anchor and the same hole. Found only because the reviewer asked what the anchor assumes.
+
+    It 'denies a push to main behind -C' {
+        Test-IsBrakedCommand -Command 'git -C . push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it behind -c <config>' {
+        Test-IsBrakedCommand -Command 'git -c http.extraheader= push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it behind --no-pager' {
+        Test-IsBrakedCommand -Command 'git --no-pager push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it behind several stacked flags' {
+        Test-IsBrakedCommand -Command 'git --no-pager -C . -c core.pager=cat push origin HEAD:main' `
+            -Irreversible $script:AllIrr | Should -Be 'merge'
+    }
+    It 'closes the same hole in the PRE-EXISTING branch-delete rule' {
+        Test-IsBrakedCommand -Command 'git -C . push origin --delete feature' -Irreversible $script:AllIrr |
+            Should -Be 'delete'
+    }
+    It 'closes it for the refspec delete too' {
+        Test-IsBrakedCommand -Command 'git -C . push origin :feature-x' -Irreversible $script:AllIrr |
+            Should -Be 'delete'
+    }
+
+    Context 'and still does not invent matches' {
+        It 'does not treat an unrelated git command as a push' {
+            # Quote stripping turns this into `git commit -m push to main`; only tokens that LOOK
+            # like flags may sit between git and push, so `commit` stops it dead.
+            Test-IsBrakedCommand -Command 'git commit -m "push to main"' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'does not brake an ordinary flagged push' {
+            Test-IsBrakedCommand -Command 'git -C . push -u origin issue-542-x' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'does not brake a flagged push to a main-ish branch name' {
+            Test-IsBrakedCommand -Command 'git -C . push origin HEAD:main-cleanup' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+    }
+}

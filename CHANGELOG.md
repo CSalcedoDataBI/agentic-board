@@ -26,6 +26,22 @@
   same effect) matched nothing, a case the original `\b` had caught. It now ends at a lookahead
   over the shell's own terminator set, which covers both directions.
 
+  **A third review round found the anchor itself was wrong — and had always been.** Every git
+  rule in this file began `\bgit\s+push\b`, which demands that `push` follow `git`
+  immediately. One ordinary global flag shook all of them off at once: `git -C . push origin
+  HEAD:main`, `git -c k=v push …`, `git --no-pager push …`. That was never about the new patterns —
+  the **pre-existing branch-delete rules had the same hole**, and `git -C . push origin --delete f`
+  went through untouched. All four git rules now share one prefix that tolerates flag-shaped tokens
+  between the program and the subcommand, so fixing it once fixed the older rules too. Only
+  flag-shaped tokens are allowed in that gap, so `git commit -m "push to main"` is still not read
+  as a push, and the repetition is bounded rather than `*` — this runs on every tool call, and an
+  unbounded nested quantifier over adversarial input is a stall waiting to happen (measured: 1 ms
+  against a command carrying 200 flag-like tokens).
+
+  **Known and accepted:** `git push main` is read as a push to the default branch even when `main`
+  is the name of a *remote*. A false positive, not a bypass, on a rare spelling — and this pattern
+  deliberately errs toward refusing.
+
   The original over-block, for the record: the tests missed it because the case they checked,
   `maintenance`, continues with `t` (a word character) and so passed **for the wrong reason** —
   proving nothing about `-` or `.`. A green test that passes by accident is the same failure this
