@@ -71,13 +71,13 @@ $ErrorActionPreference = "Stop"
 # it was set, so every PR fact came back blank and a legitimately ordered run was refused for
 # "conditions unmet" that were never actually read.
 function Invoke-BrakeMergeCheck {
-# CAPTURE THE PARAMETERS FIRST, before a single dot-source runs (#536). Dot-sourcing executes the
-# sourced script's param() block IN THIS SCOPE, and Board-ReviewGate.ps1 declares `[int]$PR = 0` -
-# so halfway down this function `$PR` silently became 0 and `gh pr checks 0` returned nothing. The
-# tests condition was therefore never satisfiable and end-to-end mode could refuse but never
-# allow. Reading the parameter once, up here, is the whole fix; the rule is "capture before you
-# dot-source", not "remember which script clobbers which name".
-$prNumber = [int]$PR
+# A TRAP FOR WHOEVER RESTORES THE GATE HERE (#536 -> #541), recorded because it cost real
+# debugging and is invisible in a normal reading: this function dot-sources other scripts, and
+# dot-sourcing runs THEIR param() block IN THIS SCOPE. `Board-ReviewGate.ps1` declares
+# `[int]$PR = 0`, so the moment it is sourced, `$PR` here becomes 0. The end-to-end gate that used
+# to live below read `gh pr checks $PR` afterwards, asked CI about PR number 0, got nothing, and
+# concluded "no tests ran" for every run alive. Capture the parameters into local names BEFORE the
+# first dot-source; do not rely on remembering which script clobbers which name.
 if (-not $DryRun) {
     $brakeGuard = Join-Path $PSScriptRoot 'Brake-Guard.ps1'
     if (Test-Path $brakeGuard) {
@@ -89,105 +89,36 @@ if (-not $DryRun) {
         if ($brakeMarker -and (@($brakeMarker.irreversible) -contains 'merge')) {
             $forWhat = if ($brakeMarker.issue -gt 0) { " para el issue #$($brakeMarker.issue)" } else { "" }
 
-            # END-TO-END (#530). The brake is no longer all-or-nothing: a run the human ORDERED to
-            # finish may close CODE work that carries a real review and recorded tests for THIS
-            # commit. Every one of those is established here, at merge time, because this is the
-            # first moment the facts exist - the marker was written before a line of code did.
-            $verdict = $null
-            try {
-                $prevE = $env:ABIOS_ENDTOEND_DOTSOURCE
-                $env:ABIOS_ENDTOEND_DOTSOURCE = '1'
-                . (Join-Path $PSScriptRoot 'Expert-EndToEnd.ps1')
-                $env:ABIOS_ENDTOEND_DOTSOURCE = $prevE
-
-                # Diff against the PR's OWN base, not the repo default. A PR targeting a release or
-                # feature branch would otherwise be compared to main, quietly omitting files and
-                # letting a report change read as code.
-                $prMeta  = gh pr view $prNumber --repo $Repo --json headRefOid,baseRefName 2>$null | ConvertFrom-Json
-                $baseRef = if ($prMeta.baseRefName) { "origin/$($prMeta.baseRefName)" } else { '' }
-                if (-not $baseRef) {
-                    $baseRef = git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null
-                    if (-not $baseRef) { $baseRef = 'origin/main' }
-                }
-                $changed = @(git diff --name-only "$baseRef...HEAD" 2>$null | Where-Object { "$_".Trim() })
-
-                # Classify with THIS project's policy, not the built-in defaults: a contract that
-                # declares extra visual patterns (a site where the posts are the product) would
-                # otherwise be ignored exactly where it matters.
-                $prevC2 = $env:ABIOS_EXPERTCONTRACT_DOTSOURCE
-                $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = '1'
-                . (Join-Path $PSScriptRoot 'ExpertContractIo.ps1')
-                $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = $prevC2
-                $contract = Read-ExpertContract
-                $wcPolicy = Get-EffectiveWorkClassPolicy -Contract $contract
-                $wc = Get-WorkClass -ChangedPaths $changed -Policy $wcPolicy
-
-                # Whether automated tests are REQUIRED is the contract's call, not this run's
-                # (#536). It was never passed, so it defaulted to $true and a project that
-                # honestly declares no automated suite could never close anything. Absent or
-                # malformed dod.tests still means required - the safe direction.
-                # Get-TestsRequired, not [bool]$contract.dod['tests']: a quoted "false" would cast
-                # to $true, the same trap already closed for the marker's endToEnd field.
-                $testsRequired = Get-TestsRequired -Contract $contract
-
-                # REVIEW evidence: reuse the gate's own strict parser rather than a looser copy.
-                # Matching "contains the marker AND contains the sha" anywhere in a body let quoted
-                # text, a checklist note or a stale comment satisfy a merge condition. The gate's
-                # parser requires the marker to be BOUND as `sha=<head>`.
-                $headSha = "$($prMeta.headRefOid)".Trim()
-                if (-not $headSha) { throw "no pude leer el commit actual del PR #$prNumber" }
-                $bodies = @()
-                $cj = gh pr view $prNumber --repo $Repo --json comments 2>$null
-                if ($cj) { $bodies = @(($cj | ConvertFrom-Json).comments | ForEach-Object { "$($_.body)" }) }
-
-                $prevG = $env:ABIOS_REVIEWGATE_DOTSOURCE
-                $env:ABIOS_REVIEWGATE_DOTSOURCE = '1'
-                . (Join-Path $PSScriptRoot 'Board-ReviewGate.ps1') -Repo $Repo
-                $env:ABIOS_REVIEWGATE_DOTSOURCE = $prevG
-                $reviewed = [bool](Get-ReviewEvidence -CommentBodies $bodies -HeadSha $headSha).reviewed
-
-                # TEST evidence: taken from CI, NOT from a block the run wrote about itself.
-                # An [abios-evidence] comment is the run's own account of its testing - useful to
-                # read, worthless as proof, and this is the one place the difference decides a
-                # merge. CI ran the suite on this commit independently; that is the claim that
-                # cannot be self-issued. Green means: checks exist and none is failing or pending.
-                # $prNumber, never $PR: by this line the review-gate dot-source above has reset
-                # $PR to 0 (#536). The verdict itself lives in Test-CiChecksPassed so it can be
-                # tested without the network.
-                # Presence and greenness are read separately: a contract that waives the test
-                # REQUIREMENT must not thereby waive a CI run that exists and failed (#539).
-                # $LASTEXITCODE matters here: gh does not throw, so a transient failure returns
-                # empty stdout and would otherwise read as "this project has no CI" (#539).
-                $chk = gh pr checks $prNumber --repo $Repo --json name,bucket 2>$null
-                $chkExit = $LASTEXITCODE
-                $ci  = Get-CiEvidence -ChecksJson "$chk" -ExitCode $chkExit
-
-                $verdict = Test-EndToEndAllowed -Ordered ([bool]$brakeMarker.endToEnd) `
-                             -WorkClass $wc.class -ReviewedHead $reviewed -TestsRecorded $ci.passed `
-                             -TestsRequired $testsRequired -CiPresent $ci.present
-            } catch {
-                # Could not establish the facts -> no permission. "I could not check" is not a yes.
-                $verdict = @{ allowed = $false; missing = @("no pude verificar las condiciones ($_)")
-                              reason  = "no pude verificar las condiciones ($_)" }
-            }
-
-            if ($verdict.allowed) {
-                # Remembered so the merge itself can be pinned to this exact commit (see $mergeArgs).
-                $script:E2eHeadSha = $headSha
-                Write-Host ""
-                Write-Host (Format-EndToEndVerdict -Verdict $verdict) -ForegroundColor Green
-                Write-Host "  (Freno armado, pero el dueno ordeno llevarlo hasta el final y se cumplen las condiciones.)" -ForegroundColor DarkGray
-                Write-Host ("  El cierre queda atado al commit {0} - si llega uno nuevo, no se mergea." -f $headSha.Substring(0,7)) -ForegroundColor DarkGray
-                Write-Host ""
+            # THE ARMED RUN DOES NOT MERGE, ordered or not (#541).
+            #
+            # This block used to weigh four conditions and, when all held, let a run the owner had
+            # ORDERED to finish close its own PR. That allowance is withdrawn: review found the
+            # gate could not defend itself once it was reachable. `cd` out of the worktree and the
+            # marker lookup above finds nothing, so this whole check is skipped -- the two halves
+            # of the control disagreed about which directory the run was in. And the review
+            # condition was satisfied by a PR comment the run can post itself.
+            #
+            # Leaving the allowance here "as defense in depth" would be the same self-deception:
+            # the hook is not a guarantee, so a command string it misses would arrive at a script
+            # that still says yes. The decision function and its tests live on in
+            # Expert-EndToEnd.ps1, ready for #541 to give them an armed context they can trust and
+            # evidence the subject cannot mint.
+            #
+            # A HUMAN who wants this merge deletes the marker first, deliberately. That is the
+            # documented path and the message below says so.
+            Write-Host ""
+            Write-Host "FRENO ACTIVO: este worktree pertenece a un run autonomo con freno armado$forWhat." -ForegroundColor Red
+            if ($brakeMarker.endToEnd) {
+                Write-Host "PUNTA A PUNTA: la orden esta REGISTRADA pero todavia no se ejecuta." -ForegroundColor Yellow
+                Write-Host "  El mecanismo que la honraba tenia dos agujeros que no podia defender (#541)," -ForegroundColor Yellow
+                Write-Host "  asi que ninguna ruta de merge esta abierta para ningun run." -ForegroundColor Yellow
             } else {
-                Write-Host ""
-                Write-Host "FRENO ACTIVO: este worktree pertenece a un run autonomo con freno armado$forWhat." -ForegroundColor Red
-                Write-Host (Format-EndToEndVerdict -Verdict $verdict) -ForegroundColor Yellow
-                Write-Host "  Marcador: $($brakeMarker.path)" -ForegroundColor DarkGray
-                Write-Host "  (Si de verdad quieres mergear a mano, borra ese archivo primero - a conciencia.)" -ForegroundColor DarkGray
-                Write-Host ""
-                exit 1
+                Write-Host "Deja el PR listo y con el gate en verde; el cierre lo hace una persona." -ForegroundColor Yellow
             }
+            Write-Host "  Marcador: $($brakeMarker.path)" -ForegroundColor DarkGray
+            Write-Host "  (Si de verdad quieres mergear a mano, borra ese archivo primero - a conciencia.)" -ForegroundColor DarkGray
+            Write-Host ""
+            exit 1
         }
     }
 }
@@ -259,15 +190,6 @@ if ($prInfo.state -ne 'OPEN') { throw "PR #$PR esta '$($prInfo.state)' (no OPEN)
 
 $mergeArgs = @('pr','merge',"$PR",'--repo',$Repo,"--$Method")
 if (-not $NoDeleteBranch) { $mergeArgs += '--delete-branch' }
-
-# Bind the merge to the exact commit the four conditions were established against (#530). Between
-# reading the class, the review and the checks and actually merging, a push to the branch would
-# otherwise slip a NEW commit through on the strength of an older one's evidence - the precise
-# failure this control exists to stop, just moved a few seconds later. Only for the autonomous
-# path: a human running this deliberately does not need the interlock.
-if ($script:E2eHeadSha) {
-    $mergeArgs += @('--match-head-commit', $script:E2eHeadSha)
-}
 
 Write-Host "=== Board-Merge  $Repo  PR #$PR ===" -ForegroundColor Cyan
 Write-Host ""

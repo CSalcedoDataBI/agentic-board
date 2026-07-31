@@ -83,54 +83,25 @@ Describe 'The review gate really does clobber $PR — the premise of the fix (#5
     }
 }
 
-Describe 'Invoke-BrakeMergeCheck does not read a name the dot-source destroys (#536)' {
-    It 'dot-sources at least one script inside the brake check' {
-        @($script:DotSources).Count | Should -BeGreaterThan 0
-    }
-
-    It 'never reads $PR after the first dot-source' {
-        # THE regression guard. Any read of $PR past that point is the defect returning, whatever
-        # it is used for.
-        $firstDot = @($script:DotSources)[0].Extent.StartOffset
-        $late = @($script:BrakeFn.FindAll({
-            param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                      $n.VariablePath.UserPath -eq 'PR' }, $true) |
-            Where-Object { $_.Extent.StartOffset -gt $firstDot })
-
-        $where = ($late | ForEach-Object { "line $($_.Extent.StartLineNumber)" }) -join ', '
-        @($late).Count | Should -Be 0 -Because "the review-gate dot-source resets `$PR to 0; found reads at $where"
-    }
-
-    It 'captures the PR number before any dot-source runs' {
-        $firstDot = @($script:DotSources)[0].Extent.StartOffset
-        $early = @($script:BrakeFn.FindAll({
-            param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                      $n.VariablePath.UserPath -eq 'PR' }, $true) |
-            Where-Object { $_.Extent.StartOffset -lt $firstDot })
-        @($early).Count | Should -BeGreaterThan 0 -Because 'the real PR number has to be saved somewhere first'
-    }
-
-    It 'asks CI about a PR number, not about an empty variable' {
-        # `gh pr checks` must receive the captured name. Guards the exact call that was broken.
-        $ghChecks = @($script:BrakeFn.FindAll({
+Describe 'The armed run does not merge, ordered or not (#541)' {
+    # The four-condition allowance used to live here. Review found the gate could not defend
+    # itself once it was reachable, so it was withdrawn rather than left as "defense in depth" -
+    # the hook is not a guarantee, and a command string it missed would have arrived at a script
+    # that still said yes.
+    It 'never calls the end-to-end decision function' {
+        $calls = @($script:BrakeFn.FindAll({
             param($n) $n -is [System.Management.Automation.Language.CommandAst] -and
-                      "$($n.Extent.Text)" -match '\bgh\s+pr\s+checks\b' }, $true))
-        @($ghChecks).Count | Should -BeGreaterThan 0
-        foreach ($c in $ghChecks) {
-            $c.Extent.Text | Should -Not -Match '\bgh\s+pr\s+checks\s+\$PR\b'
-        }
+                      "$($n.GetCommandName())" -eq 'Test-EndToEndAllowed' }, $true))
+        @($calls).Count | Should -Be 0 -Because 'a withdrawn allowance must not be reachable at all'
     }
-}
-
-Describe 'The tests requirement is taken from the contract, not hardcoded (#536)' {
-    It 'passes -TestsRequired when deciding' {
-        # Test-EndToEndAllowed documents that this comes from the contract's dod.tests. It was
-        # never passed, so it defaulted to $true and the contract was ignored.
-        $call = @($script:BrakeFn.FindAll({
-            param($n) $n -is [System.Management.Automation.Language.CommandAst] -and
-                      "$($n.GetCommandName())" -eq 'Test-EndToEndAllowed' }, $true) |
-            Select-Object -First 1)
-        $call | Should -Not -BeNullOrEmpty
-        $call.Extent.Text | Should -Match '-TestsRequired'
+    It 'exits non-zero whenever the marker brakes on merge' {
+        $script:BrakeFn.Extent.Text | Should -Match 'exit 1'
+    }
+    It 'has no allow-path left that could pin a head commit' {
+        # $script:E2eHeadSha existed only to bind an allowed autonomous merge.
+        $script:Ast.Extent.Text | Should -Not -Match 'E2eHeadSha'
+    }
+    It 'still tells the human how to proceed deliberately' {
+        $script:BrakeFn.Extent.Text | Should -Match 'borra ese archivo primero'
     }
 }

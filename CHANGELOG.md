@@ -16,7 +16,10 @@
      `[int]$PR = 0`. `$PR` silently became `0` immediately before `gh pr checks $PR`, which exits 1
      with empty output, so the CI condition was *always* false. Proven against a real PR whose four
      checks all passed: the gate refused for "missing test evidence"; the same inputs without the
-     clobber were permitted. Parameters are now captured *before* any dot-source.
+     clobber were permitted. **Stated precisely:** the bug is gone because the code that had it was
+     withdrawn with the allowance, not because a line was patched around it. What remains is the
+     trap, recorded where the gate will be rebuilt and guarded by a test that proves the review
+     gate really does clobber a caller's `$PR` — so #541 cannot walk into it again.
   2. **The tests requirement ignored the contract**, being hardcoded `$true`; and reading it cast
      the string `"false"` to `$true`, the trap already closed for the marker's `endToEnd`.
   3. **The brief never mentioned the order**, so a session carrying one was briefed exactly like a

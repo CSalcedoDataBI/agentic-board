@@ -31,10 +31,11 @@ param(
     [int]$Issue = 0,
     [int]$ProjectNum = 0,
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL",
-    # "Llevalo de punta a punta" (#530): the human ORDERS this run to finish, so it may close CODE
-    # work that carries a real review and recorded tests for the head commit. Not a stored setting --
-    # the permission travels with the instruction and is good for this run only. Anything the owner
-    # judges by looking at it still waits for him, ordered or not.
+    # "Llevalo de punta a punta" (#530): the human ORDERS this run to finish. RECORDED, NOT
+    # HONOURED (#541) - it is written into the brake marker and explained to the launched session,
+    # and no merge route is opened for it. Still pass it when the human says it: a run that knows
+    # the order exists and is inert reads its refusal as the control working, instead of hunting
+    # for a way around it. Never tell the user the run will merge.
     [switch]$EndToEnd,
     [switch]$DryRun
 )
