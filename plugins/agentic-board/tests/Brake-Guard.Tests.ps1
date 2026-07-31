@@ -722,6 +722,15 @@ Describe 'Test-IsBrakedCommand — pushing straight to the default branch IS a m
         Test-IsBrakedCommand -Command 'git push origin +HEAD:main' -Irreversible $script:AllIrr |
             Should -Be 'merge'
     }
+    It 'denies the fully-qualified ref form' {
+        # Claimed in the PR body and in the code comment, and it did work - but nothing ASSERTED it.
+        # On a change born from "the suite was green because a test asserted the gap was correct",
+        # an unasserted claim is the one thing not to leave lying around.
+        Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+        Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/master' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
     It 'denies pushing the local default branch by name' {
         Test-IsBrakedCommand -Command 'git push origin main' -Irreversible $script:AllIrr |
             Should -Be 'merge'
@@ -757,6 +766,19 @@ Describe 'Test-IsBrakedCommand — pushing straight to the default branch IS a m
         }
         It 'allows a refspec onto a branch merely ending in something like main' {
             Test-IsBrakedCommand -Command 'git push origin HEAD:my-domain' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a branch whose name STARTS with main followed by a separator' {
+            # Found by the CI reviewer on the first cut of this pattern. `` only requires the next
+            # character to be non-word, so `main-cleanup` and `master.bak` satisfied it and got
+            # refused - a false positive on exactly the command this guard must not over-block.
+            # The `maintenance` case passed because `t` IS a word character, which is why the first
+            # round of tests missed it entirely.
+            Test-IsBrakedCommand -Command 'git push origin HEAD:main-cleanup' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+            Test-IsBrakedCommand -Command 'git push origin HEAD:master.bak' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+            Test-IsBrakedCommand -Command 'git push -u origin main-cleanup' -Irreversible $script:AllIrr |
                 Should -BeNullOrEmpty
         }
         It 'still recognises the DELETE spelling as delete, not as a merge' {

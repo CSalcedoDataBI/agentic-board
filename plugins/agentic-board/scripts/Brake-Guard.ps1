@@ -87,13 +87,17 @@ $script:BrakePatterns = @(
     #
     # Two shapes: a REFSPEC landing on main/master (`HEAD:main`, `branch:main`, `+HEAD:main`,
     # `HEAD:refs/heads/main`), and pushing the default branch BY NAME (`git push origin main`).
-    # The `\b` after the branch name is load-bearing: without it `HEAD:maintenance` and
-    # `feature/maintenance` would be refused, and this pattern sits on the run's single most
-    # common command - over-blocking here is how the whole control gets switched off.
+    #
+    # BOTH end with `(\s|$)`, not `\b`, and the difference is a real false positive rather than
+    # style. `\b` only asks that the NEXT character not be a word character, so `main-cleanup` and
+    # `master.bak` satisfied it and were refused - legitimate branches, blocked, on the run's single
+    # most common command. The first round of tests missed it because the case they checked,
+    # `maintenance`, happens to continue with `t` (a word character) and so passed for the wrong
+    # reason. Requiring end-of-token instead makes the branch name have to BE main/master.
     #
     # LIMIT: this core is pure (no git access), so it cannot ask the repo what its default branch
     # is. A project whose default is neither `main` nor `master` is not covered.
-    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s\+?[^\s;|&]*[:/](main|master)\b' }
+    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s\+?[^\s;|&]*[:/](main|master)(\s|$)' }
     @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s(main|master)(\s|$)' }
 
     # --- publish: making something public / cutting a release -----------------------
