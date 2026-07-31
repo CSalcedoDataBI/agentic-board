@@ -53,10 +53,25 @@ $script:BrakeMarkerName = 'brake-armed.json'
 # never about the new patterns, it was about the anchor they all copied.
 #
 # Only FLAG-SHAPED tokens may sit in the gap, each with at most one value, so `git commit -m
-# "push to main"` (quotes are stripped by then) is not mistaken for a push. Repetition is BOUNDED
-# rather than `*`: this runs on every tool call, and an unbounded nested quantifier over
-# adversarial input is a stall waiting to happen.
-$script:GitCmd = '\bgit\s+(?:-{1,2}[^\s;|&]+\s+(?:[^\s;|&-][^\s;|&]*\s+)?){0,5}'
+# "push to main"` (quotes are stripped by then) is not mistaken for a push.
+#
+# The repetition is UNBOUNDED, and getting there took two wrong turns worth recording:
+#
+#   1. Capped at {0,5} "to avoid ReDoS". That WAS a bypass - six `-c` flags and the rule stopped
+#      matching, and chaining several `-c` is ordinary scripting, not an attack.
+#   2. Uncapped as `-{1,2}[^\s;|&]+`, on the reasoning (mine and the reviewer's) that the classes
+#      are disjoint so no catastrophic backtracking is possible. MEASURED, AND FALSE: `--flag`
+#      repeated 1000 times HUNG the matcher past three minutes. `-{1,2}` and `[^\s;|&]+` can both
+#      consume the second dash, so every `--` token had two readings and 1000 of them had 2^1000.
+#
+# The form here removes that ambiguity: one leading `-`, then everything up to whitespace, so each
+# token has exactly ONE reading. Measured after the change - 1000 `--flag` tokens: 3 ms with no
+# match, 334 ms when a real push follows; 2000 `-c k=v` tokens: 3 ms. The bypass is closed without
+# a count, and the stall is closed without a cap.
+#
+# The lesson, since this file keeps teaching it: "the classes are disjoint so it cannot blow up"
+# is an argument, not a measurement. Time it.
+$script:GitCmd = '\bgit\s+(?:-[^\s;|&]*\s+(?:[^\s;|&-][^\s;|&]*\s+)?)*'
 
 # Command patterns that REACH an irreversible action, grouped by the contract's action vocabulary
 # (the same words Expert-Autonomy uses, so one contract drives both).
@@ -117,7 +132,7 @@ $script:BrakePatterns = @(
     #
     # LIMIT: this core is pure (no git access), so it cannot ask the repo what its default branch
     # is. A project whose default is neither `main` nor `master` is not covered.
-    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s\+?[^\s;|&]*[:/](main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s\+?[^\s;|&]*:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
     @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s(main|master)(?=[\s;&|<>]|$)' }
 
     # --- publish: making something public / cutting a release -----------------------

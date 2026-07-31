@@ -853,3 +853,98 @@ Describe 'Test-IsBrakedCommand — git global flags must not shake off the guard
         }
     }
 }
+
+Describe 'Test-IsBrakedCommand — the round-3 fix carried two of its own (#542, review round 4)' {
+    # Both introduced by the fix for the global-flag anchor. Neither is exotic.
+
+    Context 'the flag allowance must not be countable' {
+        # Bounding the repetition at 5 turned the fix into a new bypass: SIX `-c` flags and the
+        # rule stops matching. Chaining several `-c` (user.name, user.email, http.sslVerify,
+        # core.pager...) is ordinary scripting, not an attack.
+        #
+        # The bound was justified in the comment as ReDoS protection. That justification was wrong:
+        # the repeated group is anchored by mandatory whitespace and its character classes are
+        # disjoint, so there is no catastrophic backtracking to protect against. A guard narrowed
+        # against an imagined risk, opening a real one.
+        It 'denies a push to main behind SIX global flags' {
+            Test-IsBrakedCommand -Command 'git -c a=1 -c b=1 -c c=1 -c d=1 -c e=1 -c f=1 push origin HEAD:main' `
+                -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'denies it behind twelve' {
+            $flags = (1..12 | ForEach-Object { "-c k$_=v" }) -join ' '
+            Test-IsBrakedCommand -Command "git $flags push origin HEAD:main" -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'closes the same count hole in the delete rule' {
+            Test-IsBrakedCommand -Command 'git -c a=1 -c b=1 -c c=1 -c d=1 -c e=1 -c f=1 push origin --delete f' `
+                -Irreversible $script:AllIrr | Should -Be 'delete'
+        }
+    }
+
+    Context 'a slash is not a refspec separator' {
+        # `[:/]` treated `/` as if it delimited a refspec. It does not - `/` is an ordinary
+        # character inside a branch name, so any branch merely ENDING in main/master was refused.
+        It 'allows a branch that merely ends in master' {
+            Test-IsBrakedCommand -Command 'git push origin release/master' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a branch that merely ends in main' {
+            Test-IsBrakedCommand -Command 'git push origin team/main' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows that same branch as an explicit refspec target' {
+            # Not raised by the review, but it is the same defect one step along.
+            Test-IsBrakedCommand -Command 'git push origin HEAD:team/main' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'STILL denies the fully-qualified ref, which is a real spelling of the default branch' {
+            Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/main' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+            Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/master' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'STILL denies the plain forms' {
+            Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+            Test-IsBrakedCommand -Command 'git push origin main' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+    }
+}
+
+Describe 'Test-IsBrakedCommand — the classifier must not be stallable (#542, review round 4)' {
+    # This guard runs on EVERY tool call. A command that makes it backtrack forever does not just
+    # slow the run down - it wedges the session, and a wedged guard is a removed guard.
+    #
+    # Not hypothetical: while removing the flag COUNT (itself a bypass), the replacement used
+    # `-{1,2}[^\s;|&]+`, where both halves can consume the second dash of `--flag`. Two readings
+    # per token, 1000 tokens, and the matcher ran past three minutes. Both the external reviewer
+    # and I had argued it was safe because "the character classes are disjoint". The argument was
+    # wrong and only the stopwatch said so.
+    #
+    # These are timing assertions on purpose. Generous bounds - they exist to catch a hang, not to
+    # police milliseconds on a busy CI box.
+
+    It 'answers quickly on a long run of valueless flags' {
+        $cmd = 'git ' + ('--flag ' * 1000) + 'status'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $null = Test-IsBrakedCommand -Command $cmd -Irreversible $script:AllIrr
+        $sw.Stop()
+        $sw.ElapsedMilliseconds | Should -BeLessThan 5000 -Because 'this exact shape hung the matcher'
+    }
+    It 'answers quickly when that run ends in a real push' {
+        $cmd = 'git ' + ('--flag ' * 1000) + 'push origin HEAD:main'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $r = Test-IsBrakedCommand -Command $cmd -Irreversible $script:AllIrr
+        $sw.Stop()
+        $r | Should -Be 'merge'
+        $sw.ElapsedMilliseconds | Should -BeLessThan 5000
+    }
+    It 'answers quickly on a long run of flags WITH values' {
+        $cmd = 'git ' + ('-c k=v ' * 2000) + 'status'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $null = Test-IsBrakedCommand -Command $cmd -Irreversible $script:AllIrr
+        $sw.Stop()
+        $sw.ElapsedMilliseconds | Should -BeLessThan 5000
+    }
+}

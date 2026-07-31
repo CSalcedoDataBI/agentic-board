@@ -38,6 +38,24 @@
   unbounded nested quantifier over adversarial input is a stall waiting to happen (measured: 1 ms
   against a command carrying 200 flag-like tokens).
 
+  **Round four found two more in that fix — and measuring the repair found a third nobody had
+  seen.** The flag allowance was capped at five, which was itself a bypass: six `-c` flags and the
+  rule stopped matching, and chaining `-c` is ordinary scripting. And `[:/]` treated `/` as a
+  refspec separator, which it is not — `release/master`, `team/main` and `HEAD:team/main` were all
+  refused for merely *ending* in the default branch's name.
+
+  Removing the cap came with an argument, made by the reviewer and accepted by me, that the
+  repetition could not blow up because its character classes are disjoint. **The argument was
+  wrong and only the stopwatch said so:** `--flag` repeated 1000 times ran the matcher past three
+  minutes, because `-{1,2}` and `[^\s;|&]+` can both consume the second dash — two readings per
+  token, 2^1000 for a thousand of them. This code runs on *every tool call*, so that is not a slow
+  path, it is a wedged session, and a wedged guard is a removed guard. The form now allows exactly
+  one reading per token: measured at 3 ms with no match and 334 ms in the absurd worst case, with
+  three timing tests to catch a return — the suite was green with the hang present.
+
+  Recorded in the source, because this file keeps teaching it: *"the classes are disjoint so it
+  cannot blow up" is an argument, not a measurement. Time it.*
+
   **Known and accepted:** `git push main` is read as a push to the default branch even when `main`
   is the name of a *remote*. A false positive, not a bypass, on a rare spelling — and this pattern
   deliberately errs toward refusing.
