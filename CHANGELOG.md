@@ -2,129 +2,62 @@
 
 ## [Unreleased]
 ### Fixed
-- **End-to-end mode could refuse but never allow — three gaps between the order and the merge**
-  (#536). Field-testing the autonomy boundary on a real issue found that `-EndToEnd`, shipped in
-  0.29.0, was **inert**. The boundary itself held — nothing merged that should not, and every
-  failure below failed *safe* — but the half the owner asked for, "when I order it end to end,
-  finish it", could not happen. Three independent blockers, each sufficient on its own:
+- **`-EndToEnd` shipped inert in 0.29.0, and after five review findings it is staying inert — on
+  purpose** (#536, #541). Field-testing the autonomy boundary found the ordered end-to-end close
+  could refuse but never allow. Three separate blockers were fixed; then three rounds of external
+  review found five live false-permission paths in the mechanism that would have opened it, two of
+  them complete bypasses. **The boundary held throughout — nothing merged that should not — and
+  every failure failed safe.** The order is now recorded, explained, and acted on nowhere.
+
+  What was genuinely broken and is now fixed:
 
   1. **The tests condition could never be satisfied.** `Invoke-BrakeMergeCheck` dot-sources
-     `Board-ReviewGate.ps1` to reuse its strict review parser, and dot-sourcing runs the sourced
-     script's `param()` block **in the caller's scope** — where it declares `[int]$PR = 0`. So
-     `$PR` silently became `0` immediately before `gh pr checks $PR`, which exits 1 with empty
-     output. `$tested` was therefore *always* false. Verified against a real PR whose four checks
-     all passed: the gate refused for "missing test evidence"; the identical inputs without the
-     clobber were **permitted**. That one variable was the entire difference between refuse and
-     allow. Parameters are now captured *before* any dot-source — the rule is "capture before you
-     dot-source", not "remember which script clobbers which name". (Same failure family as the
-     `-DryRun` incident.)
+     `Board-ReviewGate.ps1`, whose `param()` block runs **in the caller's scope** and declares
+     `[int]$PR = 0`. `$PR` silently became `0` immediately before `gh pr checks $PR`, which exits 1
+     with empty output, so the CI condition was *always* false. Proven against a real PR whose four
+     checks all passed: the gate refused for "missing test evidence"; the same inputs without the
+     clobber were permitted. Parameters are now captured *before* any dot-source.
+  2. **The tests requirement ignored the contract**, being hardcoded `$true`; and reading it cast
+     the string `"false"` to `$true`, the trap already closed for the marker's `endToEnd`.
+  3. **The brief never mentioned the order**, so a session carrying one was briefed exactly like a
+     session without one. It now says the order was given, that it cannot yet be acted on, and that
+     a refused merge is the control working — not a failure to route around. Without that, a run
+     reads its own refusal as an error and hunts for another way.
 
-  2. **The tool-layer brake ignored the order.** `Read-BrakeMarker` parsed `endToEnd` and
-     `New-BrakeMarkerJson` wrote it, but nothing *consumed* it: the PreToolUse hook denied a merge
-     identically whether or not the owner had ordered the finish, so even with (1) fixed the merge
-     was unreachable. The fix is deliberately **not** "allow merges when ordered". The order opens
-     exactly one path — `Board-Merge.ps1`, the only merge route that *checks* anything, which
-     re-establishes the four conditions and exits non-zero when they do not hold. Raw
-     `gh pr merge`, the REST merge endpoints and `gh` reached through a variable stay refused, as
-     do deploy/publish/refresh/delete. Ordering a run now **narrows** the route to a merge rather
-     than widening it.
+  **Why the ordered close stays shut.** Opening it — even only for the gate's own script, which
+  re-checks four conditions and refuses on its own — made two latent holes *reachable*, and neither
+  is a string-matching bug (#541):
 
-  3. **The run was never told it may finish.** `Format-AutoBrief` hardcoded *"Reach 'PR ready' and
-     STOP there. Do NOT merge…"* with no end-to-end parameter, so the launched session was briefed
-     to stop even when ordered otherwise — obeying a "stop" it had been handed while the "finish"
-     sat in a marker file it never read. The brief now grants the permission when ordered, names
-     the four conditions it must earn, points at the gated path, and still forbids everything else.
-     A fourth gap surfaced with it: there was **no way to type the order**. `/expert auto <issue>
-     de punta a punta` now expresses it, documented in the command surface and the skill.
+  | Bypass | Why the gate could not defend itself |
+  |---|---|
+  | `cd C:\ ; pwsh <genuine-gate> -PR 42` | The hook judges per segment and allows it; the gate then resolves its marker from its **runtime** cwd, finds none outside the worktree, and skips all four conditions. The two halves of the control disagreed about which directory the run was in, and the run picked |
+  | `[abios-review] … sha=<head>` | The review condition is a PR comment the run is able to post itself — the self-certification the design had already removed for the *test* condition |
 
-  Also fixed: the tests requirement was documented as coming from the contract's `dod.tests` but
-  was never passed, so it was hardcoded to `true` and a project that honestly declares no automated
-  suite could never close anything. Fails safe, still ignored the contract.
+  Three earlier findings were fixed before these: the gated path matched a bare **filename** (any
+  file so named passed), then a canonical **path pattern** — which was itself wrong, since the
+  installed plugin lives at `<version>/scripts/`, so it would have refused the *genuine* gate in
+  every project except this repo — then a **substring** test that a mention-as-argument satisfied,
+  then a token match that a `<gate>-bypass.ps1` prefix satisfied while breaking any install under
+  `C:\Program Files`. Also fixed on the way: a failed `gh pr checks` read being laundered into
+  "this project has no CI", and `dod.tests: false` waiving **red** CI rather than just the
+  requirement to have a suite.
+
+  The pattern is the finding: **every round's tests passed, and the next round still found a live
+  false-permission path.** That is the argument for keeping the door shut until #541 gives the gate
+  a trustworthy armed context and evidence the subject cannot mint.
 
 ### Added
-- **The brake hook itself is now under test** (#536). `Brake-Guard.ps1`'s pure core was well
-  covered; the hook that *drives* it — the piece Claude Code actually executes, and the only one
-  that can produce a refusal — had none. 17 tests drive the real script over real stdin and assert
-  on the payload, pinning both fail directions: silence outside an armed run, denial for anything
-  unclear inside one (corrupt marker, emptied list, the string `"true"` posing as an order).
-- `Test-CiChecksPassed`, extracted so the one condition that cannot be self-issued is testable
-  without a network round-trip, and a structural regression guard asserting the brake check never
-  reads a name a dot-source destroys.
-
-  Mutation-verified in both directions: removing the gated bypass turns the "ordered run may reach
-  the gate" test red; making the order open *everything* turns four "still denied" tests red.
-
-### Fixed (found by review on this change, before it shipped)
-- **The gated path was a filename, not a script.** Review caught that the bypass matched
-  `board-merge.ps1` anywhere in the command. An ordered run has full write access to its own
-  worktree, so it could drop *any* file by that name — carrying none of the four conditions — and
-  invoke it. That defeats the entire guarantee the gated path exists to make.
-
-  The first repair, anchoring to a canonical-looking path, was **wrong and caught before shipping**:
-  the installed plugin lives at `<version>/scripts/Board-Merge.ps1`, with no `plugins/agentic-board/`
-  in it, so a path pattern would have refused the *genuine* gate in every project except this repo.
-  Identity now comes from the caller that knows it — the hook passes its own sibling — and an empty
-  identity means no bypass at all. The brief prints that absolute path, because telling the run to
-  "use Board-Merge.ps1" would earn it a refusal it would read as *"I may not finish"*: the safety
-  control breaking the happy path, which is how safety controls get reverted (this module already
-  shipped that failure once).
-- **A quoted boolean in the contract.** `[bool]$contract.dod['tests']` cast the string `"false"` to
-  `$true` — the same trap already closed for the marker's `endToEnd`. Reading it now requires a real
-  boolean, or a string that unambiguously says so; anything else means *required*.
-
-  An adversarial sweep of 27 evasion cases — command substitution, backticks, env-var prefixes,
-  redirections, line continuations, quote-splitting, `bash -c` wrapping, per-segment vouching — was
-  run against the classifier, its catalogue taken from `liberzon/claude-hooks` (MIT), which solves
-  the same sub-command decomposition problem. All 27 behave as intended. The one case that passes
-  by design (overwriting the real gate before invoking it) is a **stated limit**, tracked in #540
-  with the design that would close it; two half-fixes were considered and rejected there for
-  looking like fixes while leaving the hole open.
-
-### Fixed (found by an external review — Codex — on the review fixes themselves)
-- **The gate had to be the script INVOKED, not one merely mentioned.** The identity check asked
-  whether the genuine path appeared *anywhere* in the command segment, so naming it as an unused
-  argument vouched for a look-alike standing in the command position:
-  `pwsh ./board-merge.ps1 'C:\real\...\Board-Merge.ps1' -PR 5`. A substring test cannot tell the
-  script being *run* from a string being *passed*. Every token naming the gate script must now BE
-  the gate — one impostor anywhere in the segment refuses the whole command. The earlier tests had
-  covered this trick only *across* segments; this was the within-segment version.
-- **"No test suite required" was silently waiving RED CI.** With `dod.tests: false` the CI verdict
-  was ignored entirely, collapsing four different states — no checks, pending checks, failed
-  checks, unreadable answer — into one. A project honestly declaring it has no automated suite
-  would then close a PR whose CI was failing, and `Board-Merge` can fall back to `--admin`, so the
-  ruleset would not have stopped it either. Presence and greenness are now separate questions:
-  the contract decides whether a suite is *required*; it never decides whether the CI that
-  *exists* may be red. Unreadable output counts as present-and-not-green, so "I could not read the
-  checks" cannot be laundered into "this project has no CI".
-
-  Two pre-existing tests had encoded the first half of that defect and were corrected rather than
-  worked around.
-
-### Fixed (external review, round 2 — on the round-1 fixes)
-- **The gate token had to END at the gate.** The tokeniser matched `…board-merge.ps1` without
-  requiring the token to stop there, so a path merely *starting* with the real gate captured it
-  exactly and passed — `<gate>-bypass.ps1` ran a different script with none of the four conditions
-  in it. The same whitespace tokenisation also refused a **genuine** gate whose path contains
-  spaces (quotes are stripped before this point), breaking the legitimate path on any
-  `C:\Program Files\…` install. Both are fixed by anchoring on the gate itself: every occurrence
-  of the script name must be the tail of the real gate path and sit on token boundaries at both
-  ends.
-- **A failed CI *read* is not an absent CI.** Native commands do not throw in PowerShell, so a
-  transient `gh pr checks` failure returns empty stdout — indistinguishable from "this project has
-  no CI", and under a `dod.tests: false` contract that difference decided a merge. The exit status
-  is now weighed: empty output from a failed command is present-and-not-green; only a clean run
-  reporting nothing counts as no CI. Real output is still trusted when the command exits non-zero,
-  because `gh` exits non-zero merely for *failing* checks.
-
-  Mutation-verified across both rounds: restoring the substring match turns 2 red, waiving red CI
-  turns 1 red, dropping the token boundary turns 2 red, ignoring the exit status turns 2 red.
-
-  **Three external review rounds, each finding something real the previous rounds and the full
-  suite had missed.** Recorded because it is the argument for the practice: every round's findings
-  were live false-permission paths in a control whose whole purpose is to deny them, and the suite
-  was green the entire time.
-
-  1,627 tests suite-wide.
+- **The brake hook is under test at last** — the piece Claude Code actually executes, and the only
+  one that can produce a refusal, had no tests. 17 now drive the real script over real stdin and
+  pin both fail directions: silence outside an armed run, denial for anything unclear inside one
+  (corrupt marker, emptied list, the string `"true"` posing as an order), plus the `cd`-out shape
+  that motivated closing the ordered path.
+- Structural regression guards (AST) asserting the merge check never reads a name a dot-source
+  destroys, and that the tests requirement is passed rather than assumed.
+- An adversarial sweep of 27 evasion classes — command substitution, backticks, env-var prefixes,
+  redirections, line continuations, quote-splitting, `bash -c` wrapping, per-segment vouching —
+  its catalogue taken from `liberzon/claude-hooks` (MIT, registered in `knowledge/`), which solves
+  the same sub-command decomposition problem. Ideas, not code.
 
 ## [0.29.0] - 2026-07-30
 ### Added

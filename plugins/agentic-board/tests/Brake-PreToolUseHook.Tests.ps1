@@ -108,54 +108,44 @@ Describe 'Brake hook — an armed run without the order' {
     }
 }
 
-Describe 'Brake hook — the ORDERED end-to-end run (#536)' {
-    # Before this, the marker carried `endToEnd` and the hook never read it: the gated path was
-    # refused identically, so an ordered run could not reach the only merge route that CHECKS
-    # anything. The order opens that one path and nothing else.
+Describe 'Brake hook — the order is recorded and acted on nowhere (#541)' {
+    # #536 let an ordered run reach the gate's own script. Review found that opening it made two
+    # latent holes reachable — a `cd` out of the worktree makes the gate skip its own four
+    # conditions, and the review condition is a comment the run can post itself. Neither is
+    # fixable in a command-string classifier, so nothing is opened until #541.
 
-    It 'lets the GATED merge script through when ordered' {
-        # The hook identifies the gate as its OWN sibling, so the command has to name that exact
-        # script - which is what the brief hands the run.
+    It 'refuses the gate script even when the marker carries the order' {
         $gate = Join-Path (Split-Path $script:Hook -Parent) 'Board-Merge.ps1'
-        $wt = script:NewWorktree 'e2e-gated' (script:Marker -EndToEnd $true)
-        script:RunHook -Cwd $wt -Command "pwsh -File $gate -PR 535" | Should -BeNullOrEmpty
+        $wt = script:NewWorktree 'e2e-gate' (script:Marker -EndToEnd $true)
+        script:DecisionOf (script:RunHook -Cwd $wt -Command "pwsh -File $gate -PR 535") | Should -Be 'deny'
     }
-    It 'REFUSES a look-alike the run could have written itself' {
-        # The bypass review found: any file called board-merge.ps1 used to be waved through.
-        $wt = script:NewWorktree 'e2e-lookalike' (script:Marker -EndToEnd $true)
-        script:DecisionOf (script:RunHook -Cwd $wt -Command 'pwsh ./board-merge.ps1 -PR 535') |
+    It 'refuses the cd-out-of-the-worktree shape that motivated closing it' {
+        $gate = Join-Path (Split-Path $script:Hook -Parent) 'Board-Merge.ps1'
+        $wt = script:NewWorktree 'e2e-cd' (script:Marker -EndToEnd $true)
+        script:DecisionOf (script:RunHook -Cwd $wt -Command "cd C:\ ; pwsh -File $gate -PR 535") |
             Should -Be 'deny'
     }
-    It 'REFUSES a look-alike sitting in a scripts/ folder of its own' {
-        $wt = script:NewWorktree 'e2e-lookalike2' (script:Marker -EndToEnd $true)
-        script:DecisionOf (script:RunHook -Cwd $wt -Command 'pwsh myproj/scripts/board-merge.ps1 -PR 535') |
-            Should -Be 'deny'
-    }
-    It 'still denies the RAW merge when ordered' {
+    It 'refuses a raw merge when ordered' {
         $wt = script:NewWorktree 'e2e-raw' (script:Marker -EndToEnd $true)
         script:DecisionOf (script:RunHook -Cwd $wt -Command 'gh pr merge 535 --squash') | Should -Be 'deny'
     }
-    It 'still denies the REST merge endpoint when ordered' {
-        $wt = script:NewWorktree 'e2e-rest' (script:Marker -EndToEnd $true)
-        script:DecisionOf (script:RunHook -Cwd $wt -Command 'curl -X PUT https://api.github.com/repos/o/r/pulls/9/merge') |
-            Should -Be 'deny'
-    }
-    It 'still denies tampering with the marker when ordered' {
-        $wt = script:NewWorktree 'e2e-tamper' (script:Marker -EndToEnd $true)
-        script:DecisionOf (script:RunHook -Cwd $wt -Command 'rm .agentic-board/brake-armed.json') |
-            Should -Be 'deny'
-    }
-    It 'still denies deploy and publish when ordered — the order is about CLOSING the work' {
+    It 'refuses deploy and publish when ordered' {
         $wt = script:NewWorktree 'e2e-deploy' (script:Marker -EndToEnd $true)
         script:DecisionOf (script:RunHook -Cwd $wt -Command 'wrangler deploy') | Should -Be 'deny'
         script:DecisionOf (script:RunHook -Cwd $wt -Command 'npm publish')     | Should -Be 'deny'
     }
-    It 'treats the STRING "true" as no order at all' {
-        # PowerShell casts any non-empty string to $true; a hand-edited marker must not be able to
-        # grant the permission by writing it as text.
-        $wt = script:NewWorktree 'e2e-strtrue' '{"issue":532,"irreversible":["merge"],"endToEnd":"true"}'
-        script:DecisionOf (script:RunHook -Cwd $wt -Command 'pwsh scripts/Board-Merge.ps1 -PR 1') |
+    It 'refuses tampering when ordered' {
+        $wt = script:NewWorktree 'e2e-tamper' (script:Marker -EndToEnd $true)
+        script:DecisionOf (script:RunHook -Cwd $wt -Command 'rm .agentic-board/brake-armed.json') |
             Should -Be 'deny'
+    }
+    It 'behaves identically ordered and unordered' {
+        # The clearest statement of the current contract: the order changes nothing here.
+        $gate = Join-Path (Split-Path $script:Hook -Parent) 'Board-Merge.ps1'
+        $on  = script:NewWorktree 'e2e-on'  (script:Marker -EndToEnd $true)
+        $off = script:NewWorktree 'e2e-off' (script:Marker -EndToEnd $false)
+        (script:DecisionOf (script:RunHook -Cwd $on  -Command "pwsh -File $gate -PR 1")) |
+            Should -Be (script:DecisionOf (script:RunHook -Cwd $off -Command "pwsh -File $gate -PR 1"))
     }
 }
 

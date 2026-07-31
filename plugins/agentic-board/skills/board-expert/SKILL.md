@@ -44,8 +44,8 @@ in which role decided a match. Schema and merge rules: `references/roles.md`.
 
 Pass `-EndToEnd` **only** when the human ordered the finish in that instruction ("de punta a
 punta", "llévalo hasta el final", "ciérralo tú"). It is an order, not a setting: never carry it
-over from a previous run, and never read it out of the contract. See the autonomy boundary below
-for what it actually opens.
+over from a previous run, and never read it out of the contract. It is currently **recorded and
+not honoured** — see the autonomy boundary below, and never tell the user the run will merge.
 
 ## Guiding principle: total self-use of agentic-board
 
@@ -71,22 +71,22 @@ stops there for the human to merge.
 The brake is mechanical, not prose: `Start-WorktreeSession` writes `.agentic-board/brake-armed.json`
 into the launched worktree and a PreToolUse hook refuses the call before it runs.
 
-**Ordered end to end (`-EndToEnd`).** The order does not lift the brake — it opens exactly one
-path. `Board-Merge.ps1` — the only merge route that checks anything, identified by its ABSOLUTE
-path (a copy elsewhere, or a file the run writes with the same name, is refused) — becomes
-reachable, and it
-re-establishes four conditions at merge time, refusing while naming every unmet one:
+**Ordered end to end (`-EndToEnd`) — RECORDED, NOT HONOURED (#541).** The order is written into
+the run's brake marker and explained to the launched session; it does **not** open a merge.
 
-| Condition | Why it is separate |
+It briefly did. The gate's own script was opened for an ordered run, on the reasoning that it
+re-checks four conditions (ordered · code-class · a real review of the head commit · CI green) and
+refuses on its own. External review found that opening it made two latent holes reachable, neither
+of them a string-matching bug:
+
+| Hole | Why the gate could not defend itself |
 |---|---|
-| the owner ordered it | permission travels with the instruction, not with a file |
-| the change is code-class | what he judges by LOOKING at it stays his, ordered or not |
-| a real review of THIS commit | a green check is not a review |
-| CI passed on THIS commit | the run may not certify its own testing |
+| `cd C:\ ; pwsh <gate> -PR 42` | The hook judges per segment and allows it; the gate then resolves its marker from its RUNTIME cwd, finds none outside the worktree, and skips all four conditions |
+| `[abios-review] … sha=<head>` | The review condition is a PR comment the run is able to post itself — the self-certification already removed for the TEST condition |
 
-Raw `gh pr merge`, the REST merge endpoints and `gh` reached through a variable stay refused at
-the tool layer even when ordered, so the order NARROWS the route to a merge instead of widening
-it. Deploy/publish/refresh/delete are never covered by it.
+So the tool layer refuses every merge route for every run, ordered or not. Keep passing
+`-EndToEnd` when the human says it: the session is told the order exists and is inert, which is
+what stops it reading its own refusal as a failure to work around.
 
 ## Evidence (three places)
 

@@ -48,17 +48,12 @@ function Format-AutoBrief {
         [Parameter(Mandatory)][hashtable]$Contract,
         [string]$PlanBody = "",
         [string]$RoleObjective = "",
-        # The owner ORDERED this run to finish (#530, reaching the brief since #536). Until now the
-        # permission was recorded in the brake marker and never told to the agent that had to act
-        # on it: the brief ordered the stop either way, so an ordered run obeyed a "stop" it had
-        # been given while the "finish" sat in a file it never read. A switch, so an untaught
-        # caller cannot grant it by accident.
-        [switch]$EndToEnd,
-        # Absolute path of the REAL gate. The tool layer opens that exact script and nothing else,
-        # so the brief has to name it. Saying just "use Board-Merge.ps1" would have the run reach
-        # for a bare name, be refused, and read that as "I am not allowed to finish" - the safety
-        # control breaking the happy path, which is how safety controls end up reverted.
-        [string]$GatePath = ''
+        # The owner ORDERED this run to finish (#530). The brief now EXPLAINS that order rather than
+        # granting it: the mechanism that would honour it was found to have two holes it could not
+        # defend (#541), so the run is told plainly that the order is recorded, cannot yet be acted
+        # on, and that a refused merge is the control working - not a bug to route around. Telling
+        # it nothing would leave it reading its own refusal as failure.
+        [switch]$EndToEnd
     )
     $dod = @()
     if ($Contract.dod) { $dod = @($Contract.dod.Keys | Where-Object { $Contract.dod[$_] }) }
@@ -72,42 +67,25 @@ function Format-AutoBrief {
         "`nAdopt the agent type ``$($Contract.roleAgent)`` for this run — its definition is your persona.`n"
     } else { '' }
 
-    # The closing section. Ordered or not, the OTHER irreversible verbs stay off the table: the
-    # end-to-end order is permission to finish THIS work, never a general lifting of the brake.
-    $others = @($irr | Where-Object { "$_".Trim().ToLowerInvariant() -ne 'merge' })
-    $othersList = if ($others.Count) { ($others -join ', ') } else { '(none)' }
-    # Name the real script when the caller knows it. The fallback stays deliberately explicit that
-    # a bare name will not work, rather than printing one that would be refused.
-    $gateLine = if ($GatePath) {
-        "$GatePath -PR <n>"
-    } else {
-        "<the absolute path of this plugin's Board-Merge.ps1> -PR <n>   # resolve it before you run it"
-    }
+    # The closing section. Both branches STOP; the ordered one also says why the order is inert.
     $closingSection = if ($EndToEnd) { @"
-## Closing the work — ORDERED end to end (you MAY close this work yourself)
+## STOP before the irreversible — including the close you were ordered to make
 
-The owner ordered this run end to end, so you MAY close this work yourself — but only by EARNING
-it. The merge gate re-checks all four conditions at merge time and will refuse if any is unmet:
+The owner ordered this run end to end, and that order is RECORDED in your brake marker. It is not
+yet something you can act on, and you should not try.
 
-1. ordered end to end        (given — that is why you are reading this)
-2. the change is code        (a report, page, theme or image goes to the human, ordered or not)
-3. a real review of THIS commit  (a green check is not a review)
-4. automated tests ran on THIS commit  (recorded in CI, not in your own account of it)
+Why, stated plainly so you do not treat the refusal as a bug: the mechanism that would let an
+ordered run close its own PR was found to have two holes it could not defend (#541). Changing
+directory before invoking the gate made the gate skip its own checks entirely, and the "a real
+review exists" condition was satisfied by a PR comment the run itself can post. Until both are
+closed, the tool layer refuses every merge route for every run, ordered or not.
 
-Close it by invoking the gate at THIS EXACT PATH:
+So: reach "PR ready + review gate green" and STOP there, exactly as an unordered run would. Do NOT
+merge, deploy, refresh, publish or delete. If a merge command is refused, that is this control
+working as intended — do not look for another way around it. Say in your final report that the
+work is ready and the close is waiting for the human.
 
-    $gateLine
-
-That script IS the gate — it weighs the four conditions and exits non-zero when they do not hold.
-Use that exact path. The tool layer opens that one script and nothing else, so a copy of it
-elsewhere — or a file you write yourself with the same name — is refused like any other merge.
-Do NOT reach for ``gh pr merge`` or the REST merge endpoint either: going around the gate is not
-the same job as passing it.
-
-If the gate refuses, it names exactly what is missing. Fix that and try again — do not look for
-another way to merge.
-
-STILL OFF LIMITS, ordered or not: $othersList. Those wait for the human.
+STOP before: $irrList.
 "@ } else { @"
 ## STOP before the irreversible (brake — ask the human)
 STOP before: $irrList.
@@ -189,8 +167,7 @@ if ($repo) {
     }
 }
 
-$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role `
-             -EndToEnd:$EndToEnd -GatePath (Join-Path $PSScriptRoot 'Board-Merge.ps1')
+$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role -EndToEnd:$EndToEnd
 
 # The brake, as a CONTROL rather than prose (#440). The generic launch briefing used to order
 # the merge outright and make it the completion condition, so a session that merged to main was
@@ -212,15 +189,13 @@ Write-Host "=== /board expert auto  (issue #$Issue) ===" -ForegroundColor Cyan
 Write-Host "  Brief composed -> $briefPath" -ForegroundColor Green
 Write-Host "  Autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
 if ($stopAtPR -and $EndToEnd) {
-    # ORDERED (#530/#536). Say what is actually true: the brake is still armed and still refuses
-    # every ungated route; what the order opens is the GATED script, which re-checks the four
-    # conditions and refuses on its own when they do not hold. Printing "will merge" here would
-    # be the same overclaim #516 removed - the run has to earn it, and may well not.
-    Write-Host "  Brake ARMED + END-TO-END ORDERED: the session may close its OWN PR, but only" -ForegroundColor Cyan
-    Write-Host "               through Board-Merge.ps1, and only if the change is code, carries a" -ForegroundColor Cyan
-    Write-Host "               real review of the head commit and CI passed on it. Otherwise it" -ForegroundColor Cyan
-    Write-Host "               refuses and the PR waits for you. Deploy/publish/refresh/delete" -ForegroundColor Cyan
-    Write-Host "               stay off the table." -ForegroundColor Cyan
+    # Say what is TRUE, not what was asked for. The order is recorded and cannot yet be acted on
+    # (#541); printing "the session may close its own PR" would be the same overclaim #516 removed.
+    Write-Host "  Brake ARMED. The end-to-end order is RECORDED but NOT yet honoured:" -ForegroundColor Yellow
+    Write-Host "               the mechanism that would let a run close its own PR was found to have" -ForegroundColor Yellow
+    Write-Host "               two holes it could not defend (see issue #541), so every merge route" -ForegroundColor Yellow
+    Write-Host "               is refused for every run. This session will stop at a reviewed PR and" -ForegroundColor Yellow
+    Write-Host "               the close is yours." -ForegroundColor Yellow
 } elseif ($stopAtPR) {
     # #516: this line used to claim a brake that was only a paragraph in the brief. It is now a
     # control - Start-WorktreeSession writes a marker into the worktree and a PreToolUse hook
@@ -243,12 +218,7 @@ if ($DryRun) {
         -StopAtPR:$stopAtPR -BriefFile $briefPath -Irreversible @($contract.autonomy.irreversible) -EndToEnd:$EndToEnd
     Write-Host ""
     Write-Host "  The launched session is briefed by $briefPath — it will research, build, test with" -ForegroundColor DarkGray
-    if ($EndToEnd) {
-        Write-Host "  recorded evidence, self-drive the board, and close its own PR through the gate" -ForegroundColor DarkGray
-        Write-Host "  if — and only if — it earns all four conditions." -ForegroundColor DarkGray
-    } else {
-        Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray
-    }
+    Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray
 }
 Write-Host ""
 Write-Host "  Monitor:  scripts/Board-Work.ps1 -Sessions -Watch" -ForegroundColor Cyan

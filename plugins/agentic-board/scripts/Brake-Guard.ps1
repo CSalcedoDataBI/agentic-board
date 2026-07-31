@@ -55,15 +55,24 @@ $script:BrakeMarkerName = 'brake-armed.json'
 $script:BrakePatterns = @(
     # --- merge: putting work on the default branch ---------------------------------
     @{ action = 'merge';   pattern = '\bgh\s+pr\s+merge\b' }
-    # GATED (#536): this script is the only merge path that CHECKS anything - it establishes the
-    # four end-to-end conditions and exits 1 when any is unmet. So it is the one pattern an
-    # ORDERED run may reach; every other route below stays shut. Marking it here rather than
-    # special-casing the string in Test-IsBrakedCommand keeps "which paths are gated" a property
-    # of the pattern table, where the next person will actually look.
+    # The tool's own merge script. DENIED for every autonomous run, ordered or not.
     #
-    # The DENY pattern stays broad on purpose - any invocation by that name is a merge attempt and
-    # is refused for an unordered run. What the order opens is narrower: see $GatedMergePattern.
-    @{ action = 'merge';   pattern = '\bboard-merge\.ps1\b'; gated = $true }
+    # #536 briefly opened this one path for a run the owner had ordered to finish, on the reasoning
+    # that this script re-checks the four conditions and refuses on its own. External review found
+    # that opening it made two latent holes REACHABLE, and neither is a string-matching bug (#541):
+    #
+    #   - `cd C:\ ; pwsh <genuine-gate> -PR 42` passes here per segment, and the gate then resolves
+    #     its marker from its RUNTIME cwd, finds none outside the worktree, and skips all four
+    #     conditions. The two halves of the control disagreed about which directory the run was in,
+    #     and the run got to pick.
+    #   - The review condition is satisfied by a PR comment the run is able to post itself - the
+    #     same self-certification the design had already removed for the TEST condition.
+    #
+    # So the path stays shut until #541 gives the gate a trustworthy armed context and evidence the
+    # subject cannot mint. An ordered run still records the order in its marker; what it does not
+    # get is a way to act on it. A control that opens a door on the strength of a check the caller
+    # can walk around is the failure this file exists to stop.
+    @{ action = 'merge';   pattern = '\bboard-merge\.ps1\b' }
     # The REST merge endpoints, recognized by the ENDPOINT rather than by the client that calls
     # it. Anchoring these to `gh api` (as the first cut did) left the identical request open via
     # curl, Invoke-RestMethod, python or node - all of which have the same token available.
@@ -105,60 +114,6 @@ $script:BrakePatterns = @(
     @{ action = 'merge';   pattern = '\bgh\s+(pr|api|repo|release)\s+[$%]' }
     @{ action = 'merge';   pattern = '\bgh\s+[$%]' }
 )
-
-# Compare paths the way two spellings of the same path should compare: case-insensitively, with
-# both separators treated alike. Used only for the gated-path identity check below.
-function ConvertTo-ComparablePath {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
-    if (-not $Path) { return '' }
-    return ($Path -replace '\\', '/').Trim().ToLowerInvariant()
-}
-
-<#
-    Is this segment an invocation of the GENUINE gate, and nothing else?
-
-    The first cut asked "does the genuine path appear anywhere in this segment?" and external
-    review broke it in one line: naming the real gate as an unused ARGUMENT vouched for a
-    look-alike sitting in the command position -
-
-        pwsh ./board-merge.ps1 'C:\real\...\Board-Merge.ps1' -PR 5
-
-    A substring test cannot tell the script being RUN from a string being passed. So every token
-    that names the gate script must BE the gate: one impostor anywhere in the segment refuses the
-    whole thing. Conservative on purpose - the cost of a false refusal is one command the run has
-    to reword, and the cost of a false permission is an unreviewed merge.
-#>
-function Test-IsGenuineGateInvocation {
-    param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Segment,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Gate
-    )
-    if (-not $Gate) { return $false }
-    $seg = ConvertTo-ComparablePath $Segment
-    $gate = ConvertTo-ComparablePath $Gate
-
-    # Anchor on the GATE, not on a whitespace token. Two failures came from doing it the other way:
-    #   - `[^\s;|&]*board-merge\.ps1` stopped matching AT the script name, so `<gate>-bypass.ps1`
-    #     captured exactly `<gate>` and passed while a different script ran;
-    #   - splitting on whitespace refused a genuine gate whose path contains spaces (quotes are
-    #     already stripped by now), breaking the legitimate path on any `C:\Program Files\...`.
-    # So: every occurrence of the script name must be the tail of the real gate path, and must sit
-    # on token boundaries at both ends.
-    $hits = [regex]::Matches($seg, 'board-merge\.ps1')
-    if ($hits.Count -eq 0) { return $false }
-    foreach ($h in $hits) {
-        $end = $h.Index + $h.Length
-        # The token has to END here - otherwise this is `<gate>-bypass.ps1` or `<gate>.bak.ps1`.
-        if ($end -lt $seg.Length -and $seg[$end] -notmatch '[\s;|&]') { return $false }
-        # ...and the text ending here has to BE the gate, spaces and all.
-        $start = $end - $gate.Length
-        if ($start -lt 0) { return $false }
-        if ($seg.Substring($start, $gate.Length) -ne $gate) { return $false }
-        # ...and the gate has to START at a token boundary, so `C:\evil\<gate>` is not the gate.
-        if ($start -gt 0 -and $seg[$start - 1] -notmatch '[\s;|&=]') { return $false }
-    }
-    return $true
-}
 
 # A command that only PREVIEWS the action mutates nothing, so denying it buys no safety and
 # costs the run its ability to inspect what it is about to hand the human.
@@ -233,40 +188,17 @@ function ConvertTo-NormalizedCommand {
     irreversible does not get its merges denied - the control follows the contract, it does not
     invent policy.
 
-    $EndToEnd is the owner's ORDER to finish this run (#530, honoured here since #536). It does
-    not lift the brake: it opens the GATED path only. `Board-Merge.ps1` weighs the four conditions
-    and refuses on its own when they are unmet, so an ordered run reaches a merge only through the
-    thing that can still say no. Raw `gh pr merge`, the REST endpoints and the variable-indirection
-    patterns stay denied, which makes ordering the run NARROW the route to a merge rather than
-    widen it. Defaults to $false so a caller that has not been taught about the order cannot
-    accidentally grant it.
-
-    $GatedScriptPath is the absolute path of the REAL gate, supplied by the caller that knows it
-    (the hook passes its own sibling `Board-Merge.ps1`). Review caught why a pattern cannot stand
-    in for it: matching the FILENAME let an ordered run - which has full write access to its own
-    worktree - drop any file called `board-merge.ps1` with none of the four conditions in it and
-    invoke that. Matching a canonical-looking PATH was no better, and worse, wrong: the installed
-    plugin lives at `<version>/scripts/Board-Merge.ps1`, with no `plugins/agentic-board/` in it, so
-    a path pattern would have refused the genuine gate in every project except this repo itself.
-    Identity has to come from the caller, not from the shape of a string.
-
-    Empty $GatedScriptPath means NO bypass at all: a caller that cannot say which script is the
-    real one does not get to open one. That is the safe direction and keeps every existing caller
-    (and every test that omits it) on the fully-braked behaviour.
-
-    STATED LIMIT, since this file is a backstop and not a sandbox: an ordered run that OVERWRITES
-    the real gate before invoking it still passes here, because the path is then genuine. Pinning
-    the gate's content is tracked separately; the controls that catch it meanwhile are the review
-    gate (a modified gate lands in the diff) and the post-hoc supervisor.
+    THE OWNER'S END-TO-END ORDER IS NOT HONOURED HERE. It is recorded in the marker (#530) and
+    read by the merge gate, but this classifier opens nothing for it: #536 tried, and external
+    review showed that opening even the gate's own script made two latent holes reachable that no
+    amount of string matching can close (#541). Until the gate carries a trustworthy armed context
+    and evidence the run cannot mint, an ordered run is refused exactly like an unordered one.
 #>
 function Test-IsBrakedCommand {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Command,
-        [string[]]$Irreversible = @(),
-        [bool]$EndToEnd = $false,
-        [string]$GatedScriptPath = ''
+        [string[]]$Irreversible = @()
     )
-    $gate = ConvertTo-ComparablePath $GatedScriptPath
     $norm = ConvertTo-NormalizedCommand $Command
     if (-not $norm) { return '' }
 
@@ -287,10 +219,6 @@ function Test-IsBrakedCommand {
         if (Test-IsGenuinePreview -Segment $seg) { continue }                          # this segment only
         foreach ($p in $script:BrakePatterns) {
             if ($irr -notcontains $p.action) { continue }
-            # An ORDERED run may reach the gated path - and only the script the CALLER identified
-            # as the real one. Matching the bare filename here let a run invoke a look-alike it
-            # had just written itself; no $gate means no bypass.
-            if ($EndToEnd -and $p.gated -and (Test-IsGenuineGateInvocation -Segment $seg -Gate $gate)) { continue }
             if ($seg -match $p.pattern) { return $p.action }
         }
     }
