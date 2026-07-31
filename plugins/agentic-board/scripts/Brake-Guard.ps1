@@ -138,8 +138,8 @@ $script:BrakePatterns = @(
     # human "merge is marked irreversible" for a command that removes main, arguably the worse of
     # the two. Not a bypass (the contract filter runs per pattern, so a delete-braking contract
     # still refused it), but a control is only as useful as the account it gives of itself.
-    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s\+?[^\s;|&]+:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
-    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s(main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;&|<>]*\s\+?[^\s;|&]+:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;&|<>]*\s(main|master)(?=[\s;&|<>]|$)' }
 
     # --- publish: making something public / cutting a release -----------------------
     @{ action = 'publish'; pattern = '\bgh\s+release\s+create\b' }
@@ -165,7 +165,7 @@ $script:BrakePatterns = @(
     @{ action = 'delete';  pattern = $script:GitCmd + 'push\b.*--delete\b' }
     # git's other remote-branch deletion syntax: `git push origin :branch`. The leading whitespace
     # in the lookbehind keeps `HEAD:main` (an ordinary push refspec) out of it.
-    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b[^;]*\s:\S' }
+    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b[^;&|<>]*\s:\S' }
 
     # --- indirection through a variable ---------------------------------------------
     # Quote removal (see ConvertTo-NormalizedCommand) handles `gh pr 'merge'`, but a value the

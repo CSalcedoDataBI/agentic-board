@@ -69,6 +69,19 @@
   deletes no longer stops that command. It is a delete, and the guard follows the contract instead
   of inventing policy — the rule this file opens with. There is a test saying so.
 
+  **Round six, also no bypass**, and the last one taken: the prefix before the refspec excluded
+  only `;`, so the matcher could step past a background `&` and read a later `something:main` in
+  the same segment as the push target — `git push origin fine & echo notes:main` was refused for
+  text belonging to a different command. A false positive, never a bypass (a looser prefix can only
+  add matches), fixed because over-blocking on the run's most common command is the argument this
+  whole entry rests on. The prefix now stops at the same operators the branch-name lookahead uses.
+  The review's second example, `> log:main.txt`, did not reproduce — checked rather than assumed.
+
+  **Stopped here deliberately.** Rounds one to four found real defects — a bypass, a false
+  positive, an anchor broken for months, and a matcher that could hang the session. Rounds five and
+  six found no bypass at all: a mislabelled verb and this over-block. The curve flattened, so the
+  loop was ended on judgement rather than run until it produced nothing.
+
   **Known and accepted:** `git push main` is read as a push to the default branch even when `main`
   is the name of a *remote*. A false positive, not a bypass, on a rare spelling — and this pattern
   deliberately errs toward refusing.

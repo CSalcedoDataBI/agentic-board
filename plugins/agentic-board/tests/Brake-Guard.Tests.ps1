@@ -985,3 +985,42 @@ Describe 'Test-IsBrakedCommand — deleting the default branch is a DELETE (#542
             Should -Be 'delete'
     }
 }
+
+Describe 'Test-IsBrakedCommand — the prefix must not step over a background operator (#542, review round 6)' {
+    # Segments split on `;`, `&&`, `||`, `|` and newlines, but NOT on a lone `&` - deliberately, since
+    # the branch-name lookahead treats `&` as a terminator. The gap between the two: the `[^;]*`
+    # sitting before the refspec excluded only `;`, so the matcher could skip PAST a background `&`
+    # and pick up any later `something:main` in the same segment - text belonging to a different
+    # command entirely.
+    #
+    # A false positive, never a bypass (a looser prefix can only add matches). Fixed anyway: this
+    # pattern sits on the run's most common command, and over-blocking is how a control gets
+    # switched off - the argument this whole change rests on.
+
+    It 'does not read text after a background & as the push target' {
+        Test-IsBrakedCommand -Command 'git push origin fine & echo notes:main' -Irreversible $script:AllIrr |
+            Should -BeNullOrEmpty
+    }
+    It 'does not read text after a pipe-ish operator as the push target' {
+        Test-IsBrakedCommand -Command 'git push origin fine & cat refs:master' -Irreversible $script:AllIrr |
+            Should -BeNullOrEmpty
+    }
+    It 'still denies when the refspec is the REAL target and & merely follows it' {
+        # The round-2 cases must survive: there the `&` comes AFTER the refspec, not before it.
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main&' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main>out.txt' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'still denies the ordinary forms' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+        Test-IsBrakedCommand -Command 'git -C . push origin HEAD:refs/heads/master' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'still denies a real merge sitting in a LATER segment' {
+        # The prefix is narrowed, not the segment splitting: a genuine second command still counts.
+        Test-IsBrakedCommand -Command 'git status ; git push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+}
