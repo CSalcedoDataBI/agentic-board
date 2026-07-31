@@ -2,6 +2,102 @@
 
 ## [Unreleased]
 ### Fixed
+- **A braked run could push straight to the default branch** (#542). The brake watched `gh pr merge`,
+  the REST merge endpoints and `Board-Merge.ps1` — and missed the simplest route of all:
+  `git push origin HEAD:main` puts work on main with one command and matched nothing. Present in
+  every version of the brake, including shipped 0.29.0, and found only when an external review was
+  pointed at *whether the door was really shut* rather than at the change in front of it.
+
+  Not quite an oversight, which is the interesting part: the delete pattern carried a comment
+  calling `HEAD:main` "an ordinary push refspec", written while guarding against *over*-matching.
+  A test pinned that reading in place. Both were correct about the delete pattern and wrong about
+  the vocabulary — this guard defines merge as *"putting work on the default branch"*, which is
+  exactly what that refspec does. **The obsolete assertion was corrected, not worked around.**
+
+  Now refused: refspecs onto `main`/`master` (`HEAD:main`, `branch:main`, `+HEAD:main`,
+  `HEAD:refs/heads/main`) and pushing the default branch by name.
+
+  **How the branch name must end took three tries, each one a real defect — and the CI reviewer
+  caught both mistakes**, in the first two reviews it managed to publish after #543 raised its turn
+  cap. `\b` refused `HEAD:main-cleanup` and `HEAD:master.bak`: legitimate branches, blocked, on the
+  run's most common command. Replacing it with `(\s|$)` fixed that and **reopened a different
+  hole** — that only accepts a space or end-of-segment, and the segment splitter does not treat a
+  lone `&` or a redirection as a separator, so `git push origin HEAD:main&` (background the push,
+  same effect) matched nothing, a case the original `\b` had caught. It now ends at a lookahead
+  over the shell's own terminator set, which covers both directions.
+
+  **A third review round found the anchor itself was wrong — and had always been.** Every git
+  rule in this file began `\bgit\s+push\b`, which demands that `push` follow `git`
+  immediately. One ordinary global flag shook all of them off at once: `git -C . push origin
+  HEAD:main`, `git -c k=v push …`, `git --no-pager push …`. That was never about the new patterns —
+  the **pre-existing branch-delete rules had the same hole**, and `git -C . push origin --delete f`
+  went through untouched. All four git rules now share one prefix that tolerates flag-shaped tokens
+  between the program and the subcommand, so fixing it once fixed the older rules too. Only
+  flag-shaped tokens are allowed in that gap, so `git commit -m "push to main"` is still not read
+  as a push, and the repetition is bounded rather than `*` — this runs on every tool call, and an
+  unbounded nested quantifier over adversarial input is a stall waiting to happen (measured: 1 ms
+  against a command carrying 200 flag-like tokens).
+
+  **Round four found two more in that fix — and measuring the repair found a third nobody had
+  seen.** The flag allowance was capped at five, which was itself a bypass: six `-c` flags and the
+  rule stopped matching, and chaining `-c` is ordinary scripting. And `[:/]` treated `/` as a
+  refspec separator, which it is not — `release/master`, `team/main` and `HEAD:team/main` were all
+  refused for merely *ending* in the default branch's name.
+
+  Removing the cap came with an argument, made by the reviewer and accepted by me, that the
+  repetition could not blow up because its character classes are disjoint. **The argument was
+  wrong and only the stopwatch said so:** `--flag` repeated 1000 times ran the matcher past three
+  minutes, because `-{1,2}` and `[^\s;|&]+` can both consume the second dash — two readings per
+  token, 2^1000 for a thousand of them. This code runs on *every tool call*, so that is not a slow
+  path, it is a wedged session, and a wedged guard is a removed guard. The form now allows exactly
+  one reading per token: measured at 3 ms with no match and 334 ms in the absurd worst case, with
+  three timing tests to catch a return — the suite was green with the hang present.
+
+  Recorded in the source, because this file keeps teaching it: *"the classes are disjoint so it
+  cannot blow up" is an argument, not a measurement. Time it.*
+
+  **Round five found no bypass at all** — the first round on this change that did not. Its one
+  finding was about honesty rather than permission: `git push origin :main` *deletes* the remote
+  default branch, but the merge rule matched it first (its source side allowed zero characters),
+  so the refusal announced "merge is marked irreversible" for a command that removes main. Not a
+  bypass — the contract filter runs per pattern, so a delete-braking contract already refused it —
+  but a control is worth exactly as much as the account it gives of itself, which is this tool's
+  founding defect. The refspec source now requires at least one character, so an empty source falls
+  through to the delete rule where it belongs.
+
+  Recorded as a decision rather than left to chance: a contract that brakes merges but **not**
+  deletes no longer stops that command. It is a delete, and the guard follows the contract instead
+  of inventing policy — the rule this file opens with. There is a test saying so.
+
+  **Round six, also no bypass**, and the last one taken: the prefix before the refspec excluded
+  only `;`, so the matcher could step past a background `&` and read a later `something:main` in
+  the same segment as the push target — `git push origin fine & echo notes:main` was refused for
+  text belonging to a different command. A false positive, never a bypass (a looser prefix can only
+  add matches), fixed because over-blocking on the run's most common command is the argument this
+  whole entry rests on. The prefix now stops at the same operators the branch-name lookahead uses.
+  The review's second example, `> log:main.txt`, did not reproduce — checked rather than assumed.
+
+  **Stopped here deliberately.** Rounds one to four found real defects — a bypass, a false
+  positive, an anchor broken for months, and a matcher that could hang the session. Rounds five and
+  six found no bypass at all: a mislabelled verb and this over-block. The curve flattened, so the
+  loop was ended on judgement rather than run until it produced nothing.
+
+  **Known and accepted:** `git push main` is read as a push to the default branch even when `main`
+  is the name of a *remote*. A false positive, not a bypass, on a rare spelling — and this pattern
+  deliberately errs toward refusing.
+
+  The original over-block, for the record: the tests missed it because the case they checked,
+  `maintenance`, continues with `t` (a word character) and so passed **for the wrong reason** —
+  proving nothing about `-` or `.`. A green test that passes by accident is the same failure this
+  whole entry is about. The reviewer also noted
+  that `HEAD:refs/heads/main` was claimed in the description and the code comment but asserted
+  nowhere; it has a test now. Deliberately still allowed, since
+  this pattern sits on the run's most common command and over-blocking is how a control gets
+  switched off: `git push -u origin <branch>`, a bare `git push`, `--force-with-lease` on its own
+  branch, and any branch whose *name* merely contains `main` (`issue-9-domain-model`,
+  `feature/maintenance`, `HEAD:my-domain`). **Stated limit:** the pure core cannot ask the repo what
+  its default branch is, so a project whose default is neither `main` nor `master` is not covered.
+
 - **The reviewer's turn cap sat one turn above what a real review needs** (#543). Measured across
   recent runs: reviews that actually published consumed 4 / 13 / 17 / 18 / **19** turns against a
   cap of **20**, and three consecutive runs on a large PR died at 21. A run that hits the cap leaves

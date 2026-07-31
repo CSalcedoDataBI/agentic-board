@@ -46,6 +46,33 @@ $ErrorActionPreference = "Stop"
 # launch and read by the hook, the supervisor (#517) and the teardown (#518).
 $script:BrakeMarkerName = 'brake-armed.json'
 
+# `git` accepts GLOBAL options between the program and the subcommand - `git -C <path> push`,
+# `git -c k=v push`, `git --no-pager push`. Anchoring rules on `\bgit\s+push\b` demanded that
+# `push` follow `git` immediately, so ONE ordinary flag shook off every git rule at once (#542,
+# review round 3). That included the branch-delete rules, which predate this work: the hole was
+# never about the new patterns, it was about the anchor they all copied.
+#
+# Only FLAG-SHAPED tokens may sit in the gap, each with at most one value, so `git commit -m
+# "push to main"` (quotes are stripped by then) is not mistaken for a push.
+#
+# The repetition is UNBOUNDED, and getting there took two wrong turns worth recording:
+#
+#   1. Capped at {0,5} "to avoid ReDoS". That WAS a bypass - six `-c` flags and the rule stopped
+#      matching, and chaining several `-c` is ordinary scripting, not an attack.
+#   2. Uncapped as `-{1,2}[^\s;|&]+`, on the reasoning (mine and the reviewer's) that the classes
+#      are disjoint so no catastrophic backtracking is possible. MEASURED, AND FALSE: `--flag`
+#      repeated 1000 times HUNG the matcher past three minutes. `-{1,2}` and `[^\s;|&]+` can both
+#      consume the second dash, so every `--` token had two readings and 1000 of them had 2^1000.
+#
+# The form here removes that ambiguity: one leading `-`, then everything up to whitespace, so each
+# token has exactly ONE reading. Measured after the change - 1000 `--flag` tokens: 3 ms with no
+# match, 334 ms when a real push follows; 2000 `-c k=v` tokens: 3 ms. The bypass is closed without
+# a count, and the stall is closed without a cap.
+#
+# The lesson, since this file keeps teaching it: "the classes are disjoint so it cannot blow up"
+# is an argument, not a measurement. Time it.
+$script:GitCmd = '\bgit\s+(?:-[^\s;|&]*\s+(?:[^\s;|&-][^\s;|&]*\s+)?)*'
+
 # Command patterns that REACH an irreversible action, grouped by the contract's action vocabulary
 # (the same words Expert-Autonomy uses, so one contract drives both).
 #
@@ -79,6 +106,41 @@ $script:BrakePatterns = @(
     @{ action = 'merge';   pattern = '\bpulls?/\d+/merge\b' }
     @{ action = 'merge';   pattern = '\brepos/[^\s]+/merges\b' }
 
+    # Pushing straight to the default branch (#542). The simplest merge route of all, and the one
+    # this guard missed for longest: `git push origin HEAD:main` puts work on main with one command
+    # and matched nothing. It was not quite an oversight - the delete pattern below carries a
+    # comment calling `HEAD:main` "an ordinary push refspec" - but this file's own vocabulary
+    # defines merge as "putting work on the default branch", which is exactly what it does.
+    #
+    # Two shapes: a REFSPEC landing on main/master (`HEAD:main`, `branch:main`, `+HEAD:main`,
+    # `HEAD:refs/heads/main`), and pushing the default branch BY NAME (`git push origin main`).
+    #
+    # HOW THE BRANCH NAME MUST END - and this took three tries, each one a real defect:
+    #
+    #   `\b`        refused `main-cleanup` and `master.bak`. `\b` only asks that the next character
+    #               not be a word character, so a `-` or a `.` satisfied it: legitimate branches
+    #               blocked on the run's most common command. The tests missed it because the case
+    #               they checked, `maintenance`, continues with `t` - a word character - so it
+    #               passed for the WRONG REASON and proved nothing about `-`.
+    #   `(\s|$)`    fixed that and reopened a different hole: it accepts only a space or the end of
+    #               a segment, and $SegmentSeparator does not split on a lone `&` or a redirection.
+    #               So `git push origin HEAD:main&` - background the push, same effect - matched
+    #               nothing. The `\b` it replaced had caught that one.
+    #   lookahead   what is here now: the branch name must end at whitespace, a shell separator, a
+    #               redirection, or end-of-string. Both failure directions covered, and the
+    #               terminator set is the shell's, not an ad-hoc one.
+    #
+    # LIMIT: this core is pure (no git access), so it cannot ask the repo what its default branch
+    # is. A project whose default is neither `main` nor `master` is not covered.
+    # The source side is `+`, not `*`, on purpose: an EMPTY source (`git push origin :main`) is
+    # git's spelling for DELETING the remote branch, not for writing to it. Allowing zero characters
+    # there made this rule swallow the delete - the array is walked in order, so the refusal told the
+    # human "merge is marked irreversible" for a command that removes main, arguably the worse of
+    # the two. Not a bypass (the contract filter runs per pattern, so a delete-braking contract
+    # still refused it), but a control is only as useful as the account it gives of itself.
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;&|<>]*\s\+?[^\s;|&]+:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;&|<>]*\s(main|master)(?=[\s;&|<>]|$)' }
+
     # --- publish: making something public / cutting a release -----------------------
     @{ action = 'publish'; pattern = '\bgh\s+release\s+create\b' }
     @{ action = 'publish'; pattern = '\bnpm\s+publish\b' }
@@ -100,10 +162,10 @@ $script:BrakePatterns = @(
     @{ action = 'delete';  pattern = '\bgh\s+(issue|release)\s+delete\b' }
     # Every spelling gh accepts for the same DELETE request, not just the long one.
     @{ action = 'delete';  pattern = '\bgh\s+api\b.*(--method[=\s]+delete\b|-x\s+delete\b)' }
-    @{ action = 'delete';  pattern = '\bgit\s+push\b.*--delete\b' }
+    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b.*--delete\b' }
     # git's other remote-branch deletion syntax: `git push origin :branch`. The leading whitespace
     # in the lookbehind keeps `HEAD:main` (an ordinary push refspec) out of it.
-    @{ action = 'delete';  pattern = '\bgit\s+push\b[^;]*\s:\S' }
+    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b[^;&|<>]*\s:\S' }
 
     # --- indirection through a variable ---------------------------------------------
     # Quote removal (see ConvertTo-NormalizedCommand) handles `gh pr 'merge'`, but a value the

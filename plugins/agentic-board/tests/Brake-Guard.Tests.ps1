@@ -248,8 +248,18 @@ Describe 'Test-IsBrakedCommand — bypasses found by external review (round 4)' 
             Test-IsBrakedCommand -Command 'git push origin :feature-x' -Irreversible $script:AllIrr |
                 Should -Be 'delete'
         }
-        It 'still allows an ordinary push refspec' {
+        It 'does NOT read a push to main as an ordinary refspec (#542)' {
+            # This test used to assert the opposite, and that assertion WAS the gap: it was written
+            # to prove the delete pattern did not over-match, and in doing so it pinned
+            # `HEAD:main` as allowed. Pushing to the default branch is a merge by this file's own
+            # definition; it is only "ordinary" from the delete pattern's point of view.
             Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'still allows a refspec onto an ordinary branch' {
+            # What the original test meant to guard: the delete pattern must not eat a normal
+            # refspec push.
+            Test-IsBrakedCommand -Command 'git push origin HEAD:feature-x' -Irreversible $script:AllIrr |
                 Should -BeNullOrEmpty
         }
         It 'still allows a plain push' {
@@ -679,5 +689,338 @@ Describe 'Test-IsBrakedCommand — an ORDERED run is refused exactly like an uno
     It 'honours a contract that does not brake on merge at all' {
         Test-IsBrakedCommand -Command 'pwsh scripts/Board-Merge.ps1 -PR 1' -Irreversible @('deploy') |
             Should -Be ''
+    }
+}
+
+Describe 'Test-IsBrakedCommand — pushing straight to the default branch IS a merge (#542)' {
+    # Pre-existing gap, older than the end-to-end work: the brake watched `gh pr merge`, the REST
+    # merge endpoints and Board-Merge.ps1, and missed the simplest route of all. `git push origin
+    # HEAD:main` puts work on the default branch with one command and matched nothing.
+    #
+    # It was not an oversight so much as a decision that reads differently now: the delete pattern's
+    # comment says the lookbehind "keeps `HEAD:main` (an ordinary push refspec) out of it". But this
+    # file's own vocabulary defines merge as "putting work on the default branch", which is exactly
+    # what that refspec does.
+
+    It 'denies the plain refspec push to main' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies a branch-to-main refspec' {
+        Test-IsBrakedCommand -Command 'git push origin my-branch:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies the same against master' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:master' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies a FORCE refspec push to main' {
+        Test-IsBrakedCommand -Command 'git push --force origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies the + force spelling' {
+        Test-IsBrakedCommand -Command 'git push origin +HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies the fully-qualified ref form' {
+        # Claimed in the PR body and in the code comment, and it did work - but nothing ASSERTED it.
+        # On a change born from "the suite was green because a test asserted the gap was correct",
+        # an unasserted claim is the one thing not to leave lying around.
+        Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+        Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/master' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it when the shell terminates the token without a space' {
+        # Found by the CI reviewer on the FIX for the over-blocking, not on the original pattern.
+        # `(\s|$)` accepts only a space or end-of-segment, and the segment splitter does not treat
+        # a lone `&` or a redirection as a separator - so `HEAD:main&` (background the push) and
+        # `HEAD:main>out.txt` matched nothing and went through. The `` this replaced DID catch
+        # them: fixing the false positive reopened a different hole in the same pattern.
+        foreach ($c in @(
+            'git push origin HEAD:main&'
+            'git push origin HEAD:main>out.txt'
+            'git push origin main&'
+            'git push origin HEAD:main<in.txt'
+        )) {
+            Test-IsBrakedCommand -Command $c -Irreversible $script:AllIrr |
+                Should -Be 'merge' -Because "'$c' reaches main"
+        }
+    }
+    It 'denies pushing the local default branch by name' {
+        Test-IsBrakedCommand -Command 'git push origin main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it in a later segment' {
+        Test-IsBrakedCommand -Command 'git status && git push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'follows the contract — no brake when merge is not irreversible' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible @('deploy') |
+            Should -Be ''
+    }
+
+    Context 'must NOT block the pushes the run makes all day' {
+        # Over-blocking is how a safety control gets switched off for being annoying, and this
+        # pattern sits on the run's single most common command.
+        It 'allows pushing its own branch' {
+            Test-IsBrakedCommand -Command 'git push -u origin issue-542-push-to-default' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a bare push' {
+            Test-IsBrakedCommand -Command 'git push' -Irreversible $script:AllIrr | Should -BeNullOrEmpty
+        }
+        It 'allows a force-with-lease on its own branch' {
+            Test-IsBrakedCommand -Command 'git push --force-with-lease origin my-branch' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a branch whose NAME merely contains main' {
+            Test-IsBrakedCommand -Command 'git push -u origin issue-9-domain-model' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+            Test-IsBrakedCommand -Command 'git push origin feature/maintenance' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a refspec onto a branch merely ending in something like main' {
+            Test-IsBrakedCommand -Command 'git push origin HEAD:my-domain' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a branch whose name STARTS with main followed by a separator' {
+            # Found by the CI reviewer on the first cut of this pattern. `` only requires the next
+            # character to be non-word, so `main-cleanup` and `master.bak` satisfied it and got
+            # refused - a false positive on exactly the command this guard must not over-block.
+            # The `maintenance` case passed because `t` IS a word character, which is why the first
+            # round of tests missed it entirely.
+            Test-IsBrakedCommand -Command 'git push origin HEAD:main-cleanup' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+            Test-IsBrakedCommand -Command 'git push origin HEAD:master.bak' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+            Test-IsBrakedCommand -Command 'git push -u origin main-cleanup' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'still recognises the DELETE spelling as delete, not as a merge' {
+            Test-IsBrakedCommand -Command 'git push origin :old-branch' -Irreversible $script:AllIrr |
+                Should -Be 'delete'
+        }
+    }
+}
+
+Describe 'Test-IsBrakedCommand — git global flags must not shake off the guard (#542, review round 3)' {
+    # `\bgit\s+push\b` demands that `push` follow `git` immediately, so ANY global option between
+    # them broke every git rule at once. `-C` and `-c` are everyday flags, not exotica.
+    #
+    # This one was NOT introduced by this PR: the pre-existing `--delete` patterns had the same
+    # anchor and the same hole. Found only because the reviewer asked what the anchor assumes.
+
+    It 'denies a push to main behind -C' {
+        Test-IsBrakedCommand -Command 'git -C . push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it behind -c <config>' {
+        Test-IsBrakedCommand -Command 'git -c http.extraheader= push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it behind --no-pager' {
+        Test-IsBrakedCommand -Command 'git --no-pager push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it behind several stacked flags' {
+        Test-IsBrakedCommand -Command 'git --no-pager -C . -c core.pager=cat push origin HEAD:main' `
+            -Irreversible $script:AllIrr | Should -Be 'merge'
+    }
+    It 'closes the same hole in the PRE-EXISTING branch-delete rule' {
+        Test-IsBrakedCommand -Command 'git -C . push origin --delete feature' -Irreversible $script:AllIrr |
+            Should -Be 'delete'
+    }
+    It 'closes it for the refspec delete too' {
+        Test-IsBrakedCommand -Command 'git -C . push origin :feature-x' -Irreversible $script:AllIrr |
+            Should -Be 'delete'
+    }
+
+    Context 'and still does not invent matches' {
+        It 'does not treat an unrelated git command as a push' {
+            # Quote stripping turns this into `git commit -m push to main`; only tokens that LOOK
+            # like flags may sit between git and push, so `commit` stops it dead.
+            Test-IsBrakedCommand -Command 'git commit -m "push to main"' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'does not brake an ordinary flagged push' {
+            Test-IsBrakedCommand -Command 'git -C . push -u origin issue-542-x' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'does not brake a flagged push to a main-ish branch name' {
+            Test-IsBrakedCommand -Command 'git -C . push origin HEAD:main-cleanup' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Test-IsBrakedCommand — the round-3 fix carried two of its own (#542, review round 4)' {
+    # Both introduced by the fix for the global-flag anchor. Neither is exotic.
+
+    Context 'the flag allowance must not be countable' {
+        # Bounding the repetition at 5 turned the fix into a new bypass: SIX `-c` flags and the
+        # rule stops matching. Chaining several `-c` (user.name, user.email, http.sslVerify,
+        # core.pager...) is ordinary scripting, not an attack.
+        #
+        # The bound was justified in the comment as ReDoS protection. That justification was wrong:
+        # the repeated group is anchored by mandatory whitespace and its character classes are
+        # disjoint, so there is no catastrophic backtracking to protect against. A guard narrowed
+        # against an imagined risk, opening a real one.
+        It 'denies a push to main behind SIX global flags' {
+            Test-IsBrakedCommand -Command 'git -c a=1 -c b=1 -c c=1 -c d=1 -c e=1 -c f=1 push origin HEAD:main' `
+                -Irreversible $script:AllIrr | Should -Be 'merge'
+        }
+        It 'denies it behind twelve' {
+            $flags = (1..12 | ForEach-Object { "-c k$_=v" }) -join ' '
+            Test-IsBrakedCommand -Command "git $flags push origin HEAD:main" -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'closes the same count hole in the delete rule' {
+            Test-IsBrakedCommand -Command 'git -c a=1 -c b=1 -c c=1 -c d=1 -c e=1 -c f=1 push origin --delete f' `
+                -Irreversible $script:AllIrr | Should -Be 'delete'
+        }
+    }
+
+    Context 'a slash is not a refspec separator' {
+        # `[:/]` treated `/` as if it delimited a refspec. It does not - `/` is an ordinary
+        # character inside a branch name, so any branch merely ENDING in main/master was refused.
+        It 'allows a branch that merely ends in master' {
+            Test-IsBrakedCommand -Command 'git push origin release/master' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a branch that merely ends in main' {
+            Test-IsBrakedCommand -Command 'git push origin team/main' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows that same branch as an explicit refspec target' {
+            # Not raised by the review, but it is the same defect one step along.
+            Test-IsBrakedCommand -Command 'git push origin HEAD:team/main' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'STILL denies the fully-qualified ref, which is a real spelling of the default branch' {
+            Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/main' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+            Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/master' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'STILL denies the plain forms' {
+            Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+            Test-IsBrakedCommand -Command 'git push origin main' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+    }
+}
+
+Describe 'Test-IsBrakedCommand — the classifier must not be stallable (#542, review round 4)' {
+    # This guard runs on EVERY tool call. A command that makes it backtrack forever does not just
+    # slow the run down - it wedges the session, and a wedged guard is a removed guard.
+    #
+    # Not hypothetical: while removing the flag COUNT (itself a bypass), the replacement used
+    # `-{1,2}[^\s;|&]+`, where both halves can consume the second dash of `--flag`. Two readings
+    # per token, 1000 tokens, and the matcher ran past three minutes. Both the external reviewer
+    # and I had argued it was safe because "the character classes are disjoint". The argument was
+    # wrong and only the stopwatch said so.
+    #
+    # These are timing assertions on purpose. Generous bounds - they exist to catch a hang, not to
+    # police milliseconds on a busy CI box.
+
+    It 'answers quickly on a long run of valueless flags' {
+        $cmd = 'git ' + ('--flag ' * 1000) + 'status'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $null = Test-IsBrakedCommand -Command $cmd -Irreversible $script:AllIrr
+        $sw.Stop()
+        $sw.ElapsedMilliseconds | Should -BeLessThan 5000 -Because 'this exact shape hung the matcher'
+    }
+    It 'answers quickly when that run ends in a real push' {
+        $cmd = 'git ' + ('--flag ' * 1000) + 'push origin HEAD:main'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $r = Test-IsBrakedCommand -Command $cmd -Irreversible $script:AllIrr
+        $sw.Stop()
+        $r | Should -Be 'merge'
+        $sw.ElapsedMilliseconds | Should -BeLessThan 5000
+    }
+    It 'answers quickly on a long run of flags WITH values' {
+        $cmd = 'git ' + ('-c k=v ' * 2000) + 'status'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $null = Test-IsBrakedCommand -Command $cmd -Irreversible $script:AllIrr
+        $sw.Stop()
+        $sw.ElapsedMilliseconds | Should -BeLessThan 5000
+    }
+}
+
+Describe 'Test-IsBrakedCommand — deleting the default branch is a DELETE (#542, review round 5)' {
+    # `git push origin :main` removes the remote default branch. The merge refspec pattern matched
+    # it first (its source side allowed zero characters) and the array is walked in order, so the
+    # refusal said "merge is marked irreversible" for a command that DELETES main - arguably worse.
+    #
+    # Not a bypass, and worth stating why rather than assuming: the contract filter is applied per
+    # pattern BEFORE matching, so a contract braking only `delete` already refused it correctly.
+    # What was wrong was the verb the human is told, and this control is only as useful as the
+    # account it gives of itself.
+
+    It 'calls the empty-source refspec a delete, not a merge' {
+        Test-IsBrakedCommand -Command 'git push origin :main' -Irreversible @('merge','delete') |
+            Should -Be 'delete'
+        Test-IsBrakedCommand -Command 'git push origin :master' -Irreversible @('merge','delete') |
+            Should -Be 'delete'
+    }
+    It 'still calls a real refspec push a merge' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible @('merge','delete') |
+            Should -Be 'merge'
+    }
+    It 'still refuses it when only delete is braked' {
+        Test-IsBrakedCommand -Command 'git push origin :main' -Irreversible @('delete') |
+            Should -Be 'delete'
+    }
+    It 'follows the contract when only MERGE is braked' {
+        # Deliberate, and recorded so it is a decision rather than an accident: this command is a
+        # delete, so a contract that does not brake deletes does not brake this. The guard follows
+        # the contract; it does not invent policy - the rule this file opens with.
+        Test-IsBrakedCommand -Command 'git push origin :main' -Irreversible @('merge') |
+            Should -BeNullOrEmpty
+    }
+    It 'is unaffected for ordinary branches' {
+        Test-IsBrakedCommand -Command 'git push origin :feature-x' -Irreversible @('merge','delete') |
+            Should -Be 'delete'
+    }
+}
+
+Describe 'Test-IsBrakedCommand — the prefix must not step over a background operator (#542, review round 6)' {
+    # Segments split on `;`, `&&`, `||`, `|` and newlines, but NOT on a lone `&` - deliberately, since
+    # the branch-name lookahead treats `&` as a terminator. The gap between the two: the `[^;]*`
+    # sitting before the refspec excluded only `;`, so the matcher could skip PAST a background `&`
+    # and pick up any later `something:main` in the same segment - text belonging to a different
+    # command entirely.
+    #
+    # A false positive, never a bypass (a looser prefix can only add matches). Fixed anyway: this
+    # pattern sits on the run's most common command, and over-blocking is how a control gets
+    # switched off - the argument this whole change rests on.
+
+    It 'does not read text after a background & as the push target' {
+        Test-IsBrakedCommand -Command 'git push origin fine & echo notes:main' -Irreversible $script:AllIrr |
+            Should -BeNullOrEmpty
+    }
+    It 'does not read text after a pipe-ish operator as the push target' {
+        Test-IsBrakedCommand -Command 'git push origin fine & cat refs:master' -Irreversible $script:AllIrr |
+            Should -BeNullOrEmpty
+    }
+    It 'still denies when the refspec is the REAL target and & merely follows it' {
+        # The round-2 cases must survive: there the `&` comes AFTER the refspec, not before it.
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main&' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main>out.txt' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'still denies the ordinary forms' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+        Test-IsBrakedCommand -Command 'git -C . push origin HEAD:refs/heads/master' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'still denies a real merge sitting in a LATER segment' {
+        # The prefix is narrowed, not the segment splitting: a genuine second command still counts.
+        Test-IsBrakedCommand -Command 'git status ; git push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
     }
 }
