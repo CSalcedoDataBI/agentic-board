@@ -114,6 +114,36 @@ function ConvertTo-ComparablePath {
     return ($Path -replace '\\', '/').Trim().ToLowerInvariant()
 }
 
+<#
+    Is this segment an invocation of the GENUINE gate, and nothing else?
+
+    The first cut asked "does the genuine path appear anywhere in this segment?" and external
+    review broke it in one line: naming the real gate as an unused ARGUMENT vouched for a
+    look-alike sitting in the command position -
+
+        pwsh ./board-merge.ps1 'C:\real\...\Board-Merge.ps1' -PR 5
+
+    A substring test cannot tell the script being RUN from a string being passed. So every token
+    that names the gate script must BE the gate: one impostor anywhere in the segment refuses the
+    whole thing. Conservative on purpose - the cost of a false refusal is one command the run has
+    to reword, and the cost of a false permission is an unreviewed merge.
+#>
+function Test-IsGenuineGateInvocation {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Segment,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Gate
+    )
+    if (-not $Gate) { return $false }
+    $seg = ConvertTo-ComparablePath $Segment
+    # Tokens are whitespace/separator-delimited; quotes are already gone by normalization time.
+    $tokens = [regex]::Matches($seg, '[^\s;|&]*board-merge\.ps1')
+    if ($tokens.Count -eq 0) { return $false }
+    foreach ($t in $tokens) {
+        if ($t.Value -ne $Gate) { return $false }
+    }
+    return $true
+}
+
 # A command that only PREVIEWS the action mutates nothing, so denying it buys no safety and
 # costs the run its ability to inspect what it is about to hand the human.
 #
@@ -244,8 +274,7 @@ function Test-IsBrakedCommand {
             # An ORDERED run may reach the gated path - and only the script the CALLER identified
             # as the real one. Matching the bare filename here let a run invoke a look-alike it
             # had just written itself; no $gate means no bypass.
-            if ($EndToEnd -and $p.gated -and $gate -and
-                ((ConvertTo-ComparablePath $seg) -like "*$gate*")) { continue }
+            if ($EndToEnd -and $p.gated -and (Test-IsGenuineGateInvocation -Segment $seg -Gate $gate)) { continue }
             if ($seg -match $p.pattern) { return $p.action }
         }
     }

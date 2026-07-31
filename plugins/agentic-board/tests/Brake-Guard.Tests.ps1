@@ -770,3 +770,34 @@ Describe 'Test-IsBrakedCommand — the gated path is an IDENTITY, not a filename
             -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be 'merge'
     }
 }
+
+Describe 'Test-IsBrakedCommand — the gate must be the script INVOKED, not one merely mentioned (#539, external review)' {
+    # Found by Codex on the identity fix itself. The check asked "does the genuine path appear
+    # anywhere in this segment?", so naming it as an unused argument vouched for a look-alike
+    # standing in the command position. The earlier tests only covered the across-SEGMENT version
+    # of this trick; this is the within-segment one.
+    BeforeAll {
+        $script:Gate = 'C:\plug\0.29.0\scripts\Board-Merge.ps1'
+    }
+
+    It 'REFUSES a look-alike that merely mentions the genuine path as an argument' {
+        Test-IsBrakedCommand -Command "pwsh ./board-merge.ps1 '$script:Gate' -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Gate | Should -Be 'merge'
+    }
+    It 'REFUSES a look-alike with the genuine path in a trailing comment-ish argument' {
+        Test-IsBrakedCommand -Command "pwsh tmp/board-merge.ps1 -PR 5 --note $script:Gate" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Gate | Should -Be 'merge'
+    }
+    It 'REFUSES when the genuine gate and a look-alike are both invoked in one segment' {
+        Test-IsBrakedCommand -Command "pwsh $script:Gate -PR 5 && pwsh ./board-merge.ps1 -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Gate | Should -Be 'merge'
+    }
+    It 'still allows the genuine gate on its own' {
+        Test-IsBrakedCommand -Command "pwsh -File $script:Gate -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Gate | Should -Be ''
+    }
+    It 'still allows the genuine gate with ordinary arguments after it' {
+        Test-IsBrakedCommand -Command "pwsh -File $script:Gate -PR 5 -Repo o/r -Method squash" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Gate | Should -Be ''
+    }
+}

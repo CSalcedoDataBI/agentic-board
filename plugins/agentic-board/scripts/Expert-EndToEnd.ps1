@@ -74,7 +74,11 @@ function Test-EndToEndAllowed {
         [hashtable]$WorkClassPolicy,
         [bool]$ReviewedHead = $false,
         [bool]$TestsRecorded = $false,
-        [bool]$TestsRequired = $true
+        [bool]$TestsRequired = $true,
+        # Does CI exist on this commit at all? Separate from $TestsRecorded (is it green) because
+        # waiving the REQUIREMENT for a test suite must never waive a suite that ran and FAILED.
+        # Defaults to $true: assuming a project has no CI is the permissive assumption.
+        [bool]$CiPresent = $true
     )
     $missing = @()
 
@@ -94,6 +98,10 @@ function Test-EndToEndAllowed {
     }
     if ($TestsRequired -and -not $TestsRecorded) {
         $missing += 'constancia de que corrieron pruebas automaticas sobre este commit'
+    } elseif ($CiPresent -and -not $TestsRecorded) {
+        # The contract does not demand a test suite, but CI EXISTS on this commit and is not green.
+        # Waiving "you must have tests" never waives "the tests you have must pass" (#539).
+        $missing += 'que el CI de este commit este en verde (existe y no lo esta - eso no lo exime el contrato)'
     }
 
     if ($missing.Count -eq 0) {
@@ -152,16 +160,36 @@ function Get-TestsRequired {
 
 function Test-CiChecksPassed {
     param([Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$ChecksJson)
-    if ([string]::IsNullOrWhiteSpace($ChecksJson)) { return $false }
+    return (Get-CiEvidence -ChecksJson $ChecksJson).passed
+}
+
+<#
+    Split the CI question in two, because collapsing them was a false-permission path (#539).
+
+    "Does this project have to run automated tests?" is the CONTRACT's call (dod.tests).
+    "Is the CI that actually exists green?" is never the contract's call, and never waivable.
+
+    Reading only `passed` conflated four states - no checks, pending checks, failed checks and an
+    unreadable answer - so a project declaring no test suite would close a PR whose CI was RED.
+    Board-Merge can fall back to --admin, so the ruleset would not have stopped it either.
+
+    `present` is deliberately TRUE for unreadable output: "I could not read the checks" must not be
+    laundered into "this project has no CI", which is the permissive reading.
+#>
+function Get-CiEvidence {
+    param([Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$ChecksJson)
+    if ([string]::IsNullOrWhiteSpace($ChecksJson)) {
+        return @{ present = $false; passed = $false }
+    }
     try {
         $arr = @($ChecksJson | ConvertFrom-Json -ErrorAction Stop)
     } catch {
-        return $false
+        return @{ present = $true; passed = $false }
     }
-    if ($arr.Count -eq 0) { return $false }
+    if ($arr.Count -eq 0) { return @{ present = $false; passed = $false } }
     $bad    = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
     $passed = @($arr | Where-Object { "$($_.bucket)" -eq 'pass' })
-    return ($passed.Count -gt 0 -and $bad.Count -eq 0)
+    return @{ present = $true; passed = ($passed.Count -gt 0 -and $bad.Count -eq 0) }
 }
 
 # Render the decision for a human. Kept next to the decision so the refusal and its wording cannot

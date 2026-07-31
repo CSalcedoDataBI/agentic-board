@@ -75,7 +75,9 @@ Describe 'Test-EndToEndAllowed — the tests requirement comes from the contract
     # A per-run "no se podia probar" is a self-issued excuse. A project with genuinely no automated
     # tests says so once, in writing, in its contract (dod.tests).
     It 'skips the test condition when the contract says this project has no automated tests' {
-        $v = script:Allowed @{ TestsRecorded = $false; TestsRequired = $false }
+        # ...and there is genuinely no CI on the commit. Waiving the REQUIREMENT for a suite never
+        # waives a suite that ran and failed - see the CiPresent block below (#539).
+        $v = script:Allowed @{ TestsRecorded = $false; TestsRequired = $false; CiPresent = $false }
         $v.allowed | Should -BeTrue
     }
     It 'still refuses a visual change even with the test condition switched off' {
@@ -163,7 +165,7 @@ Describe 'Test-CiChecksPassed — CI evidence, read from the checks themselves (
 Describe 'Test-EndToEndAllowed — the tests requirement comes from the CONTRACT (#536)' {
     It 'does not demand tests from a project whose contract declares none' {
         $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
-                                  -TestsRecorded $false -TestsRequired $false
+                                  -TestsRecorded $false -TestsRequired $false -CiPresent $false
         $v.allowed | Should -BeTrue
     }
     It 'still demands them when the contract asks for them' {
@@ -199,5 +201,74 @@ Describe 'Get-TestsRequired — a quoted boolean is not a boolean (#539 review)'
     }
     It 'requires tests for a value it cannot interpret' {
         Get-TestsRequired -Contract @{ dod = @{ tests = 'maybe' } } | Should -BeTrue
+    }
+}
+
+Describe 'Test-EndToEndAllowed — "no suite required" is not "ignore red CI" (#539, external review)' {
+    # Found by Codex. TestsRequired=$false made the CI verdict irrelevant, collapsing four very
+    # different states into one: no checks at all, checks still pending, and checks that FAILED.
+    # A project honestly declaring it has no automated suite would then close a PR whose CI was
+    # red — and Board-Merge can fall back to --admin, so the ruleset would not stop it either.
+    #
+    # The two questions are now separate: "must this project have automated tests?" comes from the
+    # contract; "is the CI that exists actually green?" is never waivable.
+
+    It 'closes a no-suite project with no checks at all' {
+        $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
+                                  -TestsRecorded $false -TestsRequired $false -CiPresent $false
+        $v.allowed | Should -BeTrue
+    }
+    It 'REFUSES a no-suite project whose CI exists and is not green' {
+        $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
+                                  -TestsRecorded $false -TestsRequired $false -CiPresent $true
+        $v.allowed | Should -BeFalse
+        ($v.missing -join ' ') | Should -Match '(?i)ci'
+    }
+    It 'allows a no-suite project whose CI exists and IS green' {
+        $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
+                                  -TestsRecorded $true -TestsRequired $false -CiPresent $true
+        $v.allowed | Should -BeTrue
+    }
+    It 'still refuses a tests-required project with red CI' {
+        $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
+                                  -TestsRecorded $false -TestsRequired $true -CiPresent $true
+        $v.allowed | Should -BeFalse
+    }
+    It 'does not double-report when both conditions are unmet' {
+        $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
+                                  -TestsRecorded $false -TestsRequired $true -CiPresent $true
+        @($v.missing).Count | Should -Be 1
+    }
+}
+
+Describe 'Get-CiEvidence — presence and greenness are different questions (#539)' {
+    It 'reports absent when there are no checks' {
+        $e = Get-CiEvidence -ChecksJson '[]'
+        $e.present | Should -BeFalse
+        $e.passed  | Should -BeFalse
+    }
+    It 'reports absent when the query returned nothing' {
+        (Get-CiEvidence -ChecksJson '').present | Should -BeFalse
+    }
+    It 'reports present and green when all checks pass' {
+        $e = Get-CiEvidence -ChecksJson '[{"bucket":"pass","name":"Pester"}]'
+        $e.present | Should -BeTrue
+        $e.passed  | Should -BeTrue
+    }
+    It 'reports PRESENT and not green when a check failed' {
+        $e = Get-CiEvidence -ChecksJson '[{"bucket":"pass","name":"a"},{"bucket":"fail","name":"b"}]'
+        $e.present | Should -BeTrue
+        $e.passed  | Should -BeFalse
+    }
+    It 'reports PRESENT and not green when a check is still pending' {
+        $e = Get-CiEvidence -ChecksJson '[{"bucket":"pending","name":"b"}]'
+        $e.present | Should -BeTrue
+        $e.passed  | Should -BeFalse
+    }
+    It 'treats unreadable output as present-and-not-green rather than absent' {
+        # "I could not read the checks" must not be laundered into "this project has no CI".
+        $e = Get-CiEvidence -ChecksJson 'not json'
+        $e.present | Should -BeTrue
+        $e.passed  | Should -BeFalse
     }
 }

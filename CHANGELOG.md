@@ -80,7 +80,28 @@
   with the design that would close it; two half-fixes were considered and rejected there for
   looking like fixes while leaving the hole open.
 
-  1,599 tests suite-wide.
+### Fixed (found by an external review — Codex — on the review fixes themselves)
+- **The gate had to be the script INVOKED, not one merely mentioned.** The identity check asked
+  whether the genuine path appeared *anywhere* in the command segment, so naming it as an unused
+  argument vouched for a look-alike standing in the command position:
+  `pwsh ./board-merge.ps1 'C:\real\...\Board-Merge.ps1' -PR 5`. A substring test cannot tell the
+  script being *run* from a string being *passed*. Every token naming the gate script must now BE
+  the gate — one impostor anywhere in the segment refuses the whole command. The earlier tests had
+  covered this trick only *across* segments; this was the within-segment version.
+- **"No test suite required" was silently waiving RED CI.** With `dod.tests: false` the CI verdict
+  was ignored entirely, collapsing four different states — no checks, pending checks, failed
+  checks, unreadable answer — into one. A project honestly declaring it has no automated suite
+  would then close a PR whose CI was failing, and `Board-Merge` can fall back to `--admin`, so the
+  ruleset would not have stopped it either. Presence and greenness are now separate questions:
+  the contract decides whether a suite is *required*; it never decides whether the CI that
+  *exists* may be red. Unreadable output counts as present-and-not-green, so "I could not read the
+  checks" cannot be laundered into "this project has no CI".
+
+  Two pre-existing tests had encoded the first half of that defect and were corrected rather than
+  worked around. Mutation-verified: restoring the substring match turns 2 red, waiving red CI
+  again turns 1 red.
+
+  1,615 tests suite-wide.
 
 ## [0.29.0] - 2026-07-30
 ### Added

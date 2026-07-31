@@ -154,12 +154,14 @@ if (-not $DryRun) {
                 # $prNumber, never $PR: by this line the review-gate dot-source above has reset
                 # $PR to 0 (#536). The verdict itself lives in Test-CiChecksPassed so it can be
                 # tested without the network.
+                # Presence and greenness are read separately: a contract that waives the test
+                # REQUIREMENT must not thereby waive a CI run that exists and failed (#539).
                 $chk = gh pr checks $prNumber --repo $Repo --json name,bucket 2>$null
-                $tested = Test-CiChecksPassed -ChecksJson "$chk"
+                $ci  = Get-CiEvidence -ChecksJson "$chk"
 
                 $verdict = Test-EndToEndAllowed -Ordered ([bool]$brakeMarker.endToEnd) `
-                             -WorkClass $wc.class -ReviewedHead $reviewed -TestsRecorded $tested `
-                             -TestsRequired $testsRequired
+                             -WorkClass $wc.class -ReviewedHead $reviewed -TestsRecorded $ci.passed `
+                             -TestsRequired $testsRequired -CiPresent $ci.present
             } catch {
                 # Could not establish the facts -> no permission. "I could not check" is not a yes.
                 $verdict = @{ allowed = $false; missing = @("no pude verificar las condiciones ($_)")
