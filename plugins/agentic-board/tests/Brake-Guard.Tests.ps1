@@ -248,8 +248,18 @@ Describe 'Test-IsBrakedCommand — bypasses found by external review (round 4)' 
             Test-IsBrakedCommand -Command 'git push origin :feature-x' -Irreversible $script:AllIrr |
                 Should -Be 'delete'
         }
-        It 'still allows an ordinary push refspec' {
+        It 'does NOT read a push to main as an ordinary refspec (#542)' {
+            # This test used to assert the opposite, and that assertion WAS the gap: it was written
+            # to prove the delete pattern did not over-match, and in doing so it pinned
+            # `HEAD:main` as allowed. Pushing to the default branch is a merge by this file's own
+            # definition; it is only "ordinary" from the delete pattern's point of view.
             Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+                Should -Be 'merge'
+        }
+        It 'still allows a refspec onto an ordinary branch' {
+            # What the original test meant to guard: the delete pattern must not eat a normal
+            # refspec push.
+            Test-IsBrakedCommand -Command 'git push origin HEAD:feature-x' -Irreversible $script:AllIrr |
                 Should -BeNullOrEmpty
         }
         It 'still allows a plain push' {
@@ -679,5 +689,79 @@ Describe 'Test-IsBrakedCommand — an ORDERED run is refused exactly like an uno
     It 'honours a contract that does not brake on merge at all' {
         Test-IsBrakedCommand -Command 'pwsh scripts/Board-Merge.ps1 -PR 1' -Irreversible @('deploy') |
             Should -Be ''
+    }
+}
+
+Describe 'Test-IsBrakedCommand — pushing straight to the default branch IS a merge (#542)' {
+    # Pre-existing gap, older than the end-to-end work: the brake watched `gh pr merge`, the REST
+    # merge endpoints and Board-Merge.ps1, and missed the simplest route of all. `git push origin
+    # HEAD:main` puts work on the default branch with one command and matched nothing.
+    #
+    # It was not an oversight so much as a decision that reads differently now: the delete pattern's
+    # comment says the lookbehind "keeps `HEAD:main` (an ordinary push refspec) out of it". But this
+    # file's own vocabulary defines merge as "putting work on the default branch", which is exactly
+    # what that refspec does.
+
+    It 'denies the plain refspec push to main' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies a branch-to-main refspec' {
+        Test-IsBrakedCommand -Command 'git push origin my-branch:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies the same against master' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:master' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies a FORCE refspec push to main' {
+        Test-IsBrakedCommand -Command 'git push --force origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies the + force spelling' {
+        Test-IsBrakedCommand -Command 'git push origin +HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies pushing the local default branch by name' {
+        Test-IsBrakedCommand -Command 'git push origin main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'denies it in a later segment' {
+        Test-IsBrakedCommand -Command 'git status && git push origin HEAD:main' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+    It 'follows the contract — no brake when merge is not irreversible' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible @('deploy') |
+            Should -Be ''
+    }
+
+    Context 'must NOT block the pushes the run makes all day' {
+        # Over-blocking is how a safety control gets switched off for being annoying, and this
+        # pattern sits on the run's single most common command.
+        It 'allows pushing its own branch' {
+            Test-IsBrakedCommand -Command 'git push -u origin issue-542-push-to-default' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a bare push' {
+            Test-IsBrakedCommand -Command 'git push' -Irreversible $script:AllIrr | Should -BeNullOrEmpty
+        }
+        It 'allows a force-with-lease on its own branch' {
+            Test-IsBrakedCommand -Command 'git push --force-with-lease origin my-branch' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a branch whose NAME merely contains main' {
+            Test-IsBrakedCommand -Command 'git push -u origin issue-9-domain-model' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+            Test-IsBrakedCommand -Command 'git push origin feature/maintenance' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'allows a refspec onto a branch merely ending in something like main' {
+            Test-IsBrakedCommand -Command 'git push origin HEAD:my-domain' -Irreversible $script:AllIrr |
+                Should -BeNullOrEmpty
+        }
+        It 'still recognises the DELETE spelling as delete, not as a merge' {
+            Test-IsBrakedCommand -Command 'git push origin :old-branch' -Irreversible $script:AllIrr |
+                Should -Be 'delete'
+        }
     }
 }

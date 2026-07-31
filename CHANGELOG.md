@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 ### Fixed
+- **A braked run could push straight to the default branch** (#542). The brake watched `gh pr merge`,
+  the REST merge endpoints and `Board-Merge.ps1` — and missed the simplest route of all:
+  `git push origin HEAD:main` puts work on main with one command and matched nothing. Present in
+  every version of the brake, including shipped 0.29.0, and found only when an external review was
+  pointed at *whether the door was really shut* rather than at the change in front of it.
+
+  Not quite an oversight, which is the interesting part: the delete pattern carried a comment
+  calling `HEAD:main` "an ordinary push refspec", written while guarding against *over*-matching.
+  A test pinned that reading in place. Both were correct about the delete pattern and wrong about
+  the vocabulary — this guard defines merge as *"putting work on the default branch"*, which is
+  exactly what that refspec does. **The obsolete assertion was corrected, not worked around.**
+
+  Now refused: refspecs onto `main`/`master` (`HEAD:main`, `branch:main`, `+HEAD:main`,
+  `HEAD:refs/heads/main`) and pushing the default branch by name. Deliberately still allowed, since
+  this pattern sits on the run's most common command and over-blocking is how a control gets
+  switched off: `git push -u origin <branch>`, a bare `git push`, `--force-with-lease` on its own
+  branch, and any branch whose *name* merely contains `main` (`issue-9-domain-model`,
+  `feature/maintenance`, `HEAD:my-domain`). **Stated limit:** the pure core cannot ask the repo what
+  its default branch is, so a project whose default is neither `main` nor `master` is not covered.
+
 - **The reviewer's turn cap sat one turn above what a real review needs** (#543). Measured across
   recent runs: reviews that actually published consumed 4 / 13 / 17 / 18 / **19** turns against a
   cap of **20**, and three consecutive runs on a large PR died at 21. A run that hits the cap leaves

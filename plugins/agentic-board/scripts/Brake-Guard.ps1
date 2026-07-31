@@ -79,6 +79,23 @@ $script:BrakePatterns = @(
     @{ action = 'merge';   pattern = '\bpulls?/\d+/merge\b' }
     @{ action = 'merge';   pattern = '\brepos/[^\s]+/merges\b' }
 
+    # Pushing straight to the default branch (#542). The simplest merge route of all, and the one
+    # this guard missed for longest: `git push origin HEAD:main` puts work on main with one command
+    # and matched nothing. It was not quite an oversight - the delete pattern below carries a
+    # comment calling `HEAD:main` "an ordinary push refspec" - but this file's own vocabulary
+    # defines merge as "putting work on the default branch", which is exactly what it does.
+    #
+    # Two shapes: a REFSPEC landing on main/master (`HEAD:main`, `branch:main`, `+HEAD:main`,
+    # `HEAD:refs/heads/main`), and pushing the default branch BY NAME (`git push origin main`).
+    # The `\b` after the branch name is load-bearing: without it `HEAD:maintenance` and
+    # `feature/maintenance` would be refused, and this pattern sits on the run's single most
+    # common command - over-blocking here is how the whole control gets switched off.
+    #
+    # LIMIT: this core is pure (no git access), so it cannot ask the repo what its default branch
+    # is. A project whose default is neither `main` nor `master` is not covered.
+    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s\+?[^\s;|&]*[:/](main|master)\b' }
+    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s(main|master)(\s|$)' }
+
     # --- publish: making something public / cutting a release -----------------------
     @{ action = 'publish'; pattern = '\bgh\s+release\s+create\b' }
     @{ action = 'publish'; pattern = '\bnpm\s+publish\b' }
