@@ -60,6 +60,9 @@ $script:BrakePatterns = @(
     # ORDERED run may reach; every other route below stays shut. Marking it here rather than
     # special-casing the string in Test-IsBrakedCommand keeps "which paths are gated" a property
     # of the pattern table, where the next person will actually look.
+    #
+    # The DENY pattern stays broad on purpose - any invocation by that name is a merge attempt and
+    # is refused for an unordered run. What the order opens is narrower: see $GatedMergePattern.
     @{ action = 'merge';   pattern = '\bboard-merge\.ps1\b'; gated = $true }
     # The REST merge endpoints, recognized by the ENDPOINT rather than by the client that calls
     # it. Anchoring these to `gh api` (as the first cut did) left the identical request open via
@@ -102,6 +105,14 @@ $script:BrakePatterns = @(
     @{ action = 'merge';   pattern = '\bgh\s+(pr|api|repo|release)\s+[$%]' }
     @{ action = 'merge';   pattern = '\bgh\s+[$%]' }
 )
+
+# Compare paths the way two spellings of the same path should compare: case-insensitively, with
+# both separators treated alike. Used only for the gated-path identity check below.
+function ConvertTo-ComparablePath {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+    if (-not $Path) { return '' }
+    return ($Path -replace '\\', '/').Trim().ToLowerInvariant()
+}
 
 # A command that only PREVIEWS the action mutates nothing, so denying it buys no safety and
 # costs the run its ability to inspect what it is about to hand the human.
@@ -183,13 +194,33 @@ function ConvertTo-NormalizedCommand {
     patterns stay denied, which makes ordering the run NARROW the route to a merge rather than
     widen it. Defaults to $false so a caller that has not been taught about the order cannot
     accidentally grant it.
+
+    $GatedScriptPath is the absolute path of the REAL gate, supplied by the caller that knows it
+    (the hook passes its own sibling `Board-Merge.ps1`). Review caught why a pattern cannot stand
+    in for it: matching the FILENAME let an ordered run - which has full write access to its own
+    worktree - drop any file called `board-merge.ps1` with none of the four conditions in it and
+    invoke that. Matching a canonical-looking PATH was no better, and worse, wrong: the installed
+    plugin lives at `<version>/scripts/Board-Merge.ps1`, with no `plugins/agentic-board/` in it, so
+    a path pattern would have refused the genuine gate in every project except this repo itself.
+    Identity has to come from the caller, not from the shape of a string.
+
+    Empty $GatedScriptPath means NO bypass at all: a caller that cannot say which script is the
+    real one does not get to open one. That is the safe direction and keeps every existing caller
+    (and every test that omits it) on the fully-braked behaviour.
+
+    STATED LIMIT, since this file is a backstop and not a sandbox: an ordered run that OVERWRITES
+    the real gate before invoking it still passes here, because the path is then genuine. Pinning
+    the gate's content is tracked separately; the controls that catch it meanwhile are the review
+    gate (a modified gate lands in the diff) and the post-hoc supervisor.
 #>
 function Test-IsBrakedCommand {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Command,
         [string[]]$Irreversible = @(),
-        [bool]$EndToEnd = $false
+        [bool]$EndToEnd = $false,
+        [string]$GatedScriptPath = ''
     )
+    $gate = ConvertTo-ComparablePath $GatedScriptPath
     $norm = ConvertTo-NormalizedCommand $Command
     if (-not $norm) { return '' }
 
@@ -210,8 +241,11 @@ function Test-IsBrakedCommand {
         if (Test-IsGenuinePreview -Segment $seg) { continue }                          # this segment only
         foreach ($p in $script:BrakePatterns) {
             if ($irr -notcontains $p.action) { continue }
-            # An ORDERED run may reach the gated path - and only that one (see $EndToEnd above).
-            if ($EndToEnd -and $p.gated) { continue }
+            # An ORDERED run may reach the gated path - and only the script the CALLER identified
+            # as the real one. Matching the bare filename here let a run invoke a look-alike it
+            # had just written itself; no $gate means no bypass.
+            if ($EndToEnd -and $p.gated -and $gate -and
+                ((ConvertTo-ComparablePath $seg) -like "*$gate*")) { continue }
             if ($seg -match $p.pattern) { return $p.action }
         }
     }

@@ -172,3 +172,32 @@ Describe 'Test-EndToEndAllowed — the tests requirement comes from the CONTRACT
         $v.allowed | Should -BeFalse
     }
 }
+
+Describe 'Get-TestsRequired — a quoted boolean is not a boolean (#539 review)' {
+    # Same trap already closed for the marker's endToEnd: PowerShell casts any non-empty string to
+    # $true, so a contract serialising "false" read as "tests required" while saying the opposite.
+    It 'honours a real JSON false' {
+        Get-TestsRequired -Contract @{ dod = @{ tests = $false } } | Should -BeFalse
+    }
+    It 'honours a real JSON true' {
+        Get-TestsRequired -Contract @{ dod = @{ tests = $true } } | Should -BeTrue
+    }
+    It 'reads the STRING "false" as false rather than casting it to true' {
+        Get-TestsRequired -Contract @{ dod = @{ tests = 'false' } } | Should -BeFalse
+    }
+    It 'reads the STRING "true" as true' {
+        Get-TestsRequired -Contract @{ dod = @{ tests = 'true' } } | Should -BeTrue
+    }
+    It 'requires tests when the key is absent' {
+        Get-TestsRequired -Contract @{ dod = @{ ci = $true } } | Should -BeTrue
+    }
+    It 'requires tests when there is no dod at all' {
+        Get-TestsRequired -Contract @{ } | Should -BeTrue
+    }
+    It 'requires tests when there is no contract at all' {
+        Get-TestsRequired -Contract $null | Should -BeTrue
+    }
+    It 'requires tests for a value it cannot interpret' {
+        Get-TestsRequired -Contract @{ dod = @{ tests = 'maybe' } } | Should -BeTrue
+    }
+}

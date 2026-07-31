@@ -72,7 +72,9 @@ The brake is mechanical, not prose: `Start-WorktreeSession` writes `.agentic-boa
 into the launched worktree and a PreToolUse hook refuses the call before it runs.
 
 **Ordered end to end (`-EndToEnd`).** The order does not lift the brake — it opens exactly one
-path. `Board-Merge.ps1` (the only merge route that checks anything) becomes reachable, and it
+path. `Board-Merge.ps1` — the only merge route that checks anything, identified by its ABSOLUTE
+path (a copy elsewhere, or a file the run writes with the same name, is refused) — becomes
+reachable, and it
 re-establishes four conditions at merge time, refusing while naming every unmet one:
 
 | Condition | Why it is separate |

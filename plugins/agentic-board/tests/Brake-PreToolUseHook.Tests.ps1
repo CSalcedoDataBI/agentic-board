@@ -114,9 +114,22 @@ Describe 'Brake hook — the ORDERED end-to-end run (#536)' {
     # anything. The order opens that one path and nothing else.
 
     It 'lets the GATED merge script through when ordered' {
+        # The hook identifies the gate as its OWN sibling, so the command has to name that exact
+        # script - which is what the brief hands the run.
+        $gate = Join-Path (Split-Path $script:Hook -Parent) 'Board-Merge.ps1'
         $wt = script:NewWorktree 'e2e-gated' (script:Marker -EndToEnd $true)
-        script:RunHook -Cwd $wt -Command 'pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR 535' |
-            Should -BeNullOrEmpty
+        script:RunHook -Cwd $wt -Command "pwsh -File $gate -PR 535" | Should -BeNullOrEmpty
+    }
+    It 'REFUSES a look-alike the run could have written itself' {
+        # The bypass review found: any file called board-merge.ps1 used to be waved through.
+        $wt = script:NewWorktree 'e2e-lookalike' (script:Marker -EndToEnd $true)
+        script:DecisionOf (script:RunHook -Cwd $wt -Command 'pwsh ./board-merge.ps1 -PR 535') |
+            Should -Be 'deny'
+    }
+    It 'REFUSES a look-alike sitting in a scripts/ folder of its own' {
+        $wt = script:NewWorktree 'e2e-lookalike2' (script:Marker -EndToEnd $true)
+        script:DecisionOf (script:RunHook -Cwd $wt -Command 'pwsh myproj/scripts/board-merge.ps1 -PR 535') |
+            Should -Be 'deny'
     }
     It 'still denies the RAW merge when ordered' {
         $wt = script:NewWorktree 'e2e-raw' (script:Marker -EndToEnd $true)

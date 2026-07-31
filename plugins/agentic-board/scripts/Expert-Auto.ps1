@@ -53,7 +53,12 @@ function Format-AutoBrief {
         # on it: the brief ordered the stop either way, so an ordered run obeyed a "stop" it had
         # been given while the "finish" sat in a file it never read. A switch, so an untaught
         # caller cannot grant it by accident.
-        [switch]$EndToEnd
+        [switch]$EndToEnd,
+        # Absolute path of the REAL gate. The tool layer opens that exact script and nothing else,
+        # so the brief has to name it. Saying just "use Board-Merge.ps1" would have the run reach
+        # for a bare name, be refused, and read that as "I am not allowed to finish" - the safety
+        # control breaking the happy path, which is how safety controls end up reverted.
+        [string]$GatePath = ''
     )
     $dod = @()
     if ($Contract.dod) { $dod = @($Contract.dod.Keys | Where-Object { $Contract.dod[$_] }) }
@@ -71,6 +76,13 @@ function Format-AutoBrief {
     # end-to-end order is permission to finish THIS work, never a general lifting of the brake.
     $others = @($irr | Where-Object { "$_".Trim().ToLowerInvariant() -ne 'merge' })
     $othersList = if ($others.Count) { ($others -join ', ') } else { '(none)' }
+    # Name the real script when the caller knows it. The fallback stays deliberately explicit that
+    # a bare name will not work, rather than printing one that would be refused.
+    $gateLine = if ($GatePath) {
+        "$GatePath -PR <n>"
+    } else {
+        "<the absolute path of this plugin's Board-Merge.ps1> -PR <n>   # resolve it before you run it"
+    }
     $closingSection = if ($EndToEnd) { @"
 ## Closing the work — ORDERED end to end (you MAY close this work yourself)
 
@@ -82,9 +94,15 @@ it. The merge gate re-checks all four conditions at merge time and will refuse i
 3. a real review of THIS commit  (a green check is not a review)
 4. automated tests ran on THIS commit  (recorded in CI, not in your own account of it)
 
-Close it with ``Board-Merge.ps1``. That script IS the gate — it weighs the four conditions and
-exits non-zero when they do not hold. Do NOT reach for ``gh pr merge`` or the REST merge endpoint:
-they are refused at the tool layer, and going around the gate is not the same job as passing it.
+Close it by invoking the gate at THIS EXACT PATH:
+
+    $gateLine
+
+That script IS the gate — it weighs the four conditions and exits non-zero when they do not hold.
+Use that exact path. The tool layer opens that one script and nothing else, so a copy of it
+elsewhere — or a file you write yourself with the same name — is refused like any other merge.
+Do NOT reach for ``gh pr merge`` or the REST merge endpoint either: going around the gate is not
+the same job as passing it.
 
 If the gate refuses, it names exactly what is missing. Fix that and try again — do not look for
 another way to merge.
@@ -171,7 +189,8 @@ if ($repo) {
     }
 }
 
-$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role -EndToEnd:$EndToEnd
+$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role `
+             -EndToEnd:$EndToEnd -GatePath (Join-Path $PSScriptRoot 'Board-Merge.ps1')
 
 # The brake, as a CONTROL rather than prose (#440). The generic launch briefing used to order
 # the merge outright and make it the completion condition, so a session that merged to main was

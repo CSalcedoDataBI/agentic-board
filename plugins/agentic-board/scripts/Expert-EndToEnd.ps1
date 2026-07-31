@@ -124,6 +124,32 @@ function Test-EndToEndAllowed {
     no CI having run on that commit at all. Unreadable or empty input is NOT a pass - "I could not
     look" is not evidence.
 #>
+<#
+    Read a contract's `dod.tests` as a real boolean.
+
+    `[bool]$contract.dod['tests']` was the same trap already closed for the brake marker's
+    `endToEnd`: PowerShell casts ANY non-empty string to $true, so a contract serialising
+    "false" — by hand, or through a JSON writer that quotes booleans — read as "tests required"
+    when it said the opposite. It failed safe, but the behaviour depended on the contract always
+    emitting real JSON booleans, which is exactly the assumption this repo keeps finding wrong.
+
+    Absent, null or unrecognisable means REQUIRED: the safe direction, and the one a project that
+    never thought about it should get.
+#>
+function Get-TestsRequired {
+    param($Contract)
+    if ($Contract -isnot [hashtable]) { return $true }
+    if ($Contract.dod -isnot [hashtable]) { return $true }
+    if (-not $Contract.dod.ContainsKey('tests')) { return $true }
+    $v = $Contract.dod['tests']
+    if ($v -is [bool]) { return [bool]$v }
+    # A string or number only DISABLES the requirement when it unambiguously says so.
+    $s = "$v".Trim().ToLowerInvariant()
+    if ($s -in @('false','0','no')) { return $false }
+    if ($s -in @('true','1','yes')) { return $true }
+    return $true
+}
+
 function Test-CiChecksPassed {
     param([Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$ChecksJson)
     if ([string]::IsNullOrWhiteSpace($ChecksJson)) { return $false }

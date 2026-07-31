@@ -91,8 +91,12 @@ try {
     # The marker has carried the owner's end-to-end order since #530; until #536 nothing read it
     # here, so an ORDERED run was refused exactly like an unordered one and the gated merge path
     # was unreachable. Passing it opens that one path and nothing else - see Test-IsBrakedCommand.
+    # The REAL gate is this hook's own sibling: the identity cannot be inferred from the command
+    # string, and a path pattern would both miss look-alikes and refuse the genuine installed
+    # script (which lives at <version>/scripts/, not under plugins/agentic-board/).
+    $gatePath = Join-Path $PSScriptRoot 'Board-Merge.ps1'
     $action  = Test-IsBrakedCommand -Command $command -Irreversible $marker.irreversible `
-                                    -EndToEnd ([bool]$marker.endToEnd)
+                                    -EndToEnd ([bool]$marker.endToEnd) -GatedScriptPath $gatePath
     if (-not $action) { exit 0 }
 
     Write-Output (New-BrakeDenyJson -Action $action -Issue $marker.issue)

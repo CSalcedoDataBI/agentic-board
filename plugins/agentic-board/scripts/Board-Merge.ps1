@@ -126,13 +126,9 @@ if (-not $DryRun) {
                 # (#536). It was never passed, so it defaulted to $true and a project that
                 # honestly declares no automated suite could never close anything. Absent or
                 # malformed dod.tests still means required - the safe direction.
-                # Read-ExpertContract returns a HASHTABLE (ConvertFrom-Json -AsHashtable), so this
-                # is ContainsKey, not PSObject.Properties.
-                $testsRequired = $true
-                if ($contract -is [hashtable] -and $contract.dod -is [hashtable] -and
-                    $contract.dod.ContainsKey('tests')) {
-                    $testsRequired = [bool]$contract.dod['tests']
-                }
+                # Get-TestsRequired, not [bool]$contract.dod['tests']: a quoted "false" would cast
+                # to $true, the same trap already closed for the marker's endToEnd field.
+                $testsRequired = Get-TestsRequired -Contract $contract
 
                 # REVIEW evidence: reuse the gate's own strict parser rather than a looser copy.
                 # Matching "contains the marker AND contains the sha" anywhere in a body let quoted

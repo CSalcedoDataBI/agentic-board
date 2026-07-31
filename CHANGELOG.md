@@ -53,7 +53,34 @@
 
   Mutation-verified in both directions: removing the gated bypass turns the "ordered run may reach
   the gate" test red; making the order open *everything* turns four "still denied" tests red.
-  1,572 tests suite-wide.
+
+### Fixed (found by review on this change, before it shipped)
+- **The gated path was a filename, not a script.** Review caught that the bypass matched
+  `board-merge.ps1` anywhere in the command. An ordered run has full write access to its own
+  worktree, so it could drop *any* file by that name — carrying none of the four conditions — and
+  invoke it. That defeats the entire guarantee the gated path exists to make.
+
+  The first repair, anchoring to a canonical-looking path, was **wrong and caught before shipping**:
+  the installed plugin lives at `<version>/scripts/Board-Merge.ps1`, with no `plugins/agentic-board/`
+  in it, so a path pattern would have refused the *genuine* gate in every project except this repo.
+  Identity now comes from the caller that knows it — the hook passes its own sibling — and an empty
+  identity means no bypass at all. The brief prints that absolute path, because telling the run to
+  "use Board-Merge.ps1" would earn it a refusal it would read as *"I may not finish"*: the safety
+  control breaking the happy path, which is how safety controls get reverted (this module already
+  shipped that failure once).
+- **A quoted boolean in the contract.** `[bool]$contract.dod['tests']` cast the string `"false"` to
+  `$true` — the same trap already closed for the marker's `endToEnd`. Reading it now requires a real
+  boolean, or a string that unambiguously says so; anything else means *required*.
+
+  An adversarial sweep of 27 evasion cases — command substitution, backticks, env-var prefixes,
+  redirections, line continuations, quote-splitting, `bash -c` wrapping, per-segment vouching — was
+  run against the classifier, its catalogue taken from `liberzon/claude-hooks` (MIT), which solves
+  the same sub-command decomposition problem. All 27 behave as intended. The one case that passes
+  by design (overwriting the real gate before invoking it) is a **stated limit**, tracked in #540
+  with the design that would close it; two half-fixes were considered and rejected there for
+  looking like fixes while leaving the hole open.
+
+  1,599 tests suite-wide.
 
 ## [0.29.0] - 2026-07-30
 ### Added

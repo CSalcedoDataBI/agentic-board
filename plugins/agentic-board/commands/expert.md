@@ -64,8 +64,10 @@ run or from the contract. If the user did not say it, do not pass it.
 What the order does and does not do: it does NOT lift the brake. It opens exactly one path — the
 gated `Board-Merge.ps1`, which re-checks four conditions at merge time (ordered · the change is
 code-class · a real review of the head commit · CI passed on that commit) and refuses, naming
-every unmet one, when they do not all hold. Raw `gh pr merge` and the REST merge endpoints stay
-refused at the tool layer, and deploy/publish/refresh/delete stay with the human either way.
+every unmet one, when they do not all hold. That script is identified by its **absolute path**, so
+a copy elsewhere — or a file with the same name the run writes itself — is refused like any other
+merge. Raw `gh pr merge` and the REST merge endpoints stay refused at the tool layer, and
+deploy/publish/refresh/delete stay with the human either way.
 
 Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`. It reads the contract, composes the
 autonomous brief (role objective + enriched plan + DoD + the capability map + the irreversible

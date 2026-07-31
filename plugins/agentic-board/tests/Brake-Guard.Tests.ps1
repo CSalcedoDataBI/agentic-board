@@ -648,8 +648,15 @@ Describe 'Test-IsBrakedCommand — the ORDERED end-to-end run (#536)' {
     # instead of opening it.
 
     It 'opens the gated merge script when the owner ordered it end to end' {
-        Test-IsBrakedCommand -Command 'pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR 535' `
-            -Irreversible $script:AllIrr -EndToEnd $true | Should -Be ''
+        Test-IsBrakedCommand -Command 'pwsh C:\plug\0.29.0\scripts\Board-Merge.ps1 -PR 535' `
+            -Irreversible $script:AllIrr -EndToEnd $true `
+            -GatedScriptPath 'C:\plug\0.29.0\scripts\Board-Merge.ps1' | Should -Be ''
+    }
+    It 'opens NOTHING when the caller cannot say which script is the real gate' {
+        # No identity supplied -> no bypass. The safe direction, and it keeps every caller that
+        # predates the gated path on the fully-braked behaviour.
+        Test-IsBrakedCommand -Command 'pwsh C:\plug\0.29.0\scripts\Board-Merge.ps1 -PR 535' `
+            -Irreversible $script:AllIrr -EndToEnd $true | Should -Be 'merge'
     }
     It 'keeps the gated script CLOSED when there is no order' {
         Test-IsBrakedCommand -Command 'pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR 535' `
@@ -688,5 +695,78 @@ Describe 'Test-IsBrakedCommand — the ORDERED end-to-end run (#536)' {
     It 'honours a contract that does not brake on merge at all' {
         Test-IsBrakedCommand -Command 'pwsh scripts/Board-Merge.ps1 -PR 1' -Irreversible @('deploy') -EndToEnd $false |
             Should -Be ''
+    }
+}
+
+Describe 'Test-IsBrakedCommand — the gated path is an IDENTITY, not a filename (#539 review)' {
+    # Found by review on the #536 change, and it broke that change's central claim.
+    #
+    # The bypass matched `\bboard-merge\.ps1\b` anywhere in the command. An ordered run has full
+    # write access to its own worktree, so it could drop ANY file called `board-merge.ps1` — with
+    # none of the four conditions in it — and invoke that. The hook waved it through, because the
+    # pattern recognised a NAME rather than a script.
+    #
+    # Anchoring to a canonical-LOOKING path was the wrong repair, caught before shipping: the
+    # installed plugin lives at `<version>/scripts/Board-Merge.ps1`, with no `plugins/agentic-board/`
+    # anywhere in it, so a path pattern would have refused the GENUINE gate in every project except
+    # this repo itself. Identity has to come from the caller that knows it.
+
+    BeforeAll {
+        # Two plausible real locations: the installed plugin, and this repo's own copy.
+        $script:Installed = 'C:\Users\x\.claude\plugins\cache\agentic-board\agentic-board\0.29.0\scripts\Board-Merge.ps1'
+        $script:InRepo    = 'C:\Repos\agentic-bi-ops\plugins\agentic-board\scripts\Board-Merge.ps1'
+    }
+
+    It 'opens the INSTALLED plugin gate — the path a real project actually invokes' {
+        Test-IsBrakedCommand -Command "pwsh -File $script:Installed -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be ''
+    }
+    It 'opens this repo''s own copy when that is the gate in play' {
+        Test-IsBrakedCommand -Command "pwsh -File $script:InRepo -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:InRepo | Should -Be ''
+    }
+    It 'accepts the same path spelled with forward slashes' {
+        $fwd = $script:Installed -replace '\\', '/'
+        Test-IsBrakedCommand -Command "pwsh -File $fwd -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be ''
+    }
+    It 'accepts a differently-cased spelling of the same path' {
+        Test-IsBrakedCommand -Command "pwsh -File $($script:Installed.ToUpperInvariant()) -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be ''
+    }
+
+    It 'REFUSES a look-alike dropped in the worktree root' {
+        Test-IsBrakedCommand -Command 'pwsh ./board-merge.ps1 -PR 5' `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be 'merge'
+    }
+    It 'REFUSES a look-alike in an arbitrary folder' {
+        Test-IsBrakedCommand -Command 'pwsh tmp/board-merge.ps1 -PR 5' `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be 'merge'
+    }
+    It 'REFUSES a look-alike sitting in a scripts/ folder of its own' {
+        # Exactly the trick a mere `scripts/board-merge.ps1` pattern would have fallen for.
+        Test-IsBrakedCommand -Command 'pwsh myproj/scripts/board-merge.ps1 -PR 5' `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be 'merge'
+    }
+    It 'REFUSES a bare name with no path at all' {
+        Test-IsBrakedCommand -Command 'board-merge.ps1 -PR 5' `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be 'merge'
+    }
+    It 'REFUSES the repo copy when the INSTALLED script is the gate' {
+        # Two real files; only one of them is the gate this run was armed against.
+        Test-IsBrakedCommand -Command "pwsh -File $script:InRepo -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be 'merge'
+    }
+    It 'still refuses the genuine gate when NOT ordered' {
+        Test-IsBrakedCommand -Command "pwsh -File $script:Installed -PR 5" `
+            -Irreversible $script:AllIrr -EndToEnd $false -GatedScriptPath $script:Installed | Should -Be 'merge'
+    }
+    It 'does not let a genuine mention vouch for a look-alike in the next segment' {
+        Test-IsBrakedCommand -Command "echo $script:Installed ; pwsh ./board-merge.ps1 -PR 1" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be 'merge'
+    }
+    It 'does not let the genuine path vouch for a raw merge in the same segment' {
+        Test-IsBrakedCommand -Command "pwsh -File $script:Installed -PR `$(gh pr merge 9)" `
+            -Irreversible $script:AllIrr -EndToEnd $true -GatedScriptPath $script:Installed | Should -Be 'merge'
     }
 }
