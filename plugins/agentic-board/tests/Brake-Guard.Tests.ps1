@@ -948,3 +948,40 @@ Describe 'Test-IsBrakedCommand — the classifier must not be stallable (#542, r
         $sw.ElapsedMilliseconds | Should -BeLessThan 5000
     }
 }
+
+Describe 'Test-IsBrakedCommand — deleting the default branch is a DELETE (#542, review round 5)' {
+    # `git push origin :main` removes the remote default branch. The merge refspec pattern matched
+    # it first (its source side allowed zero characters) and the array is walked in order, so the
+    # refusal said "merge is marked irreversible" for a command that DELETES main - arguably worse.
+    #
+    # Not a bypass, and worth stating why rather than assuming: the contract filter is applied per
+    # pattern BEFORE matching, so a contract braking only `delete` already refused it correctly.
+    # What was wrong was the verb the human is told, and this control is only as useful as the
+    # account it gives of itself.
+
+    It 'calls the empty-source refspec a delete, not a merge' {
+        Test-IsBrakedCommand -Command 'git push origin :main' -Irreversible @('merge','delete') |
+            Should -Be 'delete'
+        Test-IsBrakedCommand -Command 'git push origin :master' -Irreversible @('merge','delete') |
+            Should -Be 'delete'
+    }
+    It 'still calls a real refspec push a merge' {
+        Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible @('merge','delete') |
+            Should -Be 'merge'
+    }
+    It 'still refuses it when only delete is braked' {
+        Test-IsBrakedCommand -Command 'git push origin :main' -Irreversible @('delete') |
+            Should -Be 'delete'
+    }
+    It 'follows the contract when only MERGE is braked' {
+        # Deliberate, and recorded so it is a decision rather than an accident: this command is a
+        # delete, so a contract that does not brake deletes does not brake this. The guard follows
+        # the contract; it does not invent policy - the rule this file opens with.
+        Test-IsBrakedCommand -Command 'git push origin :main' -Irreversible @('merge') |
+            Should -BeNullOrEmpty
+    }
+    It 'is unaffected for ordinary branches' {
+        Test-IsBrakedCommand -Command 'git push origin :feature-x' -Irreversible @('merge','delete') |
+            Should -Be 'delete'
+    }
+}

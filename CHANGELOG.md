@@ -56,6 +56,19 @@
   Recorded in the source, because this file keeps teaching it: *"the classes are disjoint so it
   cannot blow up" is an argument, not a measurement. Time it.*
 
+  **Round five found no bypass at all** — the first round on this change that did not. Its one
+  finding was about honesty rather than permission: `git push origin :main` *deletes* the remote
+  default branch, but the merge rule matched it first (its source side allowed zero characters),
+  so the refusal announced "merge is marked irreversible" for a command that removes main. Not a
+  bypass — the contract filter runs per pattern, so a delete-braking contract already refused it —
+  but a control is worth exactly as much as the account it gives of itself, which is this tool's
+  founding defect. The refspec source now requires at least one character, so an empty source falls
+  through to the delete rule where it belongs.
+
+  Recorded as a decision rather than left to chance: a contract that brakes merges but **not**
+  deletes no longer stops that command. It is a delete, and the guard follows the contract instead
+  of inventing policy — the rule this file opens with. There is a test saying so.
+
   **Known and accepted:** `git push main` is read as a push to the default branch even when `main`
   is the name of a *remote*. A false positive, not a bypass, on a rare spelling — and this pattern
   deliberately errs toward refusing.

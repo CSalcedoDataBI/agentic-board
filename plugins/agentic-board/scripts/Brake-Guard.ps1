@@ -132,7 +132,13 @@ $script:BrakePatterns = @(
     #
     # LIMIT: this core is pure (no git access), so it cannot ask the repo what its default branch
     # is. A project whose default is neither `main` nor `master` is not covered.
-    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s\+?[^\s;|&]*:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
+    # The source side is `+`, not `*`, on purpose: an EMPTY source (`git push origin :main`) is
+    # git's spelling for DELETING the remote branch, not for writing to it. Allowing zero characters
+    # there made this rule swallow the delete - the array is walked in order, so the refusal told the
+    # human "merge is marked irreversible" for a command that removes main, arguably the worse of
+    # the two. Not a bypass (the contract filter runs per pattern, so a delete-braking contract
+    # still refused it), but a control is only as useful as the account it gives of itself.
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s\+?[^\s;|&]+:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
     @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;]*\s(main|master)(?=[\s;&|<>]|$)' }
 
     # --- publish: making something public / cutting a release -----------------------
