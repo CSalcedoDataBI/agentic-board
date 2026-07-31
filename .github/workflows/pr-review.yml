@@ -43,8 +43,19 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Publicar el review es parte del trabajo, no un efecto secundario: sin la herramienta
           # para comentar, el job corría, salía limpio y no dejaba nada (#510).
+          #
+          # --max-turns MEDIDO, no estimado (#543). Con el tope en 20, los runs que SÍ publicaron
+          # consumieron 4 / 13 / 17 / 18 / 19 turnos: el margen real era de UN turno, así que
+          # cualquier PR mediano lo agotaba. Los tres runs de un PR grande (#539) murieron los tres
+          # en 21. El tiempo no es la restricción — esos runs tardan 2-4 min contra un
+          # timeout-minutes de 20 — así que subirlo no alarga nada; solo deja de matar revisiones
+          # a un turno de terminar. 40 da algo más del doble del máximo observado.
+          #
+          # Por qué importa más de lo que parece: un run agotado NO deja review, y el paso de
+          # verificación de abajo lo pone en rojo con razón (#510). Sin holgura, el gate de review
+          # bloquea PRs legítimos y empuja a saltárselo — que es como se desactiva un control.
           claude_args: |
-            --max-turns 20
+            --max-turns 40
             --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
           prompt: |
             Revisa este pull request como un senior engineer. Enfócate en:
