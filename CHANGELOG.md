@@ -17,13 +17,19 @@
   Now refused: refspecs onto `main`/`master` (`HEAD:main`, `branch:main`, `+HEAD:main`,
   `HEAD:refs/heads/main`) and pushing the default branch by name.
 
-  **The first cut of this pattern over-blocked, and the CI reviewer caught it** — the first review
-  it produced after #543 raised its turn cap. Ending the pattern with `` only asks that the next
-  character not be a word character, so `HEAD:main-cleanup` and `HEAD:master.bak` were refused:
-  legitimate branches, blocked, on the run's most common command — precisely the failure this entry
-  claims to guard against. The tests missed it because the case they checked, `maintenance`,
-  continues with `t` (a word character) and so passed for the wrong reason. Both patterns now end
-  at a real token boundary, so the branch name has to *be* `main`/`master`. The reviewer also noted
+  **How the branch name must end took three tries, each one a real defect — and the CI reviewer
+  caught both mistakes**, in the first two reviews it managed to publish after #543 raised its turn
+  cap. `\b` refused `HEAD:main-cleanup` and `HEAD:master.bak`: legitimate branches, blocked, on the
+  run's most common command. Replacing it with `(\s|$)` fixed that and **reopened a different
+  hole** — that only accepts a space or end-of-segment, and the segment splitter does not treat a
+  lone `&` or a redirection as a separator, so `git push origin HEAD:main&` (background the push,
+  same effect) matched nothing, a case the original `\b` had caught. It now ends at a lookahead
+  over the shell's own terminator set, which covers both directions.
+
+  The original over-block, for the record: the tests missed it because the case they checked,
+  `maintenance`, continues with `t` (a word character) and so passed **for the wrong reason** —
+  proving nothing about `-` or `.`. A green test that passes by accident is the same failure this
+  whole entry is about. The reviewer also noted
   that `HEAD:refs/heads/main` was claimed in the description and the code comment but asserted
   nowhere; it has a test now. Deliberately still allowed, since
   this pattern sits on the run's most common command and over-blocking is how a control gets

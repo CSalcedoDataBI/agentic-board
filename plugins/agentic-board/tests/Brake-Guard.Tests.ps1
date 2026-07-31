@@ -731,6 +731,22 @@ Describe 'Test-IsBrakedCommand — pushing straight to the default branch IS a m
         Test-IsBrakedCommand -Command 'git push origin HEAD:refs/heads/master' -Irreversible $script:AllIrr |
             Should -Be 'merge'
     }
+    It 'denies it when the shell terminates the token without a space' {
+        # Found by the CI reviewer on the FIX for the over-blocking, not on the original pattern.
+        # `(\s|$)` accepts only a space or end-of-segment, and the segment splitter does not treat
+        # a lone `&` or a redirection as a separator - so `HEAD:main&` (background the push) and
+        # `HEAD:main>out.txt` matched nothing and went through. The `` this replaced DID catch
+        # them: fixing the false positive reopened a different hole in the same pattern.
+        foreach ($c in @(
+            'git push origin HEAD:main&'
+            'git push origin HEAD:main>out.txt'
+            'git push origin main&'
+            'git push origin HEAD:main<in.txt'
+        )) {
+            Test-IsBrakedCommand -Command $c -Irreversible $script:AllIrr |
+                Should -Be 'merge' -Because "'$c' reaches main"
+        }
+    }
     It 'denies pushing the local default branch by name' {
         Test-IsBrakedCommand -Command 'git push origin main' -Irreversible $script:AllIrr |
             Should -Be 'merge'

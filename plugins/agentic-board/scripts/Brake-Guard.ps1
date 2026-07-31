@@ -88,17 +88,25 @@ $script:BrakePatterns = @(
     # Two shapes: a REFSPEC landing on main/master (`HEAD:main`, `branch:main`, `+HEAD:main`,
     # `HEAD:refs/heads/main`), and pushing the default branch BY NAME (`git push origin main`).
     #
-    # BOTH end with `(\s|$)`, not `\b`, and the difference is a real false positive rather than
-    # style. `\b` only asks that the NEXT character not be a word character, so `main-cleanup` and
-    # `master.bak` satisfied it and were refused - legitimate branches, blocked, on the run's single
-    # most common command. The first round of tests missed it because the case they checked,
-    # `maintenance`, happens to continue with `t` (a word character) and so passed for the wrong
-    # reason. Requiring end-of-token instead makes the branch name have to BE main/master.
+    # HOW THE BRANCH NAME MUST END - and this took three tries, each one a real defect:
+    #
+    #   `\b`        refused `main-cleanup` and `master.bak`. `\b` only asks that the next character
+    #               not be a word character, so a `-` or a `.` satisfied it: legitimate branches
+    #               blocked on the run's most common command. The tests missed it because the case
+    #               they checked, `maintenance`, continues with `t` - a word character - so it
+    #               passed for the WRONG REASON and proved nothing about `-`.
+    #   `(\s|$)`    fixed that and reopened a different hole: it accepts only a space or the end of
+    #               a segment, and $SegmentSeparator does not split on a lone `&` or a redirection.
+    #               So `git push origin HEAD:main&` - background the push, same effect - matched
+    #               nothing. The `\b` it replaced had caught that one.
+    #   lookahead   what is here now: the branch name must end at whitespace, a shell separator, a
+    #               redirection, or end-of-string. Both failure directions covered, and the
+    #               terminator set is the shell's, not an ad-hoc one.
     #
     # LIMIT: this core is pure (no git access), so it cannot ask the repo what its default branch
     # is. A project whose default is neither `main` nor `master` is not covered.
-    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s\+?[^\s;|&]*[:/](main|master)(\s|$)' }
-    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s(main|master)(\s|$)' }
+    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s\+?[^\s;|&]*[:/](main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';   pattern = '\bgit\s+push\b[^;]*\s(main|master)(?=[\s;&|<>]|$)' }
 
     # --- publish: making something public / cutting a release -----------------------
     @{ action = 'publish'; pattern = '\bgh\s+release\s+create\b' }
