@@ -88,6 +88,11 @@ try {
     }
 
     $command = "$($payload.tool_input.command)"
+    # The marker's endToEnd order is deliberately NOT passed: nothing here opens for it. #536
+    # opened the gate's own script for an ordered run; review found that made two holes reachable
+    # (a `cd` out of the worktree skips the gate's own checks, and the review condition is a
+    # comment the run can post itself). Tracked in #541 - until then the order is recorded and
+    # never acted on, which is the honest state.
     $action  = Test-IsBrakedCommand -Command $command -Irreversible $marker.irreversible
     if (-not $action) { exit 0 }
 

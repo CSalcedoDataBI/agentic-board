@@ -65,3 +65,42 @@ Describe 'Agent type in the autonomous brief' {
         $brief | Should -Not -Match 'Adopt the agent type'
     }
 }
+
+Describe 'Format-AutoBrief — an ordered run is told the order is inert, not that it may close (#541)' {
+    # #536 had the brief GRANT the close. Review then found the mechanism behind it had two holes
+    # it could not defend, so the grant was withdrawn. The brief must not silently go back to a
+    # bare "STOP" either: a run carrying an order it was never told about would read its own
+    # refusal as failure and hunt for a way around it.
+
+    It 'still orders the stop when there is no order' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match 'STOP'
+        $b | Should -Match 'Do NOT merge'
+    }
+    It 'does NOT grant the close when ordered' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Not -Match 'you MAY close this work yourself'
+    }
+    It 'still orders the stop when ordered' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match 'STOP'
+    }
+    It 'acknowledges the order rather than pretending it was never given' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match '(?i)ordered this run end to end'
+        $b | Should -Match '(?i)recorded'
+    }
+    It 'tells the run a refusal is the control working, not a bug to route around' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match '(?i)working as intended'
+        $b | Should -Match '(?i)another way'
+    }
+    It 'points at the issue so the state is checkable rather than asserted' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match '#541'
+    }
+    It 'names no merge path at all — there is none to name' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Not -Match 'Board-Merge\.ps1'
+    }
+}

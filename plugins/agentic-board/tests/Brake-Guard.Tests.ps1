@@ -636,3 +636,48 @@ Describe 'The end-to-end order must be a real boolean (external review, round 1)
         (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
     }
 }
+
+Describe 'Test-IsBrakedCommand — an ORDERED run is refused exactly like an unordered one (#541)' {
+    # #536 opened one path for a run the owner had ordered to finish: the gate's own script, on the
+    # reasoning that it re-checks the four conditions and refuses on its own. Three rounds of
+    # external review then found that OPENING it made two latent holes reachable, and neither is a
+    # string-matching problem this file could fix:
+    #
+    #   - `cd C:\ ; pwsh <genuine-gate> -PR 42` passes per segment, and the gate resolves its
+    #     marker from its RUNTIME cwd - outside the worktree there is none, so it skips all four
+    #     conditions and merges. The two halves of the control disagreed about which directory the
+    #     run was in, and the run got to pick.
+    #   - The review condition is satisfied by a PR comment the run can post itself.
+    #
+    # So the classifier honours no order at all. These tests pin that: the order is RECORDED in the
+    # marker and acted on nowhere, which is the honest state until #541.
+
+    It 'refuses the gate script for an ordered run, just as for any other' {
+        Test-IsBrakedCommand -Command 'pwsh C:\plug .29.0\scripts\Board-Merge.ps1 -PR 535' `
+            -Irreversible $script:AllIrr | Should -Be 'merge'
+    }
+    It 'refuses it however the path is spelled' {
+        foreach ($c in @(
+            'pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR 5'
+            'pwsh ./board-merge.ps1 -PR 5'
+            'pwsh -File C:\plug .29.0\scripts\Board-Merge.ps1 -PR 5'
+            'cd C:\ ; pwsh C:\plug .29.0\scripts\Board-Merge.ps1 -PR 5'
+        )) {
+            Test-IsBrakedCommand -Command $c -Irreversible $script:AllIrr |
+                Should -Be 'merge' -Because "'$c' must not be reachable while #541 is open"
+        }
+    }
+    It 'takes no end-to-end parameter at all — there is nothing for it to switch' {
+        # A parameter that exists and changes nothing is how a control comes to mean less than it
+        # says. If the order is ever honoured again, this test is the thing that has to change.
+        (Get-Command Test-IsBrakedCommand).Parameters.Keys | Should -Not -Contain 'EndToEnd'
+    }
+    It 'still allows a genuine preview of the gate' {
+        Test-IsBrakedCommand -Command 'pwsh Board-Merge.ps1 -PR 490 -DryRun' -Irreversible $script:AllIrr |
+            Should -BeNullOrEmpty
+    }
+    It 'honours a contract that does not brake on merge at all' {
+        Test-IsBrakedCommand -Command 'pwsh scripts/Board-Merge.ps1 -PR 1' -Irreversible @('deploy') |
+            Should -Be ''
+    }
+}

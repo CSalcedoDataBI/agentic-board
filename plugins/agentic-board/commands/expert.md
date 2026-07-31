@@ -15,6 +15,12 @@ for the user to pick (they can answer with just the number):
                      construye, prueba dejando evidencia, se auto-usa agentic-board para el
                      trabajo lateral que encuentra, y FRENA antes de lo irreversible (merge/
                      deploy/refresh/publish/delete) — deja el PR listo para tu OK.
+2b. auto <issue> de punta a punta
+                   → REGISTRA tu orden de terminarlo — pero HOY NO SE CIERRA SOLO. El
+                     mecanismo que lo permitía tenía dos agujeros que no podía defender
+                     (issue #541), así que está cerrado: toda ruta de merge está negada para
+                     todo run. La sesión deja el PR listo y el cierre lo haces tú, igual que
+                     sin la orden. Se te avisa al lanzar; no falla en silencio.
 3. roles [why "<texto>"]
                    → ver el CATÁLOGO de roles efectivo (los de fábrica + los locales del
                      proyecto, marcando cuál sobreescribe a cuál y cuántas skills engancha de
@@ -48,7 +54,25 @@ factory role. A role hooking **0 skills** is printed in yellow: it will give the
 toolset. See `references/roles.md` for the schema and the merge rules.
 
 ## auto
-Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n>`. It reads the contract, composes the
+
+**The end-to-end order (`-EndToEnd`) — RECORDED, NOT HONOURED.** When the user ORDERS the finish —
+"de punta a punta", "llévalo hasta el final", "ciérralo tú", "end to end" — add `-EndToEnd`. It is
+an ORDER, never a stored setting: it travels with that instruction and is good for that run only,
+so never infer it from a previous run or from the contract. If the user did not say it, do not
+pass it.
+
+**It does not currently let the run merge.** The mechanism that honoured it opened the gate's own
+script for an ordered run, and external review found that opening it made two holes reachable that
+no command-string check can close (#541): changing directory before invoking the gate made the gate
+skip all four of its conditions, and the "a real review exists" condition was satisfied by a PR
+comment the run itself can post. So every merge route is refused for every run, ordered or not, and
+deploy/publish/refresh/delete stay with the human as always.
+
+Still pass it when the user says it: the launched session is told the order was given and cannot yet
+be acted on, which is what stops it reading its own refusal as a failure to work around. And tell
+the user plainly that the close is still theirs — never imply the run will finish it.
+
+Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`. It reads the contract, composes the
 autonomous brief (role objective + enriched plan + DoD + the capability map + the irreversible
 line), and launches a dedicated Claude session in an isolated worktree (reusing the fleet/launch
 machinery). You are freed; monitor with `/board work -Sessions -Watch`. The launched session:

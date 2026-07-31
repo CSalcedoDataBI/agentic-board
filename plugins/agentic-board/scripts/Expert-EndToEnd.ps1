@@ -74,7 +74,11 @@ function Test-EndToEndAllowed {
         [hashtable]$WorkClassPolicy,
         [bool]$ReviewedHead = $false,
         [bool]$TestsRecorded = $false,
-        [bool]$TestsRequired = $true
+        [bool]$TestsRequired = $true,
+        # Does CI exist on this commit at all? Separate from $TestsRecorded (is it green) because
+        # waiving the REQUIREMENT for a test suite must never waive a suite that ran and FAILED.
+        # Defaults to $true: assuming a project has no CI is the permissive assumption.
+        [bool]$CiPresent = $true
     )
     $missing = @()
 
@@ -94,6 +98,10 @@ function Test-EndToEndAllowed {
     }
     if ($TestsRequired -and -not $TestsRecorded) {
         $missing += 'constancia de que corrieron pruebas automaticas sobre este commit'
+    } elseif ($CiPresent -and -not $TestsRecorded) {
+        # The contract does not demand a test suite, but CI EXISTS on this commit and is not green.
+        # Waiving "you must have tests" never waives "the tests you have must pass" (#539).
+        $missing += 'que el CI de este commit este en verde (existe y no lo esta - eso no lo exime el contrato)'
     }
 
     if ($missing.Count -eq 0) {
@@ -108,6 +116,92 @@ function Test-EndToEndAllowed {
         missing = @($missing)
         reason  = "falta: $($missing -join '; ')"
     }
+}
+
+<#
+    Did CI actually run and pass on this commit?
+
+    Takes the RAW `gh pr checks --json name,bucket` output rather than calling gh itself, so the
+    one condition that cannot be self-issued is testable without a network round-trip - and so the
+    caller is forced to hand over the checks of a PR it actually resolved. That mattered: the
+    caller used to pass a PR number that a dot-source had reset to 0, and this decision silently
+    became "no checks -> not tested" for every run (#536).
+
+    Green means: at least one check PASSED and none is failing, pending or cancelled. Counting
+    "nothing failed" as tested let a PR whose only check was SKIPPED satisfy the requirement, with
+    no CI having run on that commit at all. Unreadable or empty input is NOT a pass - "I could not
+    look" is not evidence.
+#>
+<#
+    Read a contract's `dod.tests` as a real boolean.
+
+    `[bool]$contract.dod['tests']` was the same trap already closed for the brake marker's
+    `endToEnd`: PowerShell casts ANY non-empty string to $true, so a contract serialising
+    "false" — by hand, or through a JSON writer that quotes booleans — read as "tests required"
+    when it said the opposite. It failed safe, but the behaviour depended on the contract always
+    emitting real JSON booleans, which is exactly the assumption this repo keeps finding wrong.
+
+    Absent, null or unrecognisable means REQUIRED: the safe direction, and the one a project that
+    never thought about it should get.
+#>
+function Get-TestsRequired {
+    param($Contract)
+    if ($Contract -isnot [hashtable]) { return $true }
+    if ($Contract.dod -isnot [hashtable]) { return $true }
+    if (-not $Contract.dod.ContainsKey('tests')) { return $true }
+    $v = $Contract.dod['tests']
+    if ($v -is [bool]) { return [bool]$v }
+    # A string or number only DISABLES the requirement when it unambiguously says so.
+    $s = "$v".Trim().ToLowerInvariant()
+    if ($s -in @('false','0','no')) { return $false }
+    if ($s -in @('true','1','yes')) { return $true }
+    return $true
+}
+
+function Test-CiChecksPassed {
+    param([Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$ChecksJson)
+    return (Get-CiEvidence -ChecksJson $ChecksJson).passed
+}
+
+<#
+    Split the CI question in two, because collapsing them was a false-permission path (#539).
+
+    "Does this project have to run automated tests?" is the CONTRACT's call (dod.tests).
+    "Is the CI that actually exists green?" is never the contract's call, and never waivable.
+
+    Reading only `passed` conflated four states - no checks, pending checks, failed checks and an
+    unreadable answer - so a project declaring no test suite would close a PR whose CI was RED.
+    Board-Merge can fall back to --admin, so the ruleset would not have stopped it either.
+
+    `present` is deliberately TRUE for unreadable output: "I could not read the checks" must not be
+    laundered into "this project has no CI", which is the permissive reading.
+#>
+function Get-CiEvidence {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$ChecksJson,
+        # Exit status of the command that produced $ChecksJson. Native commands do NOT throw in
+        # PowerShell, so a transient `gh pr checks` failure returns empty stdout and looks exactly
+        # like "this project has no CI" - which, under a dod.tests=false contract, was a merge.
+        # Absent (0) keeps every existing caller on the previous behaviour.
+        [int]$ExitCode = 0
+    )
+    # Empty stdout from a FAILED command means we could not read the checks, not that there are
+    # none. Unreadable is present-and-not-green; only a clean run reporting nothing is "no CI".
+    if ([string]::IsNullOrWhiteSpace($ChecksJson) -and $ExitCode -ne 0) {
+        return @{ present = $true; passed = $false }
+    }
+    if ([string]::IsNullOrWhiteSpace($ChecksJson)) {
+        return @{ present = $false; passed = $false }
+    }
+    try {
+        $arr = @($ChecksJson | ConvertFrom-Json -ErrorAction Stop)
+    } catch {
+        return @{ present = $true; passed = $false }
+    }
+    if ($arr.Count -eq 0) { return @{ present = $false; passed = $false } }
+    $bad    = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
+    $passed = @($arr | Where-Object { "$($_.bucket)" -eq 'pass' })
+    return @{ present = $true; passed = ($passed.Count -gt 0 -and $bad.Count -eq 0) }
 }
 
 # Render the decision for a human. Kept next to the decision so the refusal and its wording cannot

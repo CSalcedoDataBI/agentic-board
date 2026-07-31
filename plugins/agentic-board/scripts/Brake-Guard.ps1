@@ -55,6 +55,23 @@ $script:BrakeMarkerName = 'brake-armed.json'
 $script:BrakePatterns = @(
     # --- merge: putting work on the default branch ---------------------------------
     @{ action = 'merge';   pattern = '\bgh\s+pr\s+merge\b' }
+    # The tool's own merge script. DENIED for every autonomous run, ordered or not.
+    #
+    # #536 briefly opened this one path for a run the owner had ordered to finish, on the reasoning
+    # that this script re-checks the four conditions and refuses on its own. External review found
+    # that opening it made two latent holes REACHABLE, and neither is a string-matching bug (#541):
+    #
+    #   - `cd C:\ ; pwsh <genuine-gate> -PR 42` passes here per segment, and the gate then resolves
+    #     its marker from its RUNTIME cwd, finds none outside the worktree, and skips all four
+    #     conditions. The two halves of the control disagreed about which directory the run was in,
+    #     and the run got to pick.
+    #   - The review condition is satisfied by a PR comment the run is able to post itself - the
+    #     same self-certification the design had already removed for the TEST condition.
+    #
+    # So the path stays shut until #541 gives the gate a trustworthy armed context and evidence the
+    # subject cannot mint. An ordered run still records the order in its marker; what it does not
+    # get is a way to act on it. A control that opens a door on the strength of a check the caller
+    # can walk around is the failure this file exists to stop.
     @{ action = 'merge';   pattern = '\bboard-merge\.ps1\b' }
     # The REST merge endpoints, recognized by the ENDPOINT rather than by the client that calls
     # it. Anchoring these to `gh api` (as the first cut did) left the identical request open via
@@ -170,6 +187,12 @@ function ConvertTo-NormalizedCommand {
     $Irreversible is the contract's own list, so a contract that does NOT mark 'merge' as
     irreversible does not get its merges denied - the control follows the contract, it does not
     invent policy.
+
+    THE OWNER'S END-TO-END ORDER IS NOT HONOURED HERE. It is recorded in the marker (#530) and
+    read by the merge gate, but this classifier opens nothing for it: #536 tried, and external
+    review showed that opening even the gate's own script made two latent holes reachable that no
+    amount of string matching can close (#541). Until the gate carries a trustworthy armed context
+    and evidence the run cannot mint, an ordered run is refused exactly like an unordered one.
 #>
 function Test-IsBrakedCommand {
     param(

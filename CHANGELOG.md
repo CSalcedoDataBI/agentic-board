@@ -1,5 +1,67 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **`-EndToEnd` shipped inert in 0.29.0, and after five review findings it is staying inert — on
+  purpose** (#536, #541). Field-testing the autonomy boundary found the ordered end-to-end close
+  could refuse but never allow. Three separate blockers were fixed; then three rounds of external
+  review found five live false-permission paths in the mechanism that would have opened it, two of
+  them complete bypasses. **The boundary held throughout — nothing merged that should not — and
+  every failure failed safe.** The order is now recorded, explained, and acted on nowhere.
+
+  What was genuinely broken and is now fixed:
+
+  1. **The tests condition could never be satisfied.** `Invoke-BrakeMergeCheck` dot-sources
+     `Board-ReviewGate.ps1`, whose `param()` block runs **in the caller's scope** and declares
+     `[int]$PR = 0`. `$PR` silently became `0` immediately before `gh pr checks $PR`, which exits 1
+     with empty output, so the CI condition was *always* false. Proven against a real PR whose four
+     checks all passed: the gate refused for "missing test evidence"; the same inputs without the
+     clobber were permitted. **Stated precisely:** the bug is gone because the code that had it was
+     withdrawn with the allowance, not because a line was patched around it. What remains is the
+     trap, recorded where the gate will be rebuilt and guarded by a test that proves the review
+     gate really does clobber a caller's `$PR` — so #541 cannot walk into it again.
+  2. **The tests requirement ignored the contract**, being hardcoded `$true`; and reading it cast
+     the string `"false"` to `$true`, the trap already closed for the marker's `endToEnd`.
+  3. **The brief never mentioned the order**, so a session carrying one was briefed exactly like a
+     session without one. It now says the order was given, that it cannot yet be acted on, and that
+     a refused merge is the control working — not a failure to route around. Without that, a run
+     reads its own refusal as an error and hunts for another way.
+
+  **Why the ordered close stays shut.** Opening it — even only for the gate's own script, which
+  re-checks four conditions and refuses on its own — made two latent holes *reachable*, and neither
+  is a string-matching bug (#541):
+
+  | Bypass | Why the gate could not defend itself |
+  |---|---|
+  | `cd C:\ ; pwsh <genuine-gate> -PR 42` | The hook judges per segment and allows it; the gate then resolves its marker from its **runtime** cwd, finds none outside the worktree, and skips all four conditions. The two halves of the control disagreed about which directory the run was in, and the run picked |
+  | `[abios-review] … sha=<head>` | The review condition is a PR comment the run is able to post itself — the self-certification the design had already removed for the *test* condition |
+
+  Three earlier findings were fixed before these: the gated path matched a bare **filename** (any
+  file so named passed), then a canonical **path pattern** — which was itself wrong, since the
+  installed plugin lives at `<version>/scripts/`, so it would have refused the *genuine* gate in
+  every project except this repo — then a **substring** test that a mention-as-argument satisfied,
+  then a token match that a `<gate>-bypass.ps1` prefix satisfied while breaking any install under
+  `C:\Program Files`. Also fixed on the way: a failed `gh pr checks` read being laundered into
+  "this project has no CI", and `dod.tests: false` waiving **red** CI rather than just the
+  requirement to have a suite.
+
+  The pattern is the finding: **every round's tests passed, and the next round still found a live
+  false-permission path.** That is the argument for keeping the door shut until #541 gives the gate
+  a trustworthy armed context and evidence the subject cannot mint.
+
+### Added
+- **The brake hook is under test at last** — the piece Claude Code actually executes, and the only
+  one that can produce a refusal, had no tests. 17 now drive the real script over real stdin and
+  pin both fail directions: silence outside an armed run, denial for anything unclear inside one
+  (corrupt marker, emptied list, the string `"true"` posing as an order), plus the `cd`-out shape
+  that motivated closing the ordered path.
+- Structural regression guards (AST) asserting the merge check never reads a name a dot-source
+  destroys, and that the tests requirement is passed rather than assumed.
+- An adversarial sweep of 27 evasion classes — command substitution, backticks, env-var prefixes,
+  redirections, line continuations, quote-splitting, `bash -c` wrapping, per-segment vouching —
+  its catalogue taken from `liberzon/claude-hooks` (MIT, registered in `knowledge/`), which solves
+  the same sub-command decomposition problem. Ideas, not code.
+
 ## [0.29.0] - 2026-07-30
 ### Added
 - **`/board expert auto -EndToEnd` — an autonomous run can now finish what it started, under four

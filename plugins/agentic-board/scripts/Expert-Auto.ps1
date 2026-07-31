@@ -31,10 +31,11 @@ param(
     [int]$Issue = 0,
     [int]$ProjectNum = 0,
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL",
-    # "Llevalo de punta a punta" (#530): the human ORDERS this run to finish, so it may close CODE
-    # work that carries a real review and recorded tests for the head commit. Not a stored setting --
-    # the permission travels with the instruction and is good for this run only. Anything the owner
-    # judges by looking at it still waits for him, ordered or not.
+    # "Llevalo de punta a punta" (#530): the human ORDERS this run to finish. RECORDED, NOT
+    # HONOURED (#541) - it is written into the brake marker and explained to the launched session,
+    # and no merge route is opened for it. Still pass it when the human says it: a run that knows
+    # the order exists and is inert reads its refusal as the control working, instead of hunting
+    # for a way around it. Never tell the user the run will merge.
     [switch]$EndToEnd,
     [switch]$DryRun
 )
@@ -47,7 +48,13 @@ function Format-AutoBrief {
     param(
         [Parameter(Mandatory)][hashtable]$Contract,
         [string]$PlanBody = "",
-        [string]$RoleObjective = ""
+        [string]$RoleObjective = "",
+        # The owner ORDERED this run to finish (#530). The brief now EXPLAINS that order rather than
+        # granting it: the mechanism that would honour it was found to have two holes it could not
+        # defend (#541), so the run is told plainly that the order is recorded, cannot yet be acted
+        # on, and that a refused merge is the control working - not a bug to route around. Telling
+        # it nothing would leave it reading its own refusal as failure.
+        [switch]$EndToEnd
     )
     $dod = @()
     if ($Contract.dod) { $dod = @($Contract.dod.Keys | Where-Object { $Contract.dod[$_] }) }
@@ -60,6 +67,32 @@ function Format-AutoBrief {
     $agentLine = if ($Contract.roleAgent) {
         "`nAdopt the agent type ``$($Contract.roleAgent)`` for this run — its definition is your persona.`n"
     } else { '' }
+
+    # The closing section. Both branches STOP; the ordered one also says why the order is inert.
+    $closingSection = if ($EndToEnd) { @"
+## STOP before the irreversible — including the close you were ordered to make
+
+The owner ordered this run end to end, and that order is RECORDED in your brake marker. It is not
+yet something you can act on, and you should not try.
+
+Why, stated plainly so you do not treat the refusal as a bug: the mechanism that would let an
+ordered run close its own PR was found to have two holes it could not defend (#541). Changing
+directory before invoking the gate made the gate skip its own checks entirely, and the "a real
+review exists" condition was satisfied by a PR comment the run itself can post. Until both are
+closed, the tool layer refuses every merge route for every run, ordered or not.
+
+So: reach "PR ready + review gate green" and STOP there, exactly as an unordered run would. Do NOT
+merge, deploy, refresh, publish or delete. If a merge command is refused, that is this control
+working as intended — do not look for another way around it. Say in your final report that the
+work is ready and the close is waiting for the human.
+
+STOP before: $irrList.
+"@ } else { @"
+## STOP before the irreversible (brake — ask the human)
+STOP before: $irrList.
+Reach "PR ready + review gate green" and STOP there. Do NOT merge, deploy, refresh, publish, or
+delete on your own.
+"@ }
 
     @"
 # Autonomous brief — /board expert auto
@@ -89,10 +122,7 @@ tested, the command, the result) to the PR body, the issue comment, and evidence
 An in-scope problem: fix it in the loop and continue. An out-of-scope finding (side bug, debt):
 file a sanitized 'discovered' issue on the board and keep going — never block on it.
 
-## STOP before the irreversible (brake — ask the human)
-STOP before: $irrList.
-Reach "PR ready + review gate green" and STOP there. Do NOT merge, deploy, refresh, publish, or
-delete on your own.
+$closingSection
 "@
 }
 
@@ -138,7 +168,7 @@ if ($repo) {
     }
 }
 
-$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role
+$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role -EndToEnd:$EndToEnd
 
 # The brake, as a CONTROL rather than prose (#440). The generic launch briefing used to order
 # the merge outright and make it the completion condition, so a session that merged to main was
@@ -159,7 +189,15 @@ $brief | Set-Content -Path $briefPath -Encoding utf8
 Write-Host "=== /board expert auto  (issue #$Issue) ===" -ForegroundColor Cyan
 Write-Host "  Brief composed -> $briefPath" -ForegroundColor Green
 Write-Host "  Autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
-if ($stopAtPR) {
+if ($stopAtPR -and $EndToEnd) {
+    # Say what is TRUE, not what was asked for. The order is recorded and cannot yet be acted on
+    # (#541); printing "the session may close its own PR" would be the same overclaim #516 removed.
+    Write-Host "  Brake ARMED. The end-to-end order is RECORDED but NOT yet honoured:" -ForegroundColor Yellow
+    Write-Host "               the mechanism that would let a run close its own PR was found to have" -ForegroundColor Yellow
+    Write-Host "               two holes it could not defend (see issue #541), so every merge route" -ForegroundColor Yellow
+    Write-Host "               is refused for every run. This session will stop at a reviewed PR and" -ForegroundColor Yellow
+    Write-Host "               the close is yours." -ForegroundColor Yellow
+} elseif ($stopAtPR) {
     # #516: this line used to claim a brake that was only a paragraph in the brief. It is now a
     # control - Start-WorktreeSession writes a marker into the worktree and a PreToolUse hook
     # refuses the irreversible call - so the claim is finally true. Keep the wording honest:
