@@ -636,3 +636,57 @@ Describe 'The end-to-end order must be a real boolean (external review, round 1)
         (Read-BrakeMarker -StartDir $wt).endToEnd | Should -BeFalse
     }
 }
+
+Describe 'Test-IsBrakedCommand — the ORDERED end-to-end run (#536)' {
+    # The marker already stored `endToEnd`, and nothing read it: a run the owner had explicitly
+    # ordered to finish was refused exactly like one he had not. The permission existed on disk
+    # and never reached the control that had to honour it.
+    #
+    # The order does NOT mean "merges are allowed now". It means the GATED path becomes reachable:
+    # Board-Merge.ps1 evaluates the four conditions and exits 1 when any is unmet. Every ungated
+    # route to the same effect stays denied, so ordering the run narrows the path to a merge
+    # instead of opening it.
+
+    It 'opens the gated merge script when the owner ordered it end to end' {
+        Test-IsBrakedCommand -Command 'pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR 535' `
+            -Irreversible $script:AllIrr -EndToEnd $true | Should -Be ''
+    }
+    It 'keeps the gated script CLOSED when there is no order' {
+        Test-IsBrakedCommand -Command 'pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR 535' `
+            -Irreversible $script:AllIrr -EndToEnd $false | Should -Be 'merge'
+    }
+    It 'defaults to closed when the caller says nothing about an order' {
+        # A caller that has not been taught about end-to-end must not accidentally grant it.
+        Test-IsBrakedCommand -Command 'pwsh scripts/Board-Merge.ps1 -PR 535' -Irreversible $script:AllIrr |
+            Should -Be 'merge'
+    }
+
+    It 'still denies a raw gh pr merge — the order does not license the UNGATED path' {
+        Test-IsBrakedCommand -Command 'gh pr merge 535 --squash --delete-branch' `
+            -Irreversible $script:AllIrr -EndToEnd $true | Should -Be 'merge'
+    }
+    It 'still denies the REST merge endpoint' {
+        Test-IsBrakedCommand -Command 'curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge' `
+            -Irreversible $script:AllIrr -EndToEnd $true | Should -Be 'merge'
+    }
+    It 'still denies gh reached through a variable' {
+        Test-IsBrakedCommand -Command 'gh pr $verb 535' -Irreversible $script:AllIrr -EndToEnd $true |
+            Should -Be 'merge'
+    }
+    It 'still denies tampering with the marker' {
+        Test-IsBrakedCommand -Command 'rm .agentic-board/brake-armed.json' `
+            -Irreversible $script:AllIrr -EndToEnd $true | Should -Be 'tamper'
+    }
+
+    It 'the order is about CLOSING the work, not about deploying it' {
+        # end-to-end lets the run finish its own PR. It is not a general lifting of the brake.
+        foreach ($c in @('wrangler deploy', 'npm publish', 'gh release create v1', 'gh repo delete o/r')) {
+            Test-IsBrakedCommand -Command $c -Irreversible $script:AllIrr -EndToEnd $true |
+                Should -Not -Be '' -Because "'$c' is irreversible whether or not the run was ordered to finish"
+        }
+    }
+    It 'honours a contract that does not brake on merge at all' {
+        Test-IsBrakedCommand -Command 'pwsh scripts/Board-Merge.ps1 -PR 1' -Irreversible @('deploy') -EndToEnd $false |
+            Should -Be ''
+    }
+}

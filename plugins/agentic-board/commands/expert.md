@@ -15,6 +15,12 @@ for the user to pick (they can answer with just the number):
                      construye, prueba dejando evidencia, se auto-usa agentic-board para el
                      trabajo lateral que encuentra, y FRENA antes de lo irreversible (merge/
                      deploy/refresh/publish/delete) — deja el PR listo para tu OK.
+2b. auto <issue> de punta a punta
+                   → lo mismo, pero le DAS LA ORDEN de terminarlo. Sólo cierra su propio PR si
+                     se lo gana: que el cambio sea CÓDIGO (un informe/página/tema lo sigues
+                     aprobando tú), que haya REVISIÓN real de ese commit y que las PRUEBAS
+                     hayan corrido en CI sobre él. Si falta algo, te dice cuál y el PR te espera.
+                     Deploy/publish/refresh/delete siguen siendo tuyos, con orden o sin ella.
 3. roles [why "<texto>"]
                    → ver el CATÁLOGO de roles efectivo (los de fábrica + los locales del
                      proyecto, marcando cuál sobreescribe a cuál y cuántas skills engancha de
@@ -48,7 +54,20 @@ factory role. A role hooking **0 skills** is printed in yellow: it will give the
 toolset. See `references/roles.md` for the schema and the merge rules.
 
 ## auto
-Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n>`. It reads the contract, composes the
+
+**The end-to-end order (`-EndToEnd`).** By default the run brakes at a reviewed PR and the merge
+is yours. When the user ORDERS the finish — "de punta a punta", "llévalo hasta el final", "ciérralo
+tú", "end to end" — add `-EndToEnd` to the command below. It is an ORDER, never a stored setting:
+it travels with that instruction and is good for that run only, so never infer it from a previous
+run or from the contract. If the user did not say it, do not pass it.
+
+What the order does and does not do: it does NOT lift the brake. It opens exactly one path — the
+gated `Board-Merge.ps1`, which re-checks four conditions at merge time (ordered · the change is
+code-class · a real review of the head commit · CI passed on that commit) and refuses, naming
+every unmet one, when they do not all hold. Raw `gh pr merge` and the REST merge endpoints stay
+refused at the tool layer, and deploy/publish/refresh/delete stay with the human either way.
+
+Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`. It reads the contract, composes the
 autonomous brief (role objective + enriched plan + DoD + the capability map + the irreversible
 line), and launches a dedicated Claude session in an isolated worktree (reusing the fleet/launch
 machinery). You are freed; monitor with `/board work -Sessions -Watch`. The launched session:

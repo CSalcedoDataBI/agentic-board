@@ -88,7 +88,11 @@ try {
     }
 
     $command = "$($payload.tool_input.command)"
-    $action  = Test-IsBrakedCommand -Command $command -Irreversible $marker.irreversible
+    # The marker has carried the owner's end-to-end order since #530; until #536 nothing read it
+    # here, so an ORDERED run was refused exactly like an unordered one and the gated merge path
+    # was unreachable. Passing it opens that one path and nothing else - see Test-IsBrakedCommand.
+    $action  = Test-IsBrakedCommand -Command $command -Irreversible $marker.irreversible `
+                                    -EndToEnd ([bool]$marker.endToEnd)
     if (-not $action) { exit 0 }
 
     Write-Output (New-BrakeDenyJson -Action $action -Issue $marker.issue)

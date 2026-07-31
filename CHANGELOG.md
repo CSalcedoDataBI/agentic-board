@@ -1,5 +1,60 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **End-to-end mode could refuse but never allow — three gaps between the order and the merge**
+  (#536). Field-testing the autonomy boundary on a real issue found that `-EndToEnd`, shipped in
+  0.29.0, was **inert**. The boundary itself held — nothing merged that should not, and every
+  failure below failed *safe* — but the half the owner asked for, "when I order it end to end,
+  finish it", could not happen. Three independent blockers, each sufficient on its own:
+
+  1. **The tests condition could never be satisfied.** `Invoke-BrakeMergeCheck` dot-sources
+     `Board-ReviewGate.ps1` to reuse its strict review parser, and dot-sourcing runs the sourced
+     script's `param()` block **in the caller's scope** — where it declares `[int]$PR = 0`. So
+     `$PR` silently became `0` immediately before `gh pr checks $PR`, which exits 1 with empty
+     output. `$tested` was therefore *always* false. Verified against a real PR whose four checks
+     all passed: the gate refused for "missing test evidence"; the identical inputs without the
+     clobber were **permitted**. That one variable was the entire difference between refuse and
+     allow. Parameters are now captured *before* any dot-source — the rule is "capture before you
+     dot-source", not "remember which script clobbers which name". (Same failure family as the
+     `-DryRun` incident.)
+
+  2. **The tool-layer brake ignored the order.** `Read-BrakeMarker` parsed `endToEnd` and
+     `New-BrakeMarkerJson` wrote it, but nothing *consumed* it: the PreToolUse hook denied a merge
+     identically whether or not the owner had ordered the finish, so even with (1) fixed the merge
+     was unreachable. The fix is deliberately **not** "allow merges when ordered". The order opens
+     exactly one path — `Board-Merge.ps1`, the only merge route that *checks* anything, which
+     re-establishes the four conditions and exits non-zero when they do not hold. Raw
+     `gh pr merge`, the REST merge endpoints and `gh` reached through a variable stay refused, as
+     do deploy/publish/refresh/delete. Ordering a run now **narrows** the route to a merge rather
+     than widening it.
+
+  3. **The run was never told it may finish.** `Format-AutoBrief` hardcoded *"Reach 'PR ready' and
+     STOP there. Do NOT merge…"* with no end-to-end parameter, so the launched session was briefed
+     to stop even when ordered otherwise — obeying a "stop" it had been handed while the "finish"
+     sat in a marker file it never read. The brief now grants the permission when ordered, names
+     the four conditions it must earn, points at the gated path, and still forbids everything else.
+     A fourth gap surfaced with it: there was **no way to type the order**. `/expert auto <issue>
+     de punta a punta` now expresses it, documented in the command surface and the skill.
+
+  Also fixed: the tests requirement was documented as coming from the contract's `dod.tests` but
+  was never passed, so it was hardcoded to `true` and a project that honestly declares no automated
+  suite could never close anything. Fails safe, still ignored the contract.
+
+### Added
+- **The brake hook itself is now under test** (#536). `Brake-Guard.ps1`'s pure core was well
+  covered; the hook that *drives* it — the piece Claude Code actually executes, and the only one
+  that can produce a refusal — had none. 17 tests drive the real script over real stdin and assert
+  on the payload, pinning both fail directions: silence outside an armed run, denial for anything
+  unclear inside one (corrupt marker, emptied list, the string `"true"` posing as an order).
+- `Test-CiChecksPassed`, extracted so the one condition that cannot be self-issued is testable
+  without a network round-trip, and a structural regression guard asserting the brake check never
+  reads a name a dot-source destroys.
+
+  Mutation-verified in both directions: removing the gated bypass turns the "ordered run may reach
+  the gate" test red; making the order open *everything* turns four "still denied" tests red.
+  1,572 tests suite-wide.
+
 ## [0.29.0] - 2026-07-30
 ### Added
 - **`/board expert auto -EndToEnd` — an autonomous run can now finish what it started, under four

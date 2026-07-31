@@ -110,6 +110,34 @@ function Test-EndToEndAllowed {
     }
 }
 
+<#
+    Did CI actually run and pass on this commit?
+
+    Takes the RAW `gh pr checks --json name,bucket` output rather than calling gh itself, so the
+    one condition that cannot be self-issued is testable without a network round-trip - and so the
+    caller is forced to hand over the checks of a PR it actually resolved. That mattered: the
+    caller used to pass a PR number that a dot-source had reset to 0, and this decision silently
+    became "no checks -> not tested" for every run (#536).
+
+    Green means: at least one check PASSED and none is failing, pending or cancelled. Counting
+    "nothing failed" as tested let a PR whose only check was SKIPPED satisfy the requirement, with
+    no CI having run on that commit at all. Unreadable or empty input is NOT a pass - "I could not
+    look" is not evidence.
+#>
+function Test-CiChecksPassed {
+    param([Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$ChecksJson)
+    if ([string]::IsNullOrWhiteSpace($ChecksJson)) { return $false }
+    try {
+        $arr = @($ChecksJson | ConvertFrom-Json -ErrorAction Stop)
+    } catch {
+        return $false
+    }
+    if ($arr.Count -eq 0) { return $false }
+    $bad    = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
+    $passed = @($arr | Where-Object { "$($_.bucket)" -eq 'pass' })
+    return ($passed.Count -gt 0 -and $bad.Count -eq 0)
+}
+
 # Render the decision for a human. Kept next to the decision so the refusal and its wording cannot
 # drift apart - a refusal nobody understands gets worked around instead of fixed.
 function Format-EndToEndVerdict {

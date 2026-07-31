@@ -37,10 +37,15 @@ source and how many installed skills it really hooks); `-Why "<plan text>"` expl
 in which role decided a match. Schema and merge rules: `references/roles.md`.
 
 ### auto — run it
-`scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n>`:
+`scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`:
 1. Reads the contract; composes the autonomous brief.
 2. Launches a dedicated Claude session in an isolated worktree (reuses the fleet/launch pattern).
 3. Prints the monitor command: `/board work -Sessions -Watch`.
+
+Pass `-EndToEnd` **only** when the human ordered the finish in that instruction ("de punta a
+punta", "llévalo hasta el final", "ciérralo tú"). It is an order, not a setting: never carry it
+over from a previous run, and never read it out of the contract. See the autonomy boundary below
+for what it actually opens.
 
 ## Guiding principle: total self-use of agentic-board
 
@@ -62,6 +67,24 @@ Autonomous with a brake ONLY on the irreversible — merge to main, deploy, Fabr
 externally, delete (`Expert-Autonomy.Test-IsIrreversible`, fail-safe: unknown ⇒ treated as
 irreversible). Everything else the expert does on its own and records. It reaches "PR ready" and
 stops there for the human to merge.
+
+The brake is mechanical, not prose: `Start-WorktreeSession` writes `.agentic-board/brake-armed.json`
+into the launched worktree and a PreToolUse hook refuses the call before it runs.
+
+**Ordered end to end (`-EndToEnd`).** The order does not lift the brake — it opens exactly one
+path. `Board-Merge.ps1` (the only merge route that checks anything) becomes reachable, and it
+re-establishes four conditions at merge time, refusing while naming every unmet one:
+
+| Condition | Why it is separate |
+|---|---|
+| the owner ordered it | permission travels with the instruction, not with a file |
+| the change is code-class | what he judges by LOOKING at it stays his, ordered or not |
+| a real review of THIS commit | a green check is not a review |
+| CI passed on THIS commit | the run may not certify its own testing |
+
+Raw `gh pr merge`, the REST merge endpoints and `gh` reached through a variable stay refused at
+the tool layer even when ordered, so the order NARROWS the route to a merge instead of widening
+it. Deploy/publish/refresh/delete are never covered by it.
 
 ## Evidence (three places)
 

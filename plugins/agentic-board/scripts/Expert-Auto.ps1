@@ -47,7 +47,13 @@ function Format-AutoBrief {
     param(
         [Parameter(Mandatory)][hashtable]$Contract,
         [string]$PlanBody = "",
-        [string]$RoleObjective = ""
+        [string]$RoleObjective = "",
+        # The owner ORDERED this run to finish (#530, reaching the brief since #536). Until now the
+        # permission was recorded in the brake marker and never told to the agent that had to act
+        # on it: the brief ordered the stop either way, so an ordered run obeyed a "stop" it had
+        # been given while the "finish" sat in a file it never read. A switch, so an untaught
+        # caller cannot grant it by accident.
+        [switch]$EndToEnd
     )
     $dod = @()
     if ($Contract.dod) { $dod = @($Contract.dod.Keys | Where-Object { $Contract.dod[$_] }) }
@@ -60,6 +66,36 @@ function Format-AutoBrief {
     $agentLine = if ($Contract.roleAgent) {
         "`nAdopt the agent type ``$($Contract.roleAgent)`` for this run — its definition is your persona.`n"
     } else { '' }
+
+    # The closing section. Ordered or not, the OTHER irreversible verbs stay off the table: the
+    # end-to-end order is permission to finish THIS work, never a general lifting of the brake.
+    $others = @($irr | Where-Object { "$_".Trim().ToLowerInvariant() -ne 'merge' })
+    $othersList = if ($others.Count) { ($others -join ', ') } else { '(none)' }
+    $closingSection = if ($EndToEnd) { @"
+## Closing the work — ORDERED end to end (you MAY close this work yourself)
+
+The owner ordered this run end to end, so you MAY close this work yourself — but only by EARNING
+it. The merge gate re-checks all four conditions at merge time and will refuse if any is unmet:
+
+1. ordered end to end        (given — that is why you are reading this)
+2. the change is code        (a report, page, theme or image goes to the human, ordered or not)
+3. a real review of THIS commit  (a green check is not a review)
+4. automated tests ran on THIS commit  (recorded in CI, not in your own account of it)
+
+Close it with ``Board-Merge.ps1``. That script IS the gate — it weighs the four conditions and
+exits non-zero when they do not hold. Do NOT reach for ``gh pr merge`` or the REST merge endpoint:
+they are refused at the tool layer, and going around the gate is not the same job as passing it.
+
+If the gate refuses, it names exactly what is missing. Fix that and try again — do not look for
+another way to merge.
+
+STILL OFF LIMITS, ordered or not: $othersList. Those wait for the human.
+"@ } else { @"
+## STOP before the irreversible (brake — ask the human)
+STOP before: $irrList.
+Reach "PR ready + review gate green" and STOP there. Do NOT merge, deploy, refresh, publish, or
+delete on your own.
+"@ }
 
     @"
 # Autonomous brief — /board expert auto
@@ -89,10 +125,7 @@ tested, the command, the result) to the PR body, the issue comment, and evidence
 An in-scope problem: fix it in the loop and continue. An out-of-scope finding (side bug, debt):
 file a sanitized 'discovered' issue on the board and keep going — never block on it.
 
-## STOP before the irreversible (brake — ask the human)
-STOP before: $irrList.
-Reach "PR ready + review gate green" and STOP there. Do NOT merge, deploy, refresh, publish, or
-delete on your own.
+$closingSection
 "@
 }
 
@@ -138,7 +171,7 @@ if ($repo) {
     }
 }
 
-$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role
+$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role -EndToEnd:$EndToEnd
 
 # The brake, as a CONTROL rather than prose (#440). The generic launch briefing used to order
 # the merge outright and make it the completion condition, so a session that merged to main was
@@ -159,7 +192,17 @@ $brief | Set-Content -Path $briefPath -Encoding utf8
 Write-Host "=== /board expert auto  (issue #$Issue) ===" -ForegroundColor Cyan
 Write-Host "  Brief composed -> $briefPath" -ForegroundColor Green
 Write-Host "  Autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
-if ($stopAtPR) {
+if ($stopAtPR -and $EndToEnd) {
+    # ORDERED (#530/#536). Say what is actually true: the brake is still armed and still refuses
+    # every ungated route; what the order opens is the GATED script, which re-checks the four
+    # conditions and refuses on its own when they do not hold. Printing "will merge" here would
+    # be the same overclaim #516 removed - the run has to earn it, and may well not.
+    Write-Host "  Brake ARMED + END-TO-END ORDERED: the session may close its OWN PR, but only" -ForegroundColor Cyan
+    Write-Host "               through Board-Merge.ps1, and only if the change is code, carries a" -ForegroundColor Cyan
+    Write-Host "               real review of the head commit and CI passed on it. Otherwise it" -ForegroundColor Cyan
+    Write-Host "               refuses and the PR waits for you. Deploy/publish/refresh/delete" -ForegroundColor Cyan
+    Write-Host "               stay off the table." -ForegroundColor Cyan
+} elseif ($stopAtPR) {
     # #516: this line used to claim a brake that was only a paragraph in the brief. It is now a
     # control - Start-WorktreeSession writes a marker into the worktree and a PreToolUse hook
     # refuses the irreversible call - so the claim is finally true. Keep the wording honest:
@@ -181,7 +224,12 @@ if ($DryRun) {
         -StopAtPR:$stopAtPR -BriefFile $briefPath -Irreversible @($contract.autonomy.irreversible) -EndToEnd:$EndToEnd
     Write-Host ""
     Write-Host "  The launched session is briefed by $briefPath — it will research, build, test with" -ForegroundColor DarkGray
-    Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray
+    if ($EndToEnd) {
+        Write-Host "  recorded evidence, self-drive the board, and close its own PR through the gate" -ForegroundColor DarkGray
+        Write-Host "  if — and only if — it earns all four conditions." -ForegroundColor DarkGray
+    } else {
+        Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray
+    }
 }
 Write-Host ""
 Write-Host "  Monitor:  scripts/Board-Work.ps1 -Sessions -Watch" -ForegroundColor Cyan

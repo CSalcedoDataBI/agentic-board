@@ -118,3 +118,57 @@ Describe 'Format-EndToEndVerdict' {
             Should -Match 'el cierre lo hace una persona'
     }
 }
+
+Describe 'Test-CiChecksPassed — CI evidence, read from the checks themselves (#536)' {
+    # Extracted from Board-Merge so the one condition that decides a merge can be tested without a
+    # network round-trip. The defect that motivated it was NOT in this logic but in its INPUT:
+    # `gh pr checks $PR` was called with $PR already clobbered to 0 by a dot-source, so the answer
+    # was always "no checks" and the tests condition could never be met. See Board-Merge.Tests.ps1.
+
+    It 'accepts a PR whose checks all passed' {
+        Test-CiChecksPassed -ChecksJson '[{"bucket":"pass","name":"Pester"},{"bucket":"pass","name":"sync"}]' |
+            Should -BeTrue
+    }
+    It 'accepts passing checks alongside skipped ones' {
+        Test-CiChecksPassed -ChecksJson '[{"bucket":"pass","name":"Pester"},{"bucket":"skipping","name":"docs"}]' |
+            Should -BeTrue
+    }
+    It 'refuses when nothing actually PASSED, only skipped' {
+        # A PR whose single check was SKIPPED had no CI run on that commit at all.
+        Test-CiChecksPassed -ChecksJson '[{"bucket":"skipping","name":"docs"}]' | Should -BeFalse
+    }
+    It 'refuses a failing check' {
+        Test-CiChecksPassed -ChecksJson '[{"bucket":"pass","name":"Pester"},{"bucket":"fail","name":"review"}]' |
+            Should -BeFalse
+    }
+    It 'refuses a cancelled check' {
+        Test-CiChecksPassed -ChecksJson '[{"bucket":"pass","name":"Pester"},{"bucket":"cancel","name":"sync"}]' |
+            Should -BeFalse
+    }
+    It 'refuses a pending check — green means finished, not started' {
+        Test-CiChecksPassed -ChecksJson '[{"bucket":"pass","name":"Pester"},{"bucket":"pending","name":"sync"}]' |
+            Should -BeFalse
+    }
+    It 'refuses when the query returned nothing at all' {
+        # THE regression that made end-to-end inert: `gh pr checks 0` exits 1 with empty stdout.
+        # "I could not read the checks" must never read as "the checks passed".
+        Test-CiChecksPassed -ChecksJson ''   | Should -BeFalse
+        Test-CiChecksPassed -ChecksJson '[]' | Should -BeFalse
+    }
+    It 'refuses unparseable output rather than assuming the best' {
+        Test-CiChecksPassed -ChecksJson 'not json at all' | Should -BeFalse
+    }
+}
+
+Describe 'Test-EndToEndAllowed — the tests requirement comes from the CONTRACT (#536)' {
+    It 'does not demand tests from a project whose contract declares none' {
+        $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
+                                  -TestsRecorded $false -TestsRequired $false
+        $v.allowed | Should -BeTrue
+    }
+    It 'still demands them when the contract asks for them' {
+        $v = Test-EndToEndAllowed -Ordered $true -WorkClass 'code' -ReviewedHead $true `
+                                  -TestsRecorded $false -TestsRequired $true
+        $v.allowed | Should -BeFalse
+    }
+}

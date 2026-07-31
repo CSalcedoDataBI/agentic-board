@@ -71,6 +71,13 @@ $ErrorActionPreference = "Stop"
 # it was set, so every PR fact came back blank and a legitimately ordered run was refused for
 # "conditions unmet" that were never actually read.
 function Invoke-BrakeMergeCheck {
+# CAPTURE THE PARAMETERS FIRST, before a single dot-source runs (#536). Dot-sourcing executes the
+# sourced script's param() block IN THIS SCOPE, and Board-ReviewGate.ps1 declares `[int]$PR = 0` -
+# so halfway down this function `$PR` silently became 0 and `gh pr checks 0` returned nothing. The
+# tests condition was therefore never satisfiable and end-to-end mode could refuse but never
+# allow. Reading the parameter once, up here, is the whole fix; the rule is "capture before you
+# dot-source", not "remember which script clobbers which name".
+$prNumber = [int]$PR
 if (-not $DryRun) {
     $brakeGuard = Join-Path $PSScriptRoot 'Brake-Guard.ps1'
     if (Test-Path $brakeGuard) {
@@ -96,7 +103,7 @@ if (-not $DryRun) {
                 # Diff against the PR's OWN base, not the repo default. A PR targeting a release or
                 # feature branch would otherwise be compared to main, quietly omitting files and
                 # letting a report change read as code.
-                $prMeta  = gh pr view $PR --repo $Repo --json headRefOid,baseRefName 2>$null | ConvertFrom-Json
+                $prMeta  = gh pr view $prNumber --repo $Repo --json headRefOid,baseRefName 2>$null | ConvertFrom-Json
                 $baseRef = if ($prMeta.baseRefName) { "origin/$($prMeta.baseRefName)" } else { '' }
                 if (-not $baseRef) {
                     $baseRef = git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null
@@ -111,17 +118,30 @@ if (-not $DryRun) {
                 $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = '1'
                 . (Join-Path $PSScriptRoot 'ExpertContractIo.ps1')
                 $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = $prevC2
-                $wcPolicy = Get-EffectiveWorkClassPolicy -Contract (Read-ExpertContract)
+                $contract = Read-ExpertContract
+                $wcPolicy = Get-EffectiveWorkClassPolicy -Contract $contract
                 $wc = Get-WorkClass -ChangedPaths $changed -Policy $wcPolicy
+
+                # Whether automated tests are REQUIRED is the contract's call, not this run's
+                # (#536). It was never passed, so it defaulted to $true and a project that
+                # honestly declares no automated suite could never close anything. Absent or
+                # malformed dod.tests still means required - the safe direction.
+                # Read-ExpertContract returns a HASHTABLE (ConvertFrom-Json -AsHashtable), so this
+                # is ContainsKey, not PSObject.Properties.
+                $testsRequired = $true
+                if ($contract -is [hashtable] -and $contract.dod -is [hashtable] -and
+                    $contract.dod.ContainsKey('tests')) {
+                    $testsRequired = [bool]$contract.dod['tests']
+                }
 
                 # REVIEW evidence: reuse the gate's own strict parser rather than a looser copy.
                 # Matching "contains the marker AND contains the sha" anywhere in a body let quoted
                 # text, a checklist note or a stale comment satisfy a merge condition. The gate's
                 # parser requires the marker to be BOUND as `sha=<head>`.
                 $headSha = "$($prMeta.headRefOid)".Trim()
-                if (-not $headSha) { throw "no pude leer el commit actual del PR #$PR" }
+                if (-not $headSha) { throw "no pude leer el commit actual del PR #$prNumber" }
                 $bodies = @()
-                $cj = gh pr view $PR --repo $Repo --json comments 2>$null
+                $cj = gh pr view $prNumber --repo $Repo --json comments 2>$null
                 if ($cj) { $bodies = @(($cj | ConvertFrom-Json).comments | ForEach-Object { "$($_.body)" }) }
 
                 $prevG = $env:ABIOS_REVIEWGATE_DOTSOURCE
@@ -135,21 +155,15 @@ if (-not $DryRun) {
                 # read, worthless as proof, and this is the one place the difference decides a
                 # merge. CI ran the suite on this commit independently; that is the claim that
                 # cannot be self-issued. Green means: checks exist and none is failing or pending.
-                $tested = $false
-                $chk = gh pr checks $PR --repo $Repo --json name,bucket 2>$null
-                if ($chk) {
-                    $arr    = @($chk | ConvertFrom-Json)
-                    $bad    = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
-                    $passed = @($arr | Where-Object { "$($_.bucket)" -eq 'pass' })
-                    # At least one check must actually have PASSED. Counting "nothing failed" as
-                    # tested let a PR whose only check was SKIPPED satisfy the requirement - no CI
-                    # ran on this commit at all, which is the same "green means nobody looked" this
-                    # whole area keeps producing.
-                    $tested = ($passed.Count -gt 0 -and $bad.Count -eq 0)
-                }
+                # $prNumber, never $PR: by this line the review-gate dot-source above has reset
+                # $PR to 0 (#536). The verdict itself lives in Test-CiChecksPassed so it can be
+                # tested without the network.
+                $chk = gh pr checks $prNumber --repo $Repo --json name,bucket 2>$null
+                $tested = Test-CiChecksPassed -ChecksJson "$chk"
 
                 $verdict = Test-EndToEndAllowed -Ordered ([bool]$brakeMarker.endToEnd) `
-                             -WorkClass $wc.class -ReviewedHead $reviewed -TestsRecorded $tested
+                             -WorkClass $wc.class -ReviewedHead $reviewed -TestsRecorded $tested `
+                             -TestsRequired $testsRequired
             } catch {
                 # Could not establish the facts -> no permission. "I could not check" is not a yes.
                 $verdict = @{ allowed = $false; missing = @("no pude verificar las condiciones ($_)")

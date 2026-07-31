@@ -65,3 +65,49 @@ Describe 'Agent type in the autonomous brief' {
         $brief | Should -Not -Match 'Adopt the agent type'
     }
 }
+
+Describe 'Format-AutoBrief — the ORDERED end-to-end run (#536)' {
+    # The permission was recorded in the brake marker and never reached the agent that had to act
+    # on it: the brief said "STOP, do NOT merge" whether or not the owner had ordered the finish.
+    # A run cannot obey an instruction it was never given.
+
+    It 'still orders the stop when there is no end-to-end order' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match 'STOP'
+        $b | Should -Match 'Do NOT merge'
+    }
+    It 'defaults to stopping when the caller says nothing' {
+        # Absent parameter must never read as permission granted.
+        (Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r') |
+            Should -Not -Match 'you MAY close this work yourself'
+    }
+
+    It 'grants the finish when ordered' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match 'you MAY close this work yourself'
+    }
+    It 'names all four conditions so the run knows what it must earn' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match '(?i)code'
+        $b | Should -Match '(?i)review'
+        $b | Should -Match '(?i)tests'
+        $b | Should -Match '(?i)ordered'
+    }
+    It 'points at the GATED path and forbids the raw merge' {
+        # The gated script is the only route the tool layer leaves open in ordered mode; telling
+        # the run to reach for `gh pr merge` would just earn it a refusal it cannot interpret.
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match 'Board-Merge\.ps1'
+        $b | Should -Match 'gh pr merge'
+    }
+    It 'keeps the OTHER irreversible verbs off the table even when ordered' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match 'deploy'
+        $b | Should -Match 'publish'
+    }
+    It 'does not promise a merge the conditions may refuse' {
+        # The brief must not read as "you will merge"; the gate decides at merge time.
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r' -EndToEnd
+        $b | Should -Match '(?i)refuse|no se cierra|only if|will refuse'
+    }
+}

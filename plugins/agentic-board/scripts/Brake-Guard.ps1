@@ -55,7 +55,12 @@ $script:BrakeMarkerName = 'brake-armed.json'
 $script:BrakePatterns = @(
     # --- merge: putting work on the default branch ---------------------------------
     @{ action = 'merge';   pattern = '\bgh\s+pr\s+merge\b' }
-    @{ action = 'merge';   pattern = '\bboard-merge\.ps1\b' }
+    # GATED (#536): this script is the only merge path that CHECKS anything - it establishes the
+    # four end-to-end conditions and exits 1 when any is unmet. So it is the one pattern an
+    # ORDERED run may reach; every other route below stays shut. Marking it here rather than
+    # special-casing the string in Test-IsBrakedCommand keeps "which paths are gated" a property
+    # of the pattern table, where the next person will actually look.
+    @{ action = 'merge';   pattern = '\bboard-merge\.ps1\b'; gated = $true }
     # The REST merge endpoints, recognized by the ENDPOINT rather than by the client that calls
     # it. Anchoring these to `gh api` (as the first cut did) left the identical request open via
     # curl, Invoke-RestMethod, python or node - all of which have the same token available.
@@ -170,11 +175,20 @@ function ConvertTo-NormalizedCommand {
     $Irreversible is the contract's own list, so a contract that does NOT mark 'merge' as
     irreversible does not get its merges denied - the control follows the contract, it does not
     invent policy.
+
+    $EndToEnd is the owner's ORDER to finish this run (#530, honoured here since #536). It does
+    not lift the brake: it opens the GATED path only. `Board-Merge.ps1` weighs the four conditions
+    and refuses on its own when they are unmet, so an ordered run reaches a merge only through the
+    thing that can still say no. Raw `gh pr merge`, the REST endpoints and the variable-indirection
+    patterns stay denied, which makes ordering the run NARROW the route to a merge rather than
+    widen it. Defaults to $false so a caller that has not been taught about the order cannot
+    accidentally grant it.
 #>
 function Test-IsBrakedCommand {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Command,
-        [string[]]$Irreversible = @()
+        [string[]]$Irreversible = @(),
+        [bool]$EndToEnd = $false
     )
     $norm = ConvertTo-NormalizedCommand $Command
     if (-not $norm) { return '' }
@@ -196,6 +210,8 @@ function Test-IsBrakedCommand {
         if (Test-IsGenuinePreview -Segment $seg) { continue }                          # this segment only
         foreach ($p in $script:BrakePatterns) {
             if ($irr -notcontains $p.action) { continue }
+            # An ORDERED run may reach the gated path - and only that one (see $EndToEnd above).
+            if ($EndToEnd -and $p.gated) { continue }
             if ($seg -match $p.pattern) { return $p.action }
         }
     }
