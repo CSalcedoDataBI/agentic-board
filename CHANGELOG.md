@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.30.0] - 2026-07-31
 ### Fixed
 - **A braked run could push straight to the default branch** (#542). The brake watched `gh pr merge`,
   the REST merge endpoints and `Board-Merge.ps1` — and missed the simplest route of all:
