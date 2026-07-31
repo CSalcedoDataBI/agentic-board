@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 ### Fixed
+- **The reviewer's turn cap sat one turn above what a real review needs** (#543). Measured across
+  recent runs: reviews that actually published consumed 4 / 13 / 17 / 18 / **19** turns against a
+  cap of **20**, and three consecutive runs on a large PR died at 21. A run that hits the cap leaves
+  no review, so the verification added in #510 fails the check — correctly — and the review gate
+  ends up blocking legitimate PRs on an infrastructure limit. That is how a control gets switched
+  off: not by argument, but by being wrong often enough. Raised to 40, a little over twice the
+  observed maximum; time was never the constraint (those runs finish in 2-4 minutes against a
+  20-minute job timeout).
 - **`-EndToEnd` shipped inert in 0.29.0, and after five review findings it is staying inert — on
   purpose** (#536, #541). Field-testing the autonomy boundary found the ordered end-to-end close
   could refuse but never allow. Three separate blockers were fixed; then three rounds of external
