@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.31.0] - 2026-08-03
 ### Added
 - **A braked run can now authenticate as a machine account instead of as the owner** (#550, part of
   #541). The autonomy brake could never be complete as a text classifier — eleven of the nineteen
