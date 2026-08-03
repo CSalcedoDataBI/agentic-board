@@ -134,7 +134,9 @@ do NOT act first.**
 2. Register — log findings via ``/knowledge add`` / ``/knowledge harvest``. Read-and-forget is not research.
 3. Decide — then choose the fix or path.
 
-### Capability map (each need -> an agentic-board capability)
+### Capability map — total self-use of agentic-board (do NOT improvise your own tooling)
+
+Every need below already has a capability. Reach for it instead of inventing your own tooling.
 
 - Research / prior-art -> ``/knowledge add`` + ``/knowledge harvest``
 - Acquire / verify skills -> ``/skills bootstrap``, ``/skills audit``

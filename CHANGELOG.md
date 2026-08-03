@@ -17,9 +17,25 @@
   The capability map is retained as a lookup table inside the same section, subordinate to the
   phases rather than their replacement.
 
-  Verified by four new tests that assert on the rendered brief text, not on the source documents:
-  the seven phase names are present, "research before deciding" appears explicitly, the
-  Research-Register-Decide ordering holds in the text, and "read-and-forget" is called out.
+  Verified by five tests that assert on the rendered brief text, not on the source documents: the
+  seven numbered phases are present, "research before deciding" appears explicitly, the
+  Research-Register-Decide ordering holds inside the protocol section, "read-and-forget" is called
+  out, and the no-improvise guard survives. Each was confirmed by reintroducing the defect and
+  watching the matching test go red.
+
+  **Caught by external review before merging, and worth recording.** The rewrite replaced the old
+  heading `total self-use of agentic-board (do NOT improvise your own tooling)` and never restated
+  it. Since this function composes the *only* text the launched session ever receives, deleting that
+  line deleted the instruction — a capability map lists options, it does not forbid inventing one.
+  The plan's own founding principle, dropped by the change meant to strengthen it. The guard is back
+  in the section heading and is now asserted.
+
+  Review also found the ordering test measuring the *first* occurrence of Research / Register /
+  Decide across the whole brief. "Research" already appears in phase 2, so the test could stay green
+  with the protocol steps scrambled — a test that reported a guarantee it did not hold. It is now
+  scoped to the decision-protocol section, and the phase test matches the numbered markers rather
+  than bare words ("verify" and "report" also occur in the capability map, so the loose match
+  survived deleting the phases).
 
 ## [0.31.0] - 2026-08-03
 ### Added
