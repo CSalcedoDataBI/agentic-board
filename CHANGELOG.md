@@ -37,6 +37,32 @@
   than bare words ("verify" and "report" also occur in the capability map, so the loose match
   survived deleting the phases).
 
+- **Autonomous brief now instructs the run to escalate to an epic + sub-issues when the work
+  outgrows its issue** (#531, part of #526). A run that discovered six tasks had one move: drop six
+  loose `discovered` issues on the board with no parent and no order. `Board-Plan.ps1` already
+  created epics + native sub-issues for humans; it was unreachable from inside an autonomous run.
+
+  `Format-AutoBrief` now includes a **Self-planning — escalating to an epic** section that:
+  - tells the run to use `/board plan` rather than filing loose issues,
+  - caps the sub-issues of the created epic by the existing `boardSelfDrive.cap` (same limit as
+    `discovered` issues, so self-planning stays bounded), and
+  - requires linking the new epic back to the originating issue for traceability.
+
+  Verified by six tests that assert on the rendered brief text, each confirmed by reintroducing its
+  defect and watching the matching test go red.
+
+  **Caught by external review before merging — two defects, both known shapes.** The first cut told
+  the run to use `Board-Plan.ps1` and pinned that with a test asserting the script name. The brief
+  travels to runs working in *any* repository, where a plugin script name resolves to nothing — the
+  defect #480 and #494 are already open on, reintroduced and then locked in by its own test. It now
+  names `/board plan`, and the test asserts the command **and forbids** the script name.
+
+  The cap was read as `if ($Contract.boardSelfDrive.cap)`. In PowerShell `0` is falsy, so a contract
+  setting `cap = 0` — *create nothing* — was read as absent and the run was told it could create
+  ten. Presence is now tested, not truthiness, with a test constructing exactly the `cap = 0`
+  contract. The same fail-open shape this project keeps finding: the safe reading of a missing
+  value is not the permissive one.
+
 - **Phase 5 self-heal now explicitly invokes the decision protocol, replacing fix-it-and-continue**
   (#528, part of #526). After #527 added the decision protocol to the brief, Phase 5 still said
   "fix it (after researching first)" — a parenthetical that reads as act-first with a research note,

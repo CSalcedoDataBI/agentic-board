@@ -62,6 +62,10 @@ function Format-AutoBrief {
     $irr = @()
     if ($Contract.autonomy -and $Contract.autonomy.irreversible) { $irr = @($Contract.autonomy.irreversible) }
     $irrList = ($irr -join ', ')
+    # Presence, not truthiness: a cap of 0 means "create nothing" and is a legitimate contract.
+    # `-and $...cap` would read 0 as absent and hand the run the default of 10 instead.
+    $selfDriveCap = 10
+    if ($Contract.boardSelfDrive -and $null -ne $Contract.boardSelfDrive.cap) { $selfDriveCap = [int]$Contract.boardSelfDrive.cap }
     # A role may name an agent definition; its persona is already folded into $RoleObjective,
     # and naming it here lets the launched run adopt it as its agent type too.
     $agentLine = if ($Contract.roleAgent) {
@@ -146,6 +150,18 @@ Every need below already has a capability. Reach for it instead of inventing you
 - Record work / findings -> ``/board issue``, ``/board plan``, ``/board triage``
 - Report progress / evidence -> ``/board update``, ``[abios-evidence]`` comment
 - Survive budget / interruption -> ``/board handoff -Save``
+
+### Self-planning — escalating to an epic
+
+When you discover the work is larger than the issue you were given, escalate rather than dropping
+loose issues on the board with no parent. Use ``/board plan`` to create an epic + native
+sub-issues — the same structure it builds for a human.
+
+Bounds: the ``boardSelfDrive`` cap ($selfDriveCap) that governs ``discovered`` issues also caps the
+sub-issues of any epic you create. Do not create more sub-issues than that limit.
+
+Traceability: link the new epic to the originating issue (include the issue number,
+e.g. ``Grew out of #<n>``, in the epic body) so the trail is followable.
 
 ## Test-first + evidence
 Build test-first. After each verify phase, record a structured [abios-evidence] block (what was
@@ -257,4 +273,5 @@ if ($ProjectNum -gt 0) {
     Write-Host ""
     Write-Host "Board: https://github.com/users/$owner/projects/$ProjectNum" -ForegroundColor Cyan
 }
+
 
