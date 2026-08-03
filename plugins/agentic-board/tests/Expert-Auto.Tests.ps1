@@ -160,9 +160,13 @@ Describe 'Format-AutoBrief — self-planning escalation (#531)' {
     # issues with no parent. The brief must instruct escalation to an epic + sub-issues via
     # Board-Plan.ps1, bounded by the boardSelfDrive cap, and linked to the originating issue.
 
-    It 'names Board-Plan.ps1 as the escalation capability' {
+    It 'names the escalation capability by its typed command, not by an internal script' {
+        # The brief is the only text the run receives and the run may work in ANY repo, where a
+        # plugin script name resolves to nothing. #480 and #494 are open on exactly this; the first
+        # cut of this section named the script and pinned it with a test. Command surface only.
         $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
-        $b | Should -Match 'Board-Plan\.ps1'
+        $b | Should -Match '/board plan'
+        $b | Should -Not -Match '(?i)Board-Plan\.ps1'
     }
     It 'instructs escalation to an epic + sub-issues when the work outgrows the issue' {
         $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
@@ -186,6 +190,17 @@ Describe 'Format-AutoBrief — self-planning escalation (#531)' {
         $start | Should -BeGreaterThan -1
         $section = $b.Substring($start)
         $section | Should -Match '\b7\b'
+    }
+    It 'honours a cap of 0 instead of falling back to the default (regression, found in review)' {
+        # `if ($c.boardSelfDrive.cap)` reads 0 as absent, so a contract saying "create nothing"
+        # would tell the run it may create ten. Presence, not truthiness.
+        $c = $script:Contract.Clone()
+        $c.boardSelfDrive = @{ createIssues = $false; label = 'discovered'; cap = 0 }
+        $b = Format-AutoBrief -Contract $c -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('Self-planning', [System.StringComparison]::OrdinalIgnoreCase)
+        $section = $b.Substring($start)
+        $section | Should -Match '\(0\)'
+        $section | Should -Not -Match '\(10\)'
     }
 }
 
