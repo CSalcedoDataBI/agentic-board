@@ -155,6 +155,55 @@ Describe 'Format-AutoBrief — an ordered run is told the order is inert, not th
     }
 }
 
+Describe 'Format-AutoBrief — self-planning escalation (#531)' {
+    # #531: a run that discovers its task is really six tasks has one move: drop six loose discovered
+    # issues with no parent. The brief must instruct escalation to an epic + sub-issues via
+    # Board-Plan.ps1, bounded by the boardSelfDrive cap, and linked to the originating issue.
+
+    It 'names the escalation capability by its typed command, not by an internal script' {
+        # The brief is the only text the run receives and the run may work in ANY repo, where a
+        # plugin script name resolves to nothing. #480 and #494 are open on exactly this; the first
+        # cut of this section named the script and pinned it with a test. Command surface only.
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '/board plan'
+        $b | Should -Not -Match '(?i)Board-Plan\.ps1'
+    }
+    It 'instructs escalation to an epic + sub-issues when the work outgrows the issue' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)escalat'
+        $b | Should -Match '(?i)sub-issues'
+    }
+    It 'bounds the epic sub-issues by the boardSelfDrive cap' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)boardSelfDrive'
+        $b | Should -Match '(?i)\bcap\b'
+    }
+    It 'instructs the run to link the epic to the originating issue for traceability' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)originating issue'
+    }
+    It 'embeds the cap value from the contract into the self-planning section' {
+        $c = $script:Contract.Clone()
+        $c.boardSelfDrive = @{ createIssues = $true; label = 'discovered'; cap = 7 }
+        $b = Format-AutoBrief -Contract $c -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('Self-planning', [System.StringComparison]::OrdinalIgnoreCase)
+        $start | Should -BeGreaterThan -1
+        $section = $b.Substring($start)
+        $section | Should -Match '\b7\b'
+    }
+    It 'honours a cap of 0 instead of falling back to the default (regression, found in review)' {
+        # `if ($c.boardSelfDrive.cap)` reads 0 as absent, so a contract saying "create nothing"
+        # would tell the run it may create ten. Presence, not truthiness.
+        $c = $script:Contract.Clone()
+        $c.boardSelfDrive = @{ createIssues = $false; label = 'discovered'; cap = 0 }
+        $b = Format-AutoBrief -Contract $c -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('Self-planning', [System.StringComparison]::OrdinalIgnoreCase)
+        $section = $b.Substring($start)
+        $section | Should -Match '\(0\)'
+        $section | Should -Not -Match '\(10\)'
+    }
+}
+
 Describe 'Format-AutoBrief — research-before-deciding in self-heal (#528)' {
     # #528: the self-heal phase said "fix it (after researching first)" — still act-first in framing.
     # The decision protocol must be the EXPLICIT response to an error or fork, not a parenthetical.
