@@ -1,5 +1,42 @@
 # Changelog
 
+## [Unreleased]
+### Changed
+- **The autonomous brief now carries the seven-phase loop and the decision protocol, not a
+  capability list** (#527, part of #526). `Format-AutoBrief` used to emit a bullet list of
+  agentic-board capabilities; the 7-phase method lived in `auto-loop.md`, a file the launched
+  session was never handed. The session had no phases, no sequence, and no instruction to
+  research before deciding — only "an in-scope problem: fix it in the loop and continue" as its
+  sole heuristic.
+
+  The brief now includes the full phase sequence (Ingest → Become the expert → Execute →
+  Verify + evidence → Self-heal → Loop until done → Report) and an explicit **decision protocol**:
+  when you hit an error, an unexpected state, or a fork in the path, *research before deciding —
+  do NOT act first*. Steps in order: Research (check prior-art, register via `/knowledge`),
+  Register (log findings — read-and-forget is not research), Decide (then choose the path).
+  The capability map is retained as a lookup table inside the same section, subordinate to the
+  phases rather than their replacement.
+
+  Verified by five tests that assert on the rendered brief text, not on the source documents: the
+  seven numbered phases are present, "research before deciding" appears explicitly, the
+  Research-Register-Decide ordering holds inside the protocol section, "read-and-forget" is called
+  out, and the no-improvise guard survives. Each was confirmed by reintroducing the defect and
+  watching the matching test go red.
+
+  **Caught by external review before merging, and worth recording.** The rewrite replaced the old
+  heading `total self-use of agentic-board (do NOT improvise your own tooling)` and never restated
+  it. Since this function composes the *only* text the launched session ever receives, deleting that
+  line deleted the instruction — a capability map lists options, it does not forbid inventing one.
+  The plan's own founding principle, dropped by the change meant to strengthen it. The guard is back
+  in the section heading and is now asserted.
+
+  Review also found the ordering test measuring the *first* occurrence of Research / Register /
+  Decide across the whole brief. "Research" already appears in phase 2, so the test could stay green
+  with the protocol steps scrambled — a test that reported a guarantee it did not hold. It is now
+  scoped to the decision-protocol section, and the phase test matches the numbered markers rather
+  than bare words ("verify" and "report" also occur in the capability map, so the loose match
+  survived deleting the phases).
+
 ## [0.31.0] - 2026-08-03
 ### Added
 - **A braked run can now authenticate as a machine account instead of as the owner** (#550, part of

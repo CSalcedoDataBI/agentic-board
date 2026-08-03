@@ -66,6 +66,56 @@ Describe 'Agent type in the autonomous brief' {
     }
 }
 
+Describe 'Format-AutoBrief — phase loop and decision protocol (#527)' {
+    # #527: the brief was a capability LIST — the 7-phase loop and the research-before-deciding
+    # protocol lived in auto-loop.md, a file the launched session never received. The session
+    # must carry the METHOD (phases + decision protocol), not just a bullet list of capabilities.
+
+    It 'includes all seven phases so the session knows the method, not just the capability list' {
+        # Asserted on the NUMBERED phase markers, not on bare words: 'verify' and 'report' also
+        # occur in the capability map, so a bare-word match would stay green with the phases gone.
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?im)^1\. \*\*Ingest\*\*'
+        $b | Should -Match '(?im)^2\. \*\*Become the expert\*\*'
+        $b | Should -Match '(?im)^3\. \*\*Execute'
+        $b | Should -Match '(?im)^4\. \*\*Verify'
+        $b | Should -Match '(?im)^5\. \*\*Self-heal'
+        $b | Should -Match '(?im)^6\. \*\*Loop until'
+        $b | Should -Match '(?im)^7\. \*\*Report\*\*'
+    }
+    It 'carries the decision protocol — research before deciding, not act first' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)research.*before deciding'
+    }
+    It 'names the decision protocol steps in order: research, register, decide' {
+        # Scoped to the decision-protocol SECTION. Measuring first-occurrence over the whole brief
+        # would read 'Research' out of phase 2 and pass even with the protocol steps scrambled.
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('### Decision protocol', [System.StringComparison]::OrdinalIgnoreCase)
+        $start | Should -BeGreaterThan -1
+        $next = $b.IndexOf('### ', $start + 4, [System.StringComparison]::OrdinalIgnoreCase)
+        $section = if ($next -gt $start) { $b.Substring($start, $next - $start) } else { $b.Substring($start) }
+
+        $iR = $section.IndexOf('1. Research', [System.StringComparison]::OrdinalIgnoreCase)
+        $iReg = $section.IndexOf('2. Register', [System.StringComparison]::OrdinalIgnoreCase)
+        $iD = $section.IndexOf('3. Decide', [System.StringComparison]::OrdinalIgnoreCase)
+        $iR | Should -BeGreaterThan -1
+        $iR | Should -BeLessThan $iReg
+        $iReg | Should -BeLessThan $iD
+    }
+    It 'keeps the do-NOT-improvise guard the old brief carried (regression, found in review)' {
+        # The rewrite dropped 'total self-use ... (do NOT improvise your own tooling)' from the ONLY
+        # text the session receives. A capability map lists options; it does not forbid inventing one.
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)total self-use of agentic-board'
+        $b | Should -Match '(?i)do NOT improvise your own tooling'
+    }
+    It 'says read-and-forget is not research (the decision protocol standard)' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)read-and-forget'
+    }
+}
+
 Describe 'Format-AutoBrief — an ordered run is told the order is inert, not that it may close (#541)' {
     # #536 had the brief GRANT the close. Review then found the mechanism behind it had two holes
     # it could not defend, so the grant was withdrawn. The brief must not silently go back to a

@@ -106,21 +106,48 @@ $PlanBody
 ## Definition of Done — every gate must pass before you consider this complete
 $dodList
 
-## How you work — total self-use of agentic-board (do NOT improvise your own tooling)
-- Research / prior-art -> /knowledge add + /knowledge harvest
-- Acquire / verify skills -> /skills bootstrap, /skills audit
-- Discover latent work -> /scan
-- Record work / findings -> /board issue, /board plan, /board triage
-- Report progress / evidence -> /board update, [abios-evidence] comment
-- Survive budget / interruption -> /board handoff -Save
+## How you work — seven phases (do NOT skip any)
+
+Work sequentially through these seven phases. A capability list alone is not a method; the phases
+are the method.
+
+1. **Ingest** — read the epic/issue and its enriched plan (Role, Deliverables, Test plan / DoD).
+2. **Become the expert** — adopt the role objective. Research prior-art and docs, and register
+   findings via ``/knowledge add`` / ``/knowledge harvest`` (read-and-forget is not allowed).
+   Acquire missing tooling via ``/skills bootstrap`` / ``/skills audit``.
+3. **Execute (test-first)** — build guided by tests first, in the worktree.
+4. **Verify + evidence** — run the definition-of-done gates. Write a structured ``[abios-evidence]``
+   block to three places: the PR body, a durable issue comment, and ``evidence/<issue>.md``.
+   If green -> open the PR + run the review gate.
+5. **Self-heal + auto-drive the board**: in-scope problem -> fix it (after researching first);
+   out-of-scope finding -> file a sanitized 'discovered' issue on the board and keep going.
+6. **Loop until done or budget**: keep iterating until the DoD is green — then leave the PR ready
+   and STOP before merge — or the budget is spent -> ``/board handoff -Save``.
+7. **Report** — final evidence + updated board + a PR awaiting the human's merge approval.
+
+### Decision protocol — research before deciding
+
+When you hit an error, an unexpected state, or a fork in the path: **research before deciding —
+do NOT act first.**
+
+1. Research — check prior-art, existing patterns, similar resolved issues (``/knowledge``).
+2. Register — log findings via ``/knowledge add`` / ``/knowledge harvest``. Read-and-forget is not research.
+3. Decide — then choose the fix or path.
+
+### Capability map — total self-use of agentic-board (do NOT improvise your own tooling)
+
+Every need below already has a capability. Reach for it instead of inventing your own tooling.
+
+- Research / prior-art -> ``/knowledge add`` + ``/knowledge harvest``
+- Acquire / verify skills -> ``/skills bootstrap``, ``/skills audit``
+- Discover latent work -> ``/scan``
+- Record work / findings -> ``/board issue``, ``/board plan``, ``/board triage``
+- Report progress / evidence -> ``/board update``, ``[abios-evidence]`` comment
+- Survive budget / interruption -> ``/board handoff -Save``
 
 ## Test-first + evidence
 Build test-first. After each verify phase, record a structured [abios-evidence] block (what was
 tested, the command, the result) to the PR body, the issue comment, and evidence/<issue>.md.
-
-## Self-heal
-An in-scope problem: fix it in the loop and continue. An out-of-scope finding (side bug, debt):
-file a sanitized 'discovered' issue on the board and keep going — never block on it.
 
 $closingSection
 "@
