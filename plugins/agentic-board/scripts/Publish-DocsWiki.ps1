@@ -289,7 +289,9 @@ $prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
 $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
 $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
-$ownerVarMap = @{ 'CSalcedoDataBI' = (Get-OwnerTokenVar -Owner 'CSalcedoDataBI'); 'PAL-Devs' = (Get-OwnerTokenVar -Owner 'PAL-Devs') }
+# Built FROM the resolver, owners included: listing them here was a fifth copy of the same rule.
+$ownerVarMap = @{}
+foreach ($o in (Get-KnownOwners)) { $ownerVarMap[$o] = (Get-OwnerTokenVar -Owner $o) }
 if (-not $TokenVar) {
     if ($ownerVarMap.ContainsKey($owner)) { $TokenVar = $ownerVarMap[$owner] }
     else { $TokenVar = 'GITHUB_TOKEN_PERSONAL'; Write-Host "AVISO: owner '$owner' sin mapear — uso la personal (-TokenVar para forzar)." -ForegroundColor Yellow }

@@ -109,18 +109,15 @@ $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
 $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
 
-if ($TokenVar) {
-    # Explicit override wins, and stays literal: a caller naming a variable means it.
-    $token = Get-GhTokenValue -VarName $TokenVar
-    if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar no esta en el entorno USER de Windows." }
-} else {
-    # Throws rather than falling back when an armed run has no agent identity - see the resolver.
-    $ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $owner
-    $token   = $ctx.token
-    $TokenVar = $ctx.var
-    if ($ctx.armed) {
-        Write-Host "  Identidad de agente: $TokenVar (run frenado - sin admin, GitHub le niega main)." -ForegroundColor Cyan
-    }
+# ONE path, override included. The first cut branched on -TokenVar and skipped the armed check on
+# that branch, so a braked run got the owner's admin identity back by adding one flag to its own
+# invocation (review round 2). An override is now something the resolver JUDGES, not something that
+# routes around it.
+$ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $owner -ExplicitVar $TokenVar
+$token    = $ctx.token
+$TokenVar = $ctx.var
+if ($ctx.armed) {
+    Write-Host "  Identidad de agente: $TokenVar (run frenado - sin admin, GitHub le niega main)." -ForegroundColor Cyan
 }
 # On purpose: override any session GH_TOKEN - identity must match the context resolved above.
 $env:GH_TOKEN = $token

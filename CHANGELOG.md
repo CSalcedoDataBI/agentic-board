@@ -34,6 +34,14 @@
   real scripts, the push path uses it, no duplicated owner map survives, and every consumer loads it
   behind its dot-source guard.
 
+  **Inside an armed run there is no route back to the owner identity — including `-TokenVar`.**
+  Review round 2 found the first cut branching on an explicit `-TokenVar` and skipping the armed
+  check on that branch, under the comment *"explicit override wins"*: a bypass written as a feature,
+  and one flag was enough to undo the whole change. The branch is gone rather than guarded — an
+  override is now something the resolver **judges**, not something that routes around it — with a
+  structural test forbidding the push script from branching on `-TokenVar` again. Outside an armed
+  run an override behaves exactly as before; that is how cross-account work happens.
+
   **A missing agent token inside an armed run FAILS; it does not fall back to the owner's PAT.** A
   silent fallback would hand the run precisely the capability the brake exists to remove while every
   message still read "brake armed" — the defect this repo has now found in the brake (#440), the

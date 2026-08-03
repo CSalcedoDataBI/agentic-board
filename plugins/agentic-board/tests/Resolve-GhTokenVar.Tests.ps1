@@ -144,3 +144,53 @@ Describe 'Resolve-GhTokenVar is actually USED — not a fifth copy of the rule (
         }
     }
 }
+
+Describe 'An explicit -TokenVar cannot buy back the owner identity (#550, review round 2)' {
+    # The first cut branched on -TokenVar and skipped the armed check on that branch, with the
+    # comment "explicit override wins". That was a bypass written as a feature: a braked run only
+    # had to add `-TokenVar GITHUB_TOKEN_PERSONAL` to its own invocation to recover the admin
+    # identity, silently — while the CHANGELOG claimed a fallback to the owner's PAT was impossible.
+    # It was possible, in one flag.
+
+    It 'refuses the owner variable while armed' {
+        Test-ExplicitVarAllowed -IsArmed $true -ExplicitVar 'GITHUB_TOKEN_PERSONAL' | Should -BeFalse
+    }
+    It 'refuses the BUSINESS variable while armed — the widest identity of the three' {
+        Test-ExplicitVarAllowed -IsArmed $true -ExplicitVar 'GITHUB_TOKEN_BUSINESS' | Should -BeFalse
+    }
+    It 'refuses anything that is not the agent variable while armed' {
+        foreach ($v in @('GITHUB_TOKEN_PERSONAL','GITHUB_TOKEN_BUSINESS','SOME_OTHER_VAR','gh_token')) {
+            Test-ExplicitVarAllowed -IsArmed $true -ExplicitVar $v | Should -BeFalse -Because "'$v' is not the agent identity"
+        }
+    }
+    It 'allows naming the agent variable explicitly while armed' {
+        Test-ExplicitVarAllowed -IsArmed $true -ExplicitVar 'GITHUB_TOKEN_AGENT' | Should -BeTrue
+    }
+    It 'leaves ordinary sessions alone — an override is how cross-account work happens' {
+        Test-ExplicitVarAllowed -IsArmed $false -ExplicitVar 'GITHUB_TOKEN_PERSONAL' | Should -BeTrue
+        Test-ExplicitVarAllowed -IsArmed $false -ExplicitVar 'GITHUB_TOKEN_BUSINESS' | Should -BeTrue
+    }
+    It 'treats "no override" as nothing to judge, armed or not' {
+        Test-ExplicitVarAllowed -IsArmed $true  -ExplicitVar '' | Should -BeTrue
+        Test-ExplicitVarAllowed -IsArmed $false -ExplicitVar '' | Should -BeTrue
+    }
+
+    It 'is enforced on ONE path — the push script cannot branch around it' {
+        # The structural half: New-BoardPR must hand its -TokenVar to the resolver rather than
+        # handling it in a branch of its own, which is precisely how the leak happened.
+        $src = Get-Content (Join-Path (Join-Path $PSScriptRoot '..' 'scripts') 'New-BoardPR.ps1') -Raw
+        $src | Should -Match 'Get-GhTokenForContext[^\n]*-ExplicitVar'
+        $src | Should -Not -Match 'if \(\$TokenVar\) \{'
+    }
+    It 'no script hardcodes the list of known owners any more' {
+        $dir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+        $offenders = @()
+        foreach ($f in (Get-ChildItem $dir -Filter '*.ps1' | Where-Object { $_.Name -ne 'Resolve-GhTokenVar.ps1' })) {
+            $t = Get-Content $f.FullName -Raw
+            # Exempt anything that gets its answer FROM the resolver; the point is no private copies.
+            if ($t -match "'PAL-Devs'\s*=\s*'GITHUB_TOKEN" -or
+                ($t -match "'PAL-Devs'\s*=" -and $t -notmatch 'Resolve-GhTokenVar')) { $offenders += $f.Name }
+        }
+        $offenders -join ', ' | Should -BeNullOrEmpty
+    }
+}

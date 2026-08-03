@@ -95,8 +95,35 @@ function Resolve-GhTokenVar {
                        "GitHub le rechaza el push a main" }
 }
 
+<#
+    May a caller's EXPLICIT -TokenVar be honoured here? (#550, review round 2)
+
+    The first cut let an explicit override skip the armed check entirely, with the comment
+    "explicit override wins". That was a bypass written as a feature: a braked run only had to add
+    `-TokenVar GITHUB_TOKEN_PERSONAL` to its own invocation to get the owner's admin identity back,
+    with no error and no warning - while the CHANGELOG claimed a missing agent token could never
+    fall back to the owner's PAT. It could, in one flag.
+
+    Outside an armed run an override is ordinary and always allowed: that is how cross-account work
+    happens. Inside one, the ONLY variable a caller may name is the agent's - naming any other is
+    refused, because the whole point is that this run does not get to choose its identity.
+#>
+function Test-ExplicitVarAllowed {
+    param(
+        [bool]$IsArmed = $false,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ExplicitVar
+    )
+    if (-not $ExplicitVar) { return $true }          # nothing to allow
+    if (-not $IsArmed)     { return $true }          # ordinary session: the caller decides
+    return ($ExplicitVar -eq $script:AgentTokenVar)  # armed: only the agent identity
+}
+
 # The owner -> variable map, as a function so callers stop copying the literal. Four scripts each
 # carried their own copy before #550; that is how one rule becomes four that disagree.
+function Get-KnownOwners {
+    return @($script:OwnerTokenVar.Keys)
+}
+
 function Get-OwnerTokenVar {
     param([string]$Owner = 'CSalcedoDataBI')
     $v = $script:OwnerTokenVar[$Owner]
@@ -133,9 +160,24 @@ function Test-InBrakedRun {
 function Get-GhTokenForContext {
     param(
         [string]$StartDir = (Get-Location).Path,
-        [string]$Owner = 'CSalcedoDataBI'
+        [string]$Owner = 'CSalcedoDataBI',
+        # A caller's explicit -TokenVar. Passed IN rather than handled by the caller, so the armed
+        # check cannot be skipped by taking a different branch - which is exactly how the first cut
+        # of this leaked (review round 2).
+        [string]$ExplicitVar = ''
     )
     $armed = Test-InBrakedRun -StartDir $StartDir
+    if (-not (Test-ExplicitVarAllowed -IsArmed $armed -ExplicitVar $ExplicitVar)) {
+        throw ("Run FRENADO: -TokenVar '$ExplicitVar' no esta permitido aqui. Dentro de un run " +
+               "con freno armado la unica identidad valida es $script:AgentTokenVar; el token del " +
+               "dueno es admin y la regla de main lo exceptua, asi que aceptarlo devolveria justo " +
+               "la capacidad que el freno quita.")
+    }
+    if ($ExplicitVar) {
+        $v = Get-GhTokenValue -VarName $ExplicitVar
+        if (-not $v) { throw "$ExplicitVar no esta en el entorno USER de Windows." }
+        return @{ token = $v; var = $ExplicitVar; armed = $armed; reason = "override explicito ($ExplicitVar)" }
+    }
     $agentPresent = [bool](Get-GhTokenValue -VarName $script:AgentTokenVar)
     $d = Resolve-GhTokenVar -IsArmed $armed -AgentTokenPresent $agentPresent -Owner $Owner
     if ($d.fail) { throw $d.reason }
