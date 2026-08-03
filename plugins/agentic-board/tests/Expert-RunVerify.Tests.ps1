@@ -155,3 +155,24 @@ Describe 'Format-RunVerifyVerdict' {
         Format-RunVerifyVerdict -Result $r | Should -Match '(?i)record'
     }
 }
+
+Describe 'Expert-RunVerify CLI — the evidence file is resolved from the WORKING repo (#532)' {
+    # Found in review. $PSScriptRoot is <repo>/plugins/agentic-board/scripts only in this checkout;
+    # installed, the script sits in the plugin cache, so walking three levels up lands in the cache
+    # and evidence/<issue>.md is never found. A check that always says INCOMPLETE is as useless as
+    # one that always says COMPLETE. Asserted on the source, because the CLI half sits below the
+    # dot-source guard and cannot be invoked without a repo + network.
+
+    BeforeAll { $script:Src = Get-Content -Raw (Join-Path $PSScriptRoot '..' 'scripts' 'Expert-RunVerify.ps1') }
+
+    It 'asks git for the working repo root' {
+        $script:Src | Should -Match 'git rev-parse --show-toplevel'
+    }
+    It 'falls back to the current directory rather than to a script-relative path' {
+        $script:Src | Should -Match 'Get-Location'
+    }
+    It 'never derives the repo root by walking up from the script location' {
+        # The exact defect: Join-Path $PSScriptRoot '..' '..' '..'
+        $script:Src | Should -Not -Match "PSScriptRoot\s+'\.\.'\s+'\.\.'\s+'\.\.'"
+    }
+}

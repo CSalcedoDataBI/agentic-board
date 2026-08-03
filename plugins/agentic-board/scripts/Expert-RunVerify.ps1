@@ -157,8 +157,13 @@ if ($LASTEXITCODE -eq 0 -and $commentsJson) {
     } catch { }
 }
 
-# Read evidence file from the repo root (three levels above PSScriptRoot).
-$repoRoot      = Join-Path $PSScriptRoot '..' '..' '..' | Resolve-Path | Select-Object -ExpandProperty Path
+# Read the evidence file from the WORKING repo, never from a path relative to this script.
+# $PSScriptRoot is <repo>/plugins/agentic-board/scripts only in this checkout; once installed the
+# script lives in the plugin cache, where walking three levels up lands in the cache itself and the
+# evidence file is never found — a check that always reports INCOMPLETE is as useless as one that
+# always reports COMPLETE. The evidence belongs to the repo the run worked in: ask git for it.
+$repoRoot = (git rev-parse --show-toplevel 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $repoRoot) { $repoRoot = (Get-Location).Path }
 $evidencePath  = Join-Path $repoRoot 'evidence' "$Issue.md"
 $evidenceContent = ""
 if (Test-Path -LiteralPath $evidencePath) {

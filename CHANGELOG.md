@@ -24,6 +24,31 @@
   | Issue-comment check removed | 4 — "names the issue comment", "chatter is not evidence", "null-propagated array is no comments", "lists all three" |
   | — restored — | 16 passed, 0 failed |
 
+  **The check is wired, and the wiring is the point.** `/board expert verify <issue> <pr>` is a verb
+  on the command surface, and phase 7 of the autonomous brief now requires the run to execute it and
+  **quote its verdict** in the final report. It is the one claim in that report the run does not get
+  to make about itself.
+
+  **Caught by external review before merging — two P1 findings, and the first is the founding defect
+  again.** The first cut wired the check to *nothing*: it was referenced only by its own file and its
+  own test, so a run could still report "evidence recorded" with no mechanical check ever running.
+  The gap #532 exists to close was left open by the change closing it — the same shape the 0.31.0
+  notes record for the identity resolver. Fixed by the command verb and the phase-7 instruction
+  above, both asserted on the rendered brief.
+
+  The second: the evidence file was resolved by walking three directories above `$PSScriptRoot`.
+  That holds only in this checkout — installed, the script lives in the plugin cache, so
+  `evidence/<issue>.md` was looked up inside the cache and never found. A check that always answers
+  INCOMPLETE is as useless as one that always answers COMPLETE. The root now comes from
+  `git rev-parse --show-toplevel`, falling back to the working directory, with tests forbidding the
+  script-relative walk.
+
+  **Proven on real runs, not only on fixtures.** Against #527 / PR #553, whose three artifacts were
+  written by hand: `COMPLETE`, exit 0. Against #531 / PR #558, where the autonomous run wrote
+  nothing: `INCOMPLETE`, exit 1, naming all three missing artifacts. Three consecutive runs in this
+  plan reported their work done having recorded no evidence at all; this is the check that makes
+  that state visible instead of invisible.
+
 ### Changed
 - **The autonomous brief now carries the seven-phase loop and the decision protocol, not a
   capability list** (#527, part of #526). `Format-AutoBrief` used to emit a bullet list of
