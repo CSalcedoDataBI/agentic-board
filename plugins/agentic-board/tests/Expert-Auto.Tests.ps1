@@ -154,3 +154,38 @@ Describe 'Format-AutoBrief — an ordered run is told the order is inert, not th
         $b | Should -Not -Match 'Board-Merge\.ps1'
     }
 }
+
+Describe 'Format-AutoBrief — research-before-deciding in self-heal (#528)' {
+    # #528: the self-heal phase said "fix it (after researching first)" — still act-first in framing.
+    # The decision protocol must be the EXPLICIT response to an error or fork, not a parenthetical.
+    # "research-before-deciding replaces fix-it-and-continue" means Phase 5 invokes the protocol
+    # by name and says "do NOT act first", rather than leading with "fix it".
+
+    It 'phase 5 self-heal references the decision protocol for errors and forks, not just a parenthetical' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        # Scope to Phase 5 only — decision protocol also appears in its own section
+        $start = $b.IndexOf('5. **Self-heal', [System.StringComparison]::OrdinalIgnoreCase)
+        $start | Should -BeGreaterThan -1
+        $next  = $b.IndexOf('6. **Loop', $start, [System.StringComparison]::OrdinalIgnoreCase)
+        $phase5 = if ($next -gt $start) { $b.Substring($start, $next - $start) } else { $b.Substring($start) }
+        # Must name the decision protocol explicitly (not just "after researching first")
+        $phase5 | Should -Match '(?i)decision protocol'
+    }
+
+    It 'phase 5 self-heal says do NOT act first in the context of error or fork' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('5. **Self-heal', [System.StringComparison]::OrdinalIgnoreCase)
+        $next  = $b.IndexOf('6. **Loop', $start, [System.StringComparison]::OrdinalIgnoreCase)
+        $phase5 = if ($next -gt $start) { $b.Substring($start, $next - $start) } else { $b.Substring($start) }
+        $phase5 | Should -Match '(?i)do NOT act first'
+    }
+
+    It 'phase 5 self-heal no longer uses the act-first parenthetical fix-it framing' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('5. **Self-heal', [System.StringComparison]::OrdinalIgnoreCase)
+        $next  = $b.IndexOf('6. **Loop', $start, [System.StringComparison]::OrdinalIgnoreCase)
+        $phase5 = if ($next -gt $start) { $b.Substring($start, $next - $start) } else { $b.Substring($start) }
+        # The old framing "fix it (after researching first)" is the pattern to eliminate
+        $phase5 | Should -Not -Match '(?i)fix it \(after'
+    }
+}

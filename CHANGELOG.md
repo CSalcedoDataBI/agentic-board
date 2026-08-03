@@ -37,6 +37,16 @@
   than bare words ("verify" and "report" also occur in the capability map, so the loose match
   survived deleting the phases).
 
+- **Phase 5 self-heal now explicitly invokes the decision protocol, replacing fix-it-and-continue**
+  (#528, part of #526). After #527 added the decision protocol to the brief, Phase 5 still said
+  "fix it (after researching first)" — a parenthetical that reads as act-first with a research note,
+  not as research-first with an act-later decision. Phase 5 now reads: "when you hit an error, a
+  fork, or an unexpected state — apply the **decision protocol** (research → register → decide); do
+  NOT act first." The protocol section below it (Research → Register → Decide) is now the named
+  authority that self-heal defers to, rather than a separate section that contradicts the phase's
+  framing. Verified by three tests scoped to Phase 5 text: decision protocol named in phase,
+  "do NOT act first" present in phase, and the old "fix it (after" parenthetical is absent.
+
 ## [0.31.0] - 2026-08-03
 ### Added
 - **A braked run can now authenticate as a machine account instead of as the owner** (#550, part of
