@@ -149,18 +149,12 @@ if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi 
 $owner = ($Repo -split '/')[0]
 
 # -- 2. Account FROM THE OWNER (same mapping as New-BoardPR.ps1) ----------------
-$ownerVarMap = @{
-    'CSalcedoDataBI' = 'GITHUB_TOKEN_PERSONAL'
-    'PAL-Devs'       = 'GITHUB_TOKEN_BUSINESS'
-}
-if (-not $TokenVar) {
-    if ($ownerVarMap.ContainsKey($owner)) {
-        $TokenVar = $ownerVarMap[$owner]
-    } else {
-        $TokenVar = 'GITHUB_TOKEN_PERSONAL'
-        Write-Host "AVISO: owner '$owner' no esta mapeado a una cuenta - uso la personal por defecto (-TokenVar para forzar otra)." -ForegroundColor Yellow
-    }
-}
+# One map, not four copies (#550): Resolve-GhTokenVar owns owner -> variable.
+$prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
+$env:ABIOS_TOKENVAR_DOTSOURCE = '1'
+. (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
+$env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
+if (-not $TokenVar) { $TokenVar = Get-OwnerTokenVar -Owner $owner }
 $token = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
 if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar no esta en el entorno USER de Windows." }
 # On purpose: identity must match the repo owner, not whatever ran last.

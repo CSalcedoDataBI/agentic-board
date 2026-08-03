@@ -95,6 +95,55 @@ function Resolve-GhTokenVar {
                        "GitHub le rechaza el push a main" }
 }
 
+# The owner -> variable map, as a function so callers stop copying the literal. Four scripts each
+# carried their own copy before #550; that is how one rule becomes four that disagree.
+function Get-OwnerTokenVar {
+    param([string]$Owner = 'CSalcedoDataBI')
+    $v = $script:OwnerTokenVar[$Owner]
+    if ($v) { return $v }
+    return 'GITHUB_TOKEN_PERSONAL'
+}
+
+<#
+    Is this directory inside a brake-armed worktree?
+
+    Self-contained on purpose: no dot-source of Brake-Guard.ps1. A resolver that has to load
+    another file to answer "which token" would fail in exactly the places it matters most, and a
+    dot-source here would also run that file's param() block in the caller's scope - the trap that
+    silently disabled the merge gate's CI check (#536).
+#>
+function Test-InBrakedRun {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$StartDir)
+    $dir = $StartDir
+    while ($dir) {
+        if (Test-Path -LiteralPath (Join-Path (Join-Path $dir '.agentic-board') 'brake-armed.json')) { return $true }
+        $parent = Split-Path $dir -Parent
+        if (-not $parent -or $parent -eq $dir) { break }
+        $dir = $parent
+    }
+    return $false
+}
+
+<#
+    The one call every script should make: decide the identity AND load it.
+
+    Returns the token value, or THROWS when an armed run has no agent identity. Throwing is the
+    point: the alternative is continuing as the owner, whose PAT the `main` ruleset exempts.
+#>
+function Get-GhTokenForContext {
+    param(
+        [string]$StartDir = (Get-Location).Path,
+        [string]$Owner = 'CSalcedoDataBI'
+    )
+    $armed = Test-InBrakedRun -StartDir $StartDir
+    $agentPresent = [bool](Get-GhTokenValue -VarName $script:AgentTokenVar)
+    $d = Resolve-GhTokenVar -IsArmed $armed -AgentTokenPresent $agentPresent -Owner $Owner
+    if ($d.fail) { throw $d.reason }
+    $val = Get-GhTokenValue -VarName $d.var
+    if (-not $val) { throw "$($d.var) no esta en el entorno USER de Windows." }
+    return @{ token = $val; var = $d.var; armed = $armed; reason = $d.reason }
+}
+
 # Read the variable's value. Kept separate from the DECISION so the decision stays pure - and so a
 # token value never has to pass through the tested surface.
 function Get-GhTokenValue {

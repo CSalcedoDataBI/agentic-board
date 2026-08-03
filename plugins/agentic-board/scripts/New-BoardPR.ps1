@@ -99,22 +99,30 @@ if (-not $Repo) { $Repo = Get-RepoFromOrigin }
 if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi '$Repo')." }
 $owner = ($Repo -split '/')[0]
 
-# -- 2. Account FROM THE OWNER (the whole point of cross-account) -------------
-$ownerVarMap = @{
-    'CSalcedoDataBI' = 'GITHUB_TOKEN_PERSONAL'
-    'PAL-Devs'       = 'GITHUB_TOKEN_BUSINESS'
-}
-if (-not $TokenVar) {
-    if ($ownerVarMap.ContainsKey($owner)) {
-        $TokenVar = $ownerVarMap[$owner]
-    } else {
-        $TokenVar = 'GITHUB_TOKEN_PERSONAL'
-        Write-Host "AVISO: owner '$owner' no esta mapeado a una cuenta - uso la personal por defecto (-TokenVar para forzar otra)." -ForegroundColor Yellow
+# -- 2. Identity: the OWNER's account, or the AGENT's inside a braked run (#550) ----
+# This is the script a braked run reaches for when it pushes its branch and opens the PR, so it is
+# the place where the identity actually has to change. Resolve-GhTokenVar owns the decision; the
+# owner->variable map used to be copied here (and in three other scripts), which is how four copies
+# of one rule drift apart.
+$prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
+$env:ABIOS_TOKENVAR_DOTSOURCE = '1'
+. (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
+$env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
+
+if ($TokenVar) {
+    # Explicit override wins, and stays literal: a caller naming a variable means it.
+    $token = Get-GhTokenValue -VarName $TokenVar
+    if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar no esta en el entorno USER de Windows." }
+} else {
+    # Throws rather than falling back when an armed run has no agent identity - see the resolver.
+    $ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $owner
+    $token   = $ctx.token
+    $TokenVar = $ctx.var
+    if ($ctx.armed) {
+        Write-Host "  Identidad de agente: $TokenVar (run frenado - sin admin, GitHub le niega main)." -ForegroundColor Cyan
     }
 }
-$token = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
-if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar no esta en el entorno USER de Windows." }
-# On purpose: override any session GH_TOKEN - identity must match the repo owner.
+# On purpose: override any session GH_TOKEN - identity must match the context resolved above.
 $env:GH_TOKEN = $token
 
 # -- 3. Identity + push permission ---------------------------------------------

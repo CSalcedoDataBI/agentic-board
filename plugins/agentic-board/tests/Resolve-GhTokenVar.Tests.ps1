@@ -91,3 +91,56 @@ Describe 'Resolve-GhTokenVar — defaults refuse to be permissive' {
         (Resolve-GhTokenVar -IsArmed $true).fail | Should -BeTrue
     }
 }
+
+Describe 'Resolve-GhTokenVar is actually USED — not a fifth copy of the rule (#550, review round 1)' {
+    # The first cut of this change added the resolver, claimed "one resolver instead of the copies
+    # scattered across ~20 scripts", and wired it to NOTHING. The reviewer found it referenced only
+    # by its own test, while four scripts still carried their own owner->variable map. That is the
+    # tool's founding defect — reporting intent as fact — committed in the change meant to fix it.
+    #
+    # These tests exist so the claim and the code cannot drift apart again.
+
+    BeforeAll {
+        $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+        $script:Sources = @(Get-ChildItem -Path $script:ScriptDir -Filter '*.ps1' |
+            Where-Object { $_.Name -ne 'Resolve-GhTokenVar.ps1' })
+    }
+
+    It 'is referenced by real scripts, not only by its test' {
+        $users = @($script:Sources | Where-Object {
+            (Get-Content $_.FullName -Raw) -match 'Resolve-GhTokenVar' })
+        @($users).Count | Should -BeGreaterThan 0 -Because 'a resolver nobody calls is dead code that contradicts the claim'
+    }
+
+    It 'is used by the script a braked run pushes through' {
+        # New-BoardPR is where a braked run's identity actually has to change: it pushes the branch
+        # and opens the PR. If anything is wired, it has to be this one.
+        (Get-Content (Join-Path $script:ScriptDir 'New-BoardPR.ps1') -Raw) |
+            Should -Match 'Get-GhTokenForContext'
+    }
+
+    It 'leaves no duplicated owner->variable map behind' {
+        # The literal that was copy-pasted four times. Any script still declaring its own mapping
+        # from an owner name to a GITHUB_TOKEN_* variable is a copy that will drift.
+        $offenders = @()
+        foreach ($f in $script:Sources) {
+            $t = Get-Content $f.FullName -Raw
+            if ($t -match "'CSalcedoDataBI'\s*=\s*'GITHUB_TOKEN_PERSONAL'" -and
+                $t -notmatch 'Get-OwnerTokenVar') {
+                $offenders += $f.Name
+            }
+        }
+        $offenders -join ', ' | Should -BeNullOrEmpty -Because 'the map lives in Resolve-GhTokenVar now'
+    }
+
+    It 'every consumer loads the resolver with its dot-source guard set' {
+        # Without the guard the dot-source runs the file's CLI half in the caller's scope - the trap
+        # that silently disabled the merge gate's CI check (#536).
+        foreach ($f in $script:Sources) {
+            $t = Get-Content $f.FullName -Raw
+            if ($t -match "Resolve-GhTokenVar\.ps1") {
+                $t | Should -Match 'ABIOS_TOKENVAR_DOTSOURCE' -Because "$($f.Name) must not run the resolver's CLI half"
+            }
+        }
+    }
+}

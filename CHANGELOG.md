@@ -20,9 +20,19 @@
   | create an ordinary branch | 200 OK |
 
   Refused exactly where it matters, still able to do the work. New: one resolver answering *which
-  identity applies here* — a decision previously copy-pasted across some twenty scripts, which is
-  how it drifts — plus the same rule taught to `gh-account`, since a run's own `git push` never goes
-  through a plugin script.
+  identity applies here*, **wired into `New-BoardPR`** — the script a braked run actually pushes
+  through — with `Board-Merge` and `Publish-DocsWiki` now sharing its owner→variable map instead of
+  each carrying a copy. `gh-account` teaches the same rule inline, because a run's own `git push`
+  never goes through a plugin script; that snippet stays path-independent by design and does not
+  call the resolver.
+
+  **Caught by review before merging, and worth recording:** the first cut added the resolver, claimed
+  the consolidation, and wired it to *nothing* — referenced only by its own test while four scripts
+  kept their duplicate maps. A fifth copy of the rule, shipped as a fix for having copies. That is
+  this tool's founding defect (reporting intent as fact) committed inside the change meant to cure
+  it. Four tests now assert the claim rather than assert it in prose: the resolver is referenced by
+  real scripts, the push path uses it, no duplicated owner map survives, and every consumer loads it
+  behind its dot-source guard.
 
   **A missing agent token inside an armed run FAILS; it does not fall back to the owner's PAT.** A
   silent fallback would hand the run precisely the capability the brake exists to remove while every
