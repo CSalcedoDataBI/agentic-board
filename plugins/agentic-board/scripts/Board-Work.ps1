@@ -787,14 +787,31 @@ function New-IssueWorkspace {
 
     $dirty     = @(git status --porcelain 2>$null)
     $curBranch = git branch --show-current 2>$null
+    # Detect another LIVE session already using this working copy (#225): a clean tree on
+    # master is no defence — a foreign session can switch branches mid-work and corrupt the
+    # next commit. Read-SessionRegistry returns only live (process exists) entries.
+    $myPid = 0
+    try { $myPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+    $cwd   = (Get-Location).Path.TrimEnd('\', '/')
+    $conflictEntry = $null
+    if ($myPid) {
+        $conflictEntry = @(Read-SessionRegistry) | Where-Object {
+            $_.sessionPid -ne $myPid -and
+            ($_.workPath -and $_.workPath.TrimEnd('\', '/') -ieq $cwd)
+        } | Select-Object -First 1
+    }
+    $liveConflict = [bool]$conflictEntry
     # Batch (-PreferWorktree) always isolates. Single start keeps the classic
     # dirty-tree / other-issue-branch guard: never switch a busy working copy.
-    $needWorktree = $PreferWorktree -or `
+    $needWorktree = $PreferWorktree -or $liveConflict -or `
                     ($dirty.Count -gt 0 -and $curBranch -ne $branchName) -or `
                     ($curBranch -and $curBranch -match '^issue-\d+' -and $curBranch -ne $branchName)
     if ($needWorktree) {
         if (-not $PreferWorktree) {
-            Write-Host "  OCUPADO: working tree ocupado (rama actual: $curBranch) - uso un worktree aislado:" -ForegroundColor Yellow
+            $reason = if ($liveConflict) {
+                "otra sesion viva (issue #$($conflictEntry.issue), PID $($conflictEntry.sessionPid)) usa este mismo directorio de trabajo"
+            } else { "working tree ocupado (rama actual: $curBranch)" }
+            Write-Host "  OCUPADO: $reason - uso un worktree aislado:" -ForegroundColor Yellow
         }
         return (New-IssueWorktree $repo $issueNum $branchName $baseRef)
     }

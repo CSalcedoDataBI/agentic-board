@@ -325,6 +325,33 @@ Describe 'New-IssueWorkspace picks the base itself (the #294 wiring)' {
         $wp = New-IssueWorkspace -repo $script:Repo4 -issueNum 65 -branchName 'issue-65-fix'
         @($wp).Count | Should -Be 1
     }
+
+    It 'forces a worktree when another live session is registered at the same workPath (#225)' {
+        # Plant a fake sessions.json in the repo state dir. The entry uses $PID (the Pester
+        # runner itself) as sessionPid - it is a live process, and it differs from myPid
+        # (parent of the script's own $PID), so the code classifies it as a foreign session.
+        $stateDir = Get-AbiosStateDir
+        New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+        $fakeEntry = [pscustomobject]@{
+            issue        = 99
+            repo         = $script:Repo4
+            branch       = 'issue-99-other'
+            workPath     = $script:Clone4
+            sessionPid   = $PID
+            via          = ''
+            cli          = 'claude'
+            fleetSession = ''
+            host         = $env:COMPUTERNAME
+            started      = '2026-01-01 00:00'
+        }
+        @($fakeEntry) | ConvertTo-Json -Depth 4 -AsArray |
+            Set-Content (Join-Path $stateDir 'sessions.json')
+        # Clean tree on feature-z -> would normally go in-place (no dirty files, not an
+        # issue-* branch). The live session entry must override that and force a worktree.
+        $wp = New-IssueWorkspace -repo $script:Repo4 -issueNum 66 -branchName 'issue-66-collision'
+        $wp | Should -Not -Be $script:Clone4   # must NOT have stayed in the main clone
+        $wp | Should -Not -BeNullOrEmpty       # must have returned a valid worktree path
+    }
 }
 
 Describe 'New-IssueWorktree honours a base ref it is given' {
