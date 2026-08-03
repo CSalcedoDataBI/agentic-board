@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+### Changed
+- **The autonomous brief now carries the seven-phase loop and the decision protocol, not a
+  capability list** (#527, part of #526). `Format-AutoBrief` used to emit a bullet list of
+  agentic-board capabilities; the 7-phase method lived in `auto-loop.md`, a file the launched
+  session was never handed. The session had no phases, no sequence, and no instruction to
+  research before deciding — only "an in-scope problem: fix it in the loop and continue" as its
+  sole heuristic.
+
+  The brief now includes the full phase sequence (Ingest → Become the expert → Execute →
+  Verify + evidence → Self-heal → Loop until done → Report) and an explicit **decision protocol**:
+  when you hit an error, an unexpected state, or a fork in the path, *research before deciding —
+  do NOT act first*. Steps in order: Research (check prior-art, register via `/knowledge`),
+  Register (log findings — read-and-forget is not research), Decide (then choose the path).
+  The capability map is retained as a lookup table inside the same section, subordinate to the
+  phases rather than their replacement.
+
+  Verified by four new tests that assert on the rendered brief text, not on the source documents:
+  the seven phase names are present, "research before deciding" appears explicitly, the
+  Research-Register-Decide ordering holds in the text, and "read-and-forget" is called out.
+
 ## [0.31.0] - 2026-08-03
 ### Added
 - **A braked run can now authenticate as a machine account instead of as the owner** (#550, part of

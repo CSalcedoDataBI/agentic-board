@@ -66,6 +66,39 @@ Describe 'Agent type in the autonomous brief' {
     }
 }
 
+Describe 'Format-AutoBrief — phase loop and decision protocol (#527)' {
+    # #527: the brief was a capability LIST — the 7-phase loop and the research-before-deciding
+    # protocol lived in auto-loop.md, a file the launched session never received. The session
+    # must carry the METHOD (phases + decision protocol), not just a bullet list of capabilities.
+
+    It 'includes all seven phases so the session knows the method, not just the capability list' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)ingest'
+        $b | Should -Match '(?i)become the expert'
+        $b | Should -Match '(?i)execute'
+        $b | Should -Match '(?i)verify'
+        $b | Should -Match '(?i)self-heal'
+        $b | Should -Match '(?i)loop until'
+        $b | Should -Match '(?i)report'
+    }
+    It 'carries the decision protocol — research before deciding, not act first' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)research.*before deciding'
+    }
+    It 'names the decision protocol steps in order: research, register, decide' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $iR = $b.IndexOf('Research', [System.StringComparison]::OrdinalIgnoreCase)
+        $iReg = $b.IndexOf('Register', [System.StringComparison]::OrdinalIgnoreCase)
+        $iD = $b.IndexOf('Decide', [System.StringComparison]::OrdinalIgnoreCase)
+        $iR | Should -BeLessThan $iReg
+        $iReg | Should -BeLessThan $iD
+    }
+    It 'says read-and-forget is not research (the decision protocol standard)' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)read-and-forget'
+    }
+}
+
 Describe 'Format-AutoBrief — an ordered run is told the order is inert, not that it may close (#541)' {
     # #536 had the brief GRANT the close. Review then found the mechanism behind it had two holes
     # it could not defend, so the grant was withdrawn. The brief must not silently go back to a
