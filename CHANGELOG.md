@@ -1,6 +1,29 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+- **`Expert-RunVerify.ps1` — a completion check that proves a run used the tool instead of
+  asserting it did** (#532, part of #526). A run is considered COMPLETE only when all three
+  evidence artifacts exist and carry the `[abios-evidence]` marker: the versioned
+  `evidence/<issue>.md` file, the PR body block, and an issue comment. A run that skipped any
+  of them is reported **INCOMPLETE**, and the check names which artifact is missing — an
+  actionable gap, not a bare verdict.
+
+  The check fails closed: null, empty, or whitespace content is treated as missing, never as
+  present. A PR body of `"Closes #532"` (the exact body the first autonomous runs left, per
+  `evidence/527.md` and `evidence/528.md`) has no marker and is therefore missing. Ordinary PR
+  chatter in the comment list does not satisfy the comment requirement.
+
+  Verified by 16 Pester tests. Each guard was confirmed by reintroducing its exact defect and
+  watching the matching tests go red, then restoring and returning to 16/16:
+
+  | Defect reintroduced | Tests that went red |
+  |---|---|
+  | Evidence-file check removed | 4 — "names the evidence file", "null is missing", "whitespace is missing", "lists all three" |
+  | PR-body check removed | 3 — "names the PR body block", "non-empty body without marker is missing", "lists all three" |
+  | Issue-comment check removed | 4 — "names the issue comment", "chatter is not evidence", "null-propagated array is no comments", "lists all three" |
+  | — restored — | 16 passed, 0 failed |
+
 ### Changed
 - **The autonomous brief now carries the seven-phase loop and the decision protocol, not a
   capability list** (#527, part of #526). `Format-AutoBrief` used to emit a bullet list of

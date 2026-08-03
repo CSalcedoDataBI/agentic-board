@@ -1,0 +1,157 @@
+#Requires -Modules Pester
+<#  Tests for Expert-RunVerify.ps1 — the completion check that proves a run wrote its evidence
+    instead of asserting it did (#532, part of #526).
+
+    Pure core behind ABIOS_EXPERTRUNVERIFY_DOTSOURCE. Every test operates on the artifact
+    content directly; no gh/network access needed.
+
+    Design: each guard is verified by reintroducing its exact defect and confirming the test
+    goes red. "A green suite proves nothing on its own" — each check must be falsifiable. #>
+
+BeforeAll {
+    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-RunVerify.ps1' | Resolve-Path
+    $env:ABIOS_EXPERTRUNVERIFY_DOTSOURCE = '1'
+    . $script:Script
+    $env:ABIOS_EXPERTRUNVERIFY_DOTSOURCE = ''
+
+    $script:Marker = '[abios-evidence]'
+
+    # Fixtures: minimal valid content for each artifact.
+    $script:GoodFile    = "# $($script:Marker) #99 — something`n`n<!-- $($script:Marker) -->`n## Evidence`n| test | cmd | PASS | ok |`n"
+    $script:GoodPrBody  = "Closes #99`n`n<!-- $($script:Marker) -->`n## Evidence`n..."
+    $script:GoodComment = "<!-- $($script:Marker) -->`n## Evidence`n| test | cmd | PASS | ok |`n"
+}
+
+Describe 'Test-RunArtifactsComplete — a run that wrote nothing is INCOMPLETE (#532)' {
+    It 'reports INCOMPLETE when all three artifacts are absent' {
+        $r = Test-RunArtifactsComplete -EvidenceFileContent '' -PrBodyContent '' -IssueCommentBodies @()
+        $r.complete | Should -BeFalse
+        $r.verdict  | Should -Be 'INCOMPLETE'
+    }
+
+    It 'lists all three missing artifacts at once, not just the first' {
+        $r = Test-RunArtifactsComplete -EvidenceFileContent '' -PrBodyContent '' -IssueCommentBodies @()
+        @($r.missing).Count | Should -Be 3
+    }
+}
+
+Describe 'Test-RunArtifactsComplete — each artifact is named when missing' {
+    It 'names the evidence file when it is absent' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent '' `
+            -PrBodyContent       $script:GoodPrBody `
+            -IssueCommentBodies  @($script:GoodComment)
+        $r.complete | Should -BeFalse
+        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing or marker absent)'
+    }
+
+    It 'names the PR body block when the body has no marker' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent $script:GoodFile `
+            -PrBodyContent       'Closes #99' `
+            -IssueCommentBodies  @($script:GoodComment)
+        $r.complete | Should -BeFalse
+        $r.missing  | Should -Contain '[abios-evidence] block in PR body'
+    }
+
+    It 'names the issue comment when no comment carries the marker' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent $script:GoodFile `
+            -PrBodyContent       $script:GoodPrBody `
+            -IssueCommentBodies  @()
+        $r.complete | Should -BeFalse
+        $r.missing  | Should -Contain '[abios-evidence] comment on the issue'
+    }
+}
+
+Describe 'Test-RunArtifactsComplete — COMPLETE only when all three are present' {
+    It 'reports COMPLETE when all three artifacts carry the marker' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent $script:GoodFile `
+            -PrBodyContent       $script:GoodPrBody `
+            -IssueCommentBodies  @($script:GoodComment)
+        $r.complete | Should -BeTrue
+        $r.verdict  | Should -Be 'COMPLETE'
+        @($r.missing).Count | Should -Be 0
+    }
+
+    It 'accepts a comment list with multiple entries when at least one has the marker' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent $script:GoodFile `
+            -PrBodyContent       $script:GoodPrBody `
+            -IssueCommentBodies  @('CI verde', $script:GoodComment, 'lgtm')
+        $r.complete | Should -BeTrue
+    }
+}
+
+Describe 'Test-RunArtifactsComplete — fails closed (unreadable = missing, not assumed present)' {
+    It 'null evidence file content is treated as missing' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent $null `
+            -PrBodyContent       $script:GoodPrBody `
+            -IssueCommentBodies  @($script:GoodComment)
+        $r.complete | Should -BeFalse
+        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing or marker absent)'
+    }
+
+    It 'whitespace-only evidence file content is treated as missing' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent "   `n  " `
+            -PrBodyContent       $script:GoodPrBody `
+            -IssueCommentBodies  @($script:GoodComment)
+        $r.complete | Should -BeFalse
+        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing or marker absent)'
+    }
+
+    It 'a non-empty PR body without the marker is treated as missing' {
+        # "Closes #532" is the exact PR body the first autonomous runs left — it is not evidence.
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent $script:GoodFile `
+            -PrBodyContent       'Closes #532' `
+            -IssueCommentBodies  @($script:GoodComment)
+        $r.complete | Should -BeFalse
+        $r.missing  | Should -Contain '[abios-evidence] block in PR body'
+    }
+
+    It 'ordinary PR chatter in the comment list is not an evidence comment' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent $script:GoodFile `
+            -PrBodyContent       $script:GoodPrBody `
+            -IssueCommentBodies  @('CI verde', 'lgtm', 'gracias!')
+        $r.complete | Should -BeFalse
+        $r.missing  | Should -Contain '[abios-evidence] comment on the issue'
+    }
+
+    It 'an empty comment array (null-propagated) is treated as no comments' {
+        $r = Test-RunArtifactsComplete `
+            -EvidenceFileContent $script:GoodFile `
+            -PrBodyContent       $script:GoodPrBody `
+            -IssueCommentBodies  @($null)
+        $r.complete | Should -BeFalse
+        $r.missing  | Should -Contain '[abios-evidence] comment on the issue'
+    }
+}
+
+Describe 'Format-RunVerifyVerdict' {
+    It 'says COMPLETE for a complete run' {
+        $r = @{ complete = $true; missing = @(); verdict = 'COMPLETE' }
+        Format-RunVerifyVerdict -Result $r | Should -Match '(?i)COMPLETE'
+    }
+
+    It 'says INCOMPLETE for a run that missed evidence' {
+        $r = @{ complete = $false; missing = @('artifact-a'); verdict = 'INCOMPLETE' }
+        Format-RunVerifyVerdict -Result $r | Should -Match '(?i)INCOMPLETE'
+    }
+
+    It 'lists each missing artifact by name' {
+        $r = @{ complete = $false; missing = @('artifact-a', 'artifact-b'); verdict = 'INCOMPLETE' }
+        $v = Format-RunVerifyVerdict -Result $r
+        $v | Should -Match 'artifact-a'
+        $v | Should -Match 'artifact-b'
+    }
+
+    It 'tells the run what to do next (actionable verdict, not a bare label)' {
+        $r = @{ complete = $false; missing = @('something'); verdict = 'INCOMPLETE' }
+        Format-RunVerifyVerdict -Result $r | Should -Match '(?i)record'
+    }
+}
