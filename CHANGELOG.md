@@ -44,8 +44,19 @@
   fork, or an unexpected state — apply the **decision protocol** (research → register → decide); do
   NOT act first." The protocol section below it (Research → Register → Decide) is now the named
   authority that self-heal defers to, rather than a separate section that contradicts the phase's
-  framing. Verified by three tests scoped to Phase 5 text: decision protocol named in phase,
-  "do NOT act first" present in phase, and the old "fix it (after" parenthetical is absent.
+  framing. Verified by five tests scoped to Phase 5 text, each confirmed by reintroducing its defect
+  and watching the matching test go red.
+
+  **Caught by external review before merging — the same defect two PRs running.** The first cut
+  reframed the phase around the protocol and, in doing so, deleted `in-scope problem -> fix it`. A
+  phase named *Self-heal* that never says to heal: the protocol ends at "decide", so a run hitting an
+  in-scope bug was left holding a decision with no instruction to act on it. #527 lost the
+  no-improvise guard the same way, in the same function, one PR earlier. Rewriting a sentence in
+  `Format-AutoBrief` deletes behaviour, because that text is not documentation *about* the run — it
+  is the whole of what the run is told. Phase 5 now orders both: protocol first, then act on what was
+  decided (in-scope → fix and continue; out-of-scope → file a `discovered` issue). Two tests hold the
+  pair: one that the fix instruction exists, one that the protocol still precedes it, so restoring
+  the action cannot quietly restore act-first ordering.
 
 ## [0.31.0] - 2026-08-03
 ### Added

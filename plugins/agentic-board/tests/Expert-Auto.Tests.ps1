@@ -180,7 +180,32 @@ Describe 'Format-AutoBrief — research-before-deciding in self-heal (#528)' {
         $phase5 | Should -Match '(?i)do NOT act first'
     }
 
-    It 'phase 5 self-heal no longer uses the act-first parenthetical fix-it framing' {
+    It 'phase 5 still tells the run to FIX an in-scope problem (regression, found in review)' {
+        # Reframing phase 5 around the protocol dropped 'in-scope problem -> fix it'. The protocol
+        # ends at "decide"; a phase named Self-heal that never says to heal leaves the run with a
+        # decision and no instruction to act on it. Deleting a sentence here deletes the behaviour.
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('5. **Self-heal', [System.StringComparison]::OrdinalIgnoreCase)
+        $next  = $b.IndexOf('6. **Loop', $start, [System.StringComparison]::OrdinalIgnoreCase)
+        $phase5 = if ($next -gt $start) { $b.Substring($start, $next - $start) } else { $b.Substring($start) }
+        $phase5 | Should -Match '(?i)in-scope problem'
+        $phase5 | Should -Match '(?i)fix it in the loop and continue'
+    }
+
+    It 'phase 5 orders the protocol BEFORE acting, not the other way round' {
+        # The point of #528: research-before-deciding replaces fix-it-and-continue as the RESPONSE.
+        # Restoring the fix instruction must not restore the act-first ordering it displaced.
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('5. **Self-heal', [System.StringComparison]::OrdinalIgnoreCase)
+        $next  = $b.IndexOf('6. **Loop', $start, [System.StringComparison]::OrdinalIgnoreCase)
+        $phase5 = if ($next -gt $start) { $b.Substring($start, $next - $start) } else { $b.Substring($start) }
+        $iProtocol = $phase5.IndexOf('decision protocol', [System.StringComparison]::OrdinalIgnoreCase)
+        $iFix = $phase5.IndexOf('fix it in the loop', [System.StringComparison]::OrdinalIgnoreCase)
+        $iProtocol | Should -BeGreaterThan -1
+        $iProtocol | Should -BeLessThan $iFix
+    }
+
+    It 'phase 5 no longer uses the act-first parenthetical fix-it framing' {
         $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
         $start = $b.IndexOf('5. **Self-heal', [System.StringComparison]::OrdinalIgnoreCase)
         $next  = $b.IndexOf('6. **Loop', $start, [System.StringComparison]::OrdinalIgnoreCase)

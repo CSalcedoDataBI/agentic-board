@@ -121,7 +121,8 @@ are the method.
    If green -> open the PR + run the review gate.
 5. **Self-heal + auto-drive the board**: when you hit an error, a fork, or an unexpected state —
    apply the **decision protocol** (research → register → decide); do NOT act first.
-   Out-of-scope finding → file a sanitized 'discovered' issue on the board and keep going.
+   Then act on what you decided: an in-scope problem → fix it in the loop and continue;
+   an out-of-scope finding → file a sanitized 'discovered' issue on the board and keep going.
 6. **Loop until done or budget**: keep iterating until the DoD is green — then leave the PR ready
    and STOP before merge — or the budget is spent -> ``/board handoff -Save``.
 7. **Report** — final evidence + updated board + a PR awaiting the human's merge approval.
