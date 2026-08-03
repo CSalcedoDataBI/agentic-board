@@ -37,6 +37,22 @@
   than bare words ("verify" and "report" also occur in the capability map, so the loose match
   survived deleting the phases).
 
+- **Autonomous brief now instructs the run to escalate to an epic + sub-issues when the work
+  outgrows its issue** (#531, part of #526). A run that discovered six tasks had one move: drop six
+  loose `discovered` issues on the board with no parent and no order. `Board-Plan.ps1` already
+  created epics + native sub-issues for humans; it was unreachable from inside an autonomous run.
+
+  `Format-AutoBrief` now includes a **Self-planning — escalating to an epic** section that:
+  - tells the run to use `Board-Plan.ps1` (`/board plan`) rather than filing loose issues,
+  - caps the sub-issues of the created epic by the existing `boardSelfDrive.cap` (same limit as
+    `discovered` issues, so self-planning stays bounded), and
+  - requires linking the new epic back to the originating issue for traceability.
+
+  Verified by five tests that assert on the rendered brief text: `Board-Plan.ps1` is named,
+  escalation and sub-issues are instructed, `boardSelfDrive` cap applies, the originating issue
+  is linked, and the cap value from the contract is embedded. Each confirmed by reintroducing the
+  defect (removing the section) and watching all five tests go red together.
+
 - **Phase 5 self-heal now explicitly invokes the decision protocol, replacing fix-it-and-continue**
   (#528, part of #526). After #527 added the decision protocol to the brief, Phase 5 still said
   "fix it (after researching first)" — a parenthetical that reads as act-first with a research note,
