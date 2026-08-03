@@ -26,6 +26,11 @@ for the user to pick (they can answer with just the number):
                      proyecto, marcando cuál sobreescribe a cuál y cuántas skills engancha de
                      verdad). Con `why` explica qué rol ganó para un texto de plan y por qué
                      keyword.
+4. verify <issue> <pr>
+                   → COMPROBAR que el run dejó su evidencia de verdad, en vez de decir que la
+                     dejó: lee los tres artefactos (archivo versionado, bloque en el PR,
+                     comentario en el issue) y responde COMPLETO o INCOMPLETO nombrando qué
+                     falta. Falla cerrado: lo que no se puede leer cuenta como ausente.
 ```
 
 First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (default
@@ -44,6 +49,20 @@ ready-made agent definitions such as `wshobson/agents`), propose a complete role
 `keywords`, `skills`, and an `agent` pointer when a fitting definition exists — and persist it with
 `Add-ExpertRole` **only after the user confirms**: writing a role changes how every future plan is
 classified, so it is never a silent side effect of `config`.
+
+## verify
+Run `scripts/Expert-RunVerify.ps1 -Issue <n> -PR <n>`. It reads the three evidence artifacts a run
+owes under its contract — `evidence/<issue>.md`, the `[abios-evidence]` block in the PR body, and
+the `[abios-evidence]` comment on the issue — and prints COMPLETE or INCOMPLETE **naming every
+artifact that is missing**, not just the first. Exit 1 when incomplete.
+
+It fails closed: content it cannot read is missing content, never assumed present. That is the whole
+point — a run that reports "evidence recorded" is making a claim about itself, and this is the one
+claim it does not get to make. The `auto` brief instructs the run to quote this verdict in its final
+report, so a run cannot report done while the check says otherwise.
+
+The evidence file is resolved from the WORKING repository (git's toplevel, else the current
+directory) — never relative to the script, which lives in the plugin cache once installed.
 
 ## roles
 Run `scripts/Expert-Roles.ps1 -List`, or `scripts/Expert-Roles.ps1 -Why "<plan text>"`.

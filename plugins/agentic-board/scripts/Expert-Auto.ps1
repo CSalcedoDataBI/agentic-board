@@ -129,7 +129,11 @@ are the method.
    an out-of-scope finding → file a sanitized 'discovered' issue on the board and keep going.
 6. **Loop until done or budget**: keep iterating until the DoD is green — then leave the PR ready
    and STOP before merge — or the budget is spent -> ``/board handoff -Save``.
-7. **Report** — final evidence + updated board + a PR awaiting the human's merge approval.
+7. **Report** — before you report anything, run ``/board expert verify`` for this issue and its PR.
+   It reads the three evidence artifacts and answers COMPLETE or INCOMPLETE, naming what is missing.
+   **Quote its verdict in your final report.** If it says INCOMPLETE you are not done: record what it
+   names and run it again. Saying you recorded evidence is not the same as having recorded it — this
+   check is the difference, and it is the one claim in your report you do not get to make yourself.
 
 ### Decision protocol — research before deciding
 

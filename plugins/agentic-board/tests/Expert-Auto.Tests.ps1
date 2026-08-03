@@ -263,3 +263,32 @@ Describe 'Format-AutoBrief — research-before-deciding in self-heal (#528)' {
         $phase5 | Should -Not -Match '(?i)fix it \(after'
     }
 }
+
+Describe 'Format-AutoBrief — the run must quote the completion check (#532)' {
+    # The check existed but nothing invoked it: referenced only by its own file and its own test.
+    # A completion check nobody runs verifies nothing — the same "wired to nothing" defect the
+    # 0.31.0 notes record. Phase 7 now makes the verdict part of the report the run must give.
+
+    It 'phase 7 tells the run to run the verify check before reporting' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('7. **Report', [System.StringComparison]::OrdinalIgnoreCase)
+        $start | Should -BeGreaterThan -1
+        $next = $b.IndexOf('### ', $start, [System.StringComparison]::OrdinalIgnoreCase)
+        $phase7 = if ($next -gt $start) { $b.Substring($start, $next - $start) } else { $b.Substring($start) }
+        $phase7 | Should -Match '/board expert verify'
+    }
+    It 'phase 7 requires the verdict to be quoted, not merely the check to be run' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $start = $b.IndexOf('7. **Report', [System.StringComparison]::OrdinalIgnoreCase)
+        $next = $b.IndexOf('### ', $start, [System.StringComparison]::OrdinalIgnoreCase)
+        $phase7 = if ($next -gt $start) { $b.Substring($start, $next - $start) } else { $b.Substring($start) }
+        $phase7 | Should -Match '(?i)quote its verdict'
+        $phase7 | Should -Match '(?i)INCOMPLETE'
+    }
+    It 'names the check by its typed command, never by the script name' {
+        # Same rule the escalation section had to be corrected for: the brief travels to runs in
+        # any repo, where a plugin script name resolves to nothing (#480, #494).
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Not -Match '(?i)Expert-RunVerify\.ps1'
+    }
+}
