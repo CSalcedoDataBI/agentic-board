@@ -1,6 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## [0.32.0] - 2026-08-03
+
+**Expert mode carries its method.** Until now the launched session received a *capability list* —
+what agentic-board can do — while the seven-phase loop and the research-before-deciding protocol
+lived in a reference document it was never handed. This release folds the method into the brief
+itself, makes the protocol the response to an error rather than a footnote, lets a run escalate to
+an epic when the work outgrows its issue, and adds the first check that can tell whether a run
+actually recorded its evidence instead of merely saying so. Plan #526, tasks #527 · #528 · #531 ·
+#532.
+
+> **Measured while shipping it, and worth stating plainly:** all four autonomous runs in this plan
+> produced work that CI approved and external review rejected. Three silently deleted an instruction
+> while rewriting a sentence in `Format-AutoBrief`; one added a component wired to nothing. All four
+> reported their work done while owing evidence they had never recorded. The cause is structural —
+> that function's text is not documentation *about* the run, it is the whole of what the run is
+> told, so editing prose there is editing behaviour and no syntax check can see it. Autonomous work
+> in this repo is not mergeable without external review; a green gate measures syntax, not judgement.
+
 ### Added
 - **`Expert-RunVerify.ps1` — a completion check that proves a run used the tool instead of
   asserting it did** (#532, part of #526). A run is considered COMPLETE only when all three
@@ -970,7 +987,7 @@
   would do. New pure `Get-HandoffSaveMode` helper, unit-tested.
 - **The CHANGELOG auto-fold now composes with a hand-written `[Unreleased]` block** (#324). `New-Release.ps1`
   folds by delegating to `Board-Changelog.ps1 -Write`, which used to insert the generated block ABOVE any
-  `## [Unreleased]` — stranding the maintainer's curated entries under an orphan `[Unreleased]` below the very
+  `## [0.32.0] - 2026-08-03` — stranding the maintainer's curated entries under an orphan `[Unreleased]` below the very
   version they belonged to. It now RENAMES `[Unreleased]` to `## [<version>] - <date>` and merges the
   board-derived entries into its sections (preserving hand-written sections like `### Security`, appending
   board lines after the curated ones, never duplicating an already-cited issue). A release that ships only
