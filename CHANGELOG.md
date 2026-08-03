@@ -1,5 +1,59 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- **A braked run can now authenticate as a machine account instead of as the owner** (#550, part of
+  #541). The autonomy brake could never be complete as a text classifier — eleven of the nineteen
+  defects found on 2026-07-31 were that same defect in different clothes. The capability side is
+  different in kind, and it is now wired.
+
+  `main` requires a pull request, but the ruleset **exempts the repository admin role**, and a PAT
+  authenticates *as its owner* — so any token of his walks straight through. Weaker permissions do
+  not help: GitHub cannot distinguish "the human typed this" from "an agent used the human's token",
+  because they are the same principal. Only a **different identity** gets a different answer.
+
+  Measured, not argued, against the new machine account:
+
+  | Action | Result |
+  |---|---|
+  | write to `main` | `Repository rule violations found — Changes must be made through a pull request (422)` |
+  | create an ordinary branch | 200 OK |
+
+  Refused exactly where it matters, still able to do the work. New: one resolver answering *which
+  identity applies here*, **wired into `New-BoardPR`** — the script a braked run actually pushes
+  through — with `Board-Merge` and `Publish-DocsWiki` now sharing its owner→variable map instead of
+  each carrying a copy. `gh-account` teaches the same rule inline, because a run's own `git push`
+  never goes through a plugin script; that snippet stays path-independent by design and does not
+  call the resolver.
+
+  **Caught by review before merging, and worth recording:** the first cut added the resolver, claimed
+  the consolidation, and wired it to *nothing* — referenced only by its own test while four scripts
+  kept their duplicate maps. A fifth copy of the rule, shipped as a fix for having copies. That is
+  this tool's founding defect (reporting intent as fact) committed inside the change meant to cure
+  it. Four tests now assert the claim rather than assert it in prose: the resolver is referenced by
+  real scripts, the push path uses it, no duplicated owner map survives, and every consumer loads it
+  behind its dot-source guard.
+
+  **Inside an armed run there is no route back to the owner identity — including `-TokenVar`.**
+  Review round 2 found the first cut branching on an explicit `-TokenVar` and skipping the armed
+  check on that branch, under the comment *"explicit override wins"*: a bypass written as a feature,
+  and one flag was enough to undo the whole change. The branch is gone rather than guarded — an
+  override is now something the resolver **judges**, not something that routes around it — with a
+  structural test forbidding the push script from branching on `-TokenVar` again. Outside an armed
+  run an override behaves exactly as before; that is how cross-account work happens.
+
+  **A missing agent token inside an armed run FAILS; it does not fall back to the owner's PAT.** A
+  silent fallback would hand the run precisely the capability the brake exists to remove while every
+  message still read "brake armed" — the defect this repo has now found in the brake (#440), the
+  review gate (#510) and the evidence blocks (#479). Mutation-verified: introducing that fallback
+  turns 4 tests red.
+
+  **Stated limit, deliberately not dressed up.** This removes the default capability, not the
+  possibility. A run that ignores the skill and reads `GITHUB_TOKEN_PERSONAL` from the registry
+  itself is not stopped — the token is ambient in the Windows user environment and cannot be taken
+  away from a process running as that user. The deliberate case is what #517 and the review gate are
+  for. Treating a backstop as a sandbox is what produced most of yesterday's defects.
+
 ## [0.30.0] - 2026-07-31
 ### Fixed
 - **A braked run could push straight to the default branch** (#542). The brake watched `gh pr merge`,

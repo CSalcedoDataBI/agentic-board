@@ -16,6 +16,41 @@ The default identity for all operations in this suite is **CSalcedoDataBI**, eve
 
 ---
 
+## FIRST: are you inside a brake-armed run? (#550)
+
+Before anything else, check for `.agentic-board/brake-armed.json` in the current directory **or any
+directory above it**. If it is there, this is an autonomous run that has been braked, and the
+identity rule changes:
+
+```powershell
+$t = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_AGENT', 'User')
+if (-not $t) { throw 'Run frenado y GITHUB_TOKEN_AGENT no existe. NO uses el token del dueno.' }
+$env:GH_TOKEN = $t
+```
+
+**Do NOT fall back to `GITHUB_TOKEN_PERSONAL` if the agent token is missing. Stop and say so.**
+
+Why this matters more than it looks: `main` requires a pull request, but the rule **exempts the
+repository admin role** — and the owner's PAT authenticates *as the owner*, so GitHub lets it push
+to `main` directly. Weaker permissions on one of his tokens do not help; GitHub cannot tell "the
+human typed this" from "an agent used the human's token", because they are the same principal.
+Only a different identity gets a different answer. Measured, not assumed:
+
+| Action as `powerbiconcristobal-ui` | Result |
+|---|---|
+| write to `main` | `Repository rule violations found — Changes must be made through a pull request (422)` |
+| create an ordinary branch | 200 OK |
+
+So the agent identity is refused exactly where it should be and can still do its work. Falling back
+to the owner's PAT would hand the run the one capability the brake exists to remove, while every
+message on screen still said "brake armed".
+
+**Never** reach for `GITHUB_TOKEN_BUSINESS` here. On this repo it is read-only and looks harmless,
+but the token is not repo-scoped: it carries **admin on 17 business repositories**, client work
+included. It is the widest of the three identities, not the narrowest.
+
+---
+
 ## Canonical inline command (preferred — path-independent)
 
 This is what the agent should run at the start of any operation. It reads from the Windows USER registry, which is always current (unlike `$env:`, which reflects the value at login time and may be stale).
