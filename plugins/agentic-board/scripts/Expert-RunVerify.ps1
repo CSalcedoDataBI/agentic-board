@@ -109,16 +109,25 @@ function Test-RunArtifactsComplete {
         # heading passed round 2's check, and headings are structure, not evidence. A body line
         # is anything that is not a heading, not the marker comment, not the stub's link line,
         # and not blank.
-        $hasTableRow = ("$EvidenceFileContent" -match '(?m)^\s*\|')
-        $bodyLines = @(("$EvidenceFileContent" -split "`r?`n") | Where-Object {
+        # A table counts only by its DATA rows (round 4): header + separator alone is scaffolding
+        # - '| Test | Command | Result | Detail |' over '|---|---|' says nothing was tested.
+        $allLines = @("$EvidenceFileContent" -split "`r?`n")
+        $dataRows = @($allLines | Where-Object {
+            $l = "$_".Trim()
+            $l -match '^\|' -and
+            $l -notmatch '^\|[\s:\-|]+\|?\s*$' -and
+            $l -ne $legacyBlock
+        })
+        $bodyLines = @($allLines | Where-Object {
             $l = "$_".Trim()
             $l -and
             -not $l.StartsWith('#') -and
             -not $l.StartsWith('<!--') -and
+            -not $l.StartsWith('|') -and
             -not $l.StartsWith('Full evidence') -and
             -not $l.StartsWith('**Summary:**')
         })
-        $fileOk = $hasTableRow -or ($bodyLines.Count -gt 0)
+        $fileOk = ($dataRows.Count -gt 0) -or ($bodyLines.Count -gt 0)
     }
     if (-not $fileOk) {
         $missing += 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'

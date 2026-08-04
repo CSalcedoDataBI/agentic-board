@@ -279,3 +279,18 @@ Describe 'Round-3 closure: a heading-only file is structure, not evidence (#570)
                 -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md').complete | Should -BeTrue
     }
 }
+
+Describe 'Round-4 closure: table scaffolding is not evidence (#570)' {
+    It 'marker + heading + header row + separator with NO data row is INCOMPLETE' {
+        $scaffold = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| --- | --- | --- | --- |"
+        $stub = "<!-- [abios-evidence] -->`nFull evidence: evidence/42.md"
+        (Test-RunArtifactsComplete -EvidenceFileContent $scaffold -PrBodyContent $stub `
+                -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md').complete | Should -BeFalse
+    }
+    It 'one real data row makes it substantive' {
+        $real = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| --- | --- | --- | --- |`n| guard | Invoke-Pester | PASS | 41/41 |"
+        $stub = "<!-- [abios-evidence] -->`nFull evidence: evidence/42.md"
+        (Test-RunArtifactsComplete -EvidenceFileContent $real -PrBodyContent $stub `
+                -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md').complete | Should -BeTrue
+    }
+}
