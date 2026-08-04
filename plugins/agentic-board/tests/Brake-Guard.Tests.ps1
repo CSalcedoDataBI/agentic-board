@@ -1108,6 +1108,7 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'git push -f origin HEAD:feature' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'git push origin --delete old-branch' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'git push origin :old-branch' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin +HEAD:feature' | Should -BeFalse   # force refspec (round 3)
         }
         It 'allows reporting where it stopped' {
             Test-IsBudgetExemptCommand -Command 'gh pr comment 90 --body "out of budget, handoff saved"' | Should -BeTrue

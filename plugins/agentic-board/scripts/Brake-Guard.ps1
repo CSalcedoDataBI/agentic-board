@@ -524,7 +524,8 @@ $script:BudgetExemptPatterns = @(
     # overwrite remote state wholesale, --force rewrites it, --delete/--prune/`:ref` remove it -
     # none of which is "save your work and leave". The brake still separately refuses pushes to
     # main and deletes for contracts that brake on them; this narrows what the BUDGET excuses.
-    '^git\s+push(?![^;|&]*\s--(mirror|all|tags|force|force-with-lease|delete|prune)\b)(?![^;|&]*\s-f\b)(?![^;|&]*\s\+?:\S)\b'
+    # `+refspec` is git's force spelling without the flag (round 3) - refused with the rest.
+    '^git\s+push(?![^;|&]*\s--(mirror|all|tags|force|force-with-lease|delete|prune)\b)(?![^;|&]*\s-f\b)(?![^;|&]*\s\+?:\S)(?![^;|&]*\s\+\S)\b'
     # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
     # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
     # is push and stays allowed.
