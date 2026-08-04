@@ -275,10 +275,17 @@ if (-not (Test-Path -LiteralPath $Path)) { throw "Get-FieldEpisodes.ps1: no such
 
 $events = [System.Collections.Generic.List[object]]::new()
 $i = 0
+# Full-file timestamp bounds (#568, review round 3): the stream reads every line regardless of
+# -FromEvent, so the duration is the TRANSCRIPT's, never the incremental slice's.
+$fileFirstTs = ''; $fileLastTs = ''
 # Streamed: these files reach tens of MB and must never be loaded whole.
 $reader = [System.IO.File]::OpenText($Path)
 try {
     while ($null -ne ($line = $reader.ReadLine())) {
+        if ($line -match '"timestamp"\s*:\s*"([^"]+)"') {
+            if (-not $fileFirstTs) { $fileFirstTs = $Matches[1] }
+            $fileLastTs = $Matches[1]
+        }
         if ($i -ge $FromEvent) {
             $e = ConvertTo-FieldEvent -Line $line -Index $i
             if ($e) { $events.Add($e) }
@@ -289,12 +296,11 @@ try {
 
 $linked   = Join-FieldResults -Events $events.ToArray()
 $episodes = Get-FieldEpisodes -Events $linked -Window $Window
-# Session wall-clock from the first/last parsed events (#568). Null when unknowable.
+# Session wall-clock from the full transcript bounds (#568). Null when unknowable.
 $durationMin = $null
-$evArr = $events.ToArray()
-if ($evArr.Count -gt 1) {
-    $t0 = ConvertTo-FieldTimestamp -Ts $evArr[0].ts
-    $t1 = ConvertTo-FieldTimestamp -Ts $evArr[$evArr.Count - 1].ts
+if ($fileFirstTs -and $fileLastTs) {
+    $t0 = ConvertTo-FieldTimestamp -Ts $fileFirstTs
+    $t1 = ConvertTo-FieldTimestamp -Ts $fileLastTs
     if ($t0 -and $t1 -and $t1 -ge $t0) { $durationMin = [int][Math]::Round(($t1 - $t0).TotalMinutes) }
 }
 $result = [pscustomobject]@{
