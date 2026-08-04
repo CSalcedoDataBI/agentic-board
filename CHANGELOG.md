@@ -16,8 +16,35 @@
   Pester tests (file reads content, slashes treated as data, destructive text never executed,
   missing-file and directory-path throw, file wins over inline — a field present in the JSON
   overrides even when explicitly empty, while an absent field falls back to the inline default).
+- **`-AutoClean` teardown now kills the Windows Terminal tab shell and deletes the worktree folder** (#413). `Board-Work.ps1 -Sessions -Watch -AutoClean` previously left the `pwsh -NoExit` tab shell alive (its handle blocked `git worktree remove` from deleting the directory) and printed a manual-cleanup note. The fix: before running `git worktree remove`, teardown finds the tab's shell by its launch-script command line (`launch-<n>.ps1` — exact match on the issue number, so sibling sessions are never touched), kills it via `Stop-ProcessTree`, waits 500 ms for the OS to release the handle, then runs `Remove-Item` after `git` de-registers the worktree. When no shell is found (session already closed, or non-`wt` launch), teardown falls back to the same attempt. Two helper additions: `Find-WtTabShellCore` (pure, testable) + `Find-WtTabShell` (thin CIM wrapper, mockable) in `BoardWork.Processes.ps1`; 6 new Pester tests including the "do not kill a different issue's shell" guard.
+- **`Publish-DocsWiki.ps1` no longer generates `Docs-Command-*` wiki pages** (#418).
+  `commands/*.md` files are agent instruction files (system prompts addressed to an AI),
+  not documentation. Publishing them verbatim produced a 31 KB `Docs-Command-Board` page
+  full of internal recipes, script paths and conditional branches — instructions readable
+  only by the agent that would execute them. The `_Sidebar` no longer links to command
+  pages. `Docs-Home` is now purely the README with HTML stripped. Stale `Docs-Command-*`
+  pages left in the wiki are automatically removed on the next publish (the clone-write-
+  `git add -A` cycle stages their deletion). The CI freshness step is annotated to explain
+  why "it generates" was never evidence that "it reads" — a check that cannot ask that
+  question will report green on garbage forever. For code and architecture reference, route
+  to DeepWiki instead of generating. 15 Pester tests updated; the `Docs-Command-<X>`
+  describe block (7 tests) was removed; 2 new tests (`does NOT generate any Docs-Command-*
+  pages`, `does NOT link to any Docs-Command-* page`) enforce the invariant.
 
 ### Added
+- **DeepWiki MCP integration** (#416). Three connected pieces: (1) `mcp.json` toolkit catalog
+  entry registers the DeepWiki MCP server (`cognitionai/deepwiki`, three tools:
+  `read_wiki_structure` / `read_wiki_contents` / `ask_question`) so `/tools` can install it via
+  `claude mcp add` like any other referenced tool. (2) `/docs deepwiki` verb — runs
+  `Get-DeepWikiStatus.ps1` to resolve the current repo from `origin`, check GitHub visibility,
+  probe `deepwiki.com`, and report `indexed`, `not-indexed`, `private`, or `unknown`. The
+  public-repos-only limit (private repos require paid Devin) is documented at the point of use,
+  never buried. (3) `tools-catalog` skill's `research <id>` action now calls `ask_question` as
+  the first probe when the MCP is configured, before any clone. Machinery: new `mcp` toolkit
+  kind (next to `skill-clone` and `plugin`), detected via `claude mcp list` through new
+  `Get-InstalledMcpServers.ps1`; `Get-ToolsCatalog` and `Install-ToolFromCatalog` extended to
+  handle the new kind; 17 new Pester tests across Get-DeepWikiStatus, Get-ToolsCatalog (mcp
+  kind), and Install-ToolFromCatalog (mcp kind).
 - **`/board plan` prior-art gate** (#415). `Board-Plan.ps1` now refuses to create an epic
   unless the caller provides either `-PriorArt "<block>"` (queries run, candidates found with
   stars/license/adoption, and the explicit build-vs-reference-vs-extend decision) or `-NoPriorArt`

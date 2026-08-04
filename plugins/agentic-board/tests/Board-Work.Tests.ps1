@@ -1708,12 +1708,21 @@ Describe 'Invoke-SessionCleanup (teardown plan, #135)' {
         $acts[2] | Should -CMatch 'branch -d issue-9-x'   # safe delete, never -D (#273)
         $acts[3] | Should -Match 'prune #9'
     }
-    It 'does NOT kill a wt session PID (it is the host/launcher, not the tab) - Codex #269' {
+    It 'does NOT kill the wt host PID - instead finds the tab shell by launch script (#413)' {
         $s = [pscustomobject]@{ issue = 8; branch = 'issue-8-w'; workPath = 'C:\wt\issue-8'; sessionPid = 4321; via = 'wt' }
+        Mock Find-WtTabShell { return $null }   # no shell running; deterministic
         $acts = @(Invoke-SessionCleanup -Session $s -DryRun)
-        ($acts -join ' ') | Should -Not -Match 'kill PID 4321'
-        ($acts -join ' ') | Should -Match 'NO mato PID'
+        ($acts -join ' ') | Should -Not -Match 'kill PID 4321'   # host PID is never killed
+        ($acts -join ' ') | Should -Match 'no encontrado'        # tab shell not running
         ($acts -join ' ') | Should -Match 'prune #8'
+    }
+    It 'kills the pwsh tab shell for a wt session when found by launch script name - #413' {
+        $s = [pscustomobject]@{ issue = 8; branch = 'issue-8-w'; workPath = 'C:\wt\issue-8'; sessionPid = 4321; via = 'wt' }
+        Mock Find-WtTabShell { return [pscustomobject]@{ ProcessId = 9999; CommandLine = 'pwsh -NoExit -File launch-8.ps1' } }
+        $acts = @(Invoke-SessionCleanup -Session $s -DryRun)
+        ($acts -join ' ') | Should -Not -Match 'kill PID 4321'   # host PID is never killed
+        ($acts -join ' ') | Should -Match 'kill PID 9999'        # kills the actual tab shell
+        ($acts -join ' ') | Should -Match 'launch-8'
     }
     It 'skips the PID-kill step when the session has no sessionPid' {
         $s = [pscustomobject]@{ issue = 5; branch = 'issue-5-y'; workPath = 'C:\wt\issue-5'; sessionPid = 0; via = 'pwsh' }
@@ -1742,8 +1751,7 @@ Describe 'Invoke-SessionCleanup (teardown plan, #135)' {
 Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
     # Real repo + real worktree + a REAL held handle: the whole bug is what the OS and git do to
     # each other here, so a mock would only re-assert my own assumption. The handle stands in for
-    # the untracked `wt` tab shell that Invoke-SessionCleanup deliberately never kills (PR #269),
-    # which makes this the DESIGNED case for -Launch sessions, not a rare one.
+    # a shell cwd'd inside the worktree, making this the designed case for -Launch sessions.
     BeforeEach {
         $script:Repo2 = Join-Path $TestDrive ('h' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $script:Work2 = "$($script:Repo2)-wt"
@@ -1755,6 +1763,9 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
         git -c user.email=t@t -c user.name=t commit -q -m base
         git worktree add -q -b issue-21-h $script:Work2 2>&1 | Out-Null
         Mock Remove-SessionRegistryEntry { }
+        # Mock Find-WtTabShell so no real Get-CimInstance is called: the FileStream below is
+        # the handle stand-in, not a real pwsh process (#413).
+        Mock Find-WtTabShell { return $null }
         # Deny-share handle on a file INSIDE the worktree - what a shell cwd'd in there does.
         $script:Handle = [System.IO.File]::Open((Join-Path $script:Work2 'a.txt'), 'Open', 'Read', 'None')
         function script:New-HSession {
@@ -1842,6 +1853,35 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
             (git branch --list 'issue-21-h') | Should -Not -BeNullOrEmpty
             Should -Invoke Remove-SessionRegistryEntry -Times 0 -Exactly
         } finally { git worktree unlock $script:Work2 2>&1 | Out-Null }
+    }
+}
+
+Describe 'Find-WtTabShellCore (pure: tab shell lookup by launch script - #413)' {
+    It 'returns null when no process carries the expected launch script' {
+        $procs = @(
+            [pscustomobject]@{ ProcessId = 1111; CommandLine = 'pwsh -NoExit -File C:\tmp\launch-42.ps1' }
+        )
+        $result = Find-WtTabShellCore -Processes $procs -IssueNum 8
+        $result | Should -BeNullOrEmpty
+    }
+    It 'returns the process matching the exact issue number' {
+        $procs = @(
+            [pscustomobject]@{ ProcessId = 1111; CommandLine = 'pwsh -NoExit -File C:\tmp\launch-42.ps1' }
+            [pscustomobject]@{ ProcessId = 2222; CommandLine = 'pwsh -NoExit -File C:\tmp\launch-8.ps1' }
+        )
+        $result = Find-WtTabShellCore -Processes $procs -IssueNum 8
+        $result.ProcessId | Should -Be 2222
+    }
+    It 'does NOT match a different issue that shares digits (e.g. issue 8 vs 82)' {
+        $procs = @(
+            [pscustomobject]@{ ProcessId = 3333; CommandLine = 'pwsh -NoExit -File C:\tmp\launch-82.ps1' }
+        )
+        $result = Find-WtTabShellCore -Processes $procs -IssueNum 8
+        $result | Should -BeNullOrEmpty
+    }
+    It 'returns null for an empty process list' {
+        $result = Find-WtTabShellCore -Processes @() -IssueNum 42
+        $result | Should -BeNullOrEmpty
     }
 }
 

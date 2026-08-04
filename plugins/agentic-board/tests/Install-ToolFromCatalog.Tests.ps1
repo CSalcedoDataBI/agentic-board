@@ -81,7 +81,7 @@ Describe 'Install-ToolFromCatalog — install --all (#388)' {
     AfterEach { if (Test-Path $script:StubLog) { Remove-Item $script:StubLog -Force } }
 
     It '-All -DryRun lists skill-clones and plugins separately, installing nothing' {
-        $out = (& $script:Install -All @script:Base -InstalledNames @() -DryRun) -join "`n"
+        $out = (& $script:Install -All @script:Base -InstalledNames @() -InstalledMcpServers @() -DryRun) -join "`n"
         (Test-Path $script:StubLog) | Should -BeFalse
         $out | Should -Match '1 skill-clone\(s\) to install, 1 plugin\(s\)'
         $out | Should -Match 'skill-creator \(skill-clone anthropics/skills'   # skill listed in the plan
@@ -89,13 +89,13 @@ Describe 'Install-ToolFromCatalog — install --all (#388)' {
     }
 
     It '-All without -Yes is a safe preview (no install)' {
-        $out = (& $script:Install -All @script:Base -InstalledNames @()) -join "`n"
+        $out = (& $script:Install -All @script:Base -InstalledNames @() -InstalledMcpServers @()) -join "`n"
         (Test-Path $script:StubLog) | Should -BeFalse
         $out | Should -Match '-Yes'
     }
 
     It '-All -Yes installs the skill-clones and surfaces the plugins' {
-        $out = (& $script:Install -All @script:Base -InstalledNames @() -Yes) -join "`n"
+        $out = (& $script:Install -All @script:Base -InstalledNames @() -InstalledMcpServers @() -Yes) -join "`n"
         (Get-Content -LiteralPath $script:StubLog -Raw) | Should -Match ([regex]::Escape('anthropics/skills|skill-creator|skill-creator'))
         (Get-Content -LiteralPath $script:StubLog -Raw) | Should -Not -Match 'skills-for-fabric'  # plugin not auto-run
         $out | Should -Match 'installed 1 skill-clone'
@@ -103,8 +103,52 @@ Describe 'Install-ToolFromCatalog — install --all (#388)' {
 
     It '-All reports nothing to do when all installables are present' {
         $b = $script:Base.Clone(); $b.InstalledPlugins = @('fabric-collection')
-        $out = (& $script:Install -All @b -InstalledNames @('skill-creator') -Yes) -join "`n"
+        $out = (& $script:Install -All @b -InstalledNames @('skill-creator') -InstalledMcpServers @() -Yes) -join "`n"
         (Test-Path $script:StubLog) | Should -BeFalse
         $out | Should -Match 'nothing to install'
+    }
+}
+
+Describe 'Install-ToolFromCatalog — mcp kind (#416)' {
+    BeforeAll {
+        $script:McpCatalogDir = Join-Path $TestDrive 'mcp-toolkits'
+        New-Item -ItemType Directory -Force -Path $script:McpCatalogDir | Out-Null
+        ,@( @{ name='deepwiki-mcp'; owner='Cognition'; repo='cognitionai/deepwiki'; kind='mcp'; detect='deepwiki'; path=$null; homepage='https://deepwiki.com'; license='see repo'; install='claude mcp add --transport sse deepwiki https://mcp.deepwiki.com/sse'; purpose='AI wiki.' } ) |
+            ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $script:McpCatalogDir 'mcp.json') -Encoding utf8
+
+        $script:McpRoot = Join-Path $TestDrive 'mcp-proj'
+        New-Item -ItemType Directory -Force -Path (Join-Path $script:McpRoot 'knowledge') | Out-Null
+        @{ version=1; project='test'; domains=@(); references=@() } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $script:McpRoot 'knowledge' 'registry.json') -Encoding utf8
+
+        $script:McpBase = @{
+            Root              = $script:McpRoot
+            CatalogDir        = $script:McpCatalogDir
+            InstallSkillWith  = $script:Stub
+            InstalledPlugins  = @()
+            InstalledMcpServers = @()
+        }
+    }
+
+    AfterEach { if (Test-Path $script:StubLog) { Remove-Item $script:StubLog -Force } }
+
+    It 'surfaces the claude mcp add command for an mcp entry' {
+        $out = (& $script:Install -Id 'deepwiki-mcp' @script:McpBase -InstalledNames @()) -join "`n"
+        (Test-Path $script:StubLog) | Should -BeFalse
+        $out | Should -Match 'MCP server'
+        $out | Should -Match 'claude mcp add'
+        $out | Should -Match 'deepwiki'
+    }
+
+    It 'skips an mcp server that is already installed' {
+        $b = $script:McpBase.Clone(); $b.InstalledMcpServers = @('deepwiki')
+        $out = (& $script:Install -Id 'deepwiki-mcp' @b -InstalledNames @()) -join "`n"
+        (Test-Path $script:StubLog) | Should -BeFalse
+        $out | Should -Match 'already installed'
+    }
+
+    It '-All includes mcp servers in the surfaced count' {
+        $out = (& $script:Install -All @script:McpBase -InstalledNames @() -Yes) -join "`n"
+        $out | Should -Match 'MCP server'
     }
 }
