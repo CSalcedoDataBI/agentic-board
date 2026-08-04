@@ -8,8 +8,10 @@
     launches a dedicated session in an isolated worktree — reusing the existing fleet/-Launch +
     worktree machinery. The user is freed and monitors with `/board work -Sessions -Watch`.
 
-    Pure cores (Format-AutoBrief, Get-BudgetVerdict) behind $env:ABIOS_EXPERTAUTO_DOTSOURCE for
-    unit tests; the CLI half reads gh + the contract and drives the launch.
+    Pure cores (Format-AutoBrief, Get-ContractBudgetMinutes) behind $env:ABIOS_EXPERTAUTO_DOTSOURCE
+    for unit tests; the CLI half reads gh + the contract and drives the launch. The contract's
+    time budget is ENFORCED (#564): it travels in the brake marker and the PreToolUse hook refuses
+    non-wrap-up commands once it is spent.
 
     Autonomy brakes only on the irreversible (Expert-Autonomy): the run reaches "PR ready" and
     stops there for the human to merge.
@@ -72,6 +74,16 @@ function Format-AutoBrief {
         "`nAdopt the agent type ``$($Contract.roleAgent)`` for this run — its definition is your persona.`n"
     } else { '' }
 
+    # Say what is TRUE about the budget (round 7): a contract with maxMinutes 0 has enforcement
+    # deliberately off, and briefing that run "the tool layer will refuse you" would be false
+    # operator guidance - the same overclaim shape #516 removed from the brake.
+    $budgetMin = Get-ContractBudgetMinutes -Contract $Contract
+    $budgetSentence = if ($budgetMin -gt 0) {
+        "The time budget ($budgetMin min) is ENFORCED, not advisory: past it, the tool layer refuses further work commands and only the wrap-up (handoff, commit/push WIP, report) still passes. When that happens, wrap up — do not fight the refusal."
+    } else {
+        "This contract sets no enforced time budget. Still hand off (``/board handoff -Save``) rather than grind when progress stalls."
+    }
+
     # The closing section. Both branches STOP; the ordered one also says why the order is inert.
     $closingSection = if ($EndToEnd) { @"
 ## STOP before the irreversible — including the close you were ordered to make
@@ -128,7 +140,7 @@ are the method.
    Then act on what you decided: an in-scope problem → fix it in the loop and continue;
    an out-of-scope finding → file a sanitized 'discovered' issue on the board and keep going.
 6. **Loop until done or budget**: keep iterating until the DoD is green — then leave the PR ready
-   and STOP before merge — or the budget is spent -> ``/board handoff -Save``.
+   and STOP before merge — or the budget is spent -> ``/board handoff -Save``. $budgetSentence
 7. **Report** — before you report anything, run ``/board expert verify`` for this issue and its PR.
    It reads the three evidence artifacts and answers COMPLETE or INCOMPLETE, naming what is missing.
    **Quote its verdict in your final report.** If it says INCOMPLETE you are not done: record what it
@@ -175,20 +187,39 @@ $closingSection
 "@
 }
 
-function Get-BudgetVerdict {
-    param(
-        [Parameter(Mandatory)][int]$ElapsedMinutes,
-        [Parameter(Mandatory)][int]$Iterations,
-        [Parameter(Mandatory)][hashtable]$Contract
-    )
-    $maxMin = 120; $maxIter = 8
-    if ($Contract.budget) {
-        if ($Contract.budget.maxMinutes)    { $maxMin  = [int]$Contract.budget.maxMinutes }
-        if ($Contract.budget.maxIterations) { $maxIter = [int]$Contract.budget.maxIterations }
+# Resolve the contract's time budget for the launch (#564). The old Get-BudgetVerdict computed a
+# verdict NOTHING ever called - the 120-minute budget was a sentence in the brief and a runaway
+# run had no wall-clock limit. Enforcement now lives where it can actually act: the launch writes
+# budgetMinutes into the brake marker, and the PreToolUse hook (Brake-Guard.Get-BudgetState)
+# refuses non-wrap-up commands once it is spent. Iterations stay advisory in the brief - a hook
+# that sees single tool calls cannot count verify-loop iterations honestly, and pretending to
+# would be the reporting-intent-as-fact defect again. Pure.
+function Get-ContractBudgetMinutes {
+    param([Parameter(Mandatory)][hashtable]$Contract)
+    # Presence, not truthiness (external review, #564 round 1): a configured maxMinutes of 0 is a
+    # deliberate "no budget enforcement" and must reach the marker as 0 - truthiness read it as
+    # absent and silently re-armed the 120-minute default the owner had just switched off.
+    $maxMin = 120
+    $b = $Contract.budget
+    if ($b) {
+        $has = $false; $val = $null
+        if ($b -is [hashtable]) {
+            if ($b.ContainsKey('maxMinutes')) { $has = $true; $val = $b['maxMinutes'] }
+        } elseif ($b.PSObject -and $b.PSObject.Properties['maxMinutes']) {
+            $has = $true; $val = $b.PSObject.Properties['maxMinutes'].Value
+        }
+        if ($has) {
+            # TryParse, not a cast (round 7): casts accept shapes that are not numbers - a
+            # boolean is 1/0, and a blank behaves differently per host - and every one of those
+            # must mean "malformed -> default", never "0 -> enforcement silently off".
+            if ($val -is [int] -or $val -is [long]) { $maxMin = [Math]::Max(0, [int]$val) }
+            else {
+                $parsed = 0
+                if ([int]::TryParse("$val", [ref]$parsed)) { $maxMin = [Math]::Max(0, $parsed) }
+            }
+        }
     }
-    if ($ElapsedMinutes -gt $maxMin) { return 'handoff' }
-    if ($Iterations -ge $maxIter)    { return 'handoff' }
-    'continue'
+    return $maxMin
 }
 
 # Dot-source guard: tests set $env:ABIOS_EXPERTAUTO_DOTSOURCE to load the pure cores only.
@@ -238,6 +269,14 @@ $brief | Set-Content -Path $briefPath -Encoding utf8
 Write-Host "=== /board expert auto  (issue #$Issue) ===" -ForegroundColor Cyan
 Write-Host "  Brief composed -> $briefPath" -ForegroundColor Green
 Write-Host "  Autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
+$resolvedBudget = Get-ContractBudgetMinutes -Contract $contract
+if ($resolvedBudget -gt 0) {
+    Write-Host "  Time budget: $resolvedBudget min - ENFORCED by the PreToolUse hook (#564): past it, only wrap-up commands pass." -ForegroundColor DarkGray
+} else {
+    # Say what is true (round 8): a 0 budget is enforcement deliberately OFF, and printing
+    # "ENFORCED" for it is the same overclaim shape the brake messages were cured of (#516).
+    Write-Host "  Time budget: NONE - this contract sets maxMinutes 0, so no mechanical limit is armed (#564)." -ForegroundColor DarkYellow
+}
 if ($stopAtPR -and $EndToEnd) {
     # Say what is TRUE, not what was asked for. The order is recorded and cannot yet be acted on
     # (#541); printing "the session may close its own PR" would be the same overclaim #516 removed.
@@ -265,7 +304,8 @@ if ($DryRun) {
 } else {
     Write-Host "  Launching the autonomous session in an isolated worktree..." -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot 'Board-Work.ps1') -ProjectNum $ProjectNum -Parallel $Issue -Launch -TokenVar $TokenVar `
-        -StopAtPR:$stopAtPR -BriefFile $briefPath -Irreversible @($contract.autonomy.irreversible) -EndToEnd:$EndToEnd
+        -StopAtPR:$stopAtPR -BriefFile $briefPath -Irreversible @($contract.autonomy.irreversible) -EndToEnd:$EndToEnd `
+        -BudgetMinutes (Get-ContractBudgetMinutes -Contract $contract)
     Write-Host ""
     Write-Host "  The launched session is briefed by $briefPath — it will research, build, test with" -ForegroundColor DarkGray
     Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray

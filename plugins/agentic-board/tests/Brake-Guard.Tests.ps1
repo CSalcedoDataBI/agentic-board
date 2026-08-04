@@ -1024,3 +1024,176 @@ Describe 'Test-IsBrakedCommand — the prefix must not step over a background op
             Should -Be 'merge'
     }
 }
+
+Describe 'The enforced time budget (#564)' {
+    # Until this change the contract's 120-minute budget was PROSE: Get-BudgetVerdict existed and
+    # nothing called it, so a runaway run had no wall-clock limit at all. The marker now carries
+    # budgetMinutes + armedAt, Get-BudgetState computes the verdict, and the hook refuses non
+    # wrap-up commands once the budget is spent.
+    BeforeAll {
+        $script:T0 = [datetime]'2026-08-03 10:00:00'
+        function script:Marker([int]$budget, [string]$armedAt = '2026-08-03 10:00:00') {
+            @{ issue = 42; irreversible = @('merge'); armedAt = $armedAt; budgetMinutes = $budget }
+        }
+    }
+
+    Context 'Get-BudgetState' {
+        It 'not enforced when the marker has no budget (0) - runs launched without one are untouched' {
+            $s = Get-BudgetState -Marker (script:Marker 0) -Now $script:T0.AddHours(9)
+            $s.Enforced   | Should -BeFalse
+            $s.OverBudget | Should -BeFalse
+        }
+        It 'within budget -> not over' {
+            $s = Get-BudgetState -Marker (script:Marker 120) -Now $script:T0.AddMinutes(60)
+            $s.Enforced   | Should -BeTrue
+            $s.OverBudget | Should -BeFalse
+            $s.ElapsedMinutes | Should -Be 60
+        }
+        It 'past budget -> over, with the elapsed number the deny message needs' {
+            $s = Get-BudgetState -Marker (script:Marker 120) -Now $script:T0.AddMinutes(121)
+            $s.OverBudget     | Should -BeTrue
+            $s.ElapsedMinutes | Should -Be 121
+            $s.MaxMinutes     | Should -Be 120
+        }
+        It 'fails OPEN on an unparsable armedAt - the budget is a liveness limit, not a safety control' {
+            # The brake fails closed; the budget deliberately does not. A corrupt timestamp that
+            # denied every command would brick normal work to enforce a resource cap.
+            $s = Get-BudgetState -Marker (script:Marker 120 'not-a-date') -Now $script:T0.AddHours(9)
+            $s.Enforced   | Should -BeFalse
+            $s.OverBudget | Should -BeFalse
+        }
+        It 'fails OPEN on a missing armedAt' {
+            $s = Get-BudgetState -Marker (script:Marker 120 '') -Now $script:T0.AddHours(9)
+            $s.OverBudget | Should -BeFalse
+        }
+    }
+
+    Context 'the marker round-trips the budget' {
+        It 'New-BrakeMarkerJson carries budgetMinutes' {
+            $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge') -ArmedAt '2026-08-03 10:00:00' -BudgetMinutes 90
+            ($json | ConvertFrom-Json).budgetMinutes | Should -Be 90
+        }
+        It 'a marker without the field reads as 0 (no enforcement) - older runs keep working' {
+            $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge') -ArmedAt '2026-08-03 10:00:00'
+            ($json | ConvertFrom-Json).budgetMinutes | Should -Be 0
+        }
+        It 'a negative budget clamps to 0 rather than arming a nonsense limit' {
+            $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge') -BudgetMinutes -5
+            ($json | ConvertFrom-Json).budgetMinutes | Should -Be 0
+        }
+    }
+
+    Context 'Test-IsBudgetExemptCommand - what an over-budget run may still do' {
+        It 'allows the handoff save (THE thing the budget wants it to run)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
+        }
+        It 'refuses a handoff -Resume: resuming is the START of more work, not the end of it (round 7)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Resume' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'scripts/Board-Handoff.ps1 -Resume' | Should -BeFalse
+        }
+        It 'refuses -Resume hiding a -Save in a comment (round 8: no comments in wrap-up commands, and -resume refuses on its own)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Resume # -Save' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'scripts/Board-Handoff.ps1 -Resume -Save' | Should -BeFalse
+        }
+        It 'allows committing and pushing the WIP' {
+            Test-IsBudgetExemptCommand -Command 'git add -A' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git commit -m "wip: out of budget"' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD:issue-42-branch' | Should -BeTrue
+        }
+        It 'allows reporting where it stopped' {
+            Test-IsBudgetExemptCommand -Command 'gh pr comment 90 --body "out of budget, handoff saved"' | Should -BeTrue
+        }
+        It 'refuses more work' {
+            Test-IsBudgetExemptCommand -Command 'npm run build' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'Invoke-Pester tests/' | Should -BeFalse
+        }
+        It 'refuses more work hiding behind a handoff in the same command line' {
+            # EVERY segment must be exempt - the same per-segment rule the brake applies, in reverse.
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Save; npm run build' | Should -BeFalse
+        }
+        It 'refuses work that merely CONTAINS an exempt phrase (external review: anchored, not matched anywhere)' {
+            # `npm run build -- git status` contained "git status" and sailed through the
+            # unanchored first cut. The command must BE the wrap-up, not mention one.
+            Test-IsBudgetExemptCommand -Command 'npm run build -- git status' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'echo see Board-Handoff.ps1 for details' | Should -BeFalse
+        }
+        It 'still allows the pwsh-launcher shape after anchoring' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -NoProfile -File scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command "& 'C:\repo\scripts\Board-Handoff.ps1' -Save" | Should -BeTrue
+        }
+        It 'refuses a pwsh -Command that merely MENTIONS the exempt script (round 2: -File target required)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -Command "npm run build # Board-Handoff.ps1"' | Should -BeFalse
+        }
+        It 'refuses -Command executing OTHER work with the handoff as mere arguments (round 5: closed host-flag list)' {
+            # pwsh treats this as executing build.ps1; the trailing -File never reaches the host.
+            Test-IsBudgetExemptCommand -Command 'pwsh -Command .\build.ps1 -File .\scripts\Board-Handoff.ps1' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'pwsh -EncodedCommand bnBtIHJ1biBidWlsZA== -File scripts/Board-Handoff.ps1' | Should -BeFalse
+        }
+        It 'still allows the known non-executing host flags before -File' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
+        }
+        It 'refuses work smuggled into an exempt segment via &, redirection or subexpression (round 3: exempt segments must be inert)' {
+            Test-IsBudgetExemptCommand -Command 'git status & npm run build' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git status > src/app.ts' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git commit -m "$(npm run build)"' | Should -BeFalse
+        }
+        It 'refuses the substitution forms the normalizer hides or leaves behind (round 4)' {
+            Test-IsBudgetExemptCommand -Command 'git status `npm run build`' | Should -BeFalse       # backticks: checked raw
+            Test-IsBudgetExemptCommand -Command 'git status (npm run build)' | Should -BeFalse       # PS grouping
+            Test-IsBudgetExemptCommand -Command 'git status @(npm run build)' | Should -BeFalse      # PS array subexpr
+        }
+        It 'stash is save-only: push/save pass, pop/apply/drop/clear are more work or lost work (round 4)' {
+            Test-IsBudgetExemptCommand -Command 'git stash' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git stash push -m wip' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git stash pop' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git stash drop' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git stash clear' | Should -BeFalse
+        }
+        It 'wrap-up git takes NO global flags - `-c diff.external=` was an execution primitive (round 6)' {
+            Test-IsBudgetExemptCommand -Command 'git -c diff.external=build.cmd diff' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git -C C:\elsewhere status' | Should -BeFalse
+        }
+        It 'the exempt script is an exact basename, not a suffix (round 6)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Evil-Board-Handoff.ps1' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'scripts/Evil-Board-Handoff.ps1 -Save' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
+        }
+        It 'an empty command is not exempt' {
+            Test-IsBudgetExemptCommand -Command '' | Should -BeFalse
+        }
+    }
+
+    Context 'Test-IsBudgetExemptWrite - the wrap-up surfaces' {
+        It 'allows the handoff files' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\HANDOFF.md' | Should -BeTrue
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.handoffs\2026-08-03-issue-42.md' | Should -BeTrue
+        }
+        It 'allows the run state dir and evidence' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.agentic-board\active-run.json' | Should -BeTrue
+            Test-IsBudgetExemptWrite -Path 'C:\repo\evidence\42.md' | Should -BeTrue
+        }
+        It 'refuses source files - that is more work' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\src\app.ts' | Should -BeFalse
+            Test-IsBudgetExemptWrite -Path 'C:\repo\scripts\Board-Work.ps1' | Should -BeFalse
+        }
+        It 'refuses a `..` escape through an allowed directory (external review: pure core cannot resolve, so it refuses the shape)' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.agentic-board\..\src\app.ts' | Should -BeFalse
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.handoffs\..\src\app.ts' | Should -BeFalse
+        }
+        It 'with a root, surfaces anchor to the worktree ROOT - a mid-path directory name is not a surface (round 6)' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\src\.agentic-board\app.ts' -Root 'C:\repo' | Should -BeFalse
+            Test-IsBudgetExemptWrite -Path 'C:\other\project\.agentic-board\x.json' -Root 'C:\repo' | Should -BeFalse
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.agentic-board\active-run.json' -Root 'C:\repo' | Should -BeTrue
+            Test-IsBudgetExemptWrite -Path 'C:\repo\HANDOFF.md' -Root 'C:\repo' | Should -BeTrue
+            Test-IsBudgetExemptWrite -Path 'C:\repo\evidence\42.md' -Root 'C:\repo' | Should -BeTrue
+        }
+    }
+
+    Context 'the brake still wins over the budget exemption' {
+        It 'git push to MAIN is a braked merge even though git push is budget-exempt' {
+            # The hook checks Test-IsBrakedCommand BEFORE the budget exemption, so the exempt
+            # list can never become a side door for the irreversible.
+            Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible @('merge') | Should -Be 'merge'
+        }
+    }
+}

@@ -165,3 +165,71 @@ Describe 'Brake hook — inside an armed run, failure means refusal' {
             Should -Be 'deny'
     }
 }
+
+Describe 'The hook enforces the time budget (#564)' {
+    # End-to-end over real stdin: an armed marker whose budget is SPENT refuses more work but
+    # leaves the wrap-up path open. The brake still takes precedence over the exemption.
+    BeforeAll {
+        function script:BudgetMarker {
+            param([int]$Budget, [string]$ArmedAt)
+            return "{`"issue`":42,`"irreversible`":[`"merge`"],`"endToEnd`":false,`"armedAt`":`"$ArmedAt`",`"budgetMinutes`":$Budget}"
+        }
+        $script:SpentAt = (Get-Date).AddHours(-3).ToString('yyyy-MM-dd HH:mm:ss')   # 180 min ago
+        $script:FreshAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    }
+
+    It 'refuses more work once the budget is spent, and says BUDGET (not BRAKE)' {
+        $wt  = script:NewWorktree 'budget-spent' (script:BudgetMarker 120 $script:SpentAt)
+        $out = script:RunHook -Cwd $wt -Command 'npm run build'
+        script:DecisionOf $out | Should -Be 'deny'
+        $out | Should -Match 'BUDGET'
+    }
+    It 'still allows the handoff save when over budget' {
+        $wt  = script:NewWorktree 'budget-handoff' (script:BudgetMarker 120 $script:SpentAt)
+        $out = script:RunHook -Cwd $wt -Command 'pwsh -File scripts/Board-Handoff.ps1 -Save'
+        $out | Should -BeNullOrEmpty
+    }
+    It 'still allows committing the WIP when over budget' {
+        $wt  = script:NewWorktree 'budget-commit' (script:BudgetMarker 120 $script:SpentAt)
+        $out = script:RunHook -Cwd $wt -Command 'git commit -m "wip: out of budget"'
+        $out | Should -BeNullOrEmpty
+    }
+    It 'the BRAKE still wins: a push to main over budget is refused as merge, not excused as git' {
+        $wt  = script:NewWorktree 'budget-brake' (script:BudgetMarker 120 $script:SpentAt)
+        $out = script:RunHook -Cwd $wt -Command 'git push origin HEAD:main'
+        script:DecisionOf $out | Should -Be 'deny'
+        $out | Should -Match 'BRAKE'
+    }
+    It 'within budget, ordinary work passes untouched' {
+        $wt  = script:NewWorktree 'budget-fresh' (script:BudgetMarker 120 $script:FreshAt)
+        $out = script:RunHook -Cwd $wt -Command 'npm run build'
+        $out | Should -BeNullOrEmpty
+    }
+    It 'a marker with no budget field enforces nothing (older runs untouched)' {
+        $wt  = script:NewWorktree 'budget-none' (script:Marker)
+        $out = script:RunHook -Cwd $wt -Command 'npm run build'
+        $out | Should -BeNullOrEmpty
+    }
+    It 'over budget, a WRITE outside the wrap-up surfaces is refused' {
+        $wt  = script:NewWorktree 'budget-write' (script:BudgetMarker 120 $script:SpentAt)
+        $out = script:RunHook -Cwd $wt -Tool 'Write' -FilePath (Join-Path $wt 'src\app.ts')
+        script:DecisionOf $out | Should -Be 'deny'
+        $out | Should -Match 'BUDGET'
+    }
+    It 'over budget, writing the handoff file is allowed' {
+        $wt  = script:NewWorktree 'budget-write-ok' (script:BudgetMarker 120 $script:SpentAt)
+        $out = script:RunHook -Cwd $wt -Tool 'Write' -FilePath (Join-Path $wt 'HANDOFF.md')
+        $out | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Budget-only marker - a contract that does not brake on merge still gets its time limit (#564 round 2)' {
+    It 'enforces the budget from a marker whose irreversible list has no merge' {
+        $armedOld = (Get-Date).AddHours(-3).ToString('yyyy-MM-dd HH:mm:ss')
+        $mk  = "{`"issue`":7,`"irreversible`":[`"deploy`"],`"endToEnd`":false,`"armedAt`":`"$armedOld`",`"budgetMinutes`":60}"
+        $wt  = script:NewWorktree 'budget-only' $mk
+        $out = script:RunHook -Cwd $wt -Command 'npm run build'
+        script:DecisionOf $out | Should -Be 'deny'
+        $out | Should -Match 'BUDGET'
+    }
+}

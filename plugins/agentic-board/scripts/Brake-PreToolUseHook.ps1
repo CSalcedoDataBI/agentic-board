@@ -62,6 +62,12 @@ try {
     # MultiEdit belongs here too: it is a file-writing path like the others, and leaving it out
     # left one uncovered route to the marker. Listing a tool this harness may not expose costs
     # nothing; omitting one it does expose costs the whole control.
+    #
+    # Read-only tools (Read/Grep/Glob) stay OUTSIDE both controls, including the budget (#564,
+    # considered and rejected in external review round 2): a read produces no work product - work
+    # externalizes through commands and writes, which ARE gated - and intercepting every read
+    # would add a per-call interpreter spawn to the hot path for no containment gain. The budget
+    # is a liveness limit; reading while wrapping up is legitimate.
     $writeTools = @('Edit', 'Write', 'NotebookEdit', 'MultiEdit')
     if ($toolName -notin ($shellTools + $writeTools)) { exit 0 }
 
@@ -77,12 +83,26 @@ try {
     $marker = Read-BrakeMarker -StartDir $cwd
     if (-not $marker) { Write-Output $script:HardDeny; exit 0 }  # armed, but unreadable -> refuse
 
+    # The time budget (#564): computed once, applied after the brake checks below. The brake is a
+    # SAFETY control and always wins; the budget is a LIVENESS limit that only constrains what an
+    # over-budget run may still do (wrap up: handoff, commit/push WIP, report).
+    $budget = Get-BudgetState -Marker $marker -Now (Get-Date)
+
     if ($toolName -in $writeTools) {
         # Rewriting the marker disarms the run just as effectively as deleting it - emptying its
         # list, or pointing it at nothing. Editing it is never part of the task.
         $target = "$($payload.tool_input.file_path)"
         if ($target -and ($target -replace '\\', '/') -match '(?i)brake-armed\.json$') {
             Write-Output (New-BrakeDenyJson -Action 'tamper' -Issue $marker.issue)
+            exit 0
+        }
+        # Over budget, a write is allowed only toward the wrap-up surfaces (handoff files, the
+        # run's state dir, evidence), ANCHORED to the armed worktree's root - derived from the
+        # marker's own location, the one path fact the run cannot spoof (#564 round 6).
+        $wtRoot = ''
+        try { if ($marker.path) { $wtRoot = Split-Path (Split-Path $marker.path -Parent) -Parent } } catch { $wtRoot = '' }
+        if ($budget.OverBudget -and -not (Test-IsBudgetExemptWrite -Path $target -Root $wtRoot)) {
+            Write-Output (New-BudgetDenyJson -Issue $marker.issue -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes)
         }
         exit 0
     }
@@ -94,9 +114,15 @@ try {
     # comment the run can post itself). Tracked in #541 - until then the order is recorded and
     # never acted on, which is the honest state.
     $action  = Test-IsBrakedCommand -Command $command -Irreversible $marker.irreversible
-    if (-not $action) { exit 0 }
+    if ($action) {
+        Write-Output (New-BrakeDenyJson -Action $action -Issue $marker.issue)
+        exit 0
+    }
 
-    Write-Output (New-BrakeDenyJson -Action $action -Issue $marker.issue)
+    # Not braked - but past the budget, only wrap-up commands pass (#564).
+    if ($budget.OverBudget -and -not (Test-IsBudgetExemptCommand -Command $command)) {
+        Write-Output (New-BudgetDenyJson -Issue $marker.issue -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes)
+    }
     exit 0
 } catch {
     # Inside an armed run, an error means we could not prove the command safe -> refuse.

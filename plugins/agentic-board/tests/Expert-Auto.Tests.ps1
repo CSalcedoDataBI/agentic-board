@@ -1,7 +1,8 @@
 #Requires -Modules Pester
-<#  Tests for Expert-Auto.ps1 — the `auto` verb: compose the autonomous brief and decide when the
-    budget is spent. Pure cores (Format-AutoBrief, Get-BudgetVerdict) behind
-    ABIOS_EXPERTAUTO_DOTSOURCE; the launch itself reuses the existing fleet/-Launch machinery. #>
+<#  Tests for Expert-Auto.ps1 — the `auto` verb: compose the autonomous brief and resolve the
+    time budget the launch hands to the brake marker (#564). Pure cores (Format-AutoBrief,
+    Get-ContractBudgetMinutes) behind ABIOS_EXPERTAUTO_DOTSOURCE; the launch itself reuses the
+    existing fleet/-Launch machinery, and ENFORCEMENT lives in the PreToolUse hook (Brake-Guard). #>
 
 BeforeAll {
     $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-Auto.ps1' | Resolve-Path
@@ -41,15 +42,46 @@ Describe 'Format-AutoBrief' {
     }
 }
 
-Describe 'Get-BudgetVerdict' {
-    It 'continues while within the budget' {
-        Get-BudgetVerdict -ElapsedMinutes 10 -Iterations 1 -Contract $script:Contract | Should -Be 'continue'
+Describe 'Get-ContractBudgetMinutes - the budget the launch hands to the brake marker (#564)' {
+    # Replaces Get-BudgetVerdict, which was dead code: it computed a verdict nothing ever called,
+    # so the 120-minute budget existed only as a sentence in the brief. The launch now writes this
+    # value into the brake marker and the PreToolUse hook enforces it (see Brake-Guard tests).
+    It 'reads the contract maxMinutes' {
+        Get-ContractBudgetMinutes -Contract $script:Contract | Should -Be 120
     }
-    It 'hands off past the minute budget' {
-        Get-BudgetVerdict -ElapsedMinutes 121 -Iterations 1 -Contract $script:Contract | Should -Be 'handoff'
+    It 'defaults to 120 when the contract has no budget section' {
+        Get-ContractBudgetMinutes -Contract @{ role = 'r' } | Should -Be 120
     }
-    It 'hands off at the iteration cap' {
-        Get-BudgetVerdict -ElapsedMinutes 5 -Iterations 8 -Contract $script:Contract | Should -Be 'handoff'
+    It 'honours a custom budget' {
+        Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = 45 } } | Should -Be 45
+    }
+    It 'a malformed value falls back to the default instead of crashing the launch' {
+        Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = 'lots' } } | Should -Be 120
+    }
+    It 'preserves an explicit 0 as "no enforcement" (external review: presence, not truthiness)' {
+        # Truthiness read a configured 0 as absent and silently re-armed the 120-minute default
+        # the owner had just switched off.
+        Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = 0 } } | Should -Be 0
+    }
+    It 'a blank or boolean value is MALFORMED -> default, never "enforcement silently off" (round 7)' {
+        Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = '' } } | Should -Be 120
+        Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = $true } } | Should -Be 120
+    }
+}
+
+Describe 'The brief tells the truth about the budget (#564 round 7)' {
+    It 'a zero-budget contract is NOT briefed as mechanically enforced' {
+        $c = @{ role = 'r'; autonomy = @{ irreversible = @('merge') }; dod = @{ ci = $true }
+                budget = @{ maxIterations = 8; maxMinutes = 0 } }
+        $b = Format-AutoBrief -Contract $c -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)no enforced time budget'
+        $b | Should -Not -Match '(?i)is ENFORCED, not advisory'
+    }
+    It 'a positive budget states the enforced number and names the allowed wrap-up' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '120 min'
+        $b | Should -Match '(?i)enforced'
+        $b | Should -Match '(?i)handoff'
     }
 }
 

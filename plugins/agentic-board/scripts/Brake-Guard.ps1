@@ -316,6 +316,11 @@ function Read-BrakeMarker {
                     $irr = @('merge','deploy','refresh','publish','delete')
                     $tampered = $true
                 }
+                # budgetMinutes: 0 (not enforced) unless the marker carries a positive integer.
+                # A malformed value reads as 0 - the budget is a LIVENESS limit, not a safety
+                # control, so its failure direction is open (see Get-BudgetState).
+                $budgetMin = 0
+                try { if ($null -ne $o.budgetMinutes) { $budgetMin = [Math]::Max(0, [int]$o.budgetMinutes) } } catch { $budgetMin = 0 }
                 return @{
                     issue        = if ($o.issue) { [int]$o.issue } else { 0 }
                     irreversible = $irr
@@ -326,6 +331,7 @@ function Read-BrakeMarker {
                     # reads as NOT ordered: a run that predates this mode never received it.
                     endToEnd     = ($o.endToEnd -is [bool] -and $o.endToEnd)
                     armedAt      = "$($o.armedAt)"
+                    budgetMinutes = $budgetMin
                     path         = $candidate
                     emptied      = $tampered
                 }
@@ -366,7 +372,12 @@ function New-BrakeMarkerJson {
         # the instruction that launched the run, not to a setting on disk that could be edited
         # afterwards - and because the merge decision happens later, when this file is the only
         # thing that still remembers what was asked for (#530).
-        [bool]$EndToEnd = $false
+        [bool]$EndToEnd = $false,
+        # The contract's maxMinutes, made ENFORCEABLE (#564): the PreToolUse hook computes elapsed
+        # time from armedAt and, past this many minutes, refuses further work commands (handoff and
+        # wrap-up stay allowed). 0 = no budget enforcement. Until this field, the 120-minute budget
+        # existed only as a sentence in the brief - a limit nothing could apply.
+        [int]$BudgetMinutes = 0
     )
     $irr = @($Irreversible | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
     if ($irr.Count -eq 0) { $irr = @('merge','deploy','refresh','publish','delete') }
@@ -375,6 +386,7 @@ function New-BrakeMarkerJson {
         irreversible = $irr
         endToEnd     = $EndToEnd
         armedAt      = $ArmedAt
+        budgetMinutes = [Math]::Max(0, $BudgetMinutes)
         branch       = $Branch
         host         = $HostName
         note         = 'Written by /board expert auto. Removing this file disarms the brake for this worktree.'
@@ -407,7 +419,8 @@ function Set-BrakeArmedState {
         [string]$Branch = '',
         [string]$HostName = '',
         [string]$ArmedAt = '',
-        [bool]$EndToEnd = $false
+        [bool]$EndToEnd = $false,
+        [int]$BudgetMinutes = 0
     )
     $path = Get-BrakeMarkerPath -WorkPath $WorkPath
     if (-not $Armed) {
@@ -421,8 +434,182 @@ function Set-BrakeArmedState {
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     Set-Content -LiteralPath $path -Encoding UTF8 -Value (
         New-BrakeMarkerJson -Issue $Issue -Irreversible $Irreversible -ArmedAt $ArmedAt `
-            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd)
+            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd -BudgetMinutes $BudgetMinutes)
     return 'armed'
+}
+
+<#
+    Is this run past its time budget? (#564)
+
+    The contract's 120-minute budget was a sentence in the brief - Get-BudgetVerdict existed and
+    nothing called it, so a runaway run had no wall-clock limit at all. The marker now carries
+    budgetMinutes + armedAt, and this computes the verdict the hook enforces.
+
+    FAIL DIRECTION - open, and deliberately the opposite of the brake: the budget is a LIVENESS
+    limit (stop a runaway run), not a safety control (stop an irreversible action). A corrupt
+    armedAt that denied every command would brick normal work to enforce a resource cap; instead,
+    an unparsable/absent armedAt or a 0 budget reports not-enforced. The brake's own fail-closed
+    behavior is untouched - it runs BEFORE the budget check in the hook. Pure.
+#>
+function Get-BudgetState {
+    param(
+        [Parameter(Mandatory)]$Marker,
+        [Parameter(Mandatory)][datetime]$Now
+    )
+    $max = 0
+    try { if ($null -ne $Marker.budgetMinutes) { $max = [Math]::Max(0, [int]$Marker.budgetMinutes) } } catch { $max = 0 }
+    if ($max -le 0) {
+        return @{ Enforced = $false; OverBudget = $false; ElapsedMinutes = 0; MaxMinutes = 0 }
+    }
+    $armed = $null
+    try {
+        $armed = [datetime]::ParseExact("$($Marker.armedAt)", 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+    } catch { $armed = $null }
+    if (-not $armed) {
+        return @{ Enforced = $false; OverBudget = $false; ElapsedMinutes = 0; MaxMinutes = $max }
+    }
+    $elapsed = [int][Math]::Floor(($Now - $armed).TotalMinutes)
+    return @{
+        Enforced       = $true
+        OverBudget     = ($elapsed -gt $max)
+        ElapsedMinutes = $elapsed
+        MaxMinutes     = $max
+    }
+}
+
+# What an over-budget run is still allowed to do from a SHELL tool: save its state and leave.
+# Everything here is reversible wrap-up - the brake patterns are checked BEFORE this exemption in
+# the hook, so `git push origin HEAD:main` is still a refused merge, exempt list or not.
+#
+# Every pattern is ANCHORED to the start of the segment (external review, #564 round 1): matched
+# anywhere, an exempt token became a free pass - `npm run build -- git status` contained "git
+# status" and sailed through. The COMMAND must be the wrap-up, not merely mention one. The only
+# permitted prefixes are the launcher shapes (`&`, `pwsh -File ...`) that genuinely execute the
+# exempt script.
+# The exact basename, preceded by nothing or a path separator (round 6): `\S*` before the name
+# accepted any SUFFIX match, so `Evil-Board-Handoff.ps1` rode the exemption of the script it
+# merely ends like.
+# The handoff script must be invoked with -save (round 7): Board-Handoff.ps1 also exposes
+# -Resume, which is the START of more work, not the end of it. The runledger's verbs are all
+# wrap-up, so it carries no such constraint. Round 8 added the -resume refusal: `-Resume # -Save`
+# satisfied the -save lookahead with commented-out text (the inert rule now also refuses `#`, but
+# a switch the host actually receives deserves its own refusal, not a ride on the comment rule).
+# The lookaheads are safe against smuggling because an exempt segment is already required to be
+# INERT (no ;, &, |, #, redirections or subexpressions).
+$script:BudgetExemptHandoffSave = '(?=[^;|&]*\s-save\b)(?![^;|&]*\s-resume\b)'
+$script:BudgetExemptPatterns = @(
+    ('^(?:& )?(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
+    '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
+    # Via a pwsh launcher: the exempt script must be the -File TARGET, and the prefix may carry
+    # ONLY known non-executing host flags (round 5): "any flag-shaped token" admitted -Command,
+    # and `pwsh -command build.ps1 -file ...board-handoff.ps1` executes build.ps1 with '-file ...'
+    # as its ARGUMENTS - the -File this pattern trusted never reaches the host. Requiring -File
+    # at all is the round-2 fix (a -Command string that merely MENTIONED the script was a free
+    # pass); the closed flag list is what makes the -File the one the host actually honours.
+    ('^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
+    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
+    ('^/board\s+handoff\b' + $script:BudgetExemptHandoffSave)      # the slash-command spelling
+    # Wrap-up git takes NO global flags (round 6): the $script:GitCmd gap admitted `-c
+    # diff.external=build.cmd`, and git then executes the configured helper - the exemption
+    # became an execution primitive. The brake keeps the flag-tolerant matcher (it must not be
+    # shaken off by a flag); the exemption is a positive allowlist and stays strict instead.
+    '^git\s+(status|diff|log|add|commit|push)\b'
+    # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
+    # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
+    # is push and stays allowed.
+    '^git\s+stash(\s+(push|save)\b.*)?\s*$'
+    '^gh\s+(pr|issue)\s+(comment|view)\b'                          # report where it stopped / read for the handoff
+)
+
+# True when an over-budget shell command is part of wrapping up rather than more work. Pure.
+function Test-IsBudgetExemptCommand {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Command)
+    # Backticks are checked on the RAW command (round 4): the normalizer strips them, so a Bash
+    # substitution (`git status `npm run build``) normalized into text the anchored patterns
+    # accept - the nested command would already have run by then. Conservative on purpose: a
+    # PowerShell escape backtick in a message is rare in wrap-up commands and easy to rephrase.
+    if ("$Command".Contains('`')) { return $false }
+    $norm = ConvertTo-NormalizedCommand $Command
+    if (-not $norm) { return $false }
+    # EVERY segment must be exempt: `Board-Handoff.ps1 -Save; npm run build` is more work wearing
+    # a handoff as a hat - the same per-segment rule the brake itself applies, in reverse.
+    $sawSegment = $false
+    foreach ($segment in ($norm -split $script:SegmentSeparator)) {
+        $seg = $segment.Trim()
+        if (-not $seg) { continue }
+        if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
+        $sawSegment = $true
+        # An exempt PREFIX must not smuggle more work in the same segment (round 3): the splitter
+        # does not split on a lone `&`, and redirections / subexpressions ride inside the segment
+        # - `git status & npm run build`, `git status > src/app.ts`, `git commit -m $(npm run
+        # build)` all began with wrap-up and carried work. An exempt segment must be INERT: no
+        # background operator, no redirection, no subexpression. A LEADING `& ` is PowerShell's
+        # call operator - part of the launcher shape the patterns accept - so only that one is
+        # stripped before the check. The cost is a conservative refusal of, say, a commit message
+        # containing '&' - the deny message says how to rephrase. Parentheses are refused too
+        # (round 4): `git status (npm run build)` / `@(npm run build)` are PowerShell execution
+        # forms that survive normalization, and no wrap-up command needs them. And `#` (round 8):
+        # commented-out text satisfied the handoff's -save lookahead while the host received
+        # -resume - a wrap-up command has no business carrying a comment.
+        if (($seg -replace '^&\s+', '') -match '[&<>()#]') { return $false }
+        $segExempt = $false
+        foreach ($p in $script:BudgetExemptPatterns) {
+            if ($seg -match $p) { $segExempt = $true; break }
+        }
+        if (-not $segExempt) { return $false }
+    }
+    return $sawSegment
+}
+
+# Writes an over-budget run may still make: the handoff surfaces and the run's own state dir.
+# `..` anywhere in the path refuses outright (external review, #564 round 1): this core is pure
+# (no filesystem), so it cannot resolve `C:\repo\.handoffs\..\src\app.ts` - and no legitimate
+# wrap-up write ever needs a parent-directory hop. Refusing the shape closes the escape without
+# needing the resolution.
+#
+# With -Root (the armed worktree, derived from the marker's own location), the surfaces are
+# anchored to the ROOT rather than matched anywhere in the path (round 6): unanchored,
+# `C:\repo\src\.agentic-board\app.ts` passed because a directory NAME appeared mid-path. Without
+# a root (no marker context) the anywhere-match remains as the conservative fallback.
+function Test-IsBudgetExemptWrite {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Path,
+        [string]$Root = ''
+    )
+    if (-not "$Path".Trim()) { return $false }
+    $p = "$Path" -replace '\\', '/'
+    if ($p -match '(^|/)\.\.(/|$)') { return $false }
+    $surfaces = '(?i)^(HANDOFF\.md|active-handoff\.md|MEMORY\.md)$|^\.handoffs(/|$)|^\.agentic-board(/|$)|^evidence/[^/]+\.md$'
+    $r = "$Root".Trim() -replace '\\', '/'
+    if ($r) {
+        $r = $r.TrimEnd('/')
+        if (-not $p.StartsWith("$r/", [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+        return [bool](($p.Substring($r.Length + 1)) -match $surfaces)
+    }
+    return [bool]($p -match '(?i)(^|/)(HANDOFF\.md|active-handoff\.md)$|(^|/)\.handoffs(/|$)|(^|/)\.agentic-board(/|$)|(^|/)MEMORY\.md$|(^|/)evidence/[^/]+\.md$')
+}
+
+# The deny payload for an over-budget command: instructive, not punitive - it names the exact
+# wrap-up sequence that is still allowed.
+function New-BudgetDenyJson {
+    param(
+        [int]$Issue = 0,
+        [int]$ElapsedMinutes = 0,
+        [int]$MaxMinutes = 0
+    )
+    $issueClause = if ($Issue -gt 0) { " (issue #$Issue)" } else { "" }
+    $reason = "BUDGET: refused - this autonomous run$issueClause has spent $ElapsedMinutes of its " +
+              "$MaxMinutes-minute budget. The budget is enforced mechanically, not advisory (#564). " +
+              "Wrap up now - these are still allowed: commit and push your WIP, run " +
+              "'/board handoff -Save' (Board-Handoff.ps1) to persist the resume state, close the " +
+              "run ledger, and leave a PR/issue comment saying where you stopped. Then STOP and " +
+              "report. Do not start new work; if more time is genuinely needed, the human relaunches " +
+              "with a fresh budget."
+    return (@{ hookSpecificOutput = @{
+        hookEventName            = 'PreToolUse'
+        permissionDecision       = 'deny'
+        permissionDecisionReason = $reason
+    } } | ConvertTo-Json -Depth 5 -Compress)
 }
 
 # The PreToolUse deny payload, verbatim per the hook contract: exit 0 with this on stdout.
