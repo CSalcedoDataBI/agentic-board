@@ -1,6 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [0.33.0] - 2026-08-04
+
+**The performance & autonomy overhaul — the tool stops feeling slow and stalled.** A cold
+engineering review (three parallel deep-dives over the work loop, the plan→expert flow and the
+architecture) found the stalls were structural: an unbounded CI wait, a 6-minute reviewer poll
+paid on every PR, a dead-code run budget, no automatic epic progression, zero visible signal
+when a run stopped, ~50–140 uncached GitHub calls per issue, a ~1.3 s interpreter spawn on every
+tool call, ~72 KB of always-loaded instructions, and a telemetry subsystem blind to time. Epic
+#561 fixed all fifteen findings: #562–#576, PRs #577–#591, every behavioral change with tests
+verified by breaking the code, and every PR through the review gate (Codex external review in
+rounds while quota lasted — 40+ findings fixed across the batch — then the sanctioned
+self-review fallback, stated on each record).
 
 ### Added
 - **The product agenda policy is written down** (#576, closing epic #561's list). `CONTRIBUTING.md`
