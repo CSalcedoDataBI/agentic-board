@@ -87,10 +87,18 @@ foreach ($p in $pending) {
 
     $events = [System.Collections.Generic.List[object]]::new()
     $i = 0
+    # Timestamp bounds of the WHOLE transcript (#568, review round 2): the loop reads every line
+    # anyway, so a cheap regex captures the true first/last stamps - the parsed-event subset is
+    # pre-filtered (tool_use/tool_result/user) and its bounds undercount the session.
+    $fileFirstTs = ''; $fileLastTs = ''
     try {
         $reader = [System.IO.File]::OpenText($src.path)
         try {
             while ($null -ne ($line = $reader.ReadLine())) {
+                if ($line -match '"timestamp"\s*:\s*"([^"]+)"') {
+                    if (-not $fileFirstTs) { $fileFirstTs = $Matches[1] }
+                    $fileLastTs = $Matches[1]
+                }
                 # Cheap pre-filter: a line with none of these markers cannot become an event the
                 # detectors use, and ConvertFrom-Json over 571 MB is the whole cost of the sweep.
                 if ($i -ge $p.fromEvent -and $line.Length -gt 20 -and
@@ -109,23 +117,15 @@ foreach ($p in $pending) {
     $episodes = @(Get-FieldEpisodes -Events (Join-FieldResults -Events $events.ToArray()) -Window $Window)
     $used = if ($episodes.Count) { 'yes' } else { 'no' }
 
-    # Session wall-clock (#568). UNKNOWN stays $null in memory and in the record file - only the
-    # CSV coerces to 0 (a cell cannot hold null); fabricating a zero elsewhere is a claim, not a
-    # measurement. On an INCREMENTAL scan the slice only starts at the watermark, so the total
-    # runs from the ledger's persisted firstTs, not from the slice's own first event - otherwise
-    # a rescan overwrote the total with the slice (external review round 1).
-    $evArr = $events.ToArray()
-    $prevRow = @($ledger | Where-Object { $_ -and $_.project -eq $p.project -and $_.sessionId -eq $p.sessionId }) | Select-Object -First 1
-    $firstTs = ''
-    if ($p.fromEvent -gt 0 -and $prevRow -and "$($prevRow.PSObject.Properties['firstTs'].Value)".Trim()) {
-        $firstTs = "$($prevRow.firstTs)"
-    } elseif ($evArr.Count -gt 0 -and $null -ne $evArr[0].PSObject.Properties['ts']) {
-        $firstTs = "$($evArr[0].ts)"
-    }
+    # Session wall-clock (#568) from the FULL transcript bounds captured above - never from the
+    # filtered event subset, and immune to incremental watermarks because every scan streams the
+    # whole file. UNKNOWN stays $null in memory and in the record file - only the CSV coerces to
+    # 0 (a cell cannot hold null); fabricating a zero elsewhere is a claim, not a measurement.
+    $firstTs = $fileFirstTs
     $sessionDurationMin = $null
-    if ($evArr.Count -gt 0 -and $firstTs) {
-        $t0 = ConvertTo-FieldTimestamp -Ts $firstTs
-        $t1 = ConvertTo-FieldTimestamp -Ts $evArr[$evArr.Count - 1].ts
+    if ($fileFirstTs -and $fileLastTs) {
+        $t0 = ConvertTo-FieldTimestamp -Ts $fileFirstTs
+        $t1 = ConvertTo-FieldTimestamp -Ts $fileLastTs
         if ($t0 -and $t1 -and $t1 -ge $t0) { $sessionDurationMin = [int][Math]::Round(($t1 - $t0).TotalMinutes) }
     }
 
