@@ -22,12 +22,20 @@
 # ── Pure decision helpers (unit-testable; no I/O) ─────────────────────────────
 
 # Does a reviews list show Copilot answering that it could NOT review (no quota / unavailable)? The bot
-# posts this as a COMMENTED review by copilot-pull-request-reviewer. Pure.
+# posts this as a COMMENTED review by copilot-pull-request-reviewer. With -HeadSha, only a refusal
+# bound to THAT commit counts (#563): a stale refusal from an earlier commit is not an answer to the
+# current request, and letting it renew the full cooldown suppressed the 1-day silence path the gate
+# uses for a request that got no answer at all. Without -HeadSha the old any-refusal behavior holds. Pure.
 function Test-CopilotUnavailableReview {
-    param([object[]]$Reviews)
+    param(
+        [object[]]$Reviews,
+        [string]$HeadSha = ''
+    )
+    $head = "$HeadSha".Trim()
     foreach ($r in @($Reviews)) {
         $login = "$($r.author.login)"
         if ($login -notmatch '(?i)copilot') { continue }
+        if ($head -and "$($r.commit.oid)".Trim() -ne $head) { continue }
         if ("$($r.body)" -match '(?i)unable to review|quota limit|reached their quota|not available|no seats|isn''t available') {
             return $true
         }

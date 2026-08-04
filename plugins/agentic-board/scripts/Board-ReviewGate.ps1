@@ -704,7 +704,7 @@ $decision   = $prState.reviewDecision
 # If Copilot answered that it could NOT review (no quota), remember it per account so the NEXT PR skips
 # the request + the wait entirely (#367). Only when we actually requested it this run — a skipped run
 # has nothing new to learn. Best-effort: a marker write failure never affects the gate verdict.
-if ($copilotRequested -and (Test-CopilotUnavailableReview $reviews)) {
+if ($copilotRequested -and (Test-CopilotUnavailableReview -Reviews $reviews -HeadSha "$($prState.headRefOid)")) {
     $cooldownDays = [Math]::Max(1, $CopilotCooldownDays)
     if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays($cooldownDays) -Reason 'Copilot answered: unable to review (quota/limit)') {
         Write-Host ("  Copilot sin disponibilidad detectada - marcado NO disponible para {0} por {1} dia(s); no lo volvere a solicitar/esperar hasta entonces (#367)." -f $copilotOwner, $cooldownDays) -ForegroundColor DarkYellow
