@@ -216,7 +216,12 @@ function Get-ApplicableDodGates {
         [hashtable]$Dod = @{},
         [string[]]$ChangedPaths = @()
     )
-    $enabled = @(@($Dod.Keys) | Where-Object { $Dod[$_] })
+    # Strict boolean, not truthiness (external review): a hand-edited contract with "bpa":"false"
+    # is a non-empty string, and truthiness would re-enable the gate the owner turned off.
+    $enabled = @(@($Dod.Keys) | Where-Object {
+        $v = $Dod[$_]
+        ($v -is [bool] -and $v) -or ("$v" -match '^\s*(?i)true\s*$')
+    })
     $paths = @(@($ChangedPaths) | ForEach-Object { ("$_" -replace '\\', '/').Trim() } | Where-Object { $_ })
     if ($paths.Count -eq 0) { return @($enabled) }   # unknown diff -> every enabled gate
 

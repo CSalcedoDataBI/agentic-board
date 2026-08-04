@@ -125,8 +125,13 @@ $agentLine
 ## Plan (what to deliver)
 $PlanBody
 
-## Definition of Done — every gate must pass before you consider this complete
+## Definition of Done — the contract's gates; your DIFF decides which apply
 $dodList
+
+These are the gates the contract ENABLES. Which ones your change actually owes is decided by the
+diff (#569): run ``Expert-WorkClass.ps1`` and it prints the owed vs not-applicable split — that
+output is the authority, not this list. Every OWED gate must pass before you consider this
+complete; a gate the diff does not trigger (e.g. ``bpa`` with no model files) is not owed.
 
 ## How you work — seven phases (do NOT skip any)
 

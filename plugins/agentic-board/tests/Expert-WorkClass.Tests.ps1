@@ -227,3 +227,13 @@ Describe 'Get-ApplicableDodGates - the DoD scales to the diff (#569)' {
         (Get-ApplicableDodGates -Dod $dod -ChangedPaths @('README.md')) | Should -Contain 'sonar'
     }
 }
+
+Describe 'Get-ApplicableDodGates - strict booleans (#569 review)' {
+    It 'a hand-edited "false" STRING reads as disabled, never re-enabled by truthiness' {
+        $dod = @{ ci = $true; bpa = 'false'; tests = 'true' }
+        $g = Get-ApplicableDodGates -Dod $dod -ChangedPaths @('model/x.tmdl')
+        $g | Should -Not -Contain 'bpa'
+        $g | Should -Contain 'tests'
+        $g | Should -Contain 'ci'
+    }
+}
