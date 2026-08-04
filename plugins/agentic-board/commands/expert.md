@@ -15,6 +15,10 @@ for the user to pick (they can answer with just the number):
                      construye, prueba dejando evidencia, se auto-usa agentic-board para el
                      trabajo lateral que encuentra, y FRENA antes de lo irreversible (merge/
                      deploy/refresh/publish/delete) — deja el PR listo para tu OK.
+2a. auto -Epic <n>  → CAMINAR el épico completo, ola por ola: despacha los sub-issues LISTOS
+                     (abiertos, sin PR, sin bloqueadores abiertos), una sesión autónoma cada uno.
+                     Idempotente: mergeas los PRs de la ola y re-ejecutas el mismo comando para
+                     la siguiente. Un comando por OLA en vez de un lanzamiento por sub-issue.
 2b. auto <issue> de punta a punta
                    → REGISTRA tu orden de terminarlo — pero HOY NO SE CIERRA SOLO. El
                      mecanismo que lo permitía tenía dos agujeros que no podía defender

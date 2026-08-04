@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- **The epic walker: `/board expert auto -Epic <n>` dispatches sub-issues wave by wave** (#566,
+  part of epic #561). Nothing advanced an epic before — Expert-Auto took one `-Issue`, so a plan
+  with N sub-issues cost N human launches (Board-Plan even fetched the sub-issue list and threw
+  it away). `-Epic` reads the epic's native sub-issues, classifies them (done / in-flight /
+  blocked / **ready**) and launches one autonomous session per ready sub-issue with the
+  contract's brake and budget, each briefed with the epic's enriched plan plus its own issue
+  text. **Idempotent by design**: merge a wave's PRs and re-run the same command for the next
+  wave; done and in-flight sub-issues are never re-dispatched, and a sub-issue whose PR state
+  could not be read counts as in-flight — dispatching a possible duplicate session is the worse
+  error, so the unknown fails closed. Verified by 7 new Pester tests on the wave classifier.
 - **A stopped run now signals instead of sitting silent** (#565, part of epic #561). A braked,
   out-of-budget, or stalled run was invisible from outside — the deny payload reached only the
   model, the supervisor's verdict existed only on a terminal nobody was required to watch, and
