@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-08-04
+
+**The pending queue, cleared by the tool's own expert mode.** All seven triaged issues on the
+board (#413–#419) were worked in one day by autonomous `/board expert auto` sessions — one
+isolated worktree and one persona-briefed agent per issue, launched in dependency-safe waves,
+each finishing at a reviewed PR with recorded evidence and the merge held for the supervising
+session. The batch fixes the fleet's two operational leaks (teardown handles, watch re-polling),
+hardens `/board plan` with a prior-art gate, keeps large prose off the command line, and pivots
+documentation from generated wiki pages to DeepWiki routing plus its MCP integration.
+
 ### Fixed
 - **`-Sessions -Watch` no longer re-polls every registered session on every 30-second cycle** (#414).
   Three related defects: (1) sessions already reported `LISTO` in a prior cycle were re-polled on
