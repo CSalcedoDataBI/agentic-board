@@ -145,7 +145,7 @@ and #568 finally added the time dimension. With that in place, the standing poli
 2. **Before building a new self-control mechanism, ask what MEASUREMENT would make it
    unnecessary.** The run-ledger existed to survive compactions largely caused by a 72 KB
    instruction payload (#573 removed the weight); the evidence-×3 ceremony existed because
-   nothing verified runs (Expert-RunVerify now does, against ONE artifact).
+   nothing verified runs (`Expert-RunVerify.ps1` now does, against ONE artifact).
 3. **Field evidence outranks introspection.** `/board telemetry` reads real sessions — with
    durations since #568. When choosing the next piece of work, an episode from the field ledger
    beats a hypothesis about the tool's own governance.
