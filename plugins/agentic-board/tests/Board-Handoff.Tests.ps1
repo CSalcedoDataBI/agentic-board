@@ -299,4 +299,29 @@ Describe 'Read-HandoffBodyFile (#419 - file-backed body parameters)' {
     It 'throws when the file does not exist' {
         { Read-HandoffBodyFile (Join-Path $script:TmpDir 'missing.json') } | Should -Throw "*does not exist*"
     }
+
+    It 'throws when the path is a directory, not a file' {
+        { Read-HandoffBodyFile $script:TmpDir } | Should -Throw "*does not exist*"
+    }
+
+    It 'tracks presence per field: present (even empty) is distinguishable from absent' {
+        $f = Join-Path $script:TmpDir 'presence.json'
+        # Done present-but-empty, NextStep present, the other three absent.
+        '{ "NextStep": "[V] only step", "Done": [] }' | Set-Content -Path $f
+        $bd = Read-HandoffBodyFile $f
+        $bd.Present.NextStep    | Should -BeTrue
+        $bd.Present.Done        | Should -BeTrue   # explicitly empty MUST override inline
+        $bd.Done.Count          | Should -Be 0
+        $bd.Present.OpenThreads | Should -BeFalse  # absent falls back to inline/default
+        $bd.Present.Traps       | Should -BeFalse
+        $bd.Present.KeyFiles    | Should -BeFalse
+    }
+
+    It 'counts a JSON null field as present, normalized to the empty default' {
+        $f = Join-Path $script:TmpDir 'nullfield.json'
+        '{ "NextStep": null }' | Set-Content -Path $f
+        $bd = Read-HandoffBodyFile $f
+        $bd.Present.NextStep | Should -BeTrue
+        $bd.NextStep         | Should -BeExactly ""
+    }
 }

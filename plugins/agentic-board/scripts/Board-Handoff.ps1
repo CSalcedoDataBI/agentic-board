@@ -318,22 +318,30 @@ function Remove-MemoryIndexLine([string]$body, [string]$marker) {
     return (($kept -join "`n").TrimEnd() + "`n")
 }
 
-# Read handoff body sections from a JSON file (see -BodyFile). Fields missing from the JSON are
-# returned as defaults (empty string / empty array) so the caller can fall back to inline params.
-# A file path that is set but does not exist throws rather than silently using empty sections.
+# Read handoff body sections from a JSON file (see -BodyFile). Presence is tracked per field
+# (Present.<name>): a field PRESENT in the JSON wins over the inline param even when empty,
+# while a field ABSENT from the JSON falls back to the inline default — the two cases must be
+# distinguishable, which value-normalization alone cannot do (a JSON `null` still counts as
+# present and normalizes to the empty default). A file path that is set but does not exist
+# (or is a directory) throws rather than silently using empty sections.
 # Pure (reads a file, but no gh/git/network): tested in Pester via a temp file. (#419)
 function Read-HandoffBodyFile([string]$filePath) {
-    if (-not (Test-Path -LiteralPath $filePath)) {
+    if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
         throw "Board-Handoff: -BodyFile '$filePath' does not exist."
     }
     $raw = Get-Content -LiteralPath $filePath -Raw
     $data = $raw | ConvertFrom-Json
+    $present = @{}
+    foreach ($f in 'NextStep', 'Done', 'OpenThreads', 'Traps', 'KeyFiles') {
+        $present[$f] = ($null -ne $data.PSObject.Properties[$f])
+    }
     return [PSCustomObject]@{
         NextStep    = if ($null -ne $data.NextStep)    { [string]$data.NextStep }        else { "" }
         Done        = if ($null -ne $data.Done)        { [string[]]@($data.Done) }        else { @() }
         OpenThreads = if ($null -ne $data.OpenThreads) { [string[]]@($data.OpenThreads) } else { @() }
         Traps       = if ($null -ne $data.Traps)       { [string[]]@($data.Traps) }       else { @() }
         KeyFiles    = if ($null -ne $data.KeyFiles)    { [string[]]@($data.KeyFiles) }    else { @() }
+        Present     = $present
     }
 }
 
@@ -364,12 +372,14 @@ $ErrorActionPreference = "Stop"
 # Resolve file-backed body sections BEFORE any validation (#419: inline payloads with
 # slash-commands or path-like strings trip the tool-layer path guard before the script runs).
 if ($BodyFile) {
+    # Documented contract: a field PRESENT in the file wins over the inline param (even when
+    # explicitly empty); a field ABSENT from the file leaves the inline/default value intact.
     $bd = Read-HandoffBodyFile $BodyFile
-    if ($bd.NextStep -and -not $NextStep)    { $NextStep    = $bd.NextStep }
-    if ($bd.Done.Count -gt 0)                { $Done        = $bd.Done }
-    if ($bd.OpenThreads.Count -gt 0)         { $OpenThreads = $bd.OpenThreads }
-    if ($bd.Traps.Count -gt 0)               { $Traps       = $bd.Traps }
-    if ($bd.KeyFiles.Count -gt 0)            { $KeyFiles    = $bd.KeyFiles }
+    if ($bd.Present.NextStep)    { $NextStep    = $bd.NextStep }
+    if ($bd.Present.Done)        { $Done        = $bd.Done }
+    if ($bd.Present.OpenThreads) { $OpenThreads = $bd.OpenThreads }
+    if ($bd.Present.Traps)       { $Traps       = $bd.Traps }
+    if ($bd.Present.KeyFiles)    { $KeyFiles    = $bd.KeyFiles }
 }
 
 # The single resolver for owner/name from this clone's origin (#281). Do NOT inline the regex

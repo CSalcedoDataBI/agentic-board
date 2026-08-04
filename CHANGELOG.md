@@ -12,9 +12,10 @@
   `-DescriptionFile`, `-ResearchFile`, and `-PriorArtFile` (each a path to a plain-text file);
   `Board-Handoff.ps1` now accepts `-BodyFile` (path to a JSON file with `NextStep`, `Done`,
   `OpenThreads`, `Traps`, `KeyFiles` keys). Inline parameters remain supported unchanged for short
-  text. The new `Resolve-TextParam` and `Read-HandoffBodyFile` pure helpers are covered by 10 new
+  text. The new `Resolve-TextParam` and `Read-HandoffBodyFile` pure helpers are covered by 14 new
   Pester tests (file reads content, slashes treated as data, destructive text never executed,
-  missing-file throws, file wins over inline).
+  missing-file and directory-path throw, file wins over inline — a field present in the JSON
+  overrides even when explicitly empty, while an absent field falls back to the inline default).
 
 ### Added
 - **`/board plan` prior-art gate** (#415). `Board-Plan.ps1` now refuses to create an epic
