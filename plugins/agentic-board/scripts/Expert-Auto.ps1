@@ -145,9 +145,11 @@ are the method.
 3. **Execute (test-first)** — build guided by tests first, in the worktree.
 4. **Verify + evidence** — run the definition-of-done gates **that apply to your diff**: run
    ``Expert-WorkClass.ps1`` and it prints which of the contract's gates this change actually owes
-   (a docs fix does not pay a model migration's toll; an unreadable diff owes every gate). Write
-   a structured ``[abios-evidence]`` block to three places: the PR body, a durable issue comment,
-   and ``evidence/<issue>.md``. If green -> open the PR + run the review gate.
+   (a docs fix does not pay a model migration's toll; an unreadable diff owes every gate). Record
+   the evidence ONCE (#570): the full structured ``[abios-evidence]`` block goes to
+   ``evidence/<issue>.md`` — the single source of truth — and the PR body and a durable issue
+   comment each get the LINK STUB (marker + summary + link to the file), not a copy. If green ->
+   open the PR + run the review gate.
 5. **Self-heal + auto-drive the board**: when you hit an error, a fork, or an unexpected state —
    apply the **decision protocol** (research → register → decide); do NOT act first.
    Then act on what you decided: an in-scope problem → fix it in the loop and continue;
@@ -193,8 +195,9 @@ Traceability: link the new epic to the originating issue (include the issue numb
 e.g. ``Grew out of #<n>``, in the epic body) so the trail is followable.
 
 ## Test-first + evidence
-Build test-first. After each verify phase, record a structured [abios-evidence] block (what was
-tested, the command, the result) to the PR body, the issue comment, and evidence/<issue>.md.
+Build test-first. After each verify phase, record the structured [abios-evidence] block (what was
+tested, the command, the result) ONCE in evidence/<issue>.md, and put the link stub (marker +
+summary + link) in the PR body and an issue comment - one source of truth, two pointers (#570).
 
 $closingSection
 "@

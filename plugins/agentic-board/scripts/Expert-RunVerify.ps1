@@ -70,25 +70,87 @@ function Test-RunArtifactsComplete {
         # PR body content. Null or empty = PR body is blank or could not be read.
         [AllowEmptyString()][AllowNull()][string]$PrBodyContent,
         # All comment bodies on the issue. Empty = no comments were found.
-        [string[]]$IssueCommentBodies = @()
+        [string[]]$IssueCommentBodies = @(),
+        # The evidence file's repo-relative path, e.g. 'evidence/532.md' (#570). When given, the
+        # PR body and the issue comment must not only carry the marker but REFERENCE this file
+        # (the link stub) or carry a full '## Evidence' block (pre-#570 runs stay valid). A bare
+        # marker with neither is a stamp, not evidence.
+        [string]$EvidenceRef = ''
     )
     $marker  = $script:EvidenceMarker
     $missing = @()
 
-    # 1. Versioned evidence file — the durable record that outlives the PR.
-    if ([string]::IsNullOrWhiteSpace($EvidenceFileContent) -or
-        -not "$EvidenceFileContent".Contains($marker)) {
-        $missing += 'evidence/<issue>.md (file missing or marker absent)'
+    # The pre-#570 FULL block's signature is its results table header - NOT the '## Evidence'
+    # heading, which the link stub also emits (review round 1: heading-as-fallback let a stub
+    # with no link, or one pointing at another issue's file, pass for this one).
+    $legacyBlock = '| Test | Command | Result | Detail |'
+
+    # A surface satisfies its requirement with the marker AND substance: the stub that
+    # references THIS issue's file, or a legacy full block. Marker alone is a stamp.
+    # The reference match is BOUNDARY-AWARE (round 2): a raw substring accepted
+    # 'evidence/42.md.bak' as a reference to 'evidence/42.md'.
+    $refPattern = if ("$EvidenceRef".Trim()) { [regex]::Escape($EvidenceRef) + '(?![\w.\-])' } else { '' }
+    # The legacy fallback demands a DATA row too (round 5): header + separator without rows is
+    # scaffolding on a surface exactly as it is in the file.
+    $hasLegacyBlock = {
+        param($content)
+        if (-not "$content".Contains($legacyBlock)) { return $false }
+        $rows = @(("$content" -split "`r?`n") | Where-Object {
+            $l = "$_".Trim()
+            $l -match '^\|' -and $l -notmatch '^\|[\s:\-|]+\|?\s*$' -and $l -ne $legacyBlock
+        })
+        return ($rows.Count -gt 0)
+    }
+    $satisfies = {
+        param($content)
+        if ([string]::IsNullOrWhiteSpace($content)) { return $false }
+        if (-not "$content".Contains($marker)) { return $false }
+        if (-not $refPattern) { return $true }
+        return (("$content" -match $refPattern) -or (& $hasLegacyBlock $content))
     }
 
-    # 2. PR body — the marker that surfaces on the PR page and is SHA-bound.
-    if ([string]::IsNullOrWhiteSpace($PrBodyContent) -or
-        -not "$PrBodyContent".Contains($marker)) {
-        $missing += '[abios-evidence] block in PR body'
+    # 1. Versioned evidence file — the durable record that outlives the PR, and since #570 the
+    #    SINGLE source of truth the other two surfaces point at. In EvidenceRef mode it must
+    #    carry SUBSTANCE beyond the marker (a table row or a section heading): pointers backed
+    #    by a marker-only file would be evidence of nothing (review round 1).
+    $fileOk = -not [string]::IsNullOrWhiteSpace($EvidenceFileContent) -and
+              "$EvidenceFileContent".Contains($marker)
+    if ($fileOk -and "$EvidenceRef".Trim()) {
+        # Substance = a table row, or sections WITH BODY TEXT (round 3): a bare '## Evidence'
+        # heading passed round 2's check, and headings are structure, not evidence. A body line
+        # is anything that is not a heading, not the marker comment, not the stub's link line,
+        # and not blank.
+        # A table counts only by its DATA rows (round 4): header + separator alone is scaffolding
+        # - '| Test | Command | Result | Detail |' over '|---|---|' says nothing was tested.
+        $allLines = @("$EvidenceFileContent" -split "`r?`n")
+        $dataRows = @($allLines | Where-Object {
+            $l = "$_".Trim()
+            $l -match '^\|' -and
+            $l -notmatch '^\|[\s:\-|]+\|?\s*$' -and
+            $l -ne $legacyBlock
+        })
+        $bodyLines = @($allLines | Where-Object {
+            $l = "$_".Trim()
+            $l -and
+            -not $l.StartsWith('#') -and
+            -not $l.StartsWith('<!--') -and
+            -not $l.StartsWith('|') -and
+            -not $l.StartsWith('Full evidence') -and
+            -not $l.StartsWith('**Summary:**')
+        })
+        $fileOk = ($dataRows.Count -gt 0) -or ($bodyLines.Count -gt 0)
+    }
+    if (-not $fileOk) {
+        $missing += 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'
+    }
+
+    # 2. PR body — the marker + link stub that surfaces on the PR page.
+    if (-not (& $satisfies $PrBodyContent)) {
+        $missing += '[abios-evidence] block or link stub in PR body'
     }
 
     # 3. Issue comment — the durable marker that stays visible after the PR is closed.
-    $hasComment = @($IssueCommentBodies | Where-Object { "$_".Contains($marker) }).Count -gt 0
+    $hasComment = @($IssueCommentBodies | Where-Object { & $satisfies $_ }).Count -gt 0
     if (-not $hasComment) {
         $missing += '[abios-evidence] comment on the issue'
     }
@@ -173,7 +235,8 @@ if (Test-Path -LiteralPath $evidencePath) {
 $result = Test-RunArtifactsComplete `
     -EvidenceFileContent $evidenceContent `
     -PrBodyContent       $prBody `
-    -IssueCommentBodies  $commentBodies
+    -IssueCommentBodies  $commentBodies `
+    -EvidenceRef         "evidence/$Issue.md"
 
 Write-Host ""
 Write-Host (Format-RunVerifyVerdict -Result $result)
