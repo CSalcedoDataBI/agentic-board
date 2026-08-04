@@ -241,3 +241,26 @@ Describe 'Round-1 closures on the evidence-link mode (#570)' {
         $r.complete | Should -BeTrue
     }
 }
+
+Describe 'Round-2 closures (#570)' {
+    It 'the link stub written INTO the evidence file is a circle with nothing inside - INCOMPLETE' {
+        $stub = "<!-- [abios-evidence] -->`n## Evidence`n`n**Summary:** 1 passed / 0 failed`n`nFull evidence (single source of truth): ``evidence/42.md``"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $stub -PrBodyContent $stub `
+                -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
+    }
+    It 'a suffixed wrong path (evidence/42.md.bak) is not a reference to evidence/42.md' {
+        $wrong = "<!-- [abios-evidence] -->`nFull evidence: evidence/42.md.bak"
+        $full = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| a | b | PASS | c |"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $full -PrBodyContent $wrong `
+                -IssueCommentBodies @($wrong) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
+    }
+    It 'a markdown link with anchor or closing paren still matches the exact path' {
+        $ok = "<!-- [abios-evidence] -->`nFull evidence: [evidence/42.md](https://github.com/o/r/blob/b/evidence/42.md)"
+        $full = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| a | b | PASS | c |"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $full -PrBodyContent $ok `
+                -IssueCommentBodies @($ok) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeTrue
+    }
+}

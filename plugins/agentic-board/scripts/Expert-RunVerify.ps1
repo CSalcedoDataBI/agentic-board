@@ -87,12 +87,15 @@ function Test-RunArtifactsComplete {
 
     # A surface satisfies its requirement with the marker AND substance: the stub that
     # references THIS issue's file, or a legacy full block. Marker alone is a stamp.
+    # The reference match is BOUNDARY-AWARE (round 2): a raw substring accepted
+    # 'evidence/42.md.bak' as a reference to 'evidence/42.md'.
+    $refPattern = if ("$EvidenceRef".Trim()) { [regex]::Escape($EvidenceRef) + '(?![\w.\-])' } else { '' }
     $satisfies = {
         param($content)
         if ([string]::IsNullOrWhiteSpace($content)) { return $false }
         if (-not "$content".Contains($marker)) { return $false }
-        if (-not "$EvidenceRef".Trim()) { return $true }
-        return ("$content".Contains($EvidenceRef) -or "$content".Contains($legacyBlock))
+        if (-not $refPattern) { return $true }
+        return (("$content" -match $refPattern) -or "$content".Contains($legacyBlock))
     }
 
     # 1. Versioned evidence file — the durable record that outlives the PR, and since #570 the
@@ -102,7 +105,13 @@ function Test-RunArtifactsComplete {
     $fileOk = -not [string]::IsNullOrWhiteSpace($EvidenceFileContent) -and
               "$EvidenceFileContent".Contains($marker)
     if ($fileOk -and "$EvidenceRef".Trim()) {
-        $fileOk = ("$EvidenceFileContent" -match '(?m)^\s*\|') -or ("$EvidenceFileContent" -match '(?m)^##\s')
+        # Substance = a table row, or sections that are NOT just the link stub written back into
+        # the file (round 2: the stub emits '## Evidence' too, and a stub pointing at itself
+        # would have made the source of truth a circle with nothing inside).
+        $isStubShaped = "$EvidenceFileContent".Contains('Full evidence (single source of truth)')
+        $hasTableRow  = ("$EvidenceFileContent" -match '(?m)^\s*\|')
+        $hasSections  = ("$EvidenceFileContent" -match '(?m)^##\s')
+        $fileOk = $hasTableRow -or ($hasSections -and -not $isStubShaped)
     }
     if (-not $fileOk) {
         $missing += 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'
