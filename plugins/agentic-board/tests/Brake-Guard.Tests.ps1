@@ -1116,6 +1116,14 @@ Describe 'The enforced time budget (#564)' {
         It 'refuses a pwsh -Command that merely MENTIONS the exempt script (round 2: -File target required)' {
             Test-IsBudgetExemptCommand -Command 'pwsh -Command "npm run build # Board-Handoff.ps1"' | Should -BeFalse
         }
+        It 'refuses -Command executing OTHER work with the handoff as mere arguments (round 5: closed host-flag list)' {
+            # pwsh treats this as executing build.ps1; the trailing -File never reaches the host.
+            Test-IsBudgetExemptCommand -Command 'pwsh -Command .\build.ps1 -File .\scripts\Board-Handoff.ps1' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'pwsh -EncodedCommand bnBtIHJ1biBidWlsZA== -File scripts/Board-Handoff.ps1' | Should -BeFalse
+        }
+        It 'still allows the known non-executing host flags before -File' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
+        }
         It 'refuses work smuggled into an exempt segment via &, redirection or subexpression (round 3: exempt segments must be inert)' {
             Test-IsBudgetExemptCommand -Command 'git status & npm run build' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'git status > src/app.ts' | Should -BeFalse

@@ -489,11 +489,13 @@ function Get-BudgetState {
 $script:BudgetExemptPatterns = @(
     '^(?:& )?\S*board-handoff\.ps1\b'                              # the handoff script, invoked directly
     '^(?:& )?\S*board-runledger\.ps1\b'                            # closing the run ledger
-    # Via a pwsh launcher: the exempt script must be the -File TARGET, with only flag-shaped
-    # tokens before it (same one-reading-per-token shape as $script:GitCmd). Requiring -File is
-    # the round-2 fix: matched anywhere after `pwsh`, the script NAME inside an arbitrary
-    # -Command string ('pwsh -Command "npm run build # Board-Handoff.ps1"') was a free pass.
-    '^(?:& )?(?:pwsh|powershell)\s+(?:-[^\s;|&]*\s+(?:[^\s;|&-][^\s;|&]*\s+)?)*-file\s+\S*(board-handoff|board-runledger)\.ps1(?=\s|$)'
+    # Via a pwsh launcher: the exempt script must be the -File TARGET, and the prefix may carry
+    # ONLY known non-executing host flags (round 5): "any flag-shaped token" admitted -Command,
+    # and `pwsh -command build.ps1 -file ...board-handoff.ps1` executes build.ps1 with '-file ...'
+    # as its ARGUMENTS - the -File this pattern trusted never reaches the host. Requiring -File
+    # at all is the round-2 fix (a -Command string that merely MENTIONED the script was a free
+    # pass); the closed flag list is what makes the -File the one the host actually honours.
+    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+\S*(board-handoff|board-runledger)\.ps1(?=\s|$)'
     '^/board\s+handoff\b'                                          # the slash-command spelling
     ('^' + $script:GitCmd + '(status|diff|log|add|commit|push)\b')  # commit + push the WIP
     # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
