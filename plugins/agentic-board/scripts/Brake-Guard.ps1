@@ -524,19 +524,47 @@ $script:BudgetExemptPatterns = @(
     # around Test-IsBudgetExemptWrite.
     '^git\s+(status|diff|log)(?![^;|&]*\s--output(=|\s|$))\b'
     '^git\s+(add|commit)\b'
-    # push is WIP-branch-shaped only (#565 review round 2): --mirror/--all/--tags publish or
-    # overwrite remote state wholesale, --force rewrites it, --delete/--prune/`:ref` remove it -
-    # none of which is "save your work and leave". `+refspec` is git's force spelling without
-    # the flag (round 3). And main/master as a target is refused HERE too (round 4): the brake
-    # only refuses it for contracts that brake on merge, but "save your WIP" never means the
-    # default branch, whatever the contract says.
-    '^git\s+push(?![^;|&]*\s--(mirror|all|tags|force|force-with-lease|delete|prune)\b)(?![^;|&]*\s-f\b)(?![^;|&]*\s\+?:\S)(?![^;|&]*\s\+\S)(?![^;|&]*\s\+?[^\s;|&]*:(refs/heads/)?(main|master)(?=[\s;&|<>]|$))(?![^;|&]*\s(main|master)(?=[\s;&|<>]|$))\b'
+    # push is handled by Test-IsWipPushSegment below, not by a pattern: five rounds of review
+    # each found one more push spelling a regex missed, and the readable token walk closed them
+    # all at once (#565 rounds 2-5).
     # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
     # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
     # is push and stays allowed.
     '^git\s+stash(\s+(push|save)\b.*)?\s*$'
     '^gh\s+(pr|issue)\s+(comment|view)\b'                          # report where it stopped / read for the handoff
 )
+
+<#
+    Is this segment the ONE push shape the budget excuses - an explicit WIP-branch push? (#565)
+
+    Five review rounds each found a push spelling a regex allowlist missed (--mirror, +refspec,
+    :ref deletes, default-branch targets, and finally IMPLICIT pushes - `git push` with no
+    refspec publishes wherever the upstream points, which nothing pure can see). So the rule is
+    now positive and total: exactly `git push [-u|--set-upstream] <remote> <refspec>`, where the
+    refspec is explicit and its target is not main/master/HEAD. Anything implicit, forced,
+    deleting, wholesale or default-branch-bound is not "save your WIP". Pure.
+#>
+function Test-IsWipPushSegment {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Seg)
+    if ($Seg -notmatch '^git\s+push(\s|$)') { return $false }
+    $tokens = @((($Seg -replace '^git\s+push', '').Trim() -split '\s+') |
+                Where-Object { $_ -and $_ -notin @('-u', '--set-upstream') })
+    if ($tokens.Count -ne 2) { return $false }              # explicit remote + refspec, nothing else
+    if ($tokens[0] -match '^[-+]') { return $false }        # remote must be a name, not a flag
+    $ref = $tokens[1]
+    if ($ref -match '^[-+]') { return $false }              # no flags, no +force refspec
+    if ($ref.Contains(':')) {
+        $src, $target = $ref -split ':', 2
+        if (-not $src)    { return $false }                 # `:branch` is git's DELETE spelling
+        if (-not $target) { return $false }
+    } else {
+        $target = $ref
+    }
+    $target = $target -replace '^refs/heads/', ''
+    if ($target -in @('main', 'master', 'head')) { return $false }
+    if (-not $ref.Contains(':') -and $ref -eq 'head') { return $false }  # bare HEAD -> target unknown
+    return $true
+}
 
 # True when an over-budget shell command is part of wrapping up rather than more work. Pure.
 function Test-IsBudgetExemptCommand {
@@ -586,6 +614,7 @@ function Test-IsBudgetExemptCommand {
         foreach ($p in $script:BudgetExemptPatterns) {
             if ($fullSegs[$i] -match $p) { $segExempt = $true; break }
         }
+        if (-not $segExempt) { $segExempt = Test-IsWipPushSegment -Seg $fullSegs[$i] }
         if (-not $segExempt) { return $false }
     }
     return $true

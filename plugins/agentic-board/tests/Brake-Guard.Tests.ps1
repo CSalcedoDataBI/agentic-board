@@ -1115,6 +1115,17 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'git push origin main' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/heads/master' | Should -BeFalse
         }
+        It 'IMPLICIT pushes are not wrap-up - the upstream may point anywhere, including main (round 5)' {
+            Test-IsBudgetExemptCommand -Command 'git push' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push -u origin HEAD' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD' | Should -BeFalse
+        }
+        It 'the explicit WIP shapes stay allowed (round 5)' {
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD:issue-42-branch' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git push -u origin issue-42-branch' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git push --set-upstream origin HEAD:issue-7-fix' | Should -BeTrue
+        }
         It 'git diff --output writes a file through a read-shaped command - refused (round 4)' {
             Test-IsBudgetExemptCommand -Command 'git diff --output=src/app.ts' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'git log --output out.txt' | Should -BeFalse
