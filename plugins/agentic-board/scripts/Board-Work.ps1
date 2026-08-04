@@ -2349,7 +2349,7 @@ function Invoke-SessionWatch {
                 $sup = Join-Path $PSScriptRoot 'Fleet-Supervisor.ps1'
                 $outF = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-sup-" + [guid]::NewGuid().ToString('N') + ".txt")
                 $errF = "$outF.err"
-                $p = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-File',$sup,'-Check','-Post') `
+                $p = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-File',$sup,'-Check','-Post','-ProjectNum',"$ProjectNum") `
                         -WindowStyle Hidden -PassThru -RedirectStandardOutput $outF -RedirectStandardError $errF
                 if (-not $p.WaitForExit(120000)) {
                     try { $p.Kill() } catch { }

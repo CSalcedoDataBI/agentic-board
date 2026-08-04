@@ -170,6 +170,10 @@ function Publish-StallSignals {
         $mark = if ($state) { Join-Path $state (Get-StallMarkerName -Session $s) } else { $null }
         if ($mark -and (Test-Path -LiteralPath $mark)) { continue }
         try {
+            # Marker FIRST, like the hook path (round 13): a post that lands on GitHub while the
+            # local process dies would otherwise repost next cycle - the no-flooding guarantee
+            # outranks a lost comment, and the loss direction is stated, not pretended.
+            if ($mark) { Set-Content -LiteralPath $mark -Encoding UTF8 -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) }
             $body = New-StallCommentBody -Issue ([int]$s.issue) -AgeMin ([int]$s.ageMin) -ThresholdMin $ThresholdMin -ProjectNum $BoardNum
             # Bounded like the hook's signal post (#565 review round 2): this now runs inside the
             # session watch loop, and a hung gh call would wedge the watch - best-effort must
@@ -187,7 +191,6 @@ function Publish-StallSignals {
                 Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
             }
             if ($exit -eq 0) {
-                if ($mark) { Set-Content -LiteralPath $mark -Encoding UTF8 -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) }
                 if (-not $Quiet) { Write-Host ("  OK  senal [abios-stall] publicada en #{0}" -f $s.issue) -ForegroundColor Green }
             } elseif (-not $Quiet) {
                 Write-Host ("  WARN no pude publicar la senal de estancamiento en #{0}" -f $s.issue) -ForegroundColor DarkYellow
