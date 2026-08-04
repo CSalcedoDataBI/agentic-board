@@ -157,7 +157,7 @@ function Get-StallMarkerName {
 # Post the [abios-stall] comment for each stalled session, once per SESSION (marker in the state
 # dir). Best-effort: a posting failure is a WARN, never a changed verdict.
 function Publish-StallSignals {
-    param([object[]]$Stalled, [int]$ThresholdMin)
+    param([object[]]$Stalled, [int]$ThresholdMin, [switch]$Quiet)
     $state = Get-AbiosStateDir
     foreach ($s in @($Stalled)) {
         if (-not $s.issue -or -not $s.repo) { continue }
@@ -185,12 +185,12 @@ function Publish-StallSignals {
             }
             if ($exit -eq 0) {
                 if ($mark) { Set-Content -LiteralPath $mark -Encoding UTF8 -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) }
-                Write-Host ("  OK  senal [abios-stall] publicada en #{0}" -f $s.issue) -ForegroundColor Green
-            } else {
+                if (-not $Quiet) { Write-Host ("  OK  senal [abios-stall] publicada en #{0}" -f $s.issue) -ForegroundColor Green }
+            } elseif (-not $Quiet) {
                 Write-Host ("  WARN no pude publicar la senal de estancamiento en #{0}" -f $s.issue) -ForegroundColor DarkYellow
             }
         } catch {
-            Write-Host ("  WARN no pude publicar la senal de estancamiento en #{0}: {1}" -f $s.issue, $_) -ForegroundColor DarkYellow
+            if (-not $Quiet) { Write-Host ("  WARN no pude publicar la senal de estancamiento en #{0}: {1}" -f $s.issue, $_) -ForegroundColor DarkYellow }
         }
     }
 }
@@ -206,8 +206,9 @@ $verdict  = Get-FleetVerdict $sessions $ThresholdMin $MaxStalled
 
 if ($Json) {
     # -Post still posts under -Json (round 9): the early return silently made the switch a no-op
-    # for exactly the automation (watch loops, scripts) most likely to combine them.
-    if ($Post -and @($verdict.stalled).Count -gt 0) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin }
+    # for exactly the automation (watch loops, scripts) most likely to combine them. -Quiet keeps
+    # the stdout contract pure JSON (round 10) - publisher status must not corrupt the payload.
+    if ($Post -and @($verdict.stalled).Count -gt 0) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin -Quiet }
     $verdict | ConvertTo-Json -Depth 6; return
 }
 
