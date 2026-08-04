@@ -125,8 +125,13 @@ $agentLine
 ## Plan (what to deliver)
 $PlanBody
 
-## Definition of Done — every gate must pass before you consider this complete
+## Definition of Done — the contract's gates; your DIFF decides which apply
 $dodList
+
+These are the gates the contract ENABLES. Which ones your change actually owes is decided by the
+diff (#569): run ``Expert-WorkClass.ps1`` and it prints the owed vs not-applicable split — that
+output is the authority, not this list. Every OWED gate must pass before you consider this
+complete; a gate the diff does not trigger (e.g. ``bpa`` with no model files) is not owed.
 
 ## How you work — seven phases (do NOT skip any)
 
@@ -138,9 +143,11 @@ are the method.
    findings via ``/knowledge add`` / ``/knowledge harvest`` (read-and-forget is not allowed).
    Acquire missing tooling via ``/skills bootstrap`` / ``/skills audit``.
 3. **Execute (test-first)** — build guided by tests first, in the worktree.
-4. **Verify + evidence** — run the definition-of-done gates. Write a structured ``[abios-evidence]``
-   block to three places: the PR body, a durable issue comment, and ``evidence/<issue>.md``.
-   If green -> open the PR + run the review gate.
+4. **Verify + evidence** — run the definition-of-done gates **that apply to your diff**: run
+   ``Expert-WorkClass.ps1`` and it prints which of the contract's gates this change actually owes
+   (a docs fix does not pay a model migration's toll; an unreadable diff owes every gate). Write
+   a structured ``[abios-evidence]`` block to three places: the PR body, a durable issue comment,
+   and ``evidence/<issue>.md``. If green -> open the PR + run the review gate.
 5. **Self-heal + auto-drive the board**: when you hit an error, a fork, or an unexpected state —
    apply the **decision protocol** (research → register → decide); do NOT act first.
    Then act on what you decided: an in-scope problem → fix it in the loop and continue;

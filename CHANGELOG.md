@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- **The definition of done scales to the diff** (#569, part of epic #561). The contract's six
+  gates all defaulted to `true` and the brief listed them flat, so a 10-line docs fix owed the
+  same verify pass as a model migration. `Get-ApplicableDodGates` derives the owed gates from
+  the changed paths — `bpa`/`tmdlBreaking` only when a semantic-model file changed,
+  `build`/`lint`/`tests` only when something executable changed, `ci` always — and the
+  work-class CLI prints which gates the current diff owes and which it does not. Fail direction:
+  an unreadable diff owes **every** enabled gate, the derivation can only *disable* gates the
+  contract enabled (never re-enable one it turned off), and an unrecognized custom gate is
+  always owed. The autonomous brief now points the run at this instead of the flat list.
+  Verified by 6 new Pester tests.
 - **The tool can finally measure its own time** (#568, part of epic #561). The telemetry
   subsystem measured everything except time: the transcript parser *discarded* the timestamp
   every line carries, the correlation window was "6 events" (4 seconds or 40 minutes,

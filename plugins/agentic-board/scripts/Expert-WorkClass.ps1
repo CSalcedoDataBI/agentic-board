@@ -194,6 +194,56 @@ function Get-EffectiveWorkClassPolicy {
     return $out
 }
 
+<#
+    Which definition-of-done gates does THIS diff actually owe? (#569)
+
+    The contract defaults all six gates to true and the brief listed them flat, so a 10-line
+    docs fix owed the same six-gate verify pass as a model migration. The review gate already
+    self-skips bpa/tmdl on non-model PRs; this extends that shape to the whole DoD, from the
+    same facts (the changed paths):
+
+      - bpa / tmdlBreaking : only when a semantic-model file changed (*.tmdl, *.bim, *.pbism)
+      - build / lint / tests: only when something EXECUTABLE changed - docs, images and data
+        files are read, not run
+      - ci                  : always; it is the harness that proves the others ran
+
+    FAIL DIRECTION: an empty path list returns every enabled gate - "I could not see what
+    changed" must never waive a single check. And this only ever DISABLES gates the contract
+    already enabled; it cannot invent one the contract turned off. Pure.
+#>
+function Get-ApplicableDodGates {
+    param(
+        [hashtable]$Dod = @{},
+        [string[]]$ChangedPaths = @()
+    )
+    # Strict boolean, not truthiness (external review): a hand-edited contract with "bpa":"false"
+    # is a non-empty string, and truthiness would re-enable the gate the owner turned off.
+    $enabled = @(@($Dod.Keys) | Where-Object {
+        $v = $Dod[$_]
+        ($v -is [bool] -and $v) -or ("$v" -match '^\s*(?i)true\s*$')
+    })
+    $paths = @(@($ChangedPaths) | ForEach-Object { ("$_" -replace '\\', '/').Trim() } | Where-Object { $_ })
+    if ($paths.Count -eq 0) { return @($enabled) }   # unknown diff -> every enabled gate
+
+    $modelTouched = [bool]($paths | Where-Object { $_ -match '(?i)\.(tmdl|bim|pbism)$' })
+    $nonExecutable = '(?i)\.(md|markdown|txt|png|jpg|jpeg|gif|webp|svg|ico|csv)$'
+    $execTouched  = [bool]($paths | Where-Object { $_ -notmatch $nonExecutable })
+
+    $out = @()
+    foreach ($g in $enabled) {
+        $keep = switch ("$g".ToLowerInvariant()) {
+            'bpa'          { $modelTouched }
+            'tmdlbreaking' { $modelTouched }
+            'build'        { $execTouched }
+            'lint'         { $execTouched }
+            'tests'        { $execTouched }
+            default        { $true }          # ci and anything unknown: always owed
+        }
+        if ($keep) { $out += $g }
+    }
+    return @($out)
+}
+
 # Dot-source guard: tests set $env:ABIOS_WORKCLASS_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_WORKCLASS_DOTSOURCE) { return }
 
@@ -224,6 +274,23 @@ if (Test-HumanMustApprove -Class $verdict.class -Policy $policy) {
     Write-Host "  -> Lo aprueba una persona: hay algo que se juzga viendolo." -ForegroundColor Yellow
 } else {
     Write-Host "  -> El agente puede cerrarlo solo, si cumple los estandares." -ForegroundColor Green
+}
+
+# Which DoD gates THIS diff owes (#569): derived from the same changed paths, so a docs fix does
+# not pay a model migration's toll. An unreadable diff owes every enabled gate.
+$contractForGates = Read-ExpertContract
+# RAW values, no [bool] coercion (review round 2): [bool]'false' is $true in PowerShell, so the
+# cast re-enabled exactly the string-disabled gates the helper's strict parser refuses.
+$dodTable = @{}
+if ($contractForGates.dod) { foreach ($k in $contractForGates.dod.Keys) { $dodTable[$k] = $contractForGates.dod[$k] } }
+$owed = @(Get-ApplicableDodGates -Dod $dodTable -ChangedPaths $changed)
+# "Skipped" = enabled by the same strict rule the helper uses, minus what the diff owes.
+$enabledAll = @(Get-ApplicableDodGates -Dod $dodTable -ChangedPaths @())
+$skipped = @($enabledAll | Where-Object { $owed -notcontains $_ })
+Write-Host ""
+Write-Host ("  DoD que APLICA a este diff : {0}" -f $(if ($owed.Count) { ($owed | Sort-Object) -join ', ' } else { '(ninguna)' })) -ForegroundColor Cyan
+if ($skipped.Count) {
+    Write-Host ("  DoD que NO aplica (nada que la dispare en el diff): {0}" -f (($skipped | Sort-Object) -join ', ')) -ForegroundColor DarkGray
 }
 
 
