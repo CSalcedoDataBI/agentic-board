@@ -1121,6 +1121,18 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'git status > src/app.ts' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'git commit -m "$(npm run build)"' | Should -BeFalse
         }
+        It 'refuses the substitution forms the normalizer hides or leaves behind (round 4)' {
+            Test-IsBudgetExemptCommand -Command 'git status `npm run build`' | Should -BeFalse       # backticks: checked raw
+            Test-IsBudgetExemptCommand -Command 'git status (npm run build)' | Should -BeFalse       # PS grouping
+            Test-IsBudgetExemptCommand -Command 'git status @(npm run build)' | Should -BeFalse      # PS array subexpr
+        }
+        It 'stash is save-only: push/save pass, pop/apply/drop/clear are more work or lost work (round 4)' {
+            Test-IsBudgetExemptCommand -Command 'git stash' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git stash push -m wip' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git stash pop' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git stash drop' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git stash clear' | Should -BeFalse
+        }
         It 'an empty command is not exempt' {
             Test-IsBudgetExemptCommand -Command '' | Should -BeFalse
         }

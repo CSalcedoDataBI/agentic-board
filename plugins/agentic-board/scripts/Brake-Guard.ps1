@@ -495,13 +495,22 @@ $script:BudgetExemptPatterns = @(
     # -Command string ('pwsh -Command "npm run build # Board-Handoff.ps1"') was a free pass.
     '^(?:& )?(?:pwsh|powershell)\s+(?:-[^\s;|&]*\s+(?:[^\s;|&-][^\s;|&]*\s+)?)*-file\s+\S*(board-handoff|board-runledger)\.ps1(?=\s|$)'
     '^/board\s+handoff\b'                                          # the slash-command spelling
-    ('^' + $script:GitCmd + '(status|diff|log|add|commit|push|stash)\b')  # commit + push the WIP
+    ('^' + $script:GitCmd + '(status|diff|log|add|commit|push)\b')  # commit + push the WIP
+    # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
+    # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
+    # is push and stays allowed.
+    ('^' + $script:GitCmd + 'stash(\s+(push|save)\b.*)?\s*$')
     '^gh\s+(pr|issue)\s+(comment|view)\b'                          # report where it stopped / read for the handoff
 )
 
 # True when an over-budget shell command is part of wrapping up rather than more work. Pure.
 function Test-IsBudgetExemptCommand {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Command)
+    # Backticks are checked on the RAW command (round 4): the normalizer strips them, so a Bash
+    # substitution (`git status `npm run build``) normalized into text the anchored patterns
+    # accept - the nested command would already have run by then. Conservative on purpose: a
+    # PowerShell escape backtick in a message is rare in wrap-up commands and easy to rephrase.
+    if ("$Command".Contains('`')) { return $false }
     $norm = ConvertTo-NormalizedCommand $Command
     if (-not $norm) { return $false }
     # EVERY segment must be exempt: `Board-Handoff.ps1 -Save; npm run build` is more work wearing
@@ -519,8 +528,10 @@ function Test-IsBudgetExemptCommand {
         # background operator, no redirection, no subexpression. A LEADING `& ` is PowerShell's
         # call operator - part of the launcher shape the patterns accept - so only that one is
         # stripped before the check. The cost is a conservative refusal of, say, a commit message
-        # containing '&' - the deny message says how to rephrase.
-        if (($seg -replace '^&\s+', '') -match '[&<>]|\$\(') { return $false }
+        # containing '&' - the deny message says how to rephrase. Parentheses are refused too
+        # (round 4): `git status (npm run build)` / `@(npm run build)` are PowerShell execution
+        # forms that survive normalization, and no wrap-up command needs them.
+        if (($seg -replace '^&\s+', '') -match '[&<>()]') { return $false }
         $segExempt = $false
         foreach ($p in $script:BudgetExemptPatterns) {
             if ($seg -match $p) { $segExempt = $true; break }
