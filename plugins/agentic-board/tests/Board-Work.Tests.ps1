@@ -2214,6 +2214,81 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
             -Now { Get-Date } -Sleep { param($sec) } | Out-Null
         Should -Invoke Invoke-SessionCleanup -Times 0 -Exactly
     }
+
+    # --- #414: skip re-polling, stale prune, rate-limit protection ---
+
+    It 'does not re-poll a session that was already reported LISTO in a prior cycle (#414)' {
+        # GetStatus cycles: first call done, second call should not happen for the same issue.
+        $script:callCount = @{}
+        $script:cycle414 = 0
+        # Two sessions: A finishes in cycle 1, B stays pending then finishes in cycle 2.
+        # GetStatus should only be called ONCE for A (in cycle 1).
+        $r = Invoke-SessionWatch `
+            -ReadSessions {
+                @(
+                    [pscustomobject]@{ issue = 42; sessionPid = $null; workPath = $null },
+                    [pscustomobject]@{ issue = 43; sessionPid = $null; workPath = $null }
+                )
+            } `
+            -GetStatus {
+                param($s)
+                $script:callCount["$($s.issue)"] = ($script:callCount["$($s.issue)"] + 1)
+                # Session 42 is always done; session 43 is done after 2nd call.
+                if ($s.issue -eq 42) { [pscustomobject]@{ done = $true; reason = 'PR merged'; merged = $true } }
+                else {
+                    $n = $script:callCount['43']
+                    if ($n -ge 2) { [pscustomobject]@{ done = $true; reason = 'PR merged'; merged = $true } }
+                    else          { [pscustomobject]@{ done = $false; reason = 'en progreso'; merged = $false } }
+                }
+            } `
+            -Now { [datetime]::new(2026,1,1) } `
+            -Sleep { param($sec) } `
+            -IsStale { $false } `
+            -SuperviseEvery 0
+        # Session 42 should have been polled exactly once (cycle 1 only).
+        $script:callCount['42'] | Should -Be 1
+        $r.allDone | Should -BeTrue
+    }
+
+    It 'prunes zombie sessions (dead PID + missing workPath) without calling GetStatus (#414)' {
+        Mock Remove-SessionRegistryEntry { }
+        $script:getStatusCalled = $false
+        $r = Invoke-SessionWatch `
+            -ReadSessions { @([pscustomobject]@{ issue = 99; sessionPid = 12345; workPath = 'C:\gone' }) } `
+            -GetStatus    { param($s) $script:getStatusCalled = $true; [pscustomobject]@{ done = $false; reason = 'x' } } `
+            -IsStale      { param($s) $true } `
+            -Now { Get-Date } -Sleep { param($sec) } `
+            -SuperviseEvery 0
+        $script:getStatusCalled  | Should -BeFalse
+        Should -Invoke Remove-SessionRegistryEntry -Times 1 -Exactly -ParameterFilter { $IssueNum -eq 99 }
+        $r.allDone | Should -BeTrue
+    }
+
+    It 'removes zombie from sessions.json with outcome stale-prune (#414)' {
+        $script:outcome414 = $null
+        Mock Remove-SessionRegistryEntry { $script:outcome414 = $Outcome }
+        Invoke-SessionWatch `
+            -ReadSessions { @([pscustomobject]@{ issue = 99; sessionPid = 12345; workPath = 'C:\gone' }) } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'x' } } `
+            -IsStale      { param($s) $true } `
+            -Now { Get-Date } -Sleep { param($sec) } `
+            -SuperviseEvery 0 | Out-Null
+        $script:outcome414 | Should -Be 'stale-prune'
+    }
+
+    It 'does not report a rate-limited session as done (#414)' {
+        # A GetStatus returning rateLimited=true must NOT be counted as LISTO.
+        $script:t414 = 0
+        $r = Invoke-SessionWatch -TimeoutSec 5 `
+            -ReadSessions { @([pscustomobject]@{ issue = 55; sessionPid = $null; workPath = $null }) } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'UNKNOWN (rate limit)'; rateLimited = $true; merged = $false } } `
+            -IsStale      { $false } `
+            -Now  { $script:t414 += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t414) } `
+            -Sleep { param($sec) } `
+            -SuperviseEvery 0
+        $r.timedOut | Should -BeTrue
+        $r.allDone  | Should -BeFalse
+    }
 }
 
 Describe 'Test-Pending (vocabulary-aware pending detection, issue #278)' {

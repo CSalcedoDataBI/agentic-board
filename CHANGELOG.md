@@ -3,6 +3,23 @@
 ## [Unreleased]
 
 ### Fixed
+- **`-Sessions -Watch` no longer re-polls every registered session on every 30-second cycle** (#414).
+  Three related defects: (1) sessions already reported `LISTO` in a prior cycle were re-polled on
+  every subsequent cycle — 31 zombie entries from 2026-07-13 drove ~33 API calls per cycle,
+  exhausting the 5 000/hr GraphQL quota within four watch runs. Fix: a `$doneSet` tracks issues
+  already known to be done; at the start of each cycle `ReadSessions` output is filtered through
+  it, so a done session is never polled again. (2) zombie sessions (dead PID + `workPath` gone from
+  disk) were never pruned and kept accumulating in `sessions.json`. Fix: injectable `$IsStale`
+  scriptblock detects these; when stale, the session is removed from the registry via
+  `Remove-SessionRegistryEntry -Outcome stale-prune` — zero API calls, no `GetStatus` probe at all.
+  (3) when `gh` failed due to a rate-limit error, `Get-SessionLiveStatus` silently fell back to
+  process-liveness and printed `LISTO: proceso terminado` — indistinguishable in the output from a
+  verified `LISTO: PR merged`. Fix: `Get-SessionLiveStatus` captures stderr with `2>&1`, checks
+  `$LASTEXITCODE`, and returns `{ done=$false; reason='UNKNOWN (rate limit)'; rateLimited=$true }`
+  on any rate-limit hit — never degrading to a PID signal that looks verified. The watch loop
+  prints rate-limited sessions in `DarkYellow` so the degraded state is visible. Four new Pester
+  tests cover: no re-poll after LISTO, stale-prune skips GetStatus, stale-prune writes
+  `stale-prune` outcome, rate-limited session never reported done.
 - **Large inline text payloads no longer abort Board-Plan / Board-Handoff** (#419). The tool-layer
   path guard pattern-matches the full command string: prose containing slash-commands (`/board`,
   `/scan`, `/knowledge`, `/expert`) passed as inline parameters was misread as a filesystem path
