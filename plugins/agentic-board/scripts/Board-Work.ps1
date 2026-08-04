@@ -347,7 +347,9 @@ function Write-SessionRegistryEntry {
         cli          = $Cli
         fleetSession = $FleetSession
         host         = $env:COMPUTERNAME
-        started      = (Get-Date -Format "yyyy-MM-dd HH:mm")
+        # Seconds, not minutes (#568): this stamp is the start of every duration the tool can
+        # ever compute about its own runs; minute granularity threw away the precision for free.
+        started      = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     }
     $entries | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p
 }
@@ -2099,12 +2101,28 @@ function Read-SessionRegistryRaw {
 
 # Remove one issue's entry from sessions.json (raw read, so a dead-PID pruning pass does
 # not interfere). No-op when the registry is absent. Used by auto-clean.
+#
+# The removed row is ARCHIVED first (#568): removal used to be destruction, so every run's
+# wall-clock cost vanished the moment it finished - "nobody, including the tool, knows whether
+# a run takes 2 minutes or 40" was literally unanswerable. sessions-history.jsonl keeps the row
+# with `ended` and the outcome; best-effort - an archive failure never blocks the cleanup.
 function Remove-SessionRegistryEntry {
-    param([int]$IssueNum)
+    param([int]$IssueNum, [string]$Outcome = '')
     $p = Get-SessionRegistryPath
     if (-not $p -or -not (Test-Path $p)) { return }
     try { $entries = @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return }
+    $gone = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
     $kept = @($entries | Where-Object { [int]$_.issue -ne $IssueNum })
+    try {
+        $histPath = Join-Path (Split-Path $p -Parent) 'sessions-history.jsonl'
+        foreach ($g in $gone) {
+            $row = [ordered]@{}
+            foreach ($prop in $g.PSObject.Properties) { $row[$prop.Name] = $prop.Value }
+            $row['ended']   = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            $row['outcome'] = "$Outcome"
+            Add-Content -LiteralPath $histPath -Encoding UTF8 -Value (([pscustomobject]$row) | ConvertTo-Json -Compress -Depth 4)
+        }
+    } catch { }
     $kept | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p
 }
 
@@ -2316,7 +2334,7 @@ function Invoke-SessionCleanup {
         }
     }
     $actions += "prune #$($Session.issue) de sessions.json"
-    if (-not $DryRun) { Remove-SessionRegistryEntry -IssueNum ([int]$Session.issue) }
+    if (-not $DryRun) { Remove-SessionRegistryEntry -IssueNum ([int]$Session.issue) -Outcome $(if ($PrMerged) { 'pr-merged' } else { 'cleaned' }) }
     return $actions
 }
 
@@ -2689,7 +2707,7 @@ if ($CloseLoop) {
         $entry    = @(Read-SessionRegistryRaw | Where-Object { $_.branch -eq $curBranch }) | Select-Object -First 1
         $issueNum = if ($entry) { [int]$entry.issue } elseif ($curBranch -match '^issue-(\d+)') { [int]$Matches[1] } else { 0 }
         if ($issueNum -gt 0) {
-            Remove-SessionRegistryEntry -IssueNum $issueNum
+            Remove-SessionRegistryEntry -IssueNum $issueNum -Outcome 'close-loop'
             Write-Host ("  OK  entrada de sesion del issue #{0} purgada." -f $issueNum) -ForegroundColor DarkGray
         }
     }

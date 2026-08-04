@@ -108,6 +108,18 @@ foreach ($p in $pending) {
 
     $episodes = @(Get-FieldEpisodes -Events (Join-FieldResults -Events $events.ToArray()) -Window $Window)
     $used = if ($episodes.Count) { 'yes' } else { 'no' }
+
+    # Session wall-clock (#568): first/last parsed-event stamps. The events list is already the
+    # filtered set the detectors use, which is enough for an honest duration; unknown stays 0
+    # in the CSV (a CSV cell cannot hold null) but the record file keeps the nulls.
+    $sessionDurationMin = 0
+    $evArr = $events.ToArray()
+    if ($evArr.Count -gt 1) {
+        $t0 = ConvertTo-FieldTimestamp -Ts $evArr[0].ts
+        $t1 = ConvertTo-FieldTimestamp -Ts $evArr[$evArr.Count - 1].ts
+        if ($t0 -and $t1 -and $t1 -ge $t0) { $sessionDurationMin = [int][Math]::Round(($t1 - $t0).TotalMinutes) }
+    }
+
     if ($episodes.Count) {
         $withTool++
         $totalEpisodes += $episodes.Count
@@ -115,12 +127,15 @@ foreach ($p in $pending) {
             $toolTally[$e.tool] = 1 + [int]$toolTally[$e.tool]
             foreach ($s in $e.signals) { $signalTally[$s] = 1 + [int]$signalTally[$s] }
         }
-        # Per-session record, redacted. Traceable back to the transcript by event index.
+        # Per-session record, redacted. Traceable back to the transcript by event index; carries
+        # the time dimension (#568) so later analysis can finally say where the minutes went.
         $rec = [pscustomobject]@{
             sessionId = $p.sessionId; project = $p.project; scannedAt = (Get-Date).ToUniversalTime().ToString('o')
             events = $src.events
+            durationMin = $sessionDurationMin
             episodes = @($episodes | ForEach-Object {
-                [pscustomobject]@{ index = $_.index; tool = Protect-FieldText -Text $_.tool; failed = $_.failed; signals = $_.signals }
+                [pscustomobject]@{ index = $_.index; tool = Protect-FieldText -Text $_.tool; failed = $_.failed; signals = $_.signals
+                                   ts = $_.ts; durationMs = $_.durationMs }
             })
         }
         $rec | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $recordDir "$($p.project)__$($p.sessionId).json") -Encoding UTF8
@@ -129,6 +144,7 @@ foreach ($p in $pending) {
     # Only now — the events were actually processed.
     $ledger = @(Update-LedgerRow -Ledger $ledger -SessionId $p.sessionId -Project $p.project `
                     -Events $src.events -Bytes $src.bytes -Incidents $episodes.Count -UsedTool $used `
+                    -DurationMin $sessionDurationMin `
                     -ScannedAt ((Get-Date).ToUniversalTime().ToString('o')))
 }
 Write-Progress -Activity "Escaneando sesiones" -Completed

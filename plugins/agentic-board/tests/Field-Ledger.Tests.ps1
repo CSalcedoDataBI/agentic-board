@@ -116,3 +116,13 @@ Describe 'Safety: the scanner is read-only over the transcript store' {
         }
     }
 }
+
+Describe 'durationMin - the ledger stops being time-blind (#568)' {
+    It 'Update-LedgerRow records the duration' {
+        $l = @(Update-LedgerRow -Ledger @() -SessionId 's1' -Project 'p' -Events 10 -Bytes 100 -Incidents 0 -DurationMin 42 -ScannedAt '2026-08-03T10:00:00Z')
+        $l[0].durationMin | Should -Be 42
+    }
+    It 'the schema carries the column' {
+        $script:LedgerColumns | Should -Contain 'durationMin'
+    }
+}

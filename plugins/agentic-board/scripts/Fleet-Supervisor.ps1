@@ -127,7 +127,10 @@ function Resolve-LiveSessions {
     $out = @()
     foreach ($e in (Read-FleetSessions)) {
         $ageMin = 0
-        try { $ageMin = [int]((Get-Date) - [datetime]::ParseExact($e.started, 'yyyy-MM-dd HH:mm', $null)).TotalMinutes } catch { }
+        # Both stamp formats: rows written before #568 carry minutes, newer ones carry seconds.
+        foreach ($fmt in @('yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd HH:mm')) {
+            try { $ageMin = [int]((Get-Date) - [datetime]::ParseExact($e.started, $fmt, $null)).TotalMinutes; break } catch { }
+        }
         # prKnown separates "no PR" from "could not read" (#565 review round 4): a transient gh
         # failure used to read as pr='' - tolerable for a terminal warning, but -Post publishes
         # comments from this fact, and a false [abios-stall] on a session that HAS a PR is noise

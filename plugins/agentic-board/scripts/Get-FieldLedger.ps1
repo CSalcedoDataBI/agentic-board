@@ -28,7 +28,9 @@ $ErrorActionPreference = 'Stop'
 
 # ── Pure core ───────────────────────────────────────────────────────────────────
 
-$script:LedgerColumns = @('sessionId','project','title','events','bytes','scannedAt','usedTool','incidents')
+# durationMin (#568): the one column that lets the ledger answer "where did the time go". The
+# schema measured everything except time - events and bytes, never seconds.
+$script:LedgerColumns = @('sessionId','project','title','events','bytes','scannedAt','usedTool','incidents','durationMin')
 
 function Get-LedgerKey {
     # A session id is unique per project directory, not globally: worktrees and re-clones reuse ids.
@@ -88,6 +90,7 @@ function Update-LedgerRow {
         [Parameter(Mandatory)][string]$Project,
         [int]$Events, [long]$Bytes, [int]$Incidents,
         [string]$UsedTool = 'no',
+        [int]$DurationMin = 0,
         [Parameter(Mandatory)][string]$ScannedAt
     )
     $key = Get-LedgerKey -Project $Project -SessionId $SessionId
@@ -101,7 +104,7 @@ function Update-LedgerRow {
             $out.Add([pscustomobject]@{
                 sessionId = $SessionId; project = $Project; title = $row.title
                 events = $Events; bytes = $Bytes; scannedAt = $ScannedAt
-                usedTool = $UsedTool; incidents = $Incidents })
+                usedTool = $UsedTool; incidents = $Incidents; durationMin = $DurationMin })
         } else {
             $out.Add($row)
         }
@@ -110,7 +113,7 @@ function Update-LedgerRow {
         $out.Add([pscustomobject]@{
             sessionId = $SessionId; project = $Project; title = ''
             events = $Events; bytes = $Bytes; scannedAt = $ScannedAt
-            usedTool = $UsedTool; incidents = $Incidents })
+            usedTool = $UsedTool; incidents = $Incidents; durationMin = $DurationMin })
     }
     $out.ToArray()
 }
