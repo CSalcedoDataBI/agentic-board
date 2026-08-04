@@ -352,3 +352,14 @@ Describe 'Invoke-GhCached - the read cache (#571)' {
         $script:calls5 | Should -Be 2
     }
 }
+
+Describe 'Invoke-GhCached -Graphql on a HIT (#571 round 2)' {
+    It 'a cached errors[] payload is a MISS, not a success' {
+        Clear-GhCache
+        # Seed the cache with an errors body via a -Json call (same args, same key).
+        Mock Invoke-GhRaw { [pscustomobject]@{ Output = '{"errors":[{"message":"boom"}]}'; ExitCode = 0; StdErr = '' } }
+        $null = Invoke-GhCached -GhArgs @('api','graphql','-f','query=q1') -What 'x' -Json -TtlSec 300
+        # The -Graphql read of the same key must NOT accept it; the fresh fetch then throws.
+        { Invoke-GhCached -GhArgs @('api','graphql','-f','query=q1') -What 'x' -Graphql -TtlSec 300 } | Should -Throw
+    }
+}

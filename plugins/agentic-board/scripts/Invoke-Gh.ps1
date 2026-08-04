@@ -203,8 +203,19 @@ function Invoke-GhCached {
                 # see a truncated file) is a MISS, never a $null handed to the caller as "the
                 # board has no fields" (external review round 1).
                 if (-not [string]::IsNullOrWhiteSpace($cached)) {
-                    if ($Json) { return ($cached | ConvertFrom-Json) }
-                    return $cached
+                    if ($Json) {
+                        $parsedHit = $cached | ConvertFrom-Json
+                        # A HIT owes the same graphql errors[] check a miss gets (round 2): only
+                        # successful bodies are written, but a same-args -Json call or a stale
+                        # artifact could have cached an errors payload - treat it as a MISS.
+                        if ($Graphql -and $parsedHit.PSObject.Properties.Name -contains 'errors' -and @($parsedHit.errors).Count -gt 0) {
+                            # fall through to a fresh fetch
+                        } else {
+                            return $parsedHit
+                        }
+                    } else {
+                        return $cached
+                    }
                 }
             }
         } catch { }
