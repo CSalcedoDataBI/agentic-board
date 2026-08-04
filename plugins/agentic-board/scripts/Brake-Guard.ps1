@@ -486,22 +486,29 @@ function Get-BudgetState {
 # status" and sailed through. The COMMAND must be the wrap-up, not merely mention one. The only
 # permitted prefixes are the launcher shapes (`&`, `pwsh -File ...`) that genuinely execute the
 # exempt script.
+# The exact basename, preceded by nothing or a path separator (round 6): `\S*` before the name
+# accepted any SUFFIX match, so `Evil-Board-Handoff.ps1` rode the exemption of the script it
+# merely ends like.
+$script:BudgetExemptScript = '(?:[^\s;|&]*[\\/])?(board-handoff|board-runledger)\.ps1'
 $script:BudgetExemptPatterns = @(
-    '^(?:& )?\S*board-handoff\.ps1\b'                              # the handoff script, invoked directly
-    '^(?:& )?\S*board-runledger\.ps1\b'                            # closing the run ledger
+    ('^(?:& )?' + $script:BudgetExemptScript + '(?=\s|$)')         # the wrap-up scripts, invoked directly
     # Via a pwsh launcher: the exempt script must be the -File TARGET, and the prefix may carry
     # ONLY known non-executing host flags (round 5): "any flag-shaped token" admitted -Command,
     # and `pwsh -command build.ps1 -file ...board-handoff.ps1` executes build.ps1 with '-file ...'
     # as its ARGUMENTS - the -File this pattern trusted never reaches the host. Requiring -File
     # at all is the round-2 fix (a -Command string that merely MENTIONED the script was a free
     # pass); the closed flag list is what makes the -File the one the host actually honours.
-    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+\S*(board-handoff|board-runledger)\.ps1(?=\s|$)'
+    ('^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+' + $script:BudgetExemptScript + '(?=\s|$)')
     '^/board\s+handoff\b'                                          # the slash-command spelling
-    ('^' + $script:GitCmd + '(status|diff|log|add|commit|push)\b')  # commit + push the WIP
+    # Wrap-up git takes NO global flags (round 6): the $script:GitCmd gap admitted `-c
+    # diff.external=build.cmd`, and git then executes the configured helper - the exemption
+    # became an execution primitive. The brake keeps the flag-tolerant matcher (it must not be
+    # shaken off by a flag); the exemption is a positive allowlist and stays strict instead.
+    '^git\s+(status|diff|log|add|commit|push)\b'
     # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
     # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
     # is push and stays allowed.
-    ('^' + $script:GitCmd + 'stash(\s+(push|save)\b.*)?\s*$')
+    '^git\s+stash(\s+(push|save)\b.*)?\s*$'
     '^gh\s+(pr|issue)\s+(comment|view)\b'                          # report where it stopped / read for the handoff
 )
 
@@ -548,11 +555,26 @@ function Test-IsBudgetExemptCommand {
 # (no filesystem), so it cannot resolve `C:\repo\.handoffs\..\src\app.ts` - and no legitimate
 # wrap-up write ever needs a parent-directory hop. Refusing the shape closes the escape without
 # needing the resolution.
+#
+# With -Root (the armed worktree, derived from the marker's own location), the surfaces are
+# anchored to the ROOT rather than matched anywhere in the path (round 6): unanchored,
+# `C:\repo\src\.agentic-board\app.ts` passed because a directory NAME appeared mid-path. Without
+# a root (no marker context) the anywhere-match remains as the conservative fallback.
 function Test-IsBudgetExemptWrite {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Path,
+        [string]$Root = ''
+    )
     if (-not "$Path".Trim()) { return $false }
     $p = "$Path" -replace '\\', '/'
     if ($p -match '(^|/)\.\.(/|$)') { return $false }
+    $surfaces = '(?i)^(HANDOFF\.md|active-handoff\.md|MEMORY\.md)$|^\.handoffs(/|$)|^\.agentic-board(/|$)|^evidence/[^/]+\.md$'
+    $r = "$Root".Trim() -replace '\\', '/'
+    if ($r) {
+        $r = $r.TrimEnd('/')
+        if (-not $p.StartsWith("$r/", [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+        return [bool](($p.Substring($r.Length + 1)) -match $surfaces)
+    }
     return [bool]($p -match '(?i)(^|/)(HANDOFF\.md|active-handoff\.md)$|(^|/)\.handoffs(/|$)|(^|/)\.agentic-board(/|$)|(^|/)MEMORY\.md$|(^|/)evidence/[^/]+\.md$')
 }
 

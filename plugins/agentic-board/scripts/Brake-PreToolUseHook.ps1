@@ -97,8 +97,11 @@ try {
             exit 0
         }
         # Over budget, a write is allowed only toward the wrap-up surfaces (handoff files, the
-        # run's state dir, evidence). Anything else is more work, and the budget is spent.
-        if ($budget.OverBudget -and -not (Test-IsBudgetExemptWrite -Path $target)) {
+        # run's state dir, evidence), ANCHORED to the armed worktree's root - derived from the
+        # marker's own location, the one path fact the run cannot spoof (#564 round 6).
+        $wtRoot = ''
+        try { if ($marker.path) { $wtRoot = Split-Path (Split-Path $marker.path -Parent) -Parent } } catch { $wtRoot = '' }
+        if ($budget.OverBudget -and -not (Test-IsBudgetExemptWrite -Path $target -Root $wtRoot)) {
             Write-Output (New-BudgetDenyJson -Issue $marker.issue -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes)
         }
         exit 0

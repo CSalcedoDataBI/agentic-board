@@ -1141,6 +1141,15 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'git stash drop' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'git stash clear' | Should -BeFalse
         }
+        It 'wrap-up git takes NO global flags - `-c diff.external=` was an execution primitive (round 6)' {
+            Test-IsBudgetExemptCommand -Command 'git -c diff.external=build.cmd diff' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git -C C:\elsewhere status' | Should -BeFalse
+        }
+        It 'the exempt script is an exact basename, not a suffix (round 6)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Evil-Board-Handoff.ps1' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'scripts/Evil-Board-Handoff.ps1 -Save' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
+        }
         It 'an empty command is not exempt' {
             Test-IsBudgetExemptCommand -Command '' | Should -BeFalse
         }
@@ -1162,6 +1171,13 @@ Describe 'The enforced time budget (#564)' {
         It 'refuses a `..` escape through an allowed directory (external review: pure core cannot resolve, so it refuses the shape)' {
             Test-IsBudgetExemptWrite -Path 'C:\repo\.agentic-board\..\src\app.ts' | Should -BeFalse
             Test-IsBudgetExemptWrite -Path 'C:\repo\.handoffs\..\src\app.ts' | Should -BeFalse
+        }
+        It 'with a root, surfaces anchor to the worktree ROOT - a mid-path directory name is not a surface (round 6)' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\src\.agentic-board\app.ts' -Root 'C:\repo' | Should -BeFalse
+            Test-IsBudgetExemptWrite -Path 'C:\other\project\.agentic-board\x.json' -Root 'C:\repo' | Should -BeFalse
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.agentic-board\active-run.json' -Root 'C:\repo' | Should -BeTrue
+            Test-IsBudgetExemptWrite -Path 'C:\repo\HANDOFF.md' -Root 'C:\repo' | Should -BeTrue
+            Test-IsBudgetExemptWrite -Path 'C:\repo\evidence\42.md' -Root 'C:\repo' | Should -BeTrue
         }
     }
 
