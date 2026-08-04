@@ -83,9 +83,16 @@ jobs:
             exit 1
           fi
 
-      # Wiki docs freshness (#406): verify that the wiki pages can still be generated
-      # from the current README + commands/ without error, and that every generated page
+      # Wiki docs freshness (#406, updated #418): verify that the wiki pages can still be
+      # generated from the current README without error, and that every generated page
       # carries the <!-- GENERATED --> marker.  No git/network — pure -PagesOnly run.
+      #
+      # IMPORTANT: "it generates" is NOT evidence that "it reads".  The original check
+      # passed a 31 KB Docs-Command-Board page that read as second-person AI instructions
+      # because commands/*.md are agent prompts, not documentation.  The GENERATED marker
+      # only proves the generator ran — it says nothing about whether the output is useful
+      # or safe to publish.  Docs-Command-* pages were dropped in #418 precisely because
+      # a check that cannot ask "does this read?" will report green on garbage forever.
       - name: Validate wiki doc generation
         shell: pwsh
         run: |
