@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+- **`.agentic-board/` finally has a garbage collector** (#574, part of epic #561). The state dir
+  had accumulated 48 files across the project's entire life — briefings and launch scripts for
+  issues #123→#532, signal markers, compaction snapshots — because nothing ever cleaned it.
+  `Clear-AbiosState.ps1` reaps only **regenerable per-run debris** (briefings, launch scripts,
+  expert briefs, per-issue logs, signal markers, snapshots) under three pinned rules: a live
+  session protects its files at any age, files younger than `-MaxAgeDays` (14) stay, and durable
+  records (sessions history, run-ledger marker, contract, denial log, fleet files) plus anything
+  *unrecognized* are never touched — unknown is somebody's state, not deletable. Plan-only by
+  default, `-Force` executes, every reap entry carries its reason. This is the GC half of the
+  "one run, one record" direction; the record half was seeded by #568's `sessions-history.jsonl`
+  archive (started/ended/outcome). Verified by 9 Pester tests.
+
 ### Changed
 - **The always-loaded instruction payload shrank ~60%** (#573, part of epic #561). Every
   `/board` invocation loaded ~72 KB of instructions (≈18k tokens, ~9% of a 200k window) before
