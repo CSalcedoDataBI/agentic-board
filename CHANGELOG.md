@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed
+- **`Board-Work.ps1` sheds its inline job scheduler and process killer** (#575, part of epic
+  #561; first slice of the monolith split). The 3,176-line dispatcher — 18.7% of all script
+  code — contained a machine-capacity governor and a process-tree supervisor a board tool has
+  no business holding inline. Both clusters moved **verbatim** into part files
+  (`BoardWork.Capacity.ps1`: capacity snapshot, dispatch plan, fleet slot pacing, dispatch
+  governor; `BoardWork.Processes.ps1`: pid→parent map, descendant walk, guarded tree kill,
+  orphan detection and reaping), dot-sourced before the test guard so every caller and test
+  sees the exact same surface. Behavior-preserving by construction and by evidence: 371 tests
+  across the Board-Work, Board-Doctor and lint suites stay green with zero changes to them.
+  Further slices (session registry, worktree launch) can now follow the same pattern.
+
 ### Added
 - **`.agentic-board/` finally has a garbage collector** (#574, part of epic #561). The state dir
   had accumulated 48 files across the project's entire life — briefings and launch scripts for
