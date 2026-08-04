@@ -1244,16 +1244,23 @@ function Start-WorktreeSession {
     try {
         . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
         $armedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-        $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed ([bool]$StopAtPR) -Issue $IssueNum `
+        # A positive budget arms the marker on its own (#564, external review round 2): the hook
+        # can only enforce what the marker records, and a launch whose contract does not brake on
+        # merge still deserves its time limit. -StopAtPR without a budget arms exactly as before.
+        $armIntent = ([bool]$StopAtPR) -or ($SessionBudgetMinutes -gt 0)
+        $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed $armIntent -Issue $IssueNum `
                     -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
                     -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes
         if ($state -eq 'armed') {
             Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
+            if ($SessionBudgetMinutes -gt 0) {
+                Write-Host ("      presupuesto: {0} min - vencido, el hook solo deja pasar el cierre (handoff/commit/report)" -f $SessionBudgetMinutes) -ForegroundColor DarkGray
+            }
         } elseif ($state -eq 'disarmed') {
             Write-Host ("  OK  #{0}: freno DESARMADO (marcador de un run previo retirado)" -f $IssueNum) -ForegroundColor DarkGray
         }
     } catch {
-        if ($StopAtPR) {
+        if ($StopAtPR -or $SessionBudgetMinutes -gt 0) {
             # An unarmed run that believes it is armed is the #440 failure. Say so and refuse to
             # launch rather than spawn a session with a brake that exists only on paper.
             Write-Host "  FAIL #${IssueNum}: no se pudo armar el freno ($_). No se lanza la sesion." -ForegroundColor Red

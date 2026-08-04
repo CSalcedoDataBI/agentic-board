@@ -1113,6 +1113,9 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'pwsh -NoProfile -File scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
             Test-IsBudgetExemptCommand -Command "& 'C:\repo\scripts\Board-Handoff.ps1' -Save" | Should -BeTrue
         }
+        It 'refuses a pwsh -Command that merely MENTIONS the exempt script (round 2: -File target required)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -Command "npm run build # Board-Handoff.ps1"' | Should -BeFalse
+        }
         It 'an empty command is not exempt' {
             Test-IsBudgetExemptCommand -Command '' | Should -BeFalse
         }

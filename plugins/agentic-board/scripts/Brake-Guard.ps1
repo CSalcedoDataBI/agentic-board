@@ -489,7 +489,11 @@ function Get-BudgetState {
 $script:BudgetExemptPatterns = @(
     '^(?:& )?\S*board-handoff\.ps1\b'                              # the handoff script, invoked directly
     '^(?:& )?\S*board-runledger\.ps1\b'                            # closing the run ledger
-    '^(?:& )?(?:pwsh|powershell)\b[^;|&]*\b(board-handoff|board-runledger)\.ps1\b'  # via a pwsh launcher
+    # Via a pwsh launcher: the exempt script must be the -File TARGET, with only flag-shaped
+    # tokens before it (same one-reading-per-token shape as $script:GitCmd). Requiring -File is
+    # the round-2 fix: matched anywhere after `pwsh`, the script NAME inside an arbitrary
+    # -Command string ('pwsh -Command "npm run build # Board-Handoff.ps1"') was a free pass.
+    '^(?:& )?(?:pwsh|powershell)\s+(?:-[^\s;|&]*\s+(?:[^\s;|&-][^\s;|&]*\s+)?)*-file\s+\S*(board-handoff|board-runledger)\.ps1(?=\s|$)'
     '^/board\s+handoff\b'                                          # the slash-command spelling
     ('^' + $script:GitCmd + '(status|diff|log|add|commit|push|stash)\b')  # commit + push the WIP
     '^gh\s+(pr|issue)\s+(comment|view)\b'                          # report where it stopped / read for the handoff

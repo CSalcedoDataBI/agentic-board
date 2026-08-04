@@ -222,3 +222,14 @@ Describe 'The hook enforces the time budget (#564)' {
         $out | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Budget-only marker - a contract that does not brake on merge still gets its time limit (#564 round 2)' {
+    It 'enforces the budget from a marker whose irreversible list has no merge' {
+        $armedOld = (Get-Date).AddHours(-3).ToString('yyyy-MM-dd HH:mm:ss')
+        $mk  = "{`"issue`":7,`"irreversible`":[`"deploy`"],`"endToEnd`":false,`"armedAt`":`"$armedOld`",`"budgetMinutes`":60}"
+        $wt  = script:NewWorktree 'budget-only' $mk
+        $out = script:RunHook -Cwd $wt -Command 'npm run build'
+        script:DecisionOf $out | Should -Be 'deny'
+        $out | Should -Match 'BUDGET'
+    }
+}

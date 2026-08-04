@@ -62,6 +62,12 @@ try {
     # MultiEdit belongs here too: it is a file-writing path like the others, and leaving it out
     # left one uncovered route to the marker. Listing a tool this harness may not expose costs
     # nothing; omitting one it does expose costs the whole control.
+    #
+    # Read-only tools (Read/Grep/Glob) stay OUTSIDE both controls, including the budget (#564,
+    # considered and rejected in external review round 2): a read produces no work product - work
+    # externalizes through commands and writes, which ARE gated - and intercepting every read
+    # would add a per-call interpreter spawn to the hot path for no containment gain. The budget
+    # is a liveness limit; reading while wrapping up is legitimate.
     $writeTools = @('Edit', 'Write', 'NotebookEdit', 'MultiEdit')
     if ($toolName -notin ($shellTools + $writeTools)) { exit 0 }
 
