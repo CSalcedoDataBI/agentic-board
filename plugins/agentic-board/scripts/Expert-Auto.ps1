@@ -392,10 +392,16 @@ query($o:String!,$r:String!,$n:Int!){
     foreach ($s in @($wave.Blocked))  { Write-Host ("    x #{0} {1} (bloqueado por: {2})" -f $s.number, $s.title, (@($s.openBlockers) -join ', ')) -ForegroundColor DarkYellow }
 
     if (@($wave.Ready).Count -eq 0) {
-        $openLeft = @($wave.InFlight).Count + @($wave.Blocked).Count
+        $openForeign = @($foreign | Where-Object { "$($_.state)".ToUpperInvariant() -eq 'OPEN' }).Count
+        $openLeft = @($wave.InFlight).Count + @($wave.Blocked).Count + $openForeign
         if ($openLeft -eq 0) {
             Write-Host ""
             Write-Host "  EPIC COMPLETO: todos los sub-issues estan cerrados o mergeados. Cierra #$Epic si sigue abierto." -ForegroundColor Green
+        } elseif ($openForeign -gt 0 -and (@($wave.InFlight).Count + @($wave.Blocked).Count) -eq 0) {
+            # Round 5: an epic whose only open children live in ANOTHER repo is not complete -
+            # it is simply outside this walker's reach, and saying "complete" would be false.
+            Write-Host ""
+            Write-Host ("  Sin trabajo local pendiente, pero {0} sub-issue(s) ABIERTOS viven en otro repo - el epic NO esta completo; trabajalos alla." -f $openForeign) -ForegroundColor Yellow
         } else {
             Write-Host ""
             Write-Host "  Nada listo para despachar: mergea los PRs en vuelo (el humano cierra cada ola) y re-ejecuta" -ForegroundColor Yellow
