@@ -109,13 +109,22 @@ foreach ($p in $pending) {
     $episodes = @(Get-FieldEpisodes -Events (Join-FieldResults -Events $events.ToArray()) -Window $Window)
     $used = if ($episodes.Count) { 'yes' } else { 'no' }
 
-    # Session wall-clock (#568): first/last parsed-event stamps. The events list is already the
-    # filtered set the detectors use, which is enough for an honest duration; unknown stays 0
-    # in the CSV (a CSV cell cannot hold null) but the record file keeps the nulls.
-    $sessionDurationMin = 0
+    # Session wall-clock (#568). UNKNOWN stays $null in memory and in the record file - only the
+    # CSV coerces to 0 (a cell cannot hold null); fabricating a zero elsewhere is a claim, not a
+    # measurement. On an INCREMENTAL scan the slice only starts at the watermark, so the total
+    # runs from the ledger's persisted firstTs, not from the slice's own first event - otherwise
+    # a rescan overwrote the total with the slice (external review round 1).
     $evArr = $events.ToArray()
-    if ($evArr.Count -gt 1) {
-        $t0 = ConvertTo-FieldTimestamp -Ts $evArr[0].ts
+    $prevRow = @($ledger | Where-Object { $_ -and $_.project -eq $p.project -and $_.sessionId -eq $p.sessionId }) | Select-Object -First 1
+    $firstTs = ''
+    if ($p.fromEvent -gt 0 -and $prevRow -and "$($prevRow.PSObject.Properties['firstTs'].Value)".Trim()) {
+        $firstTs = "$($prevRow.firstTs)"
+    } elseif ($evArr.Count -gt 0 -and $null -ne $evArr[0].PSObject.Properties['ts']) {
+        $firstTs = "$($evArr[0].ts)"
+    }
+    $sessionDurationMin = $null
+    if ($evArr.Count -gt 0 -and $firstTs) {
+        $t0 = ConvertTo-FieldTimestamp -Ts $firstTs
         $t1 = ConvertTo-FieldTimestamp -Ts $evArr[$evArr.Count - 1].ts
         if ($t0 -and $t1 -and $t1 -ge $t0) { $sessionDurationMin = [int][Math]::Round(($t1 - $t0).TotalMinutes) }
     }
@@ -141,10 +150,11 @@ foreach ($p in $pending) {
         $rec | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $recordDir "$($p.project)__$($p.sessionId).json") -Encoding UTF8
     }
 
-    # Only now — the events were actually processed.
+    # Only now — the events were actually processed. The CSV coerces an unknown duration to 0
+    # (a cell cannot hold null); the record file above kept the honest null.
     $ledger = @(Update-LedgerRow -Ledger $ledger -SessionId $p.sessionId -Project $p.project `
                     -Events $src.events -Bytes $src.bytes -Incidents $episodes.Count -UsedTool $used `
-                    -DurationMin $sessionDurationMin `
+                    -DurationMin $(if ($null -eq $sessionDurationMin) { 0 } else { $sessionDurationMin }) -FirstTs $firstTs `
                     -ScannedAt ((Get-Date).ToUniversalTime().ToString('o')))
 }
 Write-Progress -Activity "Escaneando sesiones" -Completed
