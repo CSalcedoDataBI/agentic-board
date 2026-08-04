@@ -1705,9 +1705,14 @@ function Get-CloseLoopDisposition {
 # Live completion of one registered session: PR state of its head branch + issue state +
 # whether the host PID is alive. Best-effort (never throws) so a transient gh failure just
 # reads as "still in progress". Wrapped so the watch loop is testable via an injected probe.
+#
+# Rate-limit protection (#414): when gh reports a rate-limit error we return
+# { done=$false; reason='UNKNOWN (rate limit)' } rather than falling through to the PID
+# signal. A dead PID after a rate-limit failure looks identical to a verified completion —
+# both print "LISTO: proceso terminado" — so the distinction matters.
 function Get-SessionLiveStatus {
     param([object]$Session)
-    $prState = ''; $issueState = ''; $prHeadOid = ''; $branchTip = ''
+    $prState = ''; $issueState = ''; $prHeadOid = ''; $branchTip = ''; $rateLimited = $false
     if ($Session.repo -and $Session.branch) {
         # The tip we would delete. Refs are shared across worktrees, so this resolves from here.
         try { $branchTip = (git rev-parse --verify "$($Session.branch)^{commit}" 2>$null) } catch { }
@@ -1715,17 +1720,32 @@ function Get-SessionLiveStatus {
             # Several PRs can share a reused branch name, so do not trust "the newest one":
             # prefer the PR whose head IS our tip, and only fall back to the newest for the
             # non-matching case (where a MERGED state proves nothing anyway).
-            $prs = @(gh pr list --repo $Session.repo --head $Session.branch --state all --json state,headRefOid --limit 20 2>$null | ConvertFrom-Json)
-            $mine = $prs | Where-Object { $branchTip -and $_.headRefOid -eq $branchTip } | Select-Object -First 1
-            $pick = if ($mine) { $mine } elseif ($prs.Count -gt 0) { $prs[0] } else { $null }
-            if ($pick) { $prState = $pick.state; $prHeadOid = $pick.headRefOid }
+            # Capture stderr (2>&1) to detect rate-limit errors rather than silently falling
+            # back to PID liveness as a completion signal (#414).
+            $prRaw = @(gh pr list --repo $Session.repo --head $Session.branch --state all --json state,headRefOid --limit 20 2>&1)
+            if ($LASTEXITCODE -ne 0 -and ($prRaw | Out-String) -match '(?i)(rate.?limit|0/5000)') {
+                $rateLimited = $true
+            } elseif ($LASTEXITCODE -eq 0) {
+                $prs = @($prRaw | ConvertFrom-Json)
+                $mine = $prs | Where-Object { $branchTip -and $_.headRefOid -eq $branchTip } | Select-Object -First 1
+                $pick = if ($mine) { $mine } elseif ($prs.Count -gt 0) { $prs[0] } else { $null }
+                if ($pick) { $prState = $pick.state; $prHeadOid = $pick.headRefOid }
+            }
         } catch { }
     }
-    if ($Session.repo -and $Session.issue) {
+    if (-not $rateLimited -and $Session.repo -and $Session.issue) {
         try {
-            $iss = gh issue view $Session.issue --repo $Session.repo --json state 2>$null | ConvertFrom-Json
-            if ($iss) { $issueState = $iss.state }
+            $issRaw = @(gh issue view $Session.issue --repo $Session.repo --json state 2>&1)
+            if ($LASTEXITCODE -ne 0 -and ($issRaw | Out-String) -match '(?i)(rate.?limit|0/5000)') {
+                $rateLimited = $true
+            } elseif ($LASTEXITCODE -eq 0) {
+                $iss = $issRaw | ConvertFrom-Json
+                if ($iss) { $issueState = $iss.state }
+            }
         } catch { }
+    }
+    if ($rateLimited) {
+        return [pscustomobject]@{ done = $false; reason = 'UNKNOWN (rate limit)'; rateLimited = $true; merged = $false }
     }
     $pidAlive = [bool]($Session.sessionPid -and (Get-Process -Id $Session.sessionPid -ErrorAction SilentlyContinue))
     return Get-SessionCompletion -PrState $prState -IssueState $issueState -PidAlive $pidAlive `
@@ -2014,6 +2034,15 @@ function Invoke-SessionWatch {
         [scriptblock]$ReadSessions = { Read-SessionRegistryRaw },
         [scriptblock]$Now = { Get-Date },
         [scriptblock]$Sleep = { param($sec) Start-Sleep -Seconds $sec },
+        # Zombie detection (#414): dead PID + workPath gone from disk → nothing to clean up,
+        # safe to prune from sessions.json without a gh call. Injectable for tests.
+        [scriptblock]$IsStale = {
+            param($s)
+            ($s.sessionPid -gt 0) -and
+            -not (Get-Process -Id $s.sessionPid -ErrorAction SilentlyContinue) -and
+            $s.workPath -and
+            -not (Test-Path $s.workPath -PathType Container)
+        },
         # Stall detection rides the watch (#565): every -SuperviseEvery cycles the fleet
         # supervisor runs with -Post, so a stalled session gets its [abios-stall] issue comment
         # WITHOUT the human having to remember a separate command. Injectable for tests;
@@ -2041,17 +2070,30 @@ function Invoke-SessionWatch {
     )
     $start   = & $Now
     $cleaned = @{}
+    # Sessions reported LISTO in a previous cycle: skip re-polling (#414).
+    # Reduces API calls from O(registry-size × cycles) to O(pending × cycles).
+    $doneSet = @{}
     $cycle   = 0
     while ($true) {
-        $sessions = @(& $ReadSessions)
+        # Only poll sessions not yet known to be done (#414 — drop from polling set on LISTO).
+        $sessions = @(& $ReadSessions | Where-Object { -not $doneSet.ContainsKey([int]$_.issue) })
         if ($sessions.Count -eq 0) {
             Write-Host "  No hay sesiones vivas que observar." -ForegroundColor DarkGray
             return [pscustomobject]@{ allDone = $true; timedOut = $false; cleaned = @($cleaned.Keys) }
         }
         $pending = 0
         foreach ($s in $sessions) {
+            # Zombie stale-prune (#414): dead PID + workPath missing → nothing to clean up,
+            # skip the gh calls and remove the entry directly.
+            if (& $IsStale $s) {
+                Write-Host ("  #{0,-4} SKIP: zombie session pruned (PID muerto, worktree ausente)" -f $s.issue) -ForegroundColor DarkGray
+                $doneSet[[int]$s.issue] = $true
+                if (-not $DryRun) { Remove-SessionRegistryEntry -IssueNum ([int]$s.issue) -Outcome 'stale-prune' }
+                continue
+            }
             $st = & $GetStatus $s
             if ($st.done) {
+                $doneSet[[int]$s.issue] = $true   # don't re-poll this session (#414)
                 Write-Host ("  #{0,-4} LISTO: {1}" -f $s.issue, $st.reason) -ForegroundColor Green
                 if ($AutoClean -and -not $cleaned.ContainsKey([int]$s.issue)) {
                     $cleaned[[int]$s.issue] = $true
@@ -2065,7 +2107,9 @@ function Invoke-SessionWatch {
                 }
             } else {
                 $pending++
-                Write-Host ("  #{0,-4} ...   {1}" -f $s.issue, $st.reason) -ForegroundColor DarkGray
+                # Rate-limited sessions get a yellow warning so the human sees the degraded state (#414).
+                $color = if ($st.rateLimited) { 'DarkYellow' } else { 'DarkGray' }
+                Write-Host ("  #{0,-4} ...   {1}" -f $s.issue, $st.reason) -ForegroundColor $color
             }
         }
         if ($pending -eq 0) {
