@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- **The visual work-class gate scopes to what the owner actually judges by looking** (#567, part
+  of epic #561). In a web app (a FabricApp) every change touches html/css/assets, so the
+  classifier marked the whole project "visual" and the classification stopped carrying
+  information — when the end-to-end gate reopens (#541), that would have routed 100% of web work
+  to the human. The policy gains **`workClass.codeExceptions`** — globs subtracted from
+  `visualPatterns`, declared per project in the contract (e.g. `src/components/**/*.css` for
+  utility styles nobody screenshots), never guessed: the default list is empty and the
+  fail-visual direction is unchanged out of the box. And the verdict now carries
+  **`visualGroups`** — visual paths grouped by top-level section — so the owner approves *"the
+  pages section"* once instead of 47 file rows. Verified by 6 new Pester tests.
 - **The epic walker: `/board expert auto -Epic <n>` dispatches sub-issues wave by wave** (#566,
   part of epic #561). Nothing advanced an epic before — Expert-Auto took one `-Issue`, so a plan
   with N sub-issues cost N human launches (Board-Plan even fetched the sub-issue list and threw

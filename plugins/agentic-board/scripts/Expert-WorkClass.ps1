@@ -58,6 +58,14 @@ function New-WorkClassPolicy {
             # Images - the thing you cannot review by reading
             '*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp', '*.svg', '*.ico'
         )
+        # SUBTRACTED from visualPatterns (#567): paths that wear a web-tech extension but are
+        # judged by READING, not by looking. In a web app (a FabricApp) every change touches
+        # css/html/assets, so without exceptions the whole project routes to the owner and the
+        # classification stops carrying information. Empty by default - each project declares
+        # its own plumbing in the contract (workClass.codeExceptions), e.g.
+        # 'src/components/**/*.css' for utility styles nobody screenshots. The FAIL DIRECTION
+        # is preserved: an exception must be declared, never guessed.
+        codeExceptions = @()
         # Classes the human always approves personally, whatever the run was told to do.
         humanApproves  = @('visual')
     }
@@ -128,18 +136,29 @@ function Get-WorkClass {
     if (-not $Policy) { $Policy = New-WorkClassPolicy }
     $paths = @(@($ChangedPaths) | Where-Object { "$_".Trim() })
     if ($paths.Count -eq 0) {
-        return @{ class = 'unknown'; visualPaths = @()
+        return @{ class = 'unknown'; visualPaths = @(); visualGroups = @()
                   reason = 'no pude determinar que archivos cambiaron' }
     }
-    $visual = @($paths | Where-Object { Test-IsVisualPath -Path $_ -VisualPatterns $Policy.visualPatterns })
+    $visual = @($paths | Where-Object {
+        (Test-IsVisualPath -Path $_ -VisualPatterns $Policy.visualPatterns) -and
+        -not (Test-IsVisualPath -Path $_ -VisualPatterns @($Policy.codeExceptions))
+    })
     if ($visual.Count -gt 0) {
+        # The BATCH view (#567): the owner approves SECTIONS, not 47 file rows. Grouping by the
+        # top-level directory turns "review these paths" into "look at the dashboard section" -
+        # the decision he can actually make.
+        $groups = @($visual | ForEach-Object {
+            $segs = (("$_" -replace '\\', '/') -split '/')
+            if ($segs.Count -gt 1) { $segs[0] } else { '(raiz)' }
+        } | Sort-Object -Unique)
         return @{
-            class       = 'visual'
-            visualPaths = $visual
-            reason      = "el cambio toca $($visual.Count) archivo(s) que se juzgan mirandolos"
+            class        = 'visual'
+            visualPaths  = $visual
+            visualGroups = $groups
+            reason       = "el cambio toca $($visual.Count) archivo(s) que se juzgan mirandolos, en $($groups.Count) seccion(es): $($groups -join ', ')"
         }
     }
-    return @{ class = 'code'; visualPaths = @(); reason = 'el cambio es codigo: se juzga leyendolo' }
+    return @{ class = 'code'; visualPaths = @(); visualGroups = @(); reason = 'el cambio es codigo: se juzga leyendolo' }
 }
 
 <#
@@ -197,6 +216,7 @@ Write-Host ("  Archivos cambiados : {0}" -f $changed.Count)
 Write-Host ("  Clase              : {0}" -f $verdict.class) -ForegroundColor $(if ($verdict.class -eq 'code') { 'Green' } else { 'Yellow' })
 Write-Host ("  Motivo             : {0}" -f $verdict.reason) -ForegroundColor DarkGray
 if ($verdict.visualPaths.Count -gt 0) {
+    Write-Host ("  Secciones a mirar (aprueba por LOTE, no archivo por archivo): {0}" -f ($verdict.visualGroups -join ', ')) -ForegroundColor Yellow
     Write-Host "  Lo que se juzga mirando:" -ForegroundColor Yellow
     $verdict.visualPaths | Select-Object -First 20 | ForEach-Object { Write-Host "    $_" }
 }

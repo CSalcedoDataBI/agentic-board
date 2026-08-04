@@ -154,3 +154,42 @@ Describe 'Get-EffectiveWorkClassPolicy — the contract narrows, the defaults fi
         Test-IsVisualPath -Path 'a.png' -VisualPatterns $p.visualPatterns | Should -BeFalse
     }
 }
+
+Describe 'codeExceptions - declared plumbing is judged by reading (#567)' {
+    # In a web app every change touches css/html/assets, so without exceptions the whole project
+    # routes to the owner and the classification stops carrying information. Exceptions are
+    # SUBTRACTIVE and DECLARED (contract), never guessed: the default list is empty.
+    It 'the default policy has no exceptions - fail direction unchanged out of the box' {
+        @((New-WorkClassPolicy).codeExceptions).Count | Should -Be 0
+        (Get-WorkClass -ChangedPaths @('src/components/button.css') -Policy (New-WorkClassPolicy)).class | Should -Be 'visual'
+    }
+    It 'a declared exception reclassifies matching web-tech paths as code' {
+        $p = New-WorkClassPolicy
+        $p.codeExceptions = @('src/components/**/*.css')
+        (Get-WorkClass -ChangedPaths @('src/components/deep/button.css') -Policy $p).class | Should -Be 'code'
+    }
+    It 'an exception is surgical: the rest of the visual surface still routes to the owner' {
+        $p = New-WorkClassPolicy
+        $p.codeExceptions = @('src/components/**/*.css')
+        $r = Get-WorkClass -ChangedPaths @('src/components/x.css', 'pages/dashboard.html') -Policy $p
+        $r.class | Should -Be 'visual'
+        $r.visualPaths | Should -Be @('pages/dashboard.html')
+    }
+    It 'the contract can declare exceptions through Get-EffectiveWorkClassPolicy' {
+        $c = @{ workClass = @{ codeExceptions = @('site/css/**') } }
+        $p = Get-EffectiveWorkClassPolicy -Contract $c
+        (Get-WorkClass -ChangedPaths @('site/css/main.css') -Policy $p).class | Should -Be 'code'
+    }
+}
+
+Describe 'visualGroups - the owner approves SECTIONS, not file rows (#567)' {
+    It 'groups visual paths by top-level directory' {
+        $r = Get-WorkClass -ChangedPaths @('pages/a.html','pages/b.html','themes/x.theme.json','logo.png') -Policy (New-WorkClassPolicy)
+        $r.visualGroups | Should -Be @('(raiz)','pages','themes')
+    }
+    It 'the reason names the sections so the approval is a batch decision' {
+        $r = Get-WorkClass -ChangedPaths @('pages/a.html','pages/b.html') -Policy (New-WorkClassPolicy)
+        $r.reason | Should -Match 'pages'
+        $r.reason | Should -Match '1 seccion'
+    }
+}

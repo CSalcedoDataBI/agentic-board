@@ -20,6 +20,9 @@ on read (`ExpertContractIo.Read-ExpertContract`), so `auto` never hits a missing
 | `capabilities.skillsBootstrap` | `true` | May use `/skills bootstrap` to acquire tooling. |
 | `capabilities.toolsInstall` | `false` | May install external tools (off by default — opt in). |
 | `capabilities.scan` | `true` | May use `/scan` to discover latent work. |
+| `workClass.visualPatterns` | *(see `Expert-WorkClass.New-WorkClassPolicy`)* | Globs whose changes are judged by LOOKING (reports, pages, images) — any match routes the change to the owner. |
+| `workClass.codeExceptions` | `[]` | Globs SUBTRACTED from `visualPatterns` (#567): web-tech paths that are plumbing, judged by reading (e.g. `src/components/**/*.css`). Declared per project, never guessed — in a web app, without exceptions every change is "visual" and the classification stops carrying information. |
+| `workClass.humanApproves` | `visual` | The classes the owner always approves personally. Approval is per SECTION (top-level directory batch), not per file. |
 
 ## Editing
 
