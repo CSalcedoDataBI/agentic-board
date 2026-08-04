@@ -114,8 +114,10 @@ function Get-FieldEpisodes {
         $failed  = [bool]$ev[$i].isError
 
         $sawSameTool = $false; $sawAnyTool = $false; $sawFallback = $false; $sawCorrection = $false
+        $lastInWindow = $i
         for ($j = $i + 1; $j -lt $ev.Count; $j++) {
             if (($ev[$j].index - $ev[$i].index) -gt $Window) { break }
+            $lastInWindow = $j
             $t2 = Get-InvokedTool -Command $ev[$j].command
             if ($t2) {
                 $sawAnyTool = $true
@@ -142,11 +144,26 @@ function Get-FieldEpisodes {
         # once and moved on" is ordinary work and carries no information at all.
         if ($failed -and -not $sawAnyTool -and -not $sawFallback -and -not $sawCorrection) { $signals.Add('silence') }
 
+        # The time dimension (#568): when the invocation and the last in-window event both carry
+        # a parseable stamp, the episode says how long its window actually lasted. Unknown stays
+        # $null - "6 events" was 4 seconds or 40 minutes, and pretending otherwise is how the
+        # subsystem stayed blind.
+        $tsStart = $null; $durationMs = $null
+        if ($null -ne $ev[$i].PSObject.Properties['ts']) {
+            $tsStart = ConvertTo-FieldTimestamp -Ts $ev[$i].ts
+            if ($tsStart -and $lastInWindow -gt $i) {
+                $tsEnd = ConvertTo-FieldTimestamp -Ts $ev[$lastInWindow].ts
+                if ($tsEnd -and $tsEnd -ge $tsStart) { $durationMs = [long]($tsEnd - $tsStart).TotalMilliseconds }
+            }
+        }
+
         $out.Add([pscustomobject]@{
-            index   = $ev[$i].index
-            tool    = $tool
-            failed  = $failed
-            signals = $signals.ToArray()
+            index      = $ev[$i].index
+            tool       = $tool
+            failed     = $failed
+            signals    = $signals.ToArray()
+            ts         = if ($tsStart) { $tsStart.ToString('o') } else { $null }
+            durationMs = $durationMs
         })
     }
     $out.ToArray()
@@ -207,8 +224,25 @@ function ConvertTo-FieldEvent {
 
     [pscustomobject]@{
         index = $Index; role = $o.type; command = $cmd.Trim(); isError = $isErr; text = $text.Trim()
+        # The transcript stamps every line; the first cut of this parser DISCARDED it, which left
+        # the whole telemetry subsystem time-blind (#568): the correlation window was measured in
+        # events (6 events = 4 seconds or 40 minutes, unknowable), and nobody - including the
+        # tool - could say where a session's time went. ConvertFrom-Json auto-converts ISO
+        # stamps to [datetime], so both shapes normalize to one ISO string here.
+        ts = $(if ($o.timestamp -is [datetime]) { $o.timestamp.ToUniversalTime().ToString('o') } else { "$($o.timestamp)" })
         toolUseIds = $useIds.ToArray(); failedFor = $failedFor.ToArray()
     }
+}
+
+# Parse a transcript timestamp (ISO-8601). $null when absent/unparsable - a bad stamp must make
+# the duration UNKNOWN, never zero: zero is a claim, unknown is the truth. Pure.
+function ConvertTo-FieldTimestamp {
+    param([AllowEmptyString()][string]$Ts)
+    if (-not "$Ts".Trim()) { return $null }
+    try {
+        return [datetime]::Parse("$Ts", [Globalization.CultureInfo]::InvariantCulture,
+                                 [Globalization.DateTimeStyles]::RoundtripKind)
+    } catch { return $null }
 }
 
 function Join-FieldResults {
@@ -241,10 +275,17 @@ if (-not (Test-Path -LiteralPath $Path)) { throw "Get-FieldEpisodes.ps1: no such
 
 $events = [System.Collections.Generic.List[object]]::new()
 $i = 0
+# Full-file timestamp bounds (#568, review round 3): the stream reads every line regardless of
+# -FromEvent, so the duration is the TRANSCRIPT's, never the incremental slice's.
+$fileFirstTs = ''; $fileLastTs = ''
 # Streamed: these files reach tens of MB and must never be loaded whole.
 $reader = [System.IO.File]::OpenText($Path)
 try {
     while ($null -ne ($line = $reader.ReadLine())) {
+        if ($line -match '"timestamp"\s*:\s*"([^"]+)"') {
+            if (-not $fileFirstTs) { $fileFirstTs = $Matches[1] }
+            $fileLastTs = $Matches[1]
+        }
         if ($i -ge $FromEvent) {
             $e = ConvertTo-FieldEvent -Line $line -Index $i
             if ($e) { $events.Add($e) }
@@ -255,11 +296,19 @@ try {
 
 $linked   = Join-FieldResults -Events $events.ToArray()
 $episodes = Get-FieldEpisodes -Events $linked -Window $Window
+# Session wall-clock from the full transcript bounds (#568). Null when unknowable.
+$durationMin = $null
+if ($fileFirstTs -and $fileLastTs) {
+    $t0 = ConvertTo-FieldTimestamp -Ts $fileFirstTs
+    $t1 = ConvertTo-FieldTimestamp -Ts $fileLastTs
+    if ($t0 -and $t1 -and $t1 -ge $t0) { $durationMin = [int][Math]::Round(($t1 - $t0).TotalMinutes) }
+}
 $result = [pscustomobject]@{
-    path      = $Path
-    events    = $i
-    fromEvent = $FromEvent
-    usedTool  = [bool](@($episodes).Count -gt 0)
-    episodes  = @($episodes)
+    path        = $Path
+    events      = $i
+    fromEvent   = $FromEvent
+    usedTool    = [bool](@($episodes).Count -gt 0)
+    durationMin = $durationMin
+    episodes    = @($episodes)
 }
 if ($Json) { $result | ConvertTo-Json -Depth 6 } else { $result }

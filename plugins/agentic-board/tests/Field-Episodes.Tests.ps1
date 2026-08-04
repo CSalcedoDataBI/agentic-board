@@ -256,3 +256,40 @@ Describe 'Redaction (nothing leaves the machine unscrubbed)' {
         Protect-FieldText -Text $t | Should -Be $t
     }
 }
+
+Describe 'The time dimension (#568) - the telemetry can finally say where the minutes went' {
+    It 'ConvertTo-FieldEvent KEEPS the transcript timestamp instead of discarding it' {
+        # ConvertFrom-Json auto-converts ISO stamps to [datetime]; the parser normalizes back to
+        # ISO, so the assertion compares INSTANTS, not string spellings.
+        $line = '{"type":"assistant","timestamp":"2026-08-03T10:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t1","input":{"command":"pwsh Board-Work.ps1 -Start 5"}}]}}'
+        $ts = (ConvertTo-FieldEvent -Line $line -Index 0).ts
+        $ts | Should -Not -BeNullOrEmpty
+        (ConvertTo-FieldTimestamp -Ts $ts) | Should -Be ([datetime]::Parse('2026-08-03T10:00:00.000Z', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind))
+    }
+    It 'ConvertTo-FieldTimestamp parses ISO stamps and returns null for garbage - unknown, never zero' {
+        (ConvertTo-FieldTimestamp -Ts '2026-08-03T10:00:00.000Z') | Should -Not -BeNullOrEmpty
+        (ConvertTo-FieldTimestamp -Ts 'not-a-date') | Should -BeNullOrEmpty
+        (ConvertTo-FieldTimestamp -Ts '') | Should -BeNullOrEmpty
+    }
+    It 'an episode carries ts and the wall-clock duration of its window' {
+        $ev = @(
+            [pscustomobject]@{ index = 0; role = 'assistant'; command = 'pwsh Board-Work.ps1 -Start 5'; isError = $false; text = ''; ts = '2026-08-03T10:00:00Z'; toolUseIds = @(); failedFor = @() }
+            [pscustomobject]@{ index = 1; role = 'assistant'; command = 'echo x'; isError = $false; text = ''; ts = '2026-08-03T10:02:30Z'; toolUseIds = @(); failedFor = @() }
+        )
+        $ep = @(Get-FieldEpisodes -Events $ev -Window 6)[0]
+        $ep.ts | Should -Not -BeNullOrEmpty
+        $ep.durationMs | Should -Be 150000
+    }
+    It 'an unparsable stamp yields null duration, not a fabricated number' {
+        $ev = @(
+            [pscustomobject]@{ index = 0; role = 'assistant'; command = 'pwsh Board-Work.ps1 -Start 5'; isError = $false; text = ''; ts = 'garbage'; toolUseIds = @(); failedFor = @() }
+            [pscustomobject]@{ index = 1; role = 'assistant'; command = 'echo x'; isError = $false; text = ''; ts = '2026-08-03T10:02:30Z'; toolUseIds = @(); failedFor = @() }
+        )
+        $ep = @(Get-FieldEpisodes -Events $ev -Window 6)[0]
+        $ep.durationMs | Should -BeNullOrEmpty
+    }
+    It 'events without a ts property (older fixtures) still classify - time is additive, never breaking' {
+        $ev = @([pscustomobject]@{ index = 0; role = 'assistant'; command = 'pwsh Board-Work.ps1 -Start 5'; isError = $false; text = ''; toolUseIds = @(); failedFor = @() })
+        @(Get-FieldEpisodes -Events $ev -Window 6).Count | Should -Be 1
+    }
+}

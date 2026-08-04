@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- **The tool can finally measure its own time** (#568, part of epic #561). The telemetry
+  subsystem measured everything except time: the transcript parser *discarded* the timestamp
+  every line carries, the correlation window was "6 events" (4 seconds or 40 minutes,
+  unknowable), the ledger's columns were events and bytes, `started` had minute granularity, and
+  completed session rows were deleted — every run's wall-clock cost vanished at the moment it
+  finished. Now: events keep their ISO timestamp; episodes carry `ts` + `durationMs` (unknown
+  stays `null`, never a fabricated zero); per-session records and the field ledger gain
+  `durationMin`; `started` is stamped to the second (the supervisor reads both formats); and a
+  completed session row is **archived to `sessions-history.jsonl` with `ended` and its outcome**
+  (pr-merged / cleaned / close-loop) before removal. Verified by 8 new Pester tests.
 - **The visual work-class gate scopes to what the owner actually judges by looking** (#567, part
   of epic #561). In a web app (a FabricApp) every change touches html/css/assets, so the
   classifier marked the whole project "visual" and the classification stopped carrying
