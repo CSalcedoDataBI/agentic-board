@@ -97,3 +97,15 @@ Describe 'Get-StallMarkerName - dedup per SESSION, not per issue number (#565 re
         (Get-StallMarkerName -Session $a) | Should -Not -Be (Get-StallMarkerName -Session $b)
     }
 }
+
+Describe 'Stall posting requires an ESTABLISHED no-PR fact (#565 round 4)' {
+    It 'a session whose PR lookup failed (prKnown=false) is skipped by the publisher' {
+        # Publish-StallSignals must skip it BEFORE any gh call; we prove the skip by the absence
+        # of a dedup marker after the call (a posted signal writes one).
+        $env:ABIOS_STATE_DIR_TEST = $TestDrive
+        $s = [pscustomobject]@{ issue = 42; repo = 'o/r'; started = 'x'; ageMin = 99; prKnown = $false }
+        { Publish-StallSignals -Stalled @($s) -ThresholdMin 30 } | Should -Not -Throw
+        @(Get-ChildItem $TestDrive -Filter 'signal-stall-*').Count | Should -Be 0
+        $env:ABIOS_STATE_DIR_TEST = $null
+    }
+}

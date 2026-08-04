@@ -519,13 +519,18 @@ $script:BudgetExemptPatterns = @(
     # diff.external=build.cmd`, and git then executes the configured helper - the exemption
     # became an execution primitive. The brake keeps the flag-tolerant matcher (it must not be
     # shaken off by a flag); the exemption is a positive allowlist and stays strict instead.
-    '^git\s+(status|diff|log|add|commit)\b'
+    # The read-only verbs refuse --output (round 4 of #565): `git diff --output=src/app.ts`
+    # WRITES a source file through a command that reads as inspection - a shell-only side door
+    # around Test-IsBudgetExemptWrite.
+    '^git\s+(status|diff|log)(?![^;|&]*\s--output(=|\s|$))\b'
+    '^git\s+(add|commit)\b'
     # push is WIP-branch-shaped only (#565 review round 2): --mirror/--all/--tags publish or
     # overwrite remote state wholesale, --force rewrites it, --delete/--prune/`:ref` remove it -
-    # none of which is "save your work and leave". The brake still separately refuses pushes to
-    # main and deletes for contracts that brake on them; this narrows what the BUDGET excuses.
-    # `+refspec` is git's force spelling without the flag (round 3) - refused with the rest.
-    '^git\s+push(?![^;|&]*\s--(mirror|all|tags|force|force-with-lease|delete|prune)\b)(?![^;|&]*\s-f\b)(?![^;|&]*\s\+?:\S)(?![^;|&]*\s\+\S)\b'
+    # none of which is "save your work and leave". `+refspec` is git's force spelling without
+    # the flag (round 3). And main/master as a target is refused HERE too (round 4): the brake
+    # only refuses it for contracts that brake on merge, but "save your WIP" never means the
+    # default branch, whatever the contract says.
+    '^git\s+push(?![^;|&]*\s--(mirror|all|tags|force|force-with-lease|delete|prune)\b)(?![^;|&]*\s-f\b)(?![^;|&]*\s\+?:\S)(?![^;|&]*\s\+\S)(?![^;|&]*\s\+?[^\s;|&]*:(refs/heads/)?(main|master)(?=[\s;&|<>]|$))(?![^;|&]*\s(main|master)(?=[\s;&|<>]|$))\b'
     # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
     # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
     # is push and stays allowed.

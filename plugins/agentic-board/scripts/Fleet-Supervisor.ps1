@@ -123,14 +123,22 @@ function Resolve-LiveSessions {
     foreach ($e in (Read-FleetSessions)) {
         $ageMin = 0
         try { $ageMin = [int]((Get-Date) - [datetime]::ParseExact($e.started, 'yyyy-MM-dd HH:mm', $null)).TotalMinutes } catch { }
-        $pr = ''; $merged = $false
+        # prKnown separates "no PR" from "could not read" (#565 review round 4): a transient gh
+        # failure used to read as pr='' - tolerable for a terminal warning, but -Post publishes
+        # comments from this fact, and a false [abios-stall] on a session that HAS a PR is noise
+        # that costs the signal its credibility.
+        $pr = ''; $merged = $false; $prKnown = $false
         if ($e.repo -and $e.branch) {
             try {
-                $found = @(gh pr list --repo $e.repo --head $e.branch --state all --json number,state --limit 1 2>$null | ConvertFrom-Json)
-                if ($found.Count -gt 0) { $pr = "#$($found[0].number)"; $merged = ($found[0].state -eq 'MERGED') }
-            } catch { }
+                $raw = gh pr list --repo $e.repo --head $e.branch --state all --json number,state --limit 1 2>$null
+                if ($LASTEXITCODE -eq 0 -and $null -ne $raw) {
+                    $prKnown = $true
+                    $found = @($raw | ConvertFrom-Json)
+                    if ($found.Count -gt 0) { $pr = "#$($found[0].number)"; $merged = ($found[0].state -eq 'MERGED') }
+                }
+            } catch { $prKnown = $false }
         }
-        $out += [pscustomobject]@{ issue = $e.issue; repo = $e.repo; branch = $e.branch; started = "$($e.started)"; ageMin = $ageMin; pr = $pr; merged = $merged }
+        $out += [pscustomobject]@{ issue = $e.issue; repo = $e.repo; branch = $e.branch; started = "$($e.started)"; ageMin = $ageMin; pr = $pr; merged = $merged; prKnown = $prKnown }
     }
     return $out
 }
@@ -151,6 +159,9 @@ function Publish-StallSignals {
     $state = Get-AbiosStateDir
     foreach ($s in @($Stalled)) {
         if (-not $s.issue -or -not $s.repo) { continue }
+        # Only post a stall whose "no PR" fact was actually ESTABLISHED (round 4): if the PR
+        # lookup failed, this session may well have one, and a false stall comment is noise.
+        if (($null -ne $s.PSObject.Properties['prKnown']) -and -not $s.prKnown) { continue }
         $mark = if ($state) { Join-Path $state (Get-StallMarkerName -Session $s) } else { $null }
         if ($mark -and (Test-Path -LiteralPath $mark)) { continue }
         try {

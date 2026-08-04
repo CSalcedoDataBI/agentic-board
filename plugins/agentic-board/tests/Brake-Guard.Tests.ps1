@@ -1110,6 +1110,16 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'git push origin :old-branch' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'git push origin +HEAD:feature' | Should -BeFalse   # force refspec (round 3)
         }
+        It 'push to the DEFAULT branch is never wrap-up, whatever the contract says (round 4)' {
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD:main' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin main' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/heads/master' | Should -BeFalse
+        }
+        It 'git diff --output writes a file through a read-shaped command - refused (round 4)' {
+            Test-IsBudgetExemptCommand -Command 'git diff --output=src/app.ts' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git log --output out.txt' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git diff HEAD~1' | Should -BeTrue
+        }
         It 'allows reporting where it stopped' {
             Test-IsBudgetExemptCommand -Command 'gh pr comment 90 --body "out of budget, handoff saved"' | Should -BeTrue
         }
