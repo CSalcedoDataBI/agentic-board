@@ -126,6 +126,33 @@ plugins/agentic-board/scripts/Update-Docs.ps1 -Check     # exit 1 if the README 
 Everything outside the markers stays hand-written. `-Check` is exit-code clean (0 fresh / 1 stale)
 so a docs-freshness gate can block a PR that edited a command's description without regenerating.
 
+## Product agenda: user-facing first, self-governance second (#576)
+
+The cold engineering review that produced epic #561 measured the last week of releases at
+**8:1 self-directed to user-facing** — thirty mentions of *brake*, twenty-eight of *expert*,
+twenty-six of *defect*, against ten of *skills* and zero of *board fill*. Sixty-six releases in
+thirty-nine days, and the three most recent added only mechanisms for governing the tool's own
+autonomous runs.
+
+That pattern has a root cause worth naming: **a tool that cannot measure its own runs keeps
+inventing textual mechanisms to assert that its runs went well** (the changelog itself calls
+this "the founding defect — reporting intent as fact"). Instrumentation is the cheaper cure,
+and #568 finally added the time dimension. With that in place, the standing policy is:
+
+1. **A release should carry at least one change a board USER can feel** — a faster wait, a verb
+   that does more, a clearer surface. Pure self-governance batches are for regressions and
+   security only.
+2. **Before building a new self-control mechanism, ask what MEASUREMENT would make it
+   unnecessary.** The run-ledger existed to survive compactions largely caused by a 72 KB
+   instruction payload (#573 removed the weight); the evidence-×3 ceremony existed because
+   nothing verified runs (`Expert-RunVerify.ps1` now does, against ONE artifact).
+3. **Field evidence outranks introspection.** `/board telemetry` reads real sessions — with
+   durations since #568. When choosing the next piece of work, an episode from the field ledger
+   beats a hypothesis about the tool's own governance.
+
+This is a policy, not a gate: nothing enforces it mechanically, and that is deliberate — it is
+a judgement about where the next hour goes, made by whoever holds the roadmap.
+
 ## Releasing
 
 `plugins/agentic-board/.claude-plugin/plugin.json` is the **single source of truth** for the
