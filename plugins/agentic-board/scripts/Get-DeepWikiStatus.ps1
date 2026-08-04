@@ -49,8 +49,10 @@ function Resolve-DeepWikiIndex {
     param([int]$HttpStatus, [string]$HttpBody)
     if ($HttpStatus -eq 0)   { return 'unknown' }
     if ($HttpStatus -ne 200) { return 'unknown' }
-    # Common markers on the "this repo is not yet indexed" DeepWiki landing page.
-    if ([string]$HttpBody -match '(?i)\b(start.{0,25}index|index.{0,25}this.{0,25}repo(sitory)?|not.{0,15}indexed|generate.{0,20}wiki|add.{0,20}to.{0,20}wiki)\b') {
+    # DeepWiki landing-page phrases for unindexed repos.
+    # Requires "repo(sitory)" context for start/index patterns so a wiki page discussing
+    # indexing concepts ("the B-tree index is used for fast lookups") is never flagged.
+    if ([string]$HttpBody -match '(?i)(start.{0,15}index.{0,25}repo(sitory)?|index.{0,15}this.{0,15}repo(sitory)?|not.{0,15}indexed|generate.{0,20}wiki|add.{0,20}to.{0,20}wiki)') {
         return 'not-indexed'
     }
     return 'indexed'

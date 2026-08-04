@@ -22,7 +22,7 @@ Every catalog is a JSON array of entries with these keys (all required):
 | `owner` | string | Who publishes it. Surfaced at list/install time — the attribution ("who owns each tool"). |
 | `repo` | string | GitHub `owner/name`. |
 | `kind` | `"skill-clone"` \| `"plugin"` \| `"mcp"` | How it installs (see below). |
-| `detect` | string \| null | *(plugin/mcp)* the id to match against `claude plugin list` / `claude mcp list`. Falls back to `name` when absent. Omit / `null` for `skill-clone`. |
+| `detect` | string \| null | *(plugin/mcp)* **Required and non-empty** — the id matched against `claude plugin list` / `claude mcp list` to decide if the tool is already installed. `null` for `skill-clone`. |
 | `path` | string \| null | Subpath to the skill folder for `skill-clone`; `null` for `plugin`. |
 | `license` | string | SPDX id or short label — copied next to the installed skill (mandatory for CC BY-SA). |
 | `homepage` | string | URL to the tool's home. |
