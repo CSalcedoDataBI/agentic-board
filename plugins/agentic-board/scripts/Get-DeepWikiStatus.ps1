@@ -109,7 +109,7 @@ if ($PSBoundParameters.ContainsKey('OverrideHttpStatus')) {
     $httpBody   = if ($PSBoundParameters.ContainsKey('OverrideHttpBody')) { $OverrideHttpBody } else { '' }
 } else {
     try {
-        $resp = Invoke-WebRequest -Uri $deepWikiUrl -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+        $resp = Invoke-WebRequest -Uri $deepWikiUrl -TimeoutSec 10 -ErrorAction SilentlyContinue
         $httpStatus = [int]$resp.StatusCode
         $httpBody   = [string]$resp.Content
     } catch {
