@@ -144,6 +144,25 @@ function Find-FleetOrphans {
     return Find-FleetOrphansCore $procs $livePids $liveIssues
 }
 
+# Pure core: from a list of {ProcessId, CommandLine}, find the tab shell for a specific wt
+# session, identified by the launch script `launch-<n>.ps1` it was started with. The issue
+# number makes the match exact - no risk of touching a shell for a different issue.
+# Returns the first matching object, or $null when none match.
+function Find-WtTabShellCore {
+    param([object[]]$Processes, [int]$IssueNum)
+    $pattern = 'launch-' + [regex]::Escape($IssueNum.ToString()) + '\.ps1'
+    return @($Processes | Where-Object { $_.CommandLine -match $pattern }) | Select-Object -First 1
+}
+
+# Live: find the pwsh tab shell for a specific wt-launched issue by its launch script name.
+# Thin wrapper around Get-CimInstance so callers can mock this instead of Get-CimInstance.
+# Returns the {ProcessId, CommandLine} object or $null when not found.
+function Find-WtTabShell([int]$IssueNum) {
+    $procs = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pwsh.exe'" `
+               -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
+    return Find-WtTabShellCore -Processes $procs -IssueNum $IssueNum
+}
+
 # Tree-kill a set of fleet candidates, each through the fail-safe Stop-ProcessTree (self +
 # ancestors always excluded). FAIL-SAFE: the live registry session PIDs are ALWAYS folded
 # into the guard here (not just whatever the caller passes), so a legitimate live session
