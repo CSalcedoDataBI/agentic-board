@@ -16,6 +16,54 @@ BeforeAll {
     $script:Placeholder = '_TBD'
 }
 
+Describe 'Format-PriorArtGateBlock' {
+    It 'renders the ## Prior-art gate heading when PriorArt is provided' {
+        $b = Format-PriorArtGateBlock -PriorArt 'Searched: gh search repos wiki; Decision: build'
+        $b | Should -Match '## Prior-art gate'
+    }
+
+    It 'renders the PriorArt content under the heading' {
+        $b = Format-PriorArtGateBlock -PriorArt 'Decision: reference DeepWiki (zero setup)'
+        $b | Should -Match 'Decision: reference DeepWiki'
+        $b.IndexOf('## Prior-art gate') | Should -BeLessThan ($b.IndexOf('Decision: reference DeepWiki'))
+    }
+
+    It 'renders the heading and a skip notice when -NoPriorArt is set' {
+        $b = Format-PriorArtGateBlock -NoPriorArt
+        $b | Should -Match '## Prior-art gate'
+        $b | Should -Match 'Skipped with -NoPriorArt'
+    }
+
+    It 'does NOT include a caller-supplied PriorArt string when -NoPriorArt is set' {
+        $b = Format-PriorArtGateBlock -PriorArt 'should not appear' -NoPriorArt
+        $b | Should -Not -Match 'should not appear'
+    }
+
+    It 'trims leading/trailing whitespace from the PriorArt content' {
+        $b = Format-PriorArtGateBlock -PriorArt '  trimmed content  '
+        $b | Should -Match 'trimmed content'
+        $b | Should -Not -Match '  trimmed content  '
+    }
+}
+
+Describe 'Assert-PriorArtPresent' {
+    It 'throws when PriorArt is empty and -NoPriorArt is not set' {
+        { Assert-PriorArtPresent -PriorArt '' } | Should -Throw '*prior-art search is required*'
+    }
+
+    It 'throws when PriorArt is whitespace and -NoPriorArt is not set' {
+        { Assert-PriorArtPresent -PriorArt '   ' } | Should -Throw '*prior-art search is required*'
+    }
+
+    It 'does NOT throw when PriorArt has content' {
+        { Assert-PriorArtPresent -PriorArt 'Decision: build — no existing tool does X' } | Should -Not -Throw
+    }
+
+    It 'does NOT throw when -NoPriorArt is set even if PriorArt is empty' {
+        { Assert-PriorArtPresent -PriorArt '' -NoPriorArt } | Should -Not -Throw
+    }
+}
+
 Describe 'Format-EnrichedEpicBody' {
     It 'renders all five standard headings' {
         $b = Format-EnrichedEpicBody -Goal 'Build X' -Research 'Prior art: Ralph' `

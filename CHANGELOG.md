@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **`/board plan` prior-art gate** (#415). `Board-Plan.ps1` now refuses to create an epic
+  unless the caller provides either `-PriorArt "<block>"` (queries run, candidates found with
+  stars/license/adoption, and the explicit build-vs-reference-vs-extend decision) or `-NoPriorArt`
+  (for genuinely novel work). In both cases the outcome lands in a `## Prior-art gate` section of
+  the epic body, making the decision auditable later. A silent skip — the failure mode that cost
+  five PRs on the wiki epic (#401) — is no longer possible: the script throws before creating
+  anything. Same enforcement shape as the `-Rationale` requirement in `/board triage`. Verified by
+  9 new Pester tests covering both paths (gate and skip).
+
 ## [0.33.0] - 2026-08-04
 
 **The performance & autonomy overhaul — the tool stops feeling slow and stalled.** A cold
