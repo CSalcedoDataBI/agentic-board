@@ -353,11 +353,16 @@ query($o:String!,$r:String!,$n:Int!,$c:String){
             $lw = Invoke-Gh -GhArgs @('api','graphql','-f','query=
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){
-    issue(number:$n){ closedByPullRequestsReferences(first:10, includeClosedPrs:true){ nodes { number state } } }
+    issue(number:$n){ closedByPullRequestsReferences(first:50, includeClosedPrs:true){
+      pageInfo { hasNextPage }
+      nodes { number state } } }
   }
 }','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$($s.number)") -What "leer los PRs del sub-issue #$($s.number)" -Graphql
             $issueNode = $lw.data.repository.issue
             if ($null -eq $issueNode) { throw "sin nodo issue" }
+            # Another page = facts we did not see (round 3): an OPEN PR could hide there, so the
+            # state is UNKNOWN -> InFlight, same fail direction as an unreadable list.
+            if ($issueNode.closedByPullRequestsReferences.pageInfo.hasNextPage) { throw "mas de 50 PRs vinculados - estado no verificable" }
             $prs = @($issueNode.closedByPullRequestsReferences.nodes | Where-Object { $_ })
             $hasOpen   = [bool]($prs | Where-Object { $_.state -eq 'OPEN' })
             $hasMerged = [bool]($prs | Where-Object { $_.state -eq 'MERGED' })
