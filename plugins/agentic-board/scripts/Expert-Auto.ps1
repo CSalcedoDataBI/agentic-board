@@ -296,6 +296,10 @@ $stopAtPR = Test-IsIrreversible -Action 'merge' -Contract $contract
 if ($Epic -gt 0) {
     if (-not $repo) { throw "Expert-Auto: no pude derivar el repo del origin - corre esto dentro del clon." }
     $rp = $repo -split '/'
+    # The wave decision is driven by gh READS, so they go through the fail-closed wrapper
+    # (external review round 2): raw `gh api graphql` exits 0 with an errors[] payload, and an
+    # unread PR list dispatching a duplicate session is exactly the fail-open this walker bans.
+    . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 
     # The epic and its NATIVE sub-issues. Both reads fail CLOSED: a wave dispatched from a
     # guessed list is exactly the reporting-intent-as-fact shape this tool keeps relearning.
@@ -320,10 +324,11 @@ query($o:String!,$r:String!,$n:Int!,$c:String){
   }
 }','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$Epic")
         if ($cursor) { $ghArgs += @('-f',"c=$cursor") }
-        $subsRaw = gh @ghArgs 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $subsRaw) { throw "Expert-Auto: no pude leer los sub-issues del epic #$Epic." }
-        $page = ($subsRaw | ConvertFrom-Json).data.repository.issue.subIssues
-        $subs += @($page.nodes)
+        # -Graphql throws on exit code OR errors[] - a partial list must never classify a wave.
+        $pageData = Invoke-Gh -GhArgs $ghArgs -What "leer los sub-issues del epic #$Epic" -Graphql
+        $page = $pageData.data.repository.issue.subIssues
+        if ($null -eq $page -or $null -eq $page.pageInfo) { throw "Expert-Auto: respuesta sin subIssues para el epic #$Epic - no despacho sobre una lista a medias." }
+        $subs += @($page.nodes | Where-Object { $_ })
         $cursor = if ($page.pageInfo.hasNextPage) { "$($page.pageInfo.endCursor)" } else { '' }
     } while ($cursor)
     if ($subs.Count -eq 0) { throw "Expert-Auto: el epic #$Epic no tiene sub-issues nativos - usa /board plan para crearlos, o -Issue para un issue suelto." }
@@ -342,20 +347,22 @@ query($o:String!,$r:String!,$n:Int!,$c:String){
             }
         } catch { }
         $hasOpen = $false; $hasMerged = $false; $prKnown = $false
-        $lwRaw = gh api graphql -f query='
+        try {
+            # Through the wrapper (round 2): an errors[] payload with exit 0 must land in the
+            # catch -> prKnown=$false -> InFlight, never in "no PRs" -> Ready.
+            $lw = Invoke-Gh -GhArgs @('api','graphql','-f','query=
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){
     issue(number:$n){ closedByPullRequestsReferences(first:10, includeClosedPrs:true){ nodes { number state } } }
   }
-}' -F "o=$($rp[0])" -F "r=$($rp[1])" -F "n=$($s.number)" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $lwRaw) {
-            try {
-                $prs = @(($lwRaw | ConvertFrom-Json).data.repository.issue.closedByPullRequestsReferences.nodes)
-                $hasOpen   = [bool]($prs | Where-Object { $_.state -eq 'OPEN' })
-                $hasMerged = [bool]($prs | Where-Object { $_.state -eq 'MERGED' })
-                $prKnown   = $true
-            } catch { $prKnown = $false }
-        }
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$($s.number)") -What "leer los PRs del sub-issue #$($s.number)" -Graphql
+            $issueNode = $lw.data.repository.issue
+            if ($null -eq $issueNode) { throw "sin nodo issue" }
+            $prs = @($issueNode.closedByPullRequestsReferences.nodes | Where-Object { $_ })
+            $hasOpen   = [bool]($prs | Where-Object { $_.state -eq 'OPEN' })
+            $hasMerged = [bool]($prs | Where-Object { $_.state -eq 'MERGED' })
+            $prKnown   = $true
+        } catch { $prKnown = $false }
         $enriched += [pscustomobject]@{
             number = [int]$s.number; title = "$($s.title)"; state = "$($s.state)"
             openBlockers = $openBlockers; hasOpenPr = $hasOpen; hasMergedPr = $hasMerged; prKnown = $prKnown
@@ -388,10 +395,16 @@ query($o:String!,$r:String!,$n:Int!){
     Write-Host ""
     Write-Host ("  Despachando la ola: {0}" -f ((@($wave.Ready) | ForEach-Object { "#$($_.number)" }) -join ', ')) -ForegroundColor Green
     foreach ($s in @($wave.Ready)) {
-        # Per-issue brief: the epic's enriched plan + this sub-issue's own text.
-        $subBody = ""
+        # Per-issue brief: the epic's enriched plan + this sub-issue's own text. An unreadable
+        # body SKIPS the dispatch (round 2): launching a session briefed with only a title is
+        # sending it off half-blind, and the rest of the wave does not depend on this one.
+        $subBody = $null
         $sj = gh issue view $s.number --repo $repo --json title,body 2>$null
-        if ($LASTEXITCODE -eq 0 -and $sj) { try { $so = $sj | ConvertFrom-Json; $subBody = "$($so.body)" } catch { } }
+        if ($LASTEXITCODE -eq 0 -and $sj) { try { $so = $sj | ConvertFrom-Json; $subBody = "$($so.body)" } catch { $subBody = $null } }
+        if ($null -eq $subBody) {
+            Write-Host ("  WARN #{0}: no pude leer el cuerpo del sub-issue - NO se despacha esta vez; re-ejecuta para reintentarlo." -f $s.number) -ForegroundColor DarkYellow
+            continue
+        }
         $wavePlan = "$($epicObj.title)`n`n$($epicObj.body)`n`n## Your sub-issue (deliver THIS, the epic above is context)`n#$($s.number) $($s.title)`n`n$subBody"
         $brief = Format-AutoBrief -Contract $contract -PlanBody $wavePlan -RoleObjective $contract.role -EndToEnd:$EndToEnd
         $briefPath = if ($stateDirEpic) { Join-Path $stateDirEpic "expert-brief-$($s.number).md" } else { "expert-brief-$($s.number).md" }
