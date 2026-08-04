@@ -530,41 +530,54 @@ $script:BudgetExemptPatterns = @(
 # True when an over-budget shell command is part of wrapping up rather than more work. Pure.
 function Test-IsBudgetExemptCommand {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Command)
-    # Backticks are checked on the RAW command (round 4): the normalizer strips them, so a Bash
-    # substitution (`git status `npm run build``) normalized into text the anchored patterns
-    # accept - the nested command would already have run by then. Conservative on purpose: a
-    # PowerShell escape backtick in a message is rare in wrap-up commands and easy to rephrase.
+    # Backticks and `$(` are checked on the RAW command (rounds 4/8): the normalizer strips
+    # backticks, and both forms EXECUTE even inside double quotes, so no amount of quoting makes
+    # them data. Conservative on purpose - easy to rephrase out of a wrap-up command.
     if ("$Command".Contains('`')) { return $false }
-    $norm = ConvertTo-NormalizedCommand $Command
-    if (-not $norm) { return $false }
+    if ("$Command" -match '\$\(') { return $false }
+    # TWO views of the command (#565 review). The FULL view (quotes stripped, as the shell sees
+    # arguments) drives the pattern match - a quoted script path must still match the launcher
+    # shape. The MASKED view (quoted spans -> QUOTEDARG) drives the metacharacter scan - a commit
+    # message or comment body legitimately says "(#42)", and the budget deny explicitly tells the
+    # run to leave exactly that kind of comment; text in quotes is data to the shell (the two
+    # forms that are not - $() and backticks - were just refused on the raw command above).
+    # If the two views disagree about the segment count (a quoted span carried a separator),
+    # refuse conservatively rather than pair them wrong.
+    $maskedCmd = ("$Command" -replace '"[^"]*"', ' QUOTEDARG ') -replace "'[^']*'", ' QUOTEDARG '
+    $normFull   = ConvertTo-NormalizedCommand $Command
+    $normMasked = ConvertTo-NormalizedCommand $maskedCmd
+    if (-not $normFull -or -not $normMasked) { return $false }
+
+    $splitClean = {
+        param($text)
+        $segs = @()
+        foreach ($segment in ($text -split $script:SegmentSeparator)) {
+            $seg = $segment.Trim()
+            if (-not $seg) { continue }
+            if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
+            $segs += $seg
+        }
+        return ,$segs
+    }
+    $fullSegs   = & $splitClean $normFull
+    $maskedSegs = & $splitClean $normMasked
+    if ($fullSegs.Count -ne $maskedSegs.Count -or $fullSegs.Count -eq 0) { return $false }
+
     # EVERY segment must be exempt: `Board-Handoff.ps1 -Save; npm run build` is more work wearing
     # a handoff as a hat - the same per-segment rule the brake itself applies, in reverse.
-    $sawSegment = $false
-    foreach ($segment in ($norm -split $script:SegmentSeparator)) {
-        $seg = $segment.Trim()
-        if (-not $seg) { continue }
-        if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
-        $sawSegment = $true
-        # An exempt PREFIX must not smuggle more work in the same segment (round 3): the splitter
-        # does not split on a lone `&`, and redirections / subexpressions ride inside the segment
-        # - `git status & npm run build`, `git status > src/app.ts`, `git commit -m $(npm run
-        # build)` all began with wrap-up and carried work. An exempt segment must be INERT: no
-        # background operator, no redirection, no subexpression. A LEADING `& ` is PowerShell's
-        # call operator - part of the launcher shape the patterns accept - so only that one is
-        # stripped before the check. The cost is a conservative refusal of, say, a commit message
-        # containing '&' - the deny message says how to rephrase. Parentheses are refused too
-        # (round 4): `git status (npm run build)` / `@(npm run build)` are PowerShell execution
-        # forms that survive normalization, and no wrap-up command needs them. And `#` (round 8):
-        # commented-out text satisfied the handoff's -save lookahead while the host received
-        # -resume - a wrap-up command has no business carrying a comment.
-        if (($seg -replace '^&\s+', '') -match '[&<>()#]') { return $false }
+    for ($i = 0; $i -lt $fullSegs.Count; $i++) {
+        # An exempt segment must be INERT in its SHELL SYNTAX (rounds 3/4/8): no background
+        # operator, no redirection, no grouping, no comment - judged on the MASKED view so quoted
+        # message text does not trip it. A LEADING `& ` is PowerShell's call operator - part of
+        # the launcher shape the patterns accept - so only that one is stripped first.
+        if (($maskedSegs[$i] -replace '^&\s+', '') -match '[&<>()#]') { return $false }
         $segExempt = $false
         foreach ($p in $script:BudgetExemptPatterns) {
-            if ($seg -match $p) { $segExempt = $true; break }
+            if ($fullSegs[$i] -match $p) { $segExempt = $true; break }
         }
         if (-not $segExempt) { return $false }
     }
-    return $sawSegment
+    return $true
 }
 
 # Writes an over-budget run may still make: the handoff surfaces and the run's own state dir.
@@ -754,8 +767,26 @@ function Send-RunSignal {
         if (-not $env:GH_TOKEN) { return }
         $body = New-SignalCommentBody -Kind $Kind -Action $Action -Issue ([int]$Marker.issue) `
                     -ElapsedMinutes $ElapsedMinutes -MaxMinutes $MaxMinutes
-        & gh issue comment "$($Marker.issue)" --repo "$($Marker.repo)" --body $body 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { $null = Set-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue) }
+        # HARD TIME BOUND (#565 review round 1): this runs on the PreToolUse hook path, and the
+        # harness waits for the hook process to exit - a hanging network call here would delay
+        # the denial it rides on. The body travels by file (no argument-quoting minefield), the
+        # post gets 10 seconds, and past that the child is killed and the dedup marker is NOT
+        # written, so a later denial retries the signal.
+        $bodyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-signal-" + [guid]::NewGuid().ToString('N') + ".md")
+        Set-Content -LiteralPath $bodyFile -Encoding UTF8 -Value $body
+        try {
+            $proc = Start-Process -FilePath 'gh' -ArgumentList @(
+                        'issue','comment',"$($Marker.issue)",'--repo',"$($Marker.repo)",'--body-file',$bodyFile
+                    ) -WindowStyle Hidden -PassThru -RedirectStandardOutput ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-signal-out-" + [guid]::NewGuid().ToString('N'))) `
+                      -RedirectStandardError  ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-signal-err-" + [guid]::NewGuid().ToString('N')))
+            if ($proc.WaitForExit(10000)) {
+                if ($proc.ExitCode -eq 0) { $null = Set-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue) }
+            } else {
+                try { $proc.Kill() } catch { }
+            }
+        } finally {
+            Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
+        }
     } catch { }
 }
 

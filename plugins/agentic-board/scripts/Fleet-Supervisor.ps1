@@ -130,19 +130,28 @@ function Resolve-LiveSessions {
                 if ($found.Count -gt 0) { $pr = "#$($found[0].number)"; $merged = ($found[0].state -eq 'MERGED') }
             } catch { }
         }
-        $out += [pscustomobject]@{ issue = $e.issue; repo = $e.repo; branch = $e.branch; ageMin = $ageMin; pr = $pr; merged = $merged }
+        $out += [pscustomobject]@{ issue = $e.issue; repo = $e.repo; branch = $e.branch; started = "$($e.started)"; ageMin = $ageMin; pr = $pr; merged = $merged }
     }
     return $out
 }
 
-# Post the [abios-stall] comment for each stalled session, once per issue (marker in the state
+# The dedup key for one stalled SESSION - repo + issue + start time, sanitized for a filename
+# (#565 review): keyed on the issue number alone, a relaunch of the same issue (or the same
+# number in another repo) was suppressed by the ghost of an earlier session's marker. Pure.
+function Get-StallMarkerName {
+    param([Parameter(Mandatory)]$Session)
+    $san = { param($s) ("$s" -replace '[^A-Za-z0-9]', '-') }
+    return ("signal-stall-{0}-{1}-{2}.posted" -f (& $san $Session.repo), [int]$Session.issue, (& $san $Session.started))
+}
+
+# Post the [abios-stall] comment for each stalled session, once per SESSION (marker in the state
 # dir). Best-effort: a posting failure is a WARN, never a changed verdict.
 function Publish-StallSignals {
     param([object[]]$Stalled, [int]$ThresholdMin)
     $state = Get-AbiosStateDir
     foreach ($s in @($Stalled)) {
         if (-not $s.issue -or -not $s.repo) { continue }
-        $mark = if ($state) { Join-Path $state "signal-stall-$($s.issue).posted" } else { $null }
+        $mark = if ($state) { Join-Path $state (Get-StallMarkerName -Session $s) } else { $null }
         if ($mark -and (Test-Path -LiteralPath $mark)) { continue }
         try {
             $body = New-StallCommentBody -Issue ([int]$s.issue) -AgeMin ([int]$s.ageMin) -ThresholdMin $ThresholdMin

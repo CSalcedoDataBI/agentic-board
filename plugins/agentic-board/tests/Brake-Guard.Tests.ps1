@@ -1271,3 +1271,22 @@ Describe 'The marker round-trips the repo (#565)' {
         ($json | ConvertFrom-Json).repo | Should -Be ''
     }
 }
+
+Describe 'Quoted text is data, not shell syntax (#565 review)' {
+    # The budget deny tells the run to leave a comment and commit its WIP - and those messages
+    # legitimately contain "(#42)" and similar. The metacharacter scan judges SHELL SYNTAX only:
+    # quoted spans are masked first, while $() and backticks stay refused even inside quotes
+    # (they execute there).
+    It 'allows the exact wrap-up the deny message asks for' {
+        Test-IsBudgetExemptCommand -Command 'git commit -m "wip: out of budget (#42)"' | Should -BeTrue
+        Test-IsBudgetExemptCommand -Command 'gh issue comment 42 --body "out of budget, handoff saved (#42) - see log"' | Should -BeTrue
+    }
+    It 'still refuses execution forms even inside double quotes' {
+        Test-IsBudgetExemptCommand -Command 'git commit -m "done $(npm run build)"' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'gh issue comment 42 --body "x `npm run build` y"' | Should -BeFalse
+    }
+    It 'still refuses UNQUOTED operators' {
+        Test-IsBudgetExemptCommand -Command 'git status > src/app.ts' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'git status & npm run build' | Should -BeFalse
+    }
+}

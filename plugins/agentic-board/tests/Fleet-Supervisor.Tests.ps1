@@ -80,3 +80,20 @@ Describe 'New-StallCommentBody - the stall signal the human actually sees (#565)
         $b | Should -Match '-Start 42 -TakeOver'
     }
 }
+
+Describe 'Get-StallMarkerName - dedup per SESSION, not per issue number (#565 review)' {
+    It 'keys on repo + issue + start time' {
+        $s = [pscustomobject]@{ repo = 'owner/name'; issue = 42; started = '2026-08-03 10:00' }
+        Get-StallMarkerName -Session $s | Should -Be 'signal-stall-owner-name-42-2026-08-03-10-00.posted'
+    }
+    It 'a relaunch (new started) gets a NEW marker - its stall is not suppressed by the old ghost' {
+        $a = [pscustomobject]@{ repo = 'o/r'; issue = 7; started = '2026-08-03 10:00' }
+        $b = [pscustomobject]@{ repo = 'o/r'; issue = 7; started = '2026-08-03 14:30' }
+        (Get-StallMarkerName -Session $a) | Should -Not -Be (Get-StallMarkerName -Session $b)
+    }
+    It 'the same issue number in another repo gets a different marker' {
+        $a = [pscustomobject]@{ repo = 'o/r1'; issue = 7; started = 'x' }
+        $b = [pscustomobject]@{ repo = 'o/r2'; issue = 7; started = 'x' }
+        (Get-StallMarkerName -Session $a) | Should -Not -Be (Get-StallMarkerName -Session $b)
+    }
+}

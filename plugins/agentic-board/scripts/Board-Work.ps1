@@ -2375,6 +2375,11 @@ function Invoke-SessionWatch {
         }
         if ((((& $Now) - $start)).TotalSeconds -ge $TimeoutSec) {
             Write-Host ("  Timeout ({0}s) con {1} sesion(es) aun en progreso." -f $TimeoutSec, $pending) -ForegroundColor DarkYellow
+            # Final supervisor pass BEFORE leaving (#565 review): with the defaults, the stall
+            # threshold (30 min) and the watch timeout (30 min) coincide, so returning here
+            # without one last -Post pass meant a full default watch could end with the stall
+            # never posted anywhere.
+            if ($SuperviseEvery -gt 0) { & $Supervise }
             return [pscustomobject]@{ allDone = $false; timedOut = $true; cleaned = @($cleaned.Keys) }
         }
         $cycle++
