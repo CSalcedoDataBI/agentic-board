@@ -269,7 +269,14 @@ $brief | Set-Content -Path $briefPath -Encoding utf8
 Write-Host "=== /board expert auto  (issue #$Issue) ===" -ForegroundColor Cyan
 Write-Host "  Brief composed -> $briefPath" -ForegroundColor Green
 Write-Host "  Autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
-Write-Host "  Time budget: $(Get-ContractBudgetMinutes -Contract $contract) min - ENFORCED by the PreToolUse hook (#564): past it, only wrap-up commands pass." -ForegroundColor DarkGray
+$resolvedBudget = Get-ContractBudgetMinutes -Contract $contract
+if ($resolvedBudget -gt 0) {
+    Write-Host "  Time budget: $resolvedBudget min - ENFORCED by the PreToolUse hook (#564): past it, only wrap-up commands pass." -ForegroundColor DarkGray
+} else {
+    # Say what is true (round 8): a 0 budget is enforcement deliberately OFF, and printing
+    # "ENFORCED" for it is the same overclaim shape the brake messages were cured of (#516).
+    Write-Host "  Time budget: NONE - this contract sets maxMinutes 0, so no mechanical limit is armed (#564)." -ForegroundColor DarkYellow
+}
 if ($stopAtPR -and $EndToEnd) {
     # Say what is TRUE, not what was asked for. The order is recorded and cannot yet be acted on
     # (#541); printing "the session may close its own PR" would be the same overclaim #516 removed.

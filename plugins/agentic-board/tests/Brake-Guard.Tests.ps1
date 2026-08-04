@@ -1091,6 +1091,10 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Resume' | Should -BeFalse
             Test-IsBudgetExemptCommand -Command 'scripts/Board-Handoff.ps1 -Resume' | Should -BeFalse
         }
+        It 'refuses -Resume hiding a -Save in a comment (round 8: no comments in wrap-up commands, and -resume refuses on its own)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Resume # -Save' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'scripts/Board-Handoff.ps1 -Resume -Save' | Should -BeFalse
+        }
         It 'allows committing and pushing the WIP' {
             Test-IsBudgetExemptCommand -Command 'git add -A' | Should -BeTrue
             Test-IsBudgetExemptCommand -Command 'git commit -m "wip: out of budget"' | Should -BeTrue

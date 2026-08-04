@@ -491,9 +491,12 @@ function Get-BudgetState {
 # merely ends like.
 # The handoff script must be invoked with -save (round 7): Board-Handoff.ps1 also exposes
 # -Resume, which is the START of more work, not the end of it. The runledger's verbs are all
-# wrap-up, so it carries no such constraint. The lookahead is safe against smuggling because an
-# exempt segment is already required to be INERT (no ;, &, |, redirections or subexpressions).
-$script:BudgetExemptHandoffSave = '(?=[^;|&]*\s-save\b)'
+# wrap-up, so it carries no such constraint. Round 8 added the -resume refusal: `-Resume # -Save`
+# satisfied the -save lookahead with commented-out text (the inert rule now also refuses `#`, but
+# a switch the host actually receives deserves its own refusal, not a ride on the comment rule).
+# The lookaheads are safe against smuggling because an exempt segment is already required to be
+# INERT (no ;, &, |, #, redirections or subexpressions).
+$script:BudgetExemptHandoffSave = '(?=[^;|&]*\s-save\b)(?![^;|&]*\s-resume\b)'
 $script:BudgetExemptPatterns = @(
     ('^(?:& )?(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
     '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
@@ -545,8 +548,10 @@ function Test-IsBudgetExemptCommand {
         # stripped before the check. The cost is a conservative refusal of, say, a commit message
         # containing '&' - the deny message says how to rephrase. Parentheses are refused too
         # (round 4): `git status (npm run build)` / `@(npm run build)` are PowerShell execution
-        # forms that survive normalization, and no wrap-up command needs them.
-        if (($seg -replace '^&\s+', '') -match '[&<>()]') { return $false }
+        # forms that survive normalization, and no wrap-up command needs them. And `#` (round 8):
+        # commented-out text satisfied the handoff's -save lookahead while the host received
+        # -resume - a wrap-up command has no business carrying a comment.
+        if (($seg -replace '^&\s+', '') -match '[&<>()#]') { return $false }
         $segExempt = $false
         foreach ($p in $script:BudgetExemptPatterns) {
             if ($seg -match $p) { $segExempt = $true; break }
