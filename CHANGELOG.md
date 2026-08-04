@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+- **The expert run's time budget is now enforced, not advisory** (#564, part of epic #561).
+  `Get-BudgetVerdict` computed a handoff verdict that *nothing ever called* — the contract's
+  120-minute budget existed only as a sentence in the brief, so a runaway run had no wall-clock
+  limit at all. The budget now travels in the brake marker (`budgetMinutes` + `armedAt`) and the
+  PreToolUse hook enforces it: past the budget, work commands are refused with an instructive
+  message while the **wrap-up stays open** — `/board handoff -Save`, committing and pushing WIP,
+  closing the run ledger, and leaving a PR/issue comment. The brake always wins over the
+  exemption (a push to `main` over budget is still a refused merge), and the budget **fails
+  open** on a corrupt timestamp — it is a liveness limit, not a safety control, and must never
+  brick ordinary work. Iteration counts stay advisory: a hook that sees single tool calls cannot
+  count verify-loop iterations honestly. Verified by 24 new Pester tests (pure + hook end-to-end
+  over real stdin); mutation-checked (enforcement disconnected → 3 tests red → restored).
+
 ### Fixed
 - **The review wait learns from silence, and any reviewer's answer counts** (#563, part of epic
   #561). Two defects made every PR pay the full review timeout forever: the wait loop broke only

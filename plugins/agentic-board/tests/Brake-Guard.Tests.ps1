@@ -1024,3 +1024,110 @@ Describe 'Test-IsBrakedCommand — the prefix must not step over a background op
             Should -Be 'merge'
     }
 }
+
+Describe 'The enforced time budget (#564)' {
+    # Until this change the contract's 120-minute budget was PROSE: Get-BudgetVerdict existed and
+    # nothing called it, so a runaway run had no wall-clock limit at all. The marker now carries
+    # budgetMinutes + armedAt, Get-BudgetState computes the verdict, and the hook refuses non
+    # wrap-up commands once the budget is spent.
+    BeforeAll {
+        $script:T0 = [datetime]'2026-08-03 10:00:00'
+        function script:Marker([int]$budget, [string]$armedAt = '2026-08-03 10:00:00') {
+            @{ issue = 42; irreversible = @('merge'); armedAt = $armedAt; budgetMinutes = $budget }
+        }
+    }
+
+    Context 'Get-BudgetState' {
+        It 'not enforced when the marker has no budget (0) - runs launched without one are untouched' {
+            $s = Get-BudgetState -Marker (script:Marker 0) -Now $script:T0.AddHours(9)
+            $s.Enforced   | Should -BeFalse
+            $s.OverBudget | Should -BeFalse
+        }
+        It 'within budget -> not over' {
+            $s = Get-BudgetState -Marker (script:Marker 120) -Now $script:T0.AddMinutes(60)
+            $s.Enforced   | Should -BeTrue
+            $s.OverBudget | Should -BeFalse
+            $s.ElapsedMinutes | Should -Be 60
+        }
+        It 'past budget -> over, with the elapsed number the deny message needs' {
+            $s = Get-BudgetState -Marker (script:Marker 120) -Now $script:T0.AddMinutes(121)
+            $s.OverBudget     | Should -BeTrue
+            $s.ElapsedMinutes | Should -Be 121
+            $s.MaxMinutes     | Should -Be 120
+        }
+        It 'fails OPEN on an unparsable armedAt - the budget is a liveness limit, not a safety control' {
+            # The brake fails closed; the budget deliberately does not. A corrupt timestamp that
+            # denied every command would brick normal work to enforce a resource cap.
+            $s = Get-BudgetState -Marker (script:Marker 120 'not-a-date') -Now $script:T0.AddHours(9)
+            $s.Enforced   | Should -BeFalse
+            $s.OverBudget | Should -BeFalse
+        }
+        It 'fails OPEN on a missing armedAt' {
+            $s = Get-BudgetState -Marker (script:Marker 120 '') -Now $script:T0.AddHours(9)
+            $s.OverBudget | Should -BeFalse
+        }
+    }
+
+    Context 'the marker round-trips the budget' {
+        It 'New-BrakeMarkerJson carries budgetMinutes' {
+            $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge') -ArmedAt '2026-08-03 10:00:00' -BudgetMinutes 90
+            ($json | ConvertFrom-Json).budgetMinutes | Should -Be 90
+        }
+        It 'a marker without the field reads as 0 (no enforcement) - older runs keep working' {
+            $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge') -ArmedAt '2026-08-03 10:00:00'
+            ($json | ConvertFrom-Json).budgetMinutes | Should -Be 0
+        }
+        It 'a negative budget clamps to 0 rather than arming a nonsense limit' {
+            $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge') -BudgetMinutes -5
+            ($json | ConvertFrom-Json).budgetMinutes | Should -Be 0
+        }
+    }
+
+    Context 'Test-IsBudgetExemptCommand - what an over-budget run may still do' {
+        It 'allows the handoff save (THE thing the budget wants it to run)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
+        }
+        It 'allows committing and pushing the WIP' {
+            Test-IsBudgetExemptCommand -Command 'git add -A' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git commit -m "wip: out of budget"' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD:issue-42-branch' | Should -BeTrue
+        }
+        It 'allows reporting where it stopped' {
+            Test-IsBudgetExemptCommand -Command 'gh pr comment 90 --body "out of budget, handoff saved"' | Should -BeTrue
+        }
+        It 'refuses more work' {
+            Test-IsBudgetExemptCommand -Command 'npm run build' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'Invoke-Pester tests/' | Should -BeFalse
+        }
+        It 'refuses more work hiding behind a handoff in the same command line' {
+            # EVERY segment must be exempt - the same per-segment rule the brake applies, in reverse.
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Save; npm run build' | Should -BeFalse
+        }
+        It 'an empty command is not exempt' {
+            Test-IsBudgetExemptCommand -Command '' | Should -BeFalse
+        }
+    }
+
+    Context 'Test-IsBudgetExemptWrite - the wrap-up surfaces' {
+        It 'allows the handoff files' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\HANDOFF.md' | Should -BeTrue
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.handoffs\2026-08-03-issue-42.md' | Should -BeTrue
+        }
+        It 'allows the run state dir and evidence' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.agentic-board\active-run.json' | Should -BeTrue
+            Test-IsBudgetExemptWrite -Path 'C:\repo\evidence\42.md' | Should -BeTrue
+        }
+        It 'refuses source files - that is more work' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\src\app.ts' | Should -BeFalse
+            Test-IsBudgetExemptWrite -Path 'C:\repo\scripts\Board-Work.ps1' | Should -BeFalse
+        }
+    }
+
+    Context 'the brake still wins over the budget exemption' {
+        It 'git push to MAIN is a braked merge even though git push is budget-exempt' {
+            # The hook checks Test-IsBrakedCommand BEFORE the budget exemption, so the exempt
+            # list can never become a side door for the irreversible.
+            Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible @('merge') | Should -Be 'merge'
+        }
+    }
+}

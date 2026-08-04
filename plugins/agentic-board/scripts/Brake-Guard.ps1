@@ -316,6 +316,11 @@ function Read-BrakeMarker {
                     $irr = @('merge','deploy','refresh','publish','delete')
                     $tampered = $true
                 }
+                # budgetMinutes: 0 (not enforced) unless the marker carries a positive integer.
+                # A malformed value reads as 0 - the budget is a LIVENESS limit, not a safety
+                # control, so its failure direction is open (see Get-BudgetState).
+                $budgetMin = 0
+                try { if ($null -ne $o.budgetMinutes) { $budgetMin = [Math]::Max(0, [int]$o.budgetMinutes) } } catch { $budgetMin = 0 }
                 return @{
                     issue        = if ($o.issue) { [int]$o.issue } else { 0 }
                     irreversible = $irr
@@ -326,6 +331,7 @@ function Read-BrakeMarker {
                     # reads as NOT ordered: a run that predates this mode never received it.
                     endToEnd     = ($o.endToEnd -is [bool] -and $o.endToEnd)
                     armedAt      = "$($o.armedAt)"
+                    budgetMinutes = $budgetMin
                     path         = $candidate
                     emptied      = $tampered
                 }
@@ -366,7 +372,12 @@ function New-BrakeMarkerJson {
         # the instruction that launched the run, not to a setting on disk that could be edited
         # afterwards - and because the merge decision happens later, when this file is the only
         # thing that still remembers what was asked for (#530).
-        [bool]$EndToEnd = $false
+        [bool]$EndToEnd = $false,
+        # The contract's maxMinutes, made ENFORCEABLE (#564): the PreToolUse hook computes elapsed
+        # time from armedAt and, past this many minutes, refuses further work commands (handoff and
+        # wrap-up stay allowed). 0 = no budget enforcement. Until this field, the 120-minute budget
+        # existed only as a sentence in the brief - a limit nothing could apply.
+        [int]$BudgetMinutes = 0
     )
     $irr = @($Irreversible | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
     if ($irr.Count -eq 0) { $irr = @('merge','deploy','refresh','publish','delete') }
@@ -375,6 +386,7 @@ function New-BrakeMarkerJson {
         irreversible = $irr
         endToEnd     = $EndToEnd
         armedAt      = $ArmedAt
+        budgetMinutes = [Math]::Max(0, $BudgetMinutes)
         branch       = $Branch
         host         = $HostName
         note         = 'Written by /board expert auto. Removing this file disarms the brake for this worktree.'
@@ -407,7 +419,8 @@ function Set-BrakeArmedState {
         [string]$Branch = '',
         [string]$HostName = '',
         [string]$ArmedAt = '',
-        [bool]$EndToEnd = $false
+        [bool]$EndToEnd = $false,
+        [int]$BudgetMinutes = 0
     )
     $path = Get-BrakeMarkerPath -WorkPath $WorkPath
     if (-not $Armed) {
@@ -421,8 +434,112 @@ function Set-BrakeArmedState {
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     Set-Content -LiteralPath $path -Encoding UTF8 -Value (
         New-BrakeMarkerJson -Issue $Issue -Irreversible $Irreversible -ArmedAt $ArmedAt `
-            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd)
+            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd -BudgetMinutes $BudgetMinutes)
     return 'armed'
+}
+
+<#
+    Is this run past its time budget? (#564)
+
+    The contract's 120-minute budget was a sentence in the brief - Get-BudgetVerdict existed and
+    nothing called it, so a runaway run had no wall-clock limit at all. The marker now carries
+    budgetMinutes + armedAt, and this computes the verdict the hook enforces.
+
+    FAIL DIRECTION - open, and deliberately the opposite of the brake: the budget is a LIVENESS
+    limit (stop a runaway run), not a safety control (stop an irreversible action). A corrupt
+    armedAt that denied every command would brick normal work to enforce a resource cap; instead,
+    an unparsable/absent armedAt or a 0 budget reports not-enforced. The brake's own fail-closed
+    behavior is untouched - it runs BEFORE the budget check in the hook. Pure.
+#>
+function Get-BudgetState {
+    param(
+        [Parameter(Mandatory)]$Marker,
+        [Parameter(Mandatory)][datetime]$Now
+    )
+    $max = 0
+    try { if ($null -ne $Marker.budgetMinutes) { $max = [Math]::Max(0, [int]$Marker.budgetMinutes) } } catch { $max = 0 }
+    if ($max -le 0) {
+        return @{ Enforced = $false; OverBudget = $false; ElapsedMinutes = 0; MaxMinutes = 0 }
+    }
+    $armed = $null
+    try {
+        $armed = [datetime]::ParseExact("$($Marker.armedAt)", 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+    } catch { $armed = $null }
+    if (-not $armed) {
+        return @{ Enforced = $false; OverBudget = $false; ElapsedMinutes = 0; MaxMinutes = $max }
+    }
+    $elapsed = [int][Math]::Floor(($Now - $armed).TotalMinutes)
+    return @{
+        Enforced       = $true
+        OverBudget     = ($elapsed -gt $max)
+        ElapsedMinutes = $elapsed
+        MaxMinutes     = $max
+    }
+}
+
+# What an over-budget run is still allowed to do from a SHELL tool: save its state and leave.
+# Everything here is reversible wrap-up - the brake patterns are checked BEFORE this exemption in
+# the hook, so `git push origin HEAD:main` is still a refused merge, exempt list or not.
+$script:BudgetExemptPatterns = @(
+    '\bboard-handoff\.ps1\b'        # /board handoff -Save: THE thing the budget wants it to run
+    '\bboard-runledger\.ps1\b'      # closing the run ledger is part of leaving cleanly
+    '(^|\s)/board\s+handoff\b'      # the slash-command spelling
+    $script:GitCmd + '(status|diff|log|add|commit|push|stash)\b'  # commit + push the WIP
+    '\bgh\s+(pr|issue)\s+comment\b' # report where it stopped
+    '\bgh\s+(pr|issue)\s+view\b'    # read what it needs to write the handoff
+)
+
+# True when an over-budget shell command is part of wrapping up rather than more work. Pure.
+function Test-IsBudgetExemptCommand {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Command)
+    $norm = ConvertTo-NormalizedCommand $Command
+    if (-not $norm) { return $false }
+    # EVERY segment must be exempt: `Board-Handoff.ps1 -Save; npm run build` is more work wearing
+    # a handoff as a hat - the same per-segment rule the brake itself applies, in reverse.
+    $sawSegment = $false
+    foreach ($segment in ($norm -split $script:SegmentSeparator)) {
+        $seg = $segment.Trim()
+        if (-not $seg) { continue }
+        if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
+        $sawSegment = $true
+        $segExempt = $false
+        foreach ($p in $script:BudgetExemptPatterns) {
+            if ($seg -match $p) { $segExempt = $true; break }
+        }
+        if (-not $segExempt) { return $false }
+    }
+    return $sawSegment
+}
+
+# Writes an over-budget run may still make: the handoff surfaces and the run's own state dir.
+function Test-IsBudgetExemptWrite {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+    if (-not "$Path".Trim()) { return $false }
+    $p = "$Path" -replace '\\', '/'
+    return [bool]($p -match '(?i)(^|/)(HANDOFF\.md|active-handoff\.md)$|(^|/)\.handoffs(/|$)|(^|/)\.agentic-board(/|$)|(^|/)MEMORY\.md$|(^|/)evidence/[^/]+\.md$')
+}
+
+# The deny payload for an over-budget command: instructive, not punitive - it names the exact
+# wrap-up sequence that is still allowed.
+function New-BudgetDenyJson {
+    param(
+        [int]$Issue = 0,
+        [int]$ElapsedMinutes = 0,
+        [int]$MaxMinutes = 0
+    )
+    $issueClause = if ($Issue -gt 0) { " (issue #$Issue)" } else { "" }
+    $reason = "BUDGET: refused - this autonomous run$issueClause has spent $ElapsedMinutes of its " +
+              "$MaxMinutes-minute budget. The budget is enforced mechanically, not advisory (#564). " +
+              "Wrap up now - these are still allowed: commit and push your WIP, run " +
+              "'/board handoff -Save' (Board-Handoff.ps1) to persist the resume state, close the " +
+              "run ledger, and leave a PR/issue comment saying where you stopped. Then STOP and " +
+              "report. Do not start new work; if more time is genuinely needed, the human relaunches " +
+              "with a fresh budget."
+    return (@{ hookSpecificOutput = @{
+        hookEventName            = 'PreToolUse'
+        permissionDecision       = 'deny'
+        permissionDecisionReason = $reason
+    } } | ConvertTo-Json -Depth 5 -Compress)
 }
 
 # The PreToolUse deny payload, verbatim per the hook contract: exit 0 with this on stdout.

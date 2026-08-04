@@ -77,12 +77,23 @@ try {
     $marker = Read-BrakeMarker -StartDir $cwd
     if (-not $marker) { Write-Output $script:HardDeny; exit 0 }  # armed, but unreadable -> refuse
 
+    # The time budget (#564): computed once, applied after the brake checks below. The brake is a
+    # SAFETY control and always wins; the budget is a LIVENESS limit that only constrains what an
+    # over-budget run may still do (wrap up: handoff, commit/push WIP, report).
+    $budget = Get-BudgetState -Marker $marker -Now (Get-Date)
+
     if ($toolName -in $writeTools) {
         # Rewriting the marker disarms the run just as effectively as deleting it - emptying its
         # list, or pointing it at nothing. Editing it is never part of the task.
         $target = "$($payload.tool_input.file_path)"
         if ($target -and ($target -replace '\\', '/') -match '(?i)brake-armed\.json$') {
             Write-Output (New-BrakeDenyJson -Action 'tamper' -Issue $marker.issue)
+            exit 0
+        }
+        # Over budget, a write is allowed only toward the wrap-up surfaces (handoff files, the
+        # run's state dir, evidence). Anything else is more work, and the budget is spent.
+        if ($budget.OverBudget -and -not (Test-IsBudgetExemptWrite -Path $target)) {
+            Write-Output (New-BudgetDenyJson -Issue $marker.issue -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes)
         }
         exit 0
     }
@@ -94,9 +105,15 @@ try {
     # comment the run can post itself). Tracked in #541 - until then the order is recorded and
     # never acted on, which is the honest state.
     $action  = Test-IsBrakedCommand -Command $command -Irreversible $marker.irreversible
-    if (-not $action) { exit 0 }
+    if ($action) {
+        Write-Output (New-BrakeDenyJson -Action $action -Issue $marker.issue)
+        exit 0
+    }
 
-    Write-Output (New-BrakeDenyJson -Action $action -Issue $marker.issue)
+    # Not braked - but past the budget, only wrap-up commands pass (#564).
+    if ($budget.OverBudget -and -not (Test-IsBudgetExemptCommand -Command $command)) {
+        Write-Output (New-BudgetDenyJson -Issue $marker.issue -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes)
+    }
     exit 0
 } catch {
     # Inside an armed run, an error means we could not prove the command safe -> refuse.
