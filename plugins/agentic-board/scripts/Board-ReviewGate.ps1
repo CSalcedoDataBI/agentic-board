@@ -260,9 +260,14 @@ function Test-IsReviewerCheck {
 function Test-OnlyReviewerChecksFailed {
     param(
         [string[]]$FailedChecks = @(),
-        [bool]$Parsed = $false
+        [bool]$Parsed = $false,
+        # The snapshot must be SETTLED for the allowance to mean anything (#562, external review):
+        # with checks still pending at the CI deadline, "the only FAILURE is the reviewer" says
+        # nothing about the pending ones - excusing the reviewer there would excuse the timeout.
+        [bool]$Settled = $true
     )
-    if (-not $Parsed) { return $false }                       # cannot enumerate -> never downgrade
+    if (-not $Parsed)  { return $false }                      # cannot enumerate -> never downgrade
+    if (-not $Settled) { return $false }                      # pending checks -> nothing is excused
     $names = @(@($FailedChecks) | Where-Object { "$_".Trim() })
     if ($names.Count -eq 0) { return $false }                 # nothing named -> nothing to excuse
     foreach ($n in $names) { if (-not (Test-IsReviewerCheck $n)) { return $false } }
@@ -635,6 +640,11 @@ while ($true) {
     Start-Sleep -Seconds 15
 }
 
+# Re-read PR state AFTER the wait so the verdict below judges the PRESENT, not a snapshot from
+# early in the CI wait (#562, external review): a review that requested changes or a thread opened
+# while CI was still running would otherwise be invisible to a verdict computed from stale state.
+$prState = Get-ReviewState
+
 # CI verdict, from the last snapshot.
 $checksOk     = $true
 $ciTimedOut   = $false
@@ -707,7 +717,7 @@ Write-Host ""
 # file, so its verification correctly reports "nobody reviewed" and would then block that PR
 # forever, no matter how carefully a human or an external reviewer read it.
 # Narrow on purpose: only when EVERY failing check is a reviewer job AND real evidence exists.
-if (-not $checksOk -and $evidence.reviewed -and (Test-OnlyReviewerChecksFailed -FailedChecks $failedChecks -Parsed $checksParsed)) {
+if (-not $checksOk -and $evidence.reviewed -and (Test-OnlyReviewerChecksFailed -FailedChecks $failedChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
     $checksOk = $true
     Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($failedChecks -join ', ')) -ForegroundColor DarkYellow
     Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray

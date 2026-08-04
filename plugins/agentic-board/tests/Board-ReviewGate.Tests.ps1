@@ -160,6 +160,11 @@ Describe 'Test-OnlyReviewerChecksFailed - the reviewer-red allowance (#510, revi
         It 'never downgrades when a list of blanks is all there is' {
             Test-OnlyReviewerChecksFailed -FailedChecks @('', '   ') -Parsed $true | Should -BeFalse
         }
+        It 'never downgrades while checks are still PENDING - excusing the reviewer there would excuse the CI timeout (#562)' {
+            # External-review finding: reviewer red + another check pending at the CI deadline.
+            # "The only FAILURE is the reviewer" says nothing about the pending ones.
+            Test-OnlyReviewerChecksFailed -FailedChecks @('claude-review') -Parsed $true -Settled $false | Should -BeFalse
+        }
     }
 
     Context 'a real build failure always blocks' {
