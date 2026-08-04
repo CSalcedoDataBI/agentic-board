@@ -22,11 +22,15 @@
          Both degrade safely: no model, no BPA rules file, or no Tabular Editor
          is a WARN + skip, never a block - a merge is only ever stopped by an
          actual finding. A non-BI repo never triggers either.
-      3. Waits for CI checks on the PR (gh pr checks --watch). "No checks
+      3. Waits for CI checks AND the requested review in ONE bounded loop
+         (#562). Both waits are independent, so they run concurrently: total
+         wait is max(CI, review), not their sum. The CI side is capped at
+         -CiTimeoutMinutes — the previous `gh pr checks --watch` had no
+         timeout, so a queued/stuck workflow hung the session indefinitely;
+         now it expires into an explicit "CI still pending" BLOCK. "No checks
          configured" counts as pass, with a note.
-      4. Waits (up to -TimeoutMinutes) for the requested review to arrive,
-         then reports: review decision, every review with author/state/body,
-         and unresolved review-thread count.
+      4. Reports: review decision, every review with author/state/body, and
+         unresolved review-thread count.
       5. Verdict via exit code:
            0 -> gate PASSED (checks ok, no CHANGES_REQUESTED, no unresolved
                 threads, no TMDL-breaking / BPA-error findings, AND somebody
@@ -56,6 +60,12 @@
 
 .PARAMETER TimeoutMinutes
     Max minutes to wait for the requested review. Default 6.
+
+.PARAMETER CiTimeoutMinutes
+    Max minutes to wait for CI checks to settle. Default 25 (the repo's CI
+    jobs cap at 20). Expiry is an explicit block ("CI still pending"), never
+    a silent hang — this bound exists because the unbounded watch was the
+    only wait in the codebase with no ceiling (#562).
 
 .PARAMETER MaxLines
     Small-PR guard: warn when additions+deletions exceed this. Default 600.
@@ -104,6 +114,8 @@ param(
     [int]   $PR = 0,
     [switch]$InstallRuleset,
     [int]   $TimeoutMinutes = 6,
+    # Ceiling for the CI wait (#562). The old `--watch` could hang forever on a queued workflow.
+    [int]   $CiTimeoutMinutes = 25,
     [int]   $MaxLines = 600,
     [int]   $MaxFiles = 20,
     # Days to remember "this account has no Copilot" before the gate tries it again (#367).
@@ -255,6 +267,63 @@ function Test-OnlyReviewerChecksFailed {
     if ($names.Count -eq 0) { return $false }                 # nothing named -> nothing to excuse
     foreach ($n in $names) { if (-not (Test-IsReviewerCheck $n)) { return $false } }
     return $true
+}
+
+<#
+    Classify one structured snapshot of `gh pr checks --json name,bucket` (#562).
+
+    Buckets per gh: pass / fail / pending / skipping / cancel. 'cancel' counts as failed (a
+    cancelled check did not pass) and 'skipping' as settled-ok — both mirror the previous
+    verdict logic, just computed from one snapshot instead of trusting --watch's exit code.
+
+    Fails closed: an unparsed snapshot ($Parsed=$false) reports Settled=$false and Ok=$false,
+    so the caller keeps polling and, at the deadline, blocks with a readable reason instead of
+    inventing a pass from data it never saw. An empty parsed list is the "no checks configured"
+    case — settled and ok, with NoChecks so the caller can print the note. Pure.
+#>
+function Get-ChecksVerdict {
+    param(
+        $Checks = @(),
+        [bool]$Parsed = $false
+    )
+    if (-not $Parsed) {
+        return @{ Parsed = $false; Settled = $false; Ok = $false; NoChecks = $false; Failed = @(); Pending = @() }
+    }
+    $list = @(@($Checks) | Where-Object { $_ })
+    if ($list.Count -eq 0) {
+        return @{ Parsed = $true; Settled = $true; Ok = $true; NoChecks = $true; Failed = @(); Pending = @() }
+    }
+    $failed  = @($list | Where-Object { "$($_.bucket)" -in @('fail','cancel') } | ForEach-Object { "$($_.name)" })
+    $pending = @($list | Where-Object { "$($_.bucket)" -eq 'pending' }          | ForEach-Object { "$($_.name)" })
+    return @{
+        Parsed   = $true
+        Settled  = ($pending.Count -eq 0)
+        Ok       = ($pending.Count -eq 0 -and $failed.Count -eq 0)
+        NoChecks = $false
+        Failed   = $failed
+        Pending  = $pending
+    }
+}
+
+<#
+    Should the combined CI+review wait loop exit? (#562)
+
+    The two waits are independent, so the loop runs them CONCURRENTLY and exits only when both
+    sides are done: the CI side when checks settle or its deadline passes, the review side when
+    no review is being waited on, or one arrived, or its deadline passes. This is what turns
+    the old sequential worst case (CI wait + full review wait) into max(CI, review). Pure.
+#>
+function Test-GateWaitDone {
+    param(
+        [bool]$ChecksSettled,
+        [bool]$WaitingReview,
+        [Parameter(Mandatory)][datetime]$Now,
+        [Parameter(Mandatory)][datetime]$CiDeadline,
+        [Parameter(Mandatory)][datetime]$ReviewDeadline
+    )
+    $ciDone     = $ChecksSettled -or ($Now -ge $CiDeadline)
+    $reviewDone = (-not $WaitingReview) -or ($Now -ge $ReviewDeadline)
+    return ($ciDone -and $reviewDone)
 }
 
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
@@ -496,46 +565,11 @@ if ($tmdlChanged) {
     }
 }
 
-# ── 2. CI checks ───────────────────────────────────────────────────────────────
-Write-Host ""
-Write-Host "  Esperando checks de CI..." -ForegroundColor Cyan
-$checksOk = $true
-$checksOut = gh pr checks $PR --repo $Repo --watch 2>&1
-$checksExit = $LASTEXITCODE
-$checksText = ($checksOut | Out-String).Trim()
-if ($checksText) { Write-Host $checksText }
-# Which checks failed, by name - read from STRUCTURED output, never scraped from the human-readable
-# table. Scraping was a merge decision made from display text: a failure printed in any shape the
-# regex missed would drop out of the list, leaving a reviewer failure as the only one seen and
-# waving a genuinely broken build through. If this read fails, $checksParsed stays false and the
-# downgrade below is simply never offered.
-$failedChecks = @()
-$checksParsed = $false
-$checksJson = gh pr checks $PR --repo $Repo --json name,bucket 2>$null
-if ($checksJson) {
-    try {
-        $parsedChecks = $checksJson | ConvertFrom-Json
-        # 'cancel' counts as failed: a cancelled check did not pass, and treating it as absent
-        # would be the same silent-hole mistake one level down.
-        $failedChecks = @(@($parsedChecks) | Where-Object { "$($_.bucket)" -in @('fail','cancel') } |
-                          ForEach-Object { "$($_.name)" })
-        $checksParsed = $true
-    } catch {
-        Write-Host "  WARN no pude leer los checks en formato estructurado - no se aplicara ninguna excepcion por revisor." -ForegroundColor DarkYellow
-    }
-}
-if ($checksExit -ne 0) {
-    if ($checksText -match '(?i)no checks') {
-        Write-Host "  (sin checks configurados - cuenta como pass, considera /board automate)" -ForegroundColor DarkGray
-    } else {
-        $checksOk = $false
-        Write-Host "  FAIL hay checks fallando" -ForegroundColor Red
-    }
-} else {
-    Write-Host "  OK  checks en verde" -ForegroundColor Green
-}
-
-# ── 3. Wait for the review, then collect decision + threads ───────────────────
+# ── 2+3. CI checks AND review, waited together (bounded + concurrent, #562) ───
+# The old shape was two waits in sequence: `gh pr checks --watch` (no timeout — the only unbounded
+# wait in the codebase; a queued workflow hung the session forever) and THEN a review poll. They
+# are independent, so one loop now polls both: worst case is max(CI, review), not their sum, and
+# the CI side expires at -CiTimeoutMinutes into an explicit "still pending" block.
 function Get-ReviewState {
     # THE gate verdict read. -Graphql throws on exit OR errors[] so a failed read can never come
     # back as 0 reviews / 0 unresolved / null decision -> a false GATE PASSED that authorizes a
@@ -556,19 +590,70 @@ query($o:String!, $r:String!, $n:Int!) {
     return $q.data.repository.pullRequest
 }
 
+Write-Host ""
+if ($copilotRequested) {
+    Write-Host "  Esperando checks de CI (max $CiTimeoutMinutes min) y el review (max $TimeoutMinutes min) EN PARALELO..." -ForegroundColor Cyan
+} else {
+    Write-Host "  Esperando checks de CI (max $CiTimeoutMinutes min)..." -ForegroundColor Cyan
+}
+
+$ciDeadline     = (Get-Date).AddMinutes([Math]::Max(1, $CiTimeoutMinutes))
+$reviewDeadline = (Get-Date).AddMinutes([Math]::Max(1, $TimeoutMinutes))
+$verdictCi      = Get-ChecksVerdict -Checks @() -Parsed $false
+$reviewArrived  = $false
 # NOTE: variable must NOT be named $pr - PowerShell vars are case-insensitive and it would
 # collide with the [int]$PR parameter (type conversion crash).
-$prState = Get-ReviewState
-if ($copilotRequested) {
-    Write-Host ""
-    Write-Host "  Esperando el review (max $TimeoutMinutes min)..." -ForegroundColor Cyan
-    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    while ((Get-Date) -lt $deadline) {
-        $reviews = @($prState.reviews.nodes)
-        if ($reviews.Count -gt 0 -and ($reviews | Where-Object { $_.author.login -match '(?i)copilot' })) { break }
-        Start-Sleep -Seconds 20
-        $prState = Get-ReviewState
+$prState        = $null
+
+while ($true) {
+    # CI snapshot — STRUCTURED read only (the display-text table was a merge decision made from
+    # human-readable output; see the #510 history above). A failed read keeps polling and, at the
+    # deadline, blocks — it can never invent a pass.
+    $checksJson = gh pr checks $PR --repo $Repo --json name,bucket 2>$null
+    $parsedList = @(); $parsedOk = $false
+    if ($checksJson) {
+        try { $parsedList = @($checksJson | ConvertFrom-Json); $parsedOk = $true } catch { }
+    } else {
+        # Empty stdout is either "no checks configured" (benign) or a transient read failure.
+        # Probe the human-readable form to tell them apart: only the explicit "no checks" text
+        # counts as benign; anything else stays unparsed and fails closed at the deadline.
+        $probe = (gh pr checks $PR --repo $Repo 2>&1 | Out-String)
+        if ($probe -match '(?i)no checks') { $parsedList = @(); $parsedOk = $true }
     }
+    $verdictCi = Get-ChecksVerdict -Checks $parsedList -Parsed $parsedOk
+
+    # Review snapshot — while one is awaited, and at least once so the verdict section always has
+    # PR state (decision, threads, head SHA) even when no review was requested.
+    if (-not $prState -or ($copilotRequested -and -not $reviewArrived)) {
+        $prState = Get-ReviewState
+        $reviewArrived = [bool](@($prState.reviews.nodes) | Where-Object { $_.author.login -match '(?i)copilot' })
+    }
+
+    if (Test-GateWaitDone -ChecksSettled ([bool]$verdictCi.Settled) `
+                          -WaitingReview ($copilotRequested -and -not $reviewArrived) `
+                          -Now (Get-Date) -CiDeadline $ciDeadline -ReviewDeadline $reviewDeadline) { break }
+    Start-Sleep -Seconds 15
+}
+
+# CI verdict, from the last snapshot.
+$checksOk     = $true
+$ciTimedOut   = $false
+$failedChecks = @($verdictCi.Failed)
+$checksParsed = [bool]$verdictCi.Parsed
+if ($verdictCi.NoChecks) {
+    Write-Host "  (sin checks configurados - cuenta como pass, considera /board automate)" -ForegroundColor DarkGray
+} elseif (-not $verdictCi.Parsed) {
+    $checksOk = $false
+    Write-Host "  FAIL no pude leer los checks del PR dentro del limite - se bloquea por precaucion, no como pass." -ForegroundColor Red
+} elseif (-not $verdictCi.Settled) {
+    $checksOk = $false; $ciTimedOut = $true
+    Write-Host ("  FAIL checks aun PENDIENTES tras {0} min: {1}" -f $CiTimeoutMinutes, (@($verdictCi.Pending) -join ', ')) -ForegroundColor Red
+    Write-Host "       (limite del gate #562 - antes esto esperaba sin techo y colgaba la sesion)" -ForegroundColor DarkGray
+} elseif (-not $verdictCi.Ok) {
+    $checksOk = $false
+    Write-Host ("  FAIL hay checks fallando: {0}" -f ($failedChecks -join ', ')) -ForegroundColor Red
+} else {
+    Write-Host "  OK  checks en verde" -ForegroundColor Green
 }
 
 $reviews    = @($prState.reviews.nodes)
@@ -630,7 +715,10 @@ if (-not $checksOk -and $evidence.reviewed -and (Test-OnlyReviewerChecksFailed -
 }
 
 $blockers = @()
-if (-not $checksOk)                        { $blockers += "checks de CI fallando" }
+if (-not $checksOk) {
+    $blockers += $(if ($ciTimedOut) { "checks de CI aun pendientes tras $CiTimeoutMinutes min (limite del gate, #562)" }
+                   else             { "checks de CI fallando" })
+}
 if ($decision -eq "CHANGES_REQUESTED")     { $blockers += "review pide cambios (CHANGES_REQUESTED)" }
 if ($unresolved -gt 0)                     { $blockers += "$unresolved hilo(s) de review sin resolver" }
 if ($tmdlBlocked)                          { $blockers += "cambios TMDL BREAKING en el modelo (M3.3)" }

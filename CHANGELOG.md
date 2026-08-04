@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **The review gate's CI wait now has a ceiling, and the CI and review waits run concurrently**
+  (#562, part of epic #561). `gh pr checks --watch` was the only unbounded wait in the codebase:
+  a queued or never-scheduled workflow hung the entire session indefinitely, with no signal. The
+  gate now polls a structured checks snapshot in the same loop as the review wait — worst case is
+  max(CI, review) instead of their sum — and the CI side expires at `-CiTimeoutMinutes`
+  (default 25) into an explicit **"checks still pending" BLOCK**, never a silent hang and never
+  a pass. An unreadable checks snapshot also blocks (fail closed) instead of being trusted from
+  display text. Verified by 12 new Pester tests; mutation-checked by reintroducing both defects
+  (cancel-counts-as-pass, sequential-OR exit) and watching 4 tests go red.
+
 ## [0.32.0] - 2026-08-03
 
 **Expert mode carries its method.** Until now the launched session received a *capability list* —

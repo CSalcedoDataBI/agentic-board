@@ -198,3 +198,105 @@ Describe 'Test-OnlyReviewerChecksFailed - the reviewer-red allowance (#510, revi
         It 'does not recognise "Docs freshness"' { Test-IsReviewerCheck 'Docs freshness' | Should -BeFalse }
     }
 }
+
+Describe 'Get-ChecksVerdict - one snapshot, fail-closed (#562)' {
+    # Replaces trusting `gh pr checks --watch` (unbounded, exit-code driven). The verdict is
+    # computed from one structured snapshot; whatever cannot be read can only ever block.
+    BeforeAll {
+        function script:Chk([string]$name, [string]$bucket) {
+            [pscustomobject]@{ name = $name; bucket = $bucket }
+        }
+    }
+
+    Context 'fails closed' {
+        It 'an unparsed snapshot is neither settled nor ok' {
+            $v = Get-ChecksVerdict -Checks @() -Parsed $false
+            $v.Settled | Should -BeFalse
+            $v.Ok      | Should -BeFalse
+            $v.Parsed  | Should -BeFalse
+        }
+        It 'an unparsed snapshot never reports NoChecks (cannot know that)' {
+            (Get-ChecksVerdict -Checks @() -Parsed $false).NoChecks | Should -BeFalse
+        }
+    }
+
+    Context 'no checks configured' {
+        It 'an empty PARSED list is the benign case: settled, ok, flagged NoChecks' {
+            $v = Get-ChecksVerdict -Checks @() -Parsed $true
+            $v.Settled  | Should -BeTrue
+            $v.Ok       | Should -BeTrue
+            $v.NoChecks | Should -BeTrue
+        }
+    }
+
+    Context 'buckets' {
+        It 'all pass -> settled and ok' {
+            $v = Get-ChecksVerdict -Checks @((script:Chk 'Pester' 'pass'), (script:Chk 'lint' 'pass')) -Parsed $true
+            $v.Settled | Should -BeTrue ; $v.Ok | Should -BeTrue
+            @($v.Failed).Count | Should -Be 0
+        }
+        It 'a pending check means NOT settled, and is named' {
+            $v = Get-ChecksVerdict -Checks @((script:Chk 'Pester' 'pass'), (script:Chk 'build' 'pending')) -Parsed $true
+            $v.Settled | Should -BeFalse
+            $v.Pending | Should -Contain 'build'
+        }
+        It 'a fail is settled but not ok, and is named' {
+            $v = Get-ChecksVerdict -Checks @((script:Chk 'Pester' 'fail')) -Parsed $true
+            $v.Settled | Should -BeTrue ; $v.Ok | Should -BeFalse
+            $v.Failed  | Should -Contain 'Pester'
+        }
+        It 'cancel counts as failed - a cancelled check did not pass' {
+            (Get-ChecksVerdict -Checks @((script:Chk 'build' 'cancel')) -Parsed $true).Failed | Should -Contain 'build'
+        }
+        It 'skipping counts as settled-ok (mirrors the previous verdict)' {
+            $v = Get-ChecksVerdict -Checks @((script:Chk 'docs' 'skipping')) -Parsed $true
+            $v.Settled | Should -BeTrue ; $v.Ok | Should -BeTrue
+        }
+    }
+}
+
+Describe 'Test-GateWaitDone - CI and review waited concurrently (#562)' {
+    # The property under test: total wait is max(CI, review), never their sum, and BOTH sides
+    # have a deadline - the unbounded CI watch is gone.
+    BeforeAll {
+        $script:T0     = [datetime]'2026-08-03T10:00:00'
+        $script:Later  = $script:T0.AddMinutes(60)
+    }
+
+    It 'keeps waiting while checks are pending and CI deadline has not passed' {
+        Test-GateWaitDone -ChecksSettled $false -WaitingReview $false `
+            -Now $script:T0 -CiDeadline $script:T0.AddMinutes(25) -ReviewDeadline $script:T0.AddMinutes(6) |
+            Should -BeFalse
+    }
+    It 'keeps waiting for the review even when CI already settled (concurrent, not sequential)' {
+        Test-GateWaitDone -ChecksSettled $true -WaitingReview $true `
+            -Now $script:T0 -CiDeadline $script:T0.AddMinutes(25) -ReviewDeadline $script:T0.AddMinutes(6) |
+            Should -BeFalse
+    }
+    It 'exits when both sides are done' {
+        Test-GateWaitDone -ChecksSettled $true -WaitingReview $false `
+            -Now $script:T0 -CiDeadline $script:T0.AddMinutes(25) -ReviewDeadline $script:T0.AddMinutes(6) |
+            Should -BeTrue
+    }
+    It 'the CI deadline bounds the wait - pending checks stop blocking the exit once it passes' {
+        Test-GateWaitDone -ChecksSettled $false -WaitingReview $false `
+            -Now $script:Later -CiDeadline $script:T0.AddMinutes(25) -ReviewDeadline $script:T0.AddMinutes(6) |
+            Should -BeTrue
+    }
+    It 'the review deadline bounds the wait - a silent reviewer stops blocking the exit once it passes' {
+        Test-GateWaitDone -ChecksSettled $true -WaitingReview $true `
+            -Now $script:Later -CiDeadline $script:T0.AddMinutes(25) -ReviewDeadline $script:T0.AddMinutes(6) |
+            Should -BeTrue
+    }
+    It 'waits for the LATER of the two sides, not their sum (max, not plus)' {
+        # 10 min in: CI (25m) still pending, review deadline (6m) already passed.
+        # The only thing keeping the loop alive is CI - the review side is done.
+        $now = $script:T0.AddMinutes(10)
+        Test-GateWaitDone -ChecksSettled $false -WaitingReview $true `
+            -Now $now -CiDeadline $script:T0.AddMinutes(25) -ReviewDeadline $script:T0.AddMinutes(6) |
+            Should -BeFalse   # still waiting, but ONLY on CI
+        Test-GateWaitDone -ChecksSettled $true -WaitingReview $true `
+            -Now $now -CiDeadline $script:T0.AddMinutes(25) -ReviewDeadline $script:T0.AddMinutes(6) |
+            Should -BeTrue    # CI settles -> nothing else to wait for
+    }
+}
