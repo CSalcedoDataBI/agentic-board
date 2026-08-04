@@ -251,3 +251,52 @@ Describe 'Get-HandoffSaveMode (#304)' {
         Get-HandoffSaveMode -Issue -1 | Should -Be 'refuse'
     }
 }
+
+Describe 'Read-HandoffBodyFile (#419 - file-backed body parameters)' {
+    BeforeAll {
+        $script:TmpDir = Join-Path $TestDrive 'handoff-body'
+        New-Item -ItemType Directory -Force $script:TmpDir | Out-Null
+    }
+
+    It 'reads all five sections from a JSON file' {
+        $f = Join-Path $script:TmpDir 'full.json'
+        @{
+            NextStep    = "[V] Run the tests"
+            Done        = @("[V] wrote save", "[V] wrote resume")
+            OpenThreads = @("Decide on -NoMemo default")
+            Traps       = @("Do not pass inline prose with /board")
+            KeyFiles    = @("plugins/agentic-board/scripts/Board-Handoff.ps1")
+        } | ConvertTo-Json | Set-Content -Path $f
+        $bd = Read-HandoffBodyFile $f
+        $bd.NextStep    | Should -BeExactly "[V] Run the tests"
+        $bd.Done.Count  | Should -Be 2
+        $bd.OpenThreads | Should -Contain "Decide on -NoMemo default"
+        $bd.Traps       | Should -Contain "Do not pass inline prose with /board"
+        $bd.KeyFiles    | Should -Contain "plugins/agentic-board/scripts/Board-Handoff.ps1"
+    }
+
+    It 'returns empty defaults for sections absent from the JSON' {
+        $f = Join-Path $script:TmpDir 'partial.json'
+        @{ NextStep = "[V] partial" } | ConvertTo-Json | Set-Content -Path $f
+        $bd = Read-HandoffBodyFile $f
+        $bd.NextStep       | Should -BeExactly "[V] partial"
+        $bd.Done.Count     | Should -Be 0
+        $bd.OpenThreads.Count | Should -Be 0
+        $bd.Traps.Count    | Should -Be 0
+        $bd.KeyFiles.Count | Should -Be 0
+    }
+
+    It 'treats slash-commands in section values as plain text (not executed)' {
+        $f = Join-Path $script:TmpDir 'slashes.json'
+        @{ NextStep = "[V] run /board plan then /knowledge add"; Done = @("/scan found nothing") } |
+            ConvertTo-Json | Set-Content -Path $f
+        $bd = Read-HandoffBodyFile $f
+        $bd.NextStep | Should -Match '/board'
+        $bd.NextStep | Should -Match '/knowledge'
+        $bd.Done     | Should -Contain "/scan found nothing"
+    }
+
+    It 'throws when the file does not exist' {
+        { Read-HandoffBodyFile (Join-Path $script:TmpDir 'missing.json') } | Should -Throw "*does not exist*"
+    }
+}

@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Large inline text payloads no longer abort Board-Plan / Board-Handoff** (#419). The tool-layer
+  path guard pattern-matches the full command string: prose containing slash-commands (`/board`,
+  `/scan`, `/knowledge`, `/expert`) passed as inline parameters was misread as a filesystem path
+  and caused the whole command to abort before the script ran — accounting for 65 field failures
+  across 945 sessions (Board-Plan.ps1 at 30.3% failure rate, Board-Handoff.ps1 at 22%). The fix
+  is to keep large payloads off the command line entirely. `Board-Plan.ps1` now accepts
+  `-DescriptionFile`, `-ResearchFile`, and `-PriorArtFile` (each a path to a plain-text file);
+  `Board-Handoff.ps1` now accepts `-BodyFile` (path to a JSON file with `NextStep`, `Done`,
+  `OpenThreads`, `Traps`, `KeyFiles` keys). Inline parameters remain supported unchanged for short
+  text. The new `Resolve-TextParam` and `Read-HandoffBodyFile` pure helpers are covered by 10 new
+  Pester tests (file reads content, slashes treated as data, destructive text never executed,
+  missing-file throws, file wins over inline).
+
 ### Added
 - **`/board plan` prior-art gate** (#415). `Board-Plan.ps1` now refuses to create an epic
   unless the caller provides either `-PriorArt "<block>"` (queries run, candidates found with

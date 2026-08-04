@@ -56,6 +56,21 @@
     Explicitly skip the prior-art search for genuinely novel work. The skip
     is written into the epic body so the omission is visible, not invisible.
 
+.PARAMETER DescriptionFile
+    Path to a plain-text file whose content is used as -Description. Lets agents
+    write long plan descriptions (which often contain slash-commands like /board or
+    /scan) to a temp file rather than passing them inline, where the tool-layer path
+    guard would interpret the slashes as filesystem paths and abort the run (#419).
+    When supplied, -Description is ignored.
+
+.PARAMETER ResearchFile
+    Path to a plain-text file whose content is used as -Research. Same motivation
+    as -DescriptionFile: keeps prose with slashes off the command string (#419).
+
+.PARAMETER PriorArtFile
+    Path to a plain-text file whose content is used as -PriorArt. Same motivation
+    as -DescriptionFile: keeps prose with slashes off the command string (#419).
+
 .PARAMETER Repo
     owner/name. Default: derived from the current directory's origin remote.
 
@@ -86,6 +101,9 @@ param(
     [string[]]$TestPlan = @(),
     [string]$PriorArt = "",
     [switch]$NoPriorArt,
+    [string]$DescriptionFile = "",
+    [string]$ResearchFile = "",
+    [string]$PriorArtFile = "",
     [string]$Repo = "",
     [string]$Owner = "",
     [int]   $ProjectNum = 0,
@@ -143,6 +161,18 @@ function Format-PriorArtGateBlock {
     ) -join "`n"
 }
 
+# Resolve a text parameter from an optional file, falling back to the inline value.
+# When filePath is set the file MUST exist (a typo in the path must not silently use
+# whatever inline text happens to be present). Returns the inline value unchanged when
+# filePath is empty or whitespace-only. Pure: tested without hitting the network or the board.
+function Resolve-TextParam([string]$filePath, [string]$inline) {
+    if ([string]::IsNullOrWhiteSpace($filePath)) { return $inline }
+    if (-not (Test-Path -LiteralPath $filePath)) {
+        throw "Board-Plan: file '$filePath' does not exist."
+    }
+    return (Get-Content -LiteralPath $filePath -Raw)
+}
+
 # Assert-PriorArtPresent enforces the gate: an epic cannot be created without either a
 # prior-art block or an explicit -NoPriorArt skip. A silent skip is invisible; a recorded
 # skip is auditable. Same shape as the -Rationale requirement in Board-Triage.
@@ -162,6 +192,12 @@ function Assert-PriorArtPresent {
 
 # Dot-source guard: tests set $env:ABIOS_BOARDPLAN_DOTSOURCE to load the pure formatter only.
 if ($env:ABIOS_BOARDPLAN_DOTSOURCE) { return }
+
+# Resolve file-backed parameters BEFORE validation so Assert-PriorArtPresent sees the
+# file content (#419: inline payloads with slashes trip the tool-layer path guard).
+$Description = Resolve-TextParam $DescriptionFile $Description
+$Research    = Resolve-TextParam $ResearchFile    $Research
+$PriorArt    = Resolve-TextParam $PriorArtFile    $PriorArt
 
 if (-not $Title)                          { throw "Board-Plan: -Title is required." }
 if (-not $Tasks -or $Tasks.Count -eq 0)   { throw "Board-Plan: -Tasks is required (one or more task titles)." }
