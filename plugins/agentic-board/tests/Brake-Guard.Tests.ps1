@@ -1100,6 +1100,15 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'git commit -m "wip: out of budget"' | Should -BeTrue
             Test-IsBudgetExemptCommand -Command 'git push origin HEAD:issue-42-branch' | Should -BeTrue
         }
+        It 'push is WIP-shaped only: mirror/all/tags/force/delete/:ref forms are NOT wrap-up (#565 round 2)' {
+            Test-IsBudgetExemptCommand -Command 'git push --mirror origin' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push --all origin' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push --tags origin' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push --force origin HEAD:feature' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push -f origin HEAD:feature' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin --delete old-branch' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin :old-branch' | Should -BeFalse
+        }
         It 'allows reporting where it stopped' {
             Test-IsBudgetExemptCommand -Command 'gh pr comment 90 --body "out of budget, handoff saved"' | Should -BeTrue
         }

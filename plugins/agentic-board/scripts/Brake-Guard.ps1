@@ -519,7 +519,12 @@ $script:BudgetExemptPatterns = @(
     # diff.external=build.cmd`, and git then executes the configured helper - the exemption
     # became an execution primitive. The brake keeps the flag-tolerant matcher (it must not be
     # shaken off by a flag); the exemption is a positive allowlist and stays strict instead.
-    '^git\s+(status|diff|log|add|commit|push)\b'
+    '^git\s+(status|diff|log|add|commit)\b'
+    # push is WIP-branch-shaped only (#565 review round 2): --mirror/--all/--tags publish or
+    # overwrite remote state wholesale, --force rewrites it, --delete/--prune/`:ref` remove it -
+    # none of which is "save your work and leave". The brake still separately refuses pushes to
+    # main and deletes for contracts that brake on them; this narrows what the BUDGET excuses.
+    '^git\s+push(?![^;|&]*\s--(mirror|all|tags|force|force-with-lease|delete|prune)\b)(?![^;|&]*\s-f\b)(?![^;|&]*\s\+?:\S)\b'
     # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
     # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
     # is push and stays allowed.
@@ -764,7 +769,13 @@ function Send-RunSignal {
         $null = Write-DenialLog -WorkPath $root -Kind $Kind -Action $Action -Issue ([int]$Marker.issue)
         if (-not $Marker.issue -or -not "$($Marker.repo)".Trim()) { return }
         if (Test-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue)) { return }
-        if (-not $env:GH_TOKEN) { return }
+        # Hydrate the token the way the board scripts do (#565 review round 2): a spawned tab
+        # does not always inherit GH_TOKEN, and returning here meant the promised comment
+        # silently never happened. If the user env has none either, still TRY - gh may carry
+        # its own CLI auth, and a failed post just leaves the dedup marker unwritten.
+        if (-not $env:GH_TOKEN) {
+            $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL', 'User')
+        }
         $body = New-SignalCommentBody -Kind $Kind -Action $Action -Issue ([int]$Marker.issue) `
                     -ElapsedMinutes $ElapsedMinutes -MaxMinutes $MaxMinutes
         # HARD TIME BOUND (#565 review round 1): this runs on the PreToolUse hook path, and the

@@ -155,8 +155,22 @@ function Publish-StallSignals {
         if ($mark -and (Test-Path -LiteralPath $mark)) { continue }
         try {
             $body = New-StallCommentBody -Issue ([int]$s.issue) -AgeMin ([int]$s.ageMin) -ThresholdMin $ThresholdMin
-            & gh issue comment "$($s.issue)" --repo "$($s.repo)" --body $body 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) {
+            # Bounded like the hook's signal post (#565 review round 2): this now runs inside the
+            # session watch loop, and a hung gh call would wedge the watch - best-effort must
+            # stay best-effort. Body by file, 15 seconds, then the child is killed.
+            $bodyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-stall-" + [guid]::NewGuid().ToString('N') + ".md")
+            Set-Content -LiteralPath $bodyFile -Encoding UTF8 -Value $body
+            $exit = 1
+            try {
+                $proc = Start-Process -FilePath 'gh' -ArgumentList @(
+                            'issue','comment',"$($s.issue)",'--repo',"$($s.repo)",'--body-file',$bodyFile
+                        ) -WindowStyle Hidden -PassThru -RedirectStandardOutput ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-stall-out-" + [guid]::NewGuid().ToString('N'))) `
+                          -RedirectStandardError  ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-stall-err-" + [guid]::NewGuid().ToString('N')))
+                if ($proc.WaitForExit(15000)) { $exit = $proc.ExitCode } else { try { $proc.Kill() } catch { } }
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
+            }
+            if ($exit -eq 0) {
                 if ($mark) { Set-Content -LiteralPath $mark -Encoding UTF8 -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) }
                 Write-Host ("  OK  senal [abios-stall] publicada en #{0}" -f $s.issue) -ForegroundColor Green
             } else {
