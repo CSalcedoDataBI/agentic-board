@@ -2341,8 +2341,22 @@ function Invoke-SessionWatch {
         # WITHOUT the human having to remember a separate command. Injectable for tests;
         # 0 disables.
         [int]$SuperviseEvery = 10,
+        # Bounded (#565 round 11): the supervisor makes its own gh reads before the bounded
+        # posting path, so a hung network call inside it would freeze the watch loop it rides.
+        # It runs as a child killed at 120s; its output is replayed so the verdict stays visible.
         [scriptblock]$Supervise = {
-            try { & (Join-Path $PSScriptRoot 'Fleet-Supervisor.ps1') -Check -Post } catch {
+            try {
+                $sup = Join-Path $PSScriptRoot 'Fleet-Supervisor.ps1'
+                $outF = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-sup-" + [guid]::NewGuid().ToString('N') + ".txt")
+                $errF = "$outF.err"
+                $p = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-File',$sup,'-Check','-Post') `
+                        -WindowStyle Hidden -PassThru -RedirectStandardOutput $outF -RedirectStandardError $errF
+                if (-not $p.WaitForExit(120000)) {
+                    try { $p.Kill() } catch { }
+                    Write-Host "  WARN supervisor: no termino en 120s - se corto (senal best-effort)." -ForegroundColor DarkYellow
+                }
+                if (Test-Path $outF) { Get-Content $outF | ForEach-Object { Write-Host $_ }; Remove-Item $outF, $errF -Force -ErrorAction SilentlyContinue }
+            } catch {
                 Write-Host "  WARN supervisor: $_" -ForegroundColor DarkYellow
             }
         }

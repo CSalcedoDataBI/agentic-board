@@ -518,8 +518,10 @@ function Get-BudgetState {
 $script:BudgetExemptHandoffSave = '(?=[^;|&]*\s-save\b)(?![^;|&]*\s-resume\b)'
 $script:BudgetExemptPatterns = @(
     ('^(?:& )?(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
-    # -Start begins NEW run state - the runledger's wrap-up verbs are update/close (round 7).
-    '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?![^;|&]*\s-start\b)(?=\s|$)'
+    # POSITIVE verbs only (rounds 7/11): -Start begins NEW run state, and PowerShell binds
+    # unambiguous abbreviations (`-S` reaches -Start), so a blocklist of the literal spelling
+    # was not enough - the exemption now requires the full wrap-up verb, -Update or -Close.
+    '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1\b(?=[^;|&]*\s-(update|close)\b)'
     # Via a pwsh launcher: the exempt script must be the -File TARGET, and the prefix may carry
     # ONLY known non-executing host flags (round 5): "any flag-shaped token" admitted -Command,
     # and `pwsh -command build.ps1 -file ...board-handoff.ps1` executes build.ps1 with '-file ...'
@@ -527,7 +529,7 @@ $script:BudgetExemptPatterns = @(
     # at all is the round-2 fix (a -Command string that merely MENTIONED the script was a free
     # pass); the closed flag list is what makes the -File the one the host actually honours.
     ('^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
-    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?![^;|&]*\s-start\b)(?=\s|$)'
+    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-runledger\.ps1\b(?=[^;|&]*\s-(update|close)\b)'
     ('^/board\s+handoff\b' + $script:BudgetExemptHandoffSave)      # the slash-command spelling
     # Wrap-up git takes NO global flags (round 6): the $script:GitCmd gap admitted `-c
     # diff.external=build.cmd`, and git then executes the configured helper - the exemption

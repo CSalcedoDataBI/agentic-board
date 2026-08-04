@@ -1370,8 +1370,10 @@ Describe 'Round-7 exemption closures (#565)' {
         Test-IsBudgetExemptCommand -Command 'git push origin refs/heads/*:refs/heads/*' | Should -BeFalse
         Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/heads/issue-42' | Should -BeTrue
     }
-    It 'the runledger exemption refuses -Start - beginning new run state is not wrap-up' {
+    It 'the runledger exemption is POSITIVE-verb only: -Update/-Close pass, -Start and its abbreviations do not (rounds 7/11)' {
         Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-RunLedger.ps1 -Start -Issue 42' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-RunLedger.ps1 -S -Epic 1' | Should -BeFalse
         Test-IsBudgetExemptCommand -Command 'scripts/Board-RunLedger.ps1 -Close -Issue 42' | Should -BeTrue
+        Test-IsBudgetExemptCommand -Command 'scripts/Board-RunLedger.ps1 -Update -Issue 42 -Note done' | Should -BeTrue
     }
 }
