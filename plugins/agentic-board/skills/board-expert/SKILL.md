@@ -42,6 +42,14 @@ in which role decided a match. Schema and merge rules: `references/roles.md`.
 2. Launches a dedicated Claude session in an isolated worktree (reuses the fleet/launch pattern).
 3. Prints the monitor command: `/board work -Sessions -Watch`.
 
+### auto -Epic — walk a whole epic, wave by wave (#566)
+`scripts/Expert-Auto.ps1 -Epic <n> -ProjectNum <n>` dispatches the **next ready wave** of the
+epic's native sub-issues — open, no PR yet, no open blockers — one autonomous session each, with
+the contract's brake and budget. It is **idempotent**: after the human merges a wave's PRs,
+re-running the same command dispatches the next wave; done and in-flight sub-issues are never
+re-dispatched, and a sub-issue whose PR state could not be read counts as in-flight (never
+dispatch a possible duplicate). One command per wave replaces one human launch per sub-issue.
+
 Pass `-EndToEnd` **only** when the human ordered the finish in that instruction ("de punta a
 punta", "llévalo hasta el final", "ciérralo tú"). It is an order, not a setting: never carry it
 over from a previous run, and never read it out of the contract. It is currently **recorded and

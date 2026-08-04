@@ -324,3 +324,58 @@ Describe 'Format-AutoBrief — the run must quote the completion check (#532)' {
         $b | Should -Not -Match '(?i)Expert-RunVerify\.ps1'
     }
 }
+
+Describe 'Get-EpicWaveVerdict - the epic walker brain (#566)' {
+    # Nothing advanced an epic before: one -Issue per human launch. This classifies sub-issues
+    # into the next dispatchable wave; the fail direction routes UNKNOWN PR state to InFlight
+    # (never dispatch a second session onto an issue that may already have one).
+    BeforeAll {
+        function script:Sub {
+            param([int]$n, [string]$state = 'OPEN', $blockers = @(), [bool]$openPr = $false,
+                  [bool]$mergedPr = $false, [bool]$known = $true)
+            [pscustomobject]@{ number = $n; title = "t$n"; state = $state; openBlockers = @($blockers)
+                               hasOpenPr = $openPr; hasMergedPr = $mergedPr; prKnown = $known }
+        }
+    }
+
+    It 'an open, unblocked, PR-less sub-issue is READY' {
+        $v = Get-EpicWaveVerdict -SubIssues @((script:Sub 10))
+        @($v.Ready).number | Should -Contain 10
+    }
+    It 'closed and merged sub-issues are DONE' {
+        $v = Get-EpicWaveVerdict -SubIssues @((script:Sub 10 'CLOSED'), (script:Sub 11 'OPEN' @() $false $true))
+        @($v.Done).Count | Should -Be 2
+        @($v.Ready).Count | Should -Be 0
+    }
+    It 'an open PR means IN FLIGHT - a session owns it, never re-dispatch' {
+        $v = Get-EpicWaveVerdict -SubIssues @((script:Sub 10 'OPEN' @() $true))
+        @($v.InFlight).number | Should -Contain 10
+    }
+    It 'an open blocker means BLOCKED - the next wave, not this one' {
+        $v = Get-EpicWaveVerdict -SubIssues @((script:Sub 10 'OPEN' @(9)))
+        @($v.Blocked).number | Should -Contain 10
+        @($v.Ready).Count | Should -Be 0
+    }
+    It 'UNKNOWN PR state routes to InFlight - dispatching a duplicate session is the worse error' {
+        $v = Get-EpicWaveVerdict -SubIssues @((script:Sub 10 'OPEN' @() $false $false $false))
+        @($v.InFlight).number | Should -Contain 10
+        @($v.Ready).Count | Should -Be 0
+    }
+    It 'a realistic epic splits correctly' {
+        $v = Get-EpicWaveVerdict -SubIssues @(
+            (script:Sub 1 'CLOSED'),                    # done
+            (script:Sub 2 'OPEN' @() $true),            # in flight
+            (script:Sub 3 'OPEN' @(2)),                 # blocked by 2
+            (script:Sub 4),                             # ready
+            (script:Sub 5)                              # ready
+        )
+        @($v.Ready).number | Should -Be @(4, 5)
+        @($v.Blocked).number | Should -Be @(3)
+        @($v.InFlight).number | Should -Be @(2)
+        @($v.Done).number | Should -Be @(1)
+    }
+    It 'null entries are ignored' {
+        $v = Get-EpicWaveVerdict -SubIssues @($null, (script:Sub 10))
+        @($v.Ready).Count | Should -Be 1
+    }
+}

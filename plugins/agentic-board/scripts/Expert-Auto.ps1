@@ -31,6 +31,12 @@
 [CmdletBinding()]
 param(
     [int]$Issue = 0,
+    # The epic walker (#566): dispatch the NEXT READY WAVE of this epic's sub-issues - open, no
+    # PR yet, no open blockers - one autonomous session each, brake+budget from the contract.
+    # Idempotent: re-run it after merging a wave's PRs and it dispatches the next wave; done and
+    # in-flight sub-issues are never re-dispatched. One command per WAVE instead of one human
+    # launch per sub-issue.
+    [int]$Epic = 0,
     [int]$ProjectNum = 0,
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL",
     # "Llevalo de punta a punta" (#530): the human ORDERS this run to finish. RECORDED, NOT
@@ -220,11 +226,39 @@ function Get-ContractBudgetMinutes {
     return $maxMin
 }
 
+<#
+    Classify an epic's sub-issues into the NEXT dispatchable wave (#566).
+
+    Nothing advanced an epic until now: Expert-Auto took one -Issue, so a plan with N sub-issues
+    cost N human launches - Board-Plan even fetched the sub-issue list and threw it away. This is
+    the walker's brain: given each sub-issue's state, its OPEN blockers and its linked-PR facts,
+    split them into Done / InFlight (open PR - a session owns it) / Blocked (an open blocker) /
+    Ready (dispatch now). The caller launches Ready and tells the human to re-run after merging.
+
+    Fail direction: a sub-issue whose linked-work lookup FAILED (prKnown false) goes to InFlight,
+    not Ready - dispatching a second session onto an issue that may already have one is the
+    worse error. Pure.
+#>
+function Get-EpicWaveVerdict {
+    param($SubIssues = @())
+    $done = @(); $inFlight = @(); $blocked = @(); $ready = @()
+    foreach ($s in @($SubIssues)) {
+        if ($null -eq $s) { continue }
+        if ("$($s.state)".ToUpperInvariant() -ne 'OPEN' -or [bool]$s.hasMergedPr) { $done += $s; continue }
+        if (($null -ne $s.PSObject.Properties['prKnown']) -and -not [bool]$s.prKnown) { $inFlight += $s; continue }
+        if ([bool]$s.hasOpenPr) { $inFlight += $s; continue }
+        if (@($s.openBlockers).Count -gt 0) { $blocked += $s; continue }
+        $ready += $s
+    }
+    return @{ Ready = @($ready); InFlight = @($inFlight); Blocked = @($blocked); Done = @($done) }
+}
+
 # Dot-source guard: tests set $env:ABIOS_EXPERTAUTO_DOTSOURCE to load the pure cores only.
 if ($env:ABIOS_EXPERTAUTO_DOTSOURCE) { return }
 
 # ── CLI ─────────────────────────────────────────────────────────────────────────
-if ($Issue -le 0) { throw "Expert-Auto: -Issue <n> is required." }
+if ($Issue -le 0 -and $Epic -le 0) { throw "Expert-Auto: -Issue <n> or -Epic <n> is required." }
+if ($Issue -gt 0 -and $Epic -gt 0) { throw "Expert-Auto: -Issue and -Epic are mutually exclusive - pick one." }
 
 if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
 
@@ -235,11 +269,11 @@ $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = '1'
 $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = $prevC
 $contract = Read-ExpertContract
 
-# Pull the plan body from the issue.
+# Pull the plan body from the issue (single-issue mode; the epic walker reads per sub-issue).
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
 $repo = Get-RepoFromOriginUrl (git remote get-url origin 2>$null)
 $planBody = ""
-if ($repo) {
+if ($repo -and $Issue -gt 0) {
     $json = gh issue view $Issue --repo $repo --json title,body 2>$null
     if ($LASTEXITCODE -eq 0 -and $json) {
         try { $o = $json | ConvertFrom-Json; $planBody = "$($o.title)`n`n$($o.body)" } catch { }
@@ -257,6 +291,175 @@ $env:ABIOS_EXPERTAUTONOMY_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Expert-Autonomy.ps1')
 $env:ABIOS_EXPERTAUTONOMY_DOTSOURCE = $prevA
 $stopAtPR = Test-IsIrreversible -Action 'merge' -Contract $contract
+
+# ── The epic walker (#566): dispatch the next ready wave, then hand back ────────
+if ($Epic -gt 0) {
+    if (-not $repo) { throw "Expert-Auto: no pude derivar el repo del origin - corre esto dentro del clon." }
+    $rp = $repo -split '/'
+    # The wave decision is driven by gh READS, so they go through the fail-closed wrapper
+    # (external review round 2): raw `gh api graphql` exits 0 with an errors[] payload, and an
+    # unread PR list dispatching a duplicate session is exactly the fail-open this walker bans.
+    . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+
+    # The epic and its NATIVE sub-issues. Both reads fail CLOSED: a wave dispatched from a
+    # guessed list is exactly the reporting-intent-as-fact shape this tool keeps relearning.
+    $epicJson = gh issue view $Epic --repo $repo --json title,body 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $epicJson) { throw "Expert-Auto: no pude leer el epic #$Epic en $repo." }
+    $epicObj  = $epicJson | ConvertFrom-Json
+
+    # Paginated (external review round 1): first:50 without pageInfo silently truncated a large
+    # epic and could report it complete with open sub-issues still unread. Fail CLOSED per page.
+    # The cursor travels as a -f VARIABLE, never spliced into the query text - PowerShell drops
+    # embedded quotes passing args to gh.exe and an unquoted cursor breaks every paginated read
+    # past 100 items (#329).
+    $subs = @()
+    $cursor = ''
+    do {
+        $ghArgs = @('api','graphql','-f','query=
+query($o:String!,$r:String!,$n:Int!,$c:String){
+  repository(owner:$o,name:$r){
+    issue(number:$n){ subIssues(first:50, after:$c){
+      pageInfo { hasNextPage endCursor }
+      nodes { number title state repository { nameWithOwner } } } }
+  }
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$Epic")
+        if ($cursor) { $ghArgs += @('-f',"c=$cursor") }
+        # -Graphql throws on exit code OR errors[] - a partial list must never classify a wave.
+        $pageData = Invoke-Gh -GhArgs $ghArgs -What "leer los sub-issues del epic #$Epic" -Graphql
+        $page = $pageData.data.repository.issue.subIssues
+        if ($null -eq $page -or $null -eq $page.pageInfo) { throw "Expert-Auto: respuesta sin subIssues para el epic #$Epic - no despacho sobre una lista a medias." }
+        $subs += @($page.nodes | Where-Object { $_ })
+        $cursor = if ($page.pageInfo.hasNextPage) { "$($page.pageInfo.endCursor)" } else { '' }
+    } while ($cursor)
+    if ($subs.Count -eq 0) { throw "Expert-Auto: el epic #$Epic no tiene sub-issues nativos - usa /board plan para crearlos, o -Issue para un issue suelto." }
+
+    # Enrich each sub-issue with its OPEN blockers and its linked-PR facts. Blockers are
+    # best-effort (the dependencies API may not exist for the account - degrade to unblocked,
+    # same as Board-Work's own gate); the PR read fail-closes into prKnown=$false, which the
+    # verdict routes to InFlight rather than Ready.
+    # Cross-repo sub-issues are EXCLUDED with a warning (external review round 4): GitHub allows
+    # them, and resolving their number against the epic's repo would brief and dispatch the
+    # same-number issue in the WRONG repository. Walking a foreign repo is out of this walker's
+    # scope - saying so beats guessing.
+    $foreign = @($subs | Where-Object { "$($_.repository.nameWithOwner)" -and "$($_.repository.nameWithOwner)" -ne $repo })
+    foreach ($f in $foreign) {
+        Write-Host ("  WARN sub-issue #{0} vive en {1} (otro repo) - el caminante no lo despacha; trabajalo alla." -f $f.number, $f.repository.nameWithOwner) -ForegroundColor DarkYellow
+    }
+    $subs = @($subs | Where-Object { -not "$($_.repository.nameWithOwner)" -or "$($_.repository.nameWithOwner)" -eq $repo })
+
+    $enriched = @()
+    foreach ($s in $subs) {
+        $openBlockers = @()
+        try {
+            $deps = gh api "repos/$repo/issues/$($s.number)/dependencies/blocked_by" 2>$null | ConvertFrom-Json
+            if ($LASTEXITCODE -eq 0) {
+                $openBlockers = @($deps | Where-Object { $_.state -eq 'open' } | ForEach-Object { [int]$_.number })
+            }
+        } catch { }
+        $hasOpen = $false; $hasMerged = $false; $prKnown = $false
+        try {
+            # Through the wrapper (round 2): an errors[] payload with exit 0 must land in the
+            # catch -> prKnown=$false -> InFlight, never in "no PRs" -> Ready.
+            $lw = Invoke-Gh -GhArgs @('api','graphql','-f','query=
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){
+    issue(number:$n){ closedByPullRequestsReferences(first:50, includeClosedPrs:true){
+      pageInfo { hasNextPage }
+      nodes { number state } } }
+  }
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$($s.number)") -What "leer los PRs del sub-issue #$($s.number)" -Graphql
+            $issueNode = $lw.data.repository.issue
+            if ($null -eq $issueNode) { throw "sin nodo issue" }
+            # Another page = facts we did not see (round 3): an OPEN PR could hide there, so the
+            # state is UNKNOWN -> InFlight, same fail direction as an unreadable list.
+            if ($issueNode.closedByPullRequestsReferences.pageInfo.hasNextPage) { throw "mas de 50 PRs vinculados - estado no verificable" }
+            $prs = @($issueNode.closedByPullRequestsReferences.nodes | Where-Object { $_ })
+            $hasOpen   = [bool]($prs | Where-Object { $_.state -eq 'OPEN' })
+            $hasMerged = [bool]($prs | Where-Object { $_.state -eq 'MERGED' })
+            $prKnown   = $true
+        } catch { $prKnown = $false }
+        $enriched += [pscustomobject]@{
+            number = [int]$s.number; title = "$($s.title)"; state = "$($s.state)"
+            openBlockers = $openBlockers; hasOpenPr = $hasOpen; hasMergedPr = $hasMerged; prKnown = $prKnown
+        }
+    }
+
+    $wave = Get-EpicWaveVerdict -SubIssues $enriched
+    Write-Host "=== /board expert auto -Epic $Epic  ($($enriched.Count) sub-issues) ===" -ForegroundColor Cyan
+    Write-Host ("  Done: {0}   In flight (PR abierto): {1}   Bloqueados: {2}   LISTOS: {3}" -f `
+        @($wave.Done).Count, @($wave.InFlight).Count, @($wave.Blocked).Count, @($wave.Ready).Count) -ForegroundColor Cyan
+    foreach ($s in @($wave.InFlight)) { Write-Host ("    ~ #{0} {1} (en vuelo)" -f $s.number, $s.title) -ForegroundColor DarkCyan }
+    foreach ($s in @($wave.Blocked))  { Write-Host ("    x #{0} {1} (bloqueado por: {2})" -f $s.number, $s.title, (@($s.openBlockers) -join ', ')) -ForegroundColor DarkYellow }
+
+    if (@($wave.Ready).Count -eq 0) {
+        $openForeign = @($foreign | Where-Object { "$($_.state)".ToUpperInvariant() -eq 'OPEN' }).Count
+        $openLeft = @($wave.InFlight).Count + @($wave.Blocked).Count + $openForeign
+        if ($openLeft -eq 0) {
+            Write-Host ""
+            Write-Host "  EPIC COMPLETO: todos los sub-issues estan cerrados o mergeados. Cierra #$Epic si sigue abierto." -ForegroundColor Green
+        } elseif ($openForeign -gt 0 -and (@($wave.InFlight).Count + @($wave.Blocked).Count) -eq 0) {
+            # Round 5: an epic whose only open children live in ANOTHER repo is not complete -
+            # it is simply outside this walker's reach, and saying "complete" would be false.
+            Write-Host ""
+            Write-Host ("  Sin trabajo local pendiente, pero {0} sub-issue(s) ABIERTOS viven en otro repo - el epic NO esta completo; trabajalos alla." -f $openForeign) -ForegroundColor Yellow
+        } else {
+            Write-Host ""
+            Write-Host "  Nada listo para despachar: mergea los PRs en vuelo (el humano cierra cada ola) y re-ejecuta" -ForegroundColor Yellow
+            Write-Host "  este mismo comando - la siguiente ola se despacha sola cuando sus bloqueadores cierren." -ForegroundColor Yellow
+        }
+        exit 0
+    }
+
+    $budgetMin = Get-ContractBudgetMinutes -Contract $contract
+    . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
+    $stateDirEpic = Get-AbiosStateDir
+    Write-Host ""
+    Write-Host ("  Despachando la ola: {0}" -f ((@($wave.Ready) | ForEach-Object { "#$($_.number)" }) -join ', ')) -ForegroundColor Green
+    foreach ($s in @($wave.Ready)) {
+        # Per-issue brief: the epic's enriched plan + this sub-issue's own text. An unreadable
+        # body SKIPS the dispatch (round 2): launching a session briefed with only a title is
+        # sending it off half-blind, and the rest of the wave does not depend on this one.
+        $subBody = $null
+        $sj = gh issue view $s.number --repo $repo --json title,body 2>$null
+        if ($LASTEXITCODE -eq 0 -and $sj) { try { $so = $sj | ConvertFrom-Json; $subBody = "$($so.body)" } catch { $subBody = $null } }
+        if ($null -eq $subBody) {
+            Write-Host ("  WARN #{0}: no pude leer el cuerpo del sub-issue - NO se despacha esta vez; re-ejecuta para reintentarlo." -f $s.number) -ForegroundColor DarkYellow
+            continue
+        }
+        $wavePlan = "$($epicObj.title)`n`n$($epicObj.body)`n`n## Your sub-issue (deliver THIS, the epic above is context)`n#$($s.number) $($s.title)`n`n$subBody"
+        $brief = Format-AutoBrief -Contract $contract -PlanBody $wavePlan -RoleObjective $contract.role -EndToEnd:$EndToEnd
+        $briefPath = if ($stateDirEpic) { Join-Path $stateDirEpic "expert-brief-$($s.number).md" } else { "expert-brief-$($s.number).md" }
+        $brief | Set-Content -Path $briefPath -Encoding utf8
+        if ($DryRun) {
+            Write-Host ("  [DryRun] #{0}: brief -> {1}; lanzaria Board-Work -Parallel {0} -Launch -StopAtPR:{2} -BudgetMinutes {3}" -f $s.number, $briefPath, $stopAtPR, $budgetMin) -ForegroundColor DarkYellow
+        } else {
+            # CHILD process, not in-process `&` (external review round 1): Board-Work's -Parallel
+            # mode ends with `exit 0`, which in-process terminates THIS walker after the first
+            # launch and silently drops the rest of the wave. Invoked via -Command, not -File:
+            # -File flattens array arguments (the '129,130'->'129130' defect, PR #131), and a
+            # flattened -Irreversible list would arm a brake whose vocabulary matches nothing.
+            # Single-quoted values with doubled quotes so paths survive verbatim. A launch
+            # failure warns and the wave continues - the sub-issues are independent.
+            $sq = { param($v) "'" + ("$v" -replace "'", "''") + "'" }
+            $irrLiteral = (@($contract.autonomy.irreversible) | ForEach-Object { & $sq $_ }) -join ','
+            if (-not $irrLiteral) { $irrLiteral = "" }
+            $bwCmd = "& $(& $sq (Join-Path $PSScriptRoot 'Board-Work.ps1')) -ProjectNum $ProjectNum -Parallel $($s.number) -Launch " +
+                     "-TokenVar $(& $sq $TokenVar) -BriefFile $(& $sq $briefPath) -BudgetMinutes $budgetMin " +
+                     "-Irreversible @($irrLiteral)" +
+                     $(if ($stopAtPR) { ' -StopAtPR' } else { '' }) +
+                     $(if ($EndToEnd) { ' -EndToEnd' } else { '' })
+            & pwsh -NoProfile -Command $bwCmd
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host ("  WARN #{0}: el lanzamiento devolvio {1} - revisa arriba; la ola continua." -f $s.number, $LASTEXITCODE) -ForegroundColor DarkYellow
+            }
+        }
+    }
+    Write-Host ""
+    Write-Host "  Ola despachada. Cuando sus PRs esten mergeados, re-ejecuta:" -ForegroundColor Cyan
+    Write-Host "    /board expert auto -Epic $Epic     (despacha la siguiente ola; es idempotente)" -ForegroundColor Cyan
+    Write-Host "  Monitor: scripts/Board-Work.ps1 -Sessions -Watch (el supervisor publica [abios-stall] solo)." -ForegroundColor DarkGray
+    exit 0
+}
 
 # Persist the brief so the launched session can read it.
 . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
