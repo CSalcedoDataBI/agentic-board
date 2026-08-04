@@ -106,7 +106,7 @@ one door, not a wall of commands.
 | Command | What it does |
 |---|---|
 | `/board` | Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/telemetry/triage/complete/bi-checklist. Defaults to the CSalcedoDataBI account. |
-| `/docs` | Publish all wiki pages (product docs + knowledge registry) in a single push. |
+| `/docs` | Publish all wiki pages (product docs + knowledge registry) in a single push; or check DeepWiki indexing status for this repo. |
 | `/expert` | Auto-expert mode — take a tracked plan and execute it autonomously through a specialized expert persona (research, build, test with recorded evidence, self-drive the board), stopping only at the irreversible line. Three verbs: config (define the contract), auto (run it) and roles (browse the role catalog this project can extend, and explain why a plan matched). |
 | `/knowledge` | Manage the project knowledge references registry by domain (add/harvest/list/gen/wiki). Versioned in knowledge/registry.json + generated KNOWLEDGE.md. |
 | `/scan` | Scan the CURRENT project for untracked work (code TODOs, doc checklists/pending, plans/specs) and turn the chosen items into issues + a board plan. Targets the current repo, not the tool's. |

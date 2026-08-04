@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Added
+- **DeepWiki MCP integration** (#416). Three connected pieces: (1) `mcp.json` toolkit catalog
+  entry registers the DeepWiki MCP server (`cognitionai/deepwiki`, three tools:
+  `read_wiki_structure` / `read_wiki_contents` / `ask_question`) so `/tools` can install it via
+  `claude mcp add` like any other referenced tool. (2) `/docs deepwiki` verb — runs
+  `Get-DeepWikiStatus.ps1` to resolve the current repo from `origin`, check GitHub visibility,
+  probe `deepwiki.com`, and report `indexed`, `not-indexed`, `private`, or `unknown`. The
+  public-repos-only limit (private repos require paid Devin) is documented at the point of use,
+  never buried. (3) `tools-catalog` skill's `research <id>` action now calls `ask_question` as
+  the first probe when the MCP is configured, before any clone. Machinery: new `mcp` toolkit
+  kind (next to `skill-clone` and `plugin`), detected via `claude mcp list` through new
+  `Get-InstalledMcpServers.ps1`; `Get-ToolsCatalog` and `Install-ToolFromCatalog` extended to
+  handle the new kind; 17 new Pester tests across Get-DeepWikiStatus, Get-ToolsCatalog (mcp
+  kind), and Install-ToolFromCatalog (mcp kind).
 - **`/board plan` prior-art gate** (#415). `Board-Plan.ps1` now refuses to create an epic
   unless the caller provides either `-PriorArt "<block>"` (queries run, candidates found with
   stars/license/adoption, and the explicit build-vs-reference-vs-extend decision) or `-NoPriorArt`
