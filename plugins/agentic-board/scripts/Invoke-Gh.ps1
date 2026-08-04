@@ -158,3 +158,84 @@ function Invoke-Gh {
     if ($RawJson) { return $body }
     return $parsed
 }
+
+# ── Read cache (#571) ───────────────────────────────────────────────────────────
+# Every gh invocation is a fresh process + TLS round trip, and NOTHING was cached: one clean
+# /board work cycle made ~50-65 calls, many of them re-reading facts that had not changed
+# (project fields, board schema). This is a small FILE cache - each script runs in its own pwsh
+# process, so an in-memory cache dies within a second of being populated (the Apply-FieldPreset
+# hashtable proved that). STRICTLY for read-only queries the caller can afford to see up to
+# -TtlSec seconds stale; anything that feeds a WRITE decision at second granularity keeps using
+# Invoke-Gh directly.
+
+function Get-GhCacheDir {
+    Join-Path ([System.IO.Path]::GetTempPath()) 'abios-gh-cache'
+}
+
+function Clear-GhCache {
+    $dir = Get-GhCacheDir
+    if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+function Invoke-GhCached {
+    param(
+        [Parameter(Mandatory)][string[]]$GhArgs,
+        [string]$What = 'la operacion gh',
+        [int]$TtlSec = 120,
+        [switch]$Json,
+        [switch]$Graphql,
+        [switch]$Force
+    )
+    if ($Graphql) { $Json = $true }
+    $key = [BitConverter]::ToString(
+        [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes(($GhArgs -join "`u{1f}")))) -replace '-', ''
+    $dir  = Get-GhCacheDir
+    $path = Join-Path $dir "$key.txt"
+
+    if (-not $Force -and $TtlSec -gt 0 -and (Test-Path -LiteralPath $path)) {
+        try {
+            $age = ((Get-Date) - (Get-Item -LiteralPath $path).LastWriteTime).TotalSeconds
+            if ($age -lt $TtlSec) {
+                $cached = Get-Content -LiteralPath $path -Raw
+                # A HIT must behave exactly like a fresh -Json call would; a corrupt OR EMPTY
+                # entry (Set-Content is not atomic across processes - a concurrent reader can
+                # see a truncated file) is a MISS, never a $null handed to the caller as "the
+                # board has no fields" (external review round 1).
+                if (-not [string]::IsNullOrWhiteSpace($cached)) {
+                    if ($Json) {
+                        $parsedHit = $cached | ConvertFrom-Json
+                        # A HIT owes the same graphql errors[] check a miss gets (round 2): only
+                        # successful bodies are written, but a same-args -Json call or a stale
+                        # artifact could have cached an errors payload - treat it as a MISS.
+                        if ($Graphql -and $parsedHit.PSObject.Properties.Name -contains 'errors' -and @($parsedHit.errors).Count -gt 0) {
+                            # fall through to a fresh fetch
+                        } else {
+                            return $parsedHit
+                        }
+                    } else {
+                        return $cached
+                    }
+                }
+            }
+        } catch { }
+    }
+
+    # MISS (or bust): fetch through the fail-closed wrapper. Only a SUCCESSFUL result is
+    # cached - a thrown failure must stay a failure on the next call too, never a cached one.
+    if ($Json) {
+        $body = Invoke-Gh -GhArgs $GhArgs -What $What -RawJson -Graphql:$Graphql
+        try {
+            if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+            Set-Content -LiteralPath $path -Encoding UTF8 -Value $body
+        } catch { }
+        return ($body | ConvertFrom-Json)
+    }
+    $out = Invoke-Gh -GhArgs $GhArgs -What $What
+    $text = ($out -join "`n")
+    try {
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Set-Content -LiteralPath $path -Encoding UTF8 -Value $text
+    } catch { }
+    return $text
+}

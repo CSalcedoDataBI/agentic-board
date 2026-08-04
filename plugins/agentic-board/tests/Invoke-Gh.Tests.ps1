@@ -291,3 +291,75 @@ Describe 'Dot-sourcing Invoke-Gh.ps1 is side-effect free' {
         (Get-Command Invoke-Gh -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty
     }
 }
+
+Describe 'Invoke-GhCached - the read cache (#571)' {
+    BeforeAll {
+        # Redirect the cache dir per-test-run by mocking; the cache itself keys on args.
+        Clear-GhCache
+    }
+    AfterAll { Clear-GhCache }
+
+    It 'a HIT within TTL does not touch gh again' {
+        $script:calls = 0
+        Mock Invoke-GhRaw {
+            $script:calls++
+            [pscustomobject]@{ Output = '{"fields":[{"name":"Status"}]}'; ExitCode = 0; StdErr = '' }
+        }
+        $a = Invoke-GhCached -GhArgs @('project','field-list','99','--format','json') -What 'x' -Json -TtlSec 300
+        $b = Invoke-GhCached -GhArgs @('project','field-list','99','--format','json') -What 'x' -Json -TtlSec 300
+        $script:calls | Should -Be 1
+        $b.fields[0].name | Should -Be 'Status'
+    }
+    It 'different args are different cache keys' {
+        $script:calls2 = 0
+        Mock Invoke-GhRaw {
+            $script:calls2++
+            [pscustomobject]@{ Output = '{"n":1}'; ExitCode = 0; StdErr = '' }
+        }
+        $null = Invoke-GhCached -GhArgs @('project','view','1') -What 'x' -Json -TtlSec 300
+        $null = Invoke-GhCached -GhArgs @('project','view','2') -What 'x' -Json -TtlSec 300
+        $script:calls2 | Should -Be 2
+    }
+    It '-Force busts the cache' {
+        $script:calls3 = 0
+        Mock Invoke-GhRaw {
+            $script:calls3++
+            [pscustomobject]@{ Output = '{"n":1}'; ExitCode = 0; StdErr = '' }
+        }
+        $null = Invoke-GhCached -GhArgs @('project','view','7') -What 'x' -Json -TtlSec 300
+        $null = Invoke-GhCached -GhArgs @('project','view','7') -What 'x' -Json -TtlSec 300 -Force
+        $script:calls3 | Should -Be 2
+    }
+    It 'a FAILURE is never cached - the next call fails again instead of inheriting a ghost' {
+        Clear-GhCache
+        $script:mode = 'fail'
+        Mock Invoke-GhRaw {
+            if ($script:mode -eq 'fail') { [pscustomobject]@{ Output = ''; ExitCode = 1; StdErr = 'HTTP 401' } }
+            else { [pscustomobject]@{ Output = '{"ok":true}'; ExitCode = 0; StdErr = '' } }
+        }
+        { Invoke-GhCached -GhArgs @('project','view','8') -What 'x' -Json -TtlSec 300 } | Should -Throw
+        $script:mode = 'ok'
+        (Invoke-GhCached -GhArgs @('project','view','8') -What 'x' -Json -TtlSec 300).ok | Should -BeTrue
+    }
+    It 'TtlSec 0 always fetches fresh' {
+        $script:calls5 = 0
+        Mock Invoke-GhRaw {
+            $script:calls5++
+            [pscustomobject]@{ Output = '{"n":1}'; ExitCode = 0; StdErr = '' }
+        }
+        $null = Invoke-GhCached -GhArgs @('project','view','9') -What 'x' -Json -TtlSec 0
+        $null = Invoke-GhCached -GhArgs @('project','view','9') -What 'x' -Json -TtlSec 0
+        $script:calls5 | Should -Be 2
+    }
+}
+
+Describe 'Invoke-GhCached -Graphql on a HIT (#571 round 2)' {
+    It 'a cached errors[] payload is a MISS, not a success' {
+        Clear-GhCache
+        # Seed the cache with an errors body via a -Json call (same args, same key).
+        Mock Invoke-GhRaw { [pscustomobject]@{ Output = '{"errors":[{"message":"boom"}]}'; ExitCode = 0; StdErr = '' } }
+        $null = Invoke-GhCached -GhArgs @('api','graphql','-f','query=q1') -What 'x' -Json -TtlSec 300
+        # The -Graphql read of the same key must NOT accept it; the fresh fetch then throws.
+        { Invoke-GhCached -GhArgs @('api','graphql','-f','query=q1') -What 'x' -Graphql -TtlSec 300 } | Should -Throw
+    }
+}

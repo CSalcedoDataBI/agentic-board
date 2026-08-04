@@ -259,7 +259,11 @@ function Resolve-StatusOptionId($statusNode, [string]$canonical) {
 # rather than asserting a schema it never read.
 function Get-StatusOptionNames([int]$num) {
     try {
-        $fields = (gh project field-list $num --owner $Owner --format json --limit 50 | ConvertFrom-Json).fields
+        # Through the wrapper + cache (#571): this exact line was the anti-pattern quoted in
+        # Invoke-Gh.ps1's header (a 401 read as "the board has no fields"), still live here.
+        # Board field schemas change rarely; 5 minutes of staleness is free speed.
+        $fields = (Invoke-GhCached -GhArgs @('project','field-list',"$num",'--owner',$Owner,'--format','json','--limit','50') `
+                       -What "leer los campos del board #$num" -Json -TtlSec 300).fields
         @(($fields | Where-Object { $_.name -eq 'Status' } | Select-Object -First 1).options | ForEach-Object { $_.name })
     } catch { @() }
 }
@@ -557,9 +561,12 @@ function Get-IssueBlockers([string]$repo, [int]$issueNum) {
         $issueLabels = @((gh issue view $issueNum --repo $repo --json labels | ConvertFrom-Json).labels.name)
         if ($issueLabels -contains "blocked") { $blockers += "label 'blocked' presente" }
     } catch { }
-    # Native blocked-by dependencies (best-effort: API may not exist for the account)
+    # Native blocked-by dependencies (best-effort: API may not exist for the account). Through
+    # the wrapper (#571): the raw 2>$null read made a 401 indistinguishable from "no blockers" -
+    # the try/catch keeps the degrade, but now only a REAL absence degrades silently.
     try {
-        $deps = gh api "repos/$repo/issues/$issueNum/dependencies/blocked_by" 2>$null | ConvertFrom-Json
+        $deps = Invoke-Gh -GhArgs @('api',"repos/$repo/issues/$issueNum/dependencies/blocked_by") `
+                          -What "leer los bloqueadores de #$issueNum" -Json
         foreach ($d in @($deps | Where-Object { $_.state -eq "open" })) {
             $blockers += "bloqueado por #$($d.number) '$($d.title)' (abierto)"
         }
@@ -568,9 +575,13 @@ function Get-IssueBlockers([string]$repo, [int]$issueNum) {
 }
 
 # Last [abios-claim] fingerprint comment on an issue (or empty). Wrapped so the
-# multi-session lock path can be unit-tested without a live gh call.
+# multi-session lock path can be unit-tested without a live gh call. Best-effort by contract
+# (an unreadable claim list must not block a start), so the wrapper's throw degrades to ''.
 function Get-LastClaim([string]$repo, [int]$issueNum) {
-    return (gh api "repos/$repo/issues/$issueNum/comments" --jq '[.[] | select(.body | startswith("[abios-claim]"))] | last | .body' 2>$null)
+    try {
+        return (Invoke-Gh -GhArgs @('api',"repos/$repo/issues/$issueNum/comments",'--jq','[.[] | select(.body | startswith("[abios-claim]"))] | last | .body') `
+                          -What "leer los claims de #$issueNum")
+    } catch { return '' }
 }
 
 # Build the durable [abios-claim] fingerprint comment body. Pure -> unit-testable,
@@ -617,7 +628,7 @@ function Get-IssueLinkedWork {
     $prs = @(); $commits = @()
     $rp = $Repo -split '/'
     try {
-        $data = gh api graphql -f query='
+        $data = Invoke-Gh -GhArgs @('api','graphql','-f','query=
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){
     issue(number:$n){
@@ -626,13 +637,14 @@ query($o:String!,$r:String!,$n:Int!){
       }
     }
   }
-}' -F "o=$($rp[0])" -F "r=$($rp[1])" -F "n=$IssueNum" 2>$null | ConvertFrom-Json
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$IssueNum") -What "leer los PRs de #$IssueNum" -Graphql
         $prs = @($data.data.repository.issue.closedByPullRequestsReferences.nodes)
     } catch { }
     # GitHub commit search indexes the DEFAULT branch. Filter to the exact (#n) token
     # so #12 never matches #123 (substring search would).
     try {
-        $hits = gh search commits "#$IssueNum" --repo $Repo --json sha,commit --limit 20 2>$null | ConvertFrom-Json
+        $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit','20') `
+                          -What "buscar commits de #$IssueNum" -Json
         $rx = "\(#$IssueNum\)"
         $commits = @($hits | Where-Object { $_.commit.message -match $rx } |
                      ForEach-Object { [pscustomobject]@{ sha = $_.sha } })

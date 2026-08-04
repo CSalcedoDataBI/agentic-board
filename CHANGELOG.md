@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Changed
+- **GitHub reads gain a cache, and the fail-closed wrapper gains a lint that stops the
+  bleeding** (#571, part of epic #561). Every gh invocation is a fresh process + TLS round trip
+  and nothing was cached — a clean work cycle made ~50–65 calls, many re-reading facts that had
+  not changed. `Invoke-GhCached` is a small cross-process **file cache** (in-memory caches die
+  with each script's pwsh process) for read-only queries with an explicit TTL; failures are
+  never cached, `-Force` busts, TTL 0 always fetches. The board's Status-schema read — the
+  *exact* anti-pattern quoted in the wrapper's own header, still live — now goes through it
+  (5-min TTL), and four more of the worst raw sites migrated to `Invoke-Gh` (issue blockers,
+  claims, linked PRs, commit search: a 401 no longer reads as "no blockers/no claim/no PRs").
+  A new **lint test freezes the per-file raw-gh baseline (59 sites)**: counts may only go down,
+  a new raw call names its file and fails, and stale allowances are themselves flagged.
+  Verified by 7 new Pester tests (cache semantics + lint).
 - **Evidence is written once, linked twice** (#570, part of epic #561). The same evidence block
   used to be copied to three destinations (PR body, issue comment, `evidence/<issue>.md`) —
   three copies of one content, drifting independently, and the "INCOMPLETE → record → re-run"
