@@ -204,7 +204,12 @@ if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVa
 $sessions = @(Resolve-LiveSessions)
 $verdict  = Get-FleetVerdict $sessions $ThresholdMin $MaxStalled
 
-if ($Json) { $verdict | ConvertTo-Json -Depth 6; return }
+if ($Json) {
+    # -Post still posts under -Json (round 9): the early return silently made the switch a no-op
+    # for exactly the automation (watch loops, scripts) most likely to combine them.
+    if ($Post -and @($verdict.stalled).Count -gt 0) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin }
+    $verdict | ConvertTo-Json -Depth 6; return
+}
 
 Write-Host "=== Supervisor del fleet ===" -ForegroundColor Cyan
 if ($sessions.Count -eq 0) {
@@ -212,7 +217,7 @@ if ($sessions.Count -eq 0) {
     return
 }
 foreach ($s in ($sessions | Sort-Object issue)) {
-    $tag = if ($s.merged) { 'merged' } elseif ($s.pr) { 'in review' } elseif ($s.ageMin -gt $ThresholdMin) { 'STALLED' } else { 'working' }
+    $tag = if ($s.merged) { 'merged' } elseif ($s.pr) { 'in review' } elseif ($s.ageMin -ge $ThresholdMin) { 'STALLED' } else { 'working' }
     $color = switch ($tag) { 'merged' { 'Green' } 'in review' { 'DarkCyan' } 'STALLED' { 'Red' } default { 'Yellow' } }
     Write-Host ("  #{0,-4} {1,-9} {2,4}min  {3}" -f $s.issue, $tag, $s.ageMin, $s.pr) -ForegroundColor $color
 }
