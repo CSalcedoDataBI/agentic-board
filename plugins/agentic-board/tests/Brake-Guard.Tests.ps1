@@ -1197,3 +1197,77 @@ Describe 'The enforced time budget (#564)' {
         }
     }
 }
+
+Describe 'Run signals - a stopped run must not sit silent (#565)' {
+    # A denial's only output used to go to the MODEL. These pin: the local denial log, the
+    # once-per-(kind,issue) dedup markers, and the comment bodies the human actually reads.
+    Context 'signal markers (dedup)' {
+        It 'round-trips: not posted -> set -> posted' {
+            $wt = Join-Path $TestDrive 'sig-wt'
+            New-Item -ItemType Directory -Path $wt -Force | Out-Null
+            Test-SignalPosted -WorkPath $wt -Kind 'brake' -Issue 42 | Should -BeFalse
+            Set-SignalPosted  -WorkPath $wt -Kind 'brake' -Issue 42 | Should -BeTrue
+            Test-SignalPosted -WorkPath $wt -Kind 'brake' -Issue 42 | Should -BeTrue
+        }
+        It 'kinds and issues dedup independently' {
+            $wt = Join-Path $TestDrive 'sig-wt2'
+            New-Item -ItemType Directory -Path $wt -Force | Out-Null
+            Set-SignalPosted  -WorkPath $wt -Kind 'brake' -Issue 42 | Should -BeTrue
+            Test-SignalPosted -WorkPath $wt -Kind 'budget' -Issue 42 | Should -BeFalse
+            Test-SignalPosted -WorkPath $wt -Kind 'brake' -Issue 43 | Should -BeFalse
+        }
+    }
+
+    Context 'denial log' {
+        It 'appends parseable JSONL lines' {
+            $wt = Join-Path $TestDrive 'log-wt'
+            New-Item -ItemType Directory -Path $wt -Force | Out-Null
+            Write-DenialLog -WorkPath $wt -Kind 'brake' -Action 'merge' -Issue 7 | Should -BeTrue
+            Write-DenialLog -WorkPath $wt -Kind 'budget' -Issue 7 | Should -BeTrue
+            $lines = Get-Content (Join-Path $wt '.agentic-board\denials.jsonl')
+            @($lines).Count | Should -Be 2
+            ($lines[0] | ConvertFrom-Json).action | Should -Be 'merge'
+            ($lines[1] | ConvertFrom-Json).kind   | Should -Be 'budget'
+        }
+    }
+
+    Context 'comment bodies' {
+        It 'the brake signal names the action, the issue and the log to check' {
+            $b = New-SignalCommentBody -Kind 'brake' -Action 'merge' -Issue 42
+            $b | Should -Match '\[abios-signal\] brake issue=42'
+            $b | Should -Match '\*\*merge\*\*'
+            $b | Should -Match 'issue-42\.log'
+        }
+        It 'the budget signal carries the elapsed/max numbers' {
+            $b = New-SignalCommentBody -Kind 'budget' -Issue 42 -ElapsedMinutes 130 -MaxMinutes 120
+            $b | Should -Match '\[abios-signal\] budget issue=42'
+            $b | Should -Match '130 of its 120-minute budget'
+        }
+    }
+
+    Context 'Send-RunSignal fail direction' {
+        It 'logs locally and never throws when the marker has no repo (nothing to post to)' {
+            $wt = Join-Path $TestDrive 'send-wt'
+            $dir = Join-Path $wt '.agentic-board'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $markerPath = Join-Path $dir 'brake-armed.json'
+            Set-Content -LiteralPath $markerPath -Value '{}'
+            $marker = @{ issue = 9; repo = ''; path = $markerPath }
+            { Send-RunSignal -Marker $marker -Kind 'brake' -Action 'merge' } | Should -Not -Throw
+            Test-Path (Join-Path $dir 'denials.jsonl') | Should -BeTrue
+            # No repo -> no comment attempt -> no dedup marker written.
+            Test-SignalPosted -WorkPath $wt -Kind 'brake' -Issue 9 | Should -BeFalse
+        }
+    }
+}
+
+Describe 'The marker round-trips the repo (#565)' {
+    It 'New-BrakeMarkerJson carries repo and Read shape parses it back' {
+        $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge') -Repo 'owner/name'
+        ($json | ConvertFrom-Json).repo | Should -Be 'owner/name'
+    }
+    It 'a marker without repo reads as empty (older runs keep working, they just cannot signal)' {
+        $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge')
+        ($json | ConvertFrom-Json).repo | Should -Be ''
+    }
+}

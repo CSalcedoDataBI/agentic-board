@@ -94,6 +94,7 @@ try {
         $target = "$($payload.tool_input.file_path)"
         if ($target -and ($target -replace '\\', '/') -match '(?i)brake-armed\.json$') {
             Write-Output (New-BrakeDenyJson -Action 'tamper' -Issue $marker.issue)
+            Send-RunSignal -Marker $marker -Kind 'brake' -Action 'tamper'
             exit 0
         }
         # Over budget, a write is allowed only toward the wrap-up surfaces (handoff files, the
@@ -103,6 +104,7 @@ try {
         try { if ($marker.path) { $wtRoot = Split-Path (Split-Path $marker.path -Parent) -Parent } } catch { $wtRoot = '' }
         if ($budget.OverBudget -and -not (Test-IsBudgetExemptWrite -Path $target -Root $wtRoot)) {
             Write-Output (New-BudgetDenyJson -Issue $marker.issue -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes)
+            Send-RunSignal -Marker $marker -Kind 'budget' -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes
         }
         exit 0
     }
@@ -116,12 +118,16 @@ try {
     $action  = Test-IsBrakedCommand -Command $command -Irreversible $marker.irreversible
     if ($action) {
         Write-Output (New-BrakeDenyJson -Action $action -Issue $marker.issue)
+        # Signal the human (#565): the deny above only reaches the MODEL. Once per (kind, issue),
+        # after the verdict is already emitted - a signal failure cannot change it.
+        Send-RunSignal -Marker $marker -Kind 'brake' -Action $action
         exit 0
     }
 
     # Not braked - but past the budget, only wrap-up commands pass (#564).
     if ($budget.OverBudget -and -not (Test-IsBudgetExemptCommand -Command $command)) {
         Write-Output (New-BudgetDenyJson -Issue $marker.issue -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes)
+        Send-RunSignal -Marker $marker -Kind 'budget' -ElapsedMinutes $budget.ElapsedMinutes -MaxMinutes $budget.MaxMinutes
     }
     exit 0
 } catch {

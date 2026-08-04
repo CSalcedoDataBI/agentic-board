@@ -2107,6 +2107,29 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
         $r.timedOut | Should -BeTrue
         $r.allDone  | Should -BeFalse
     }
+    It 'runs the supervisor every -SuperviseEvery cycles so stalls get posted without a human command (#565)' {
+        $script:t2 = 0
+        $script:supervised = 0
+        Invoke-SessionWatch -TimeoutSec 100 -SuperviseEvery 2 `
+            -ReadSessions { @([pscustomobject]@{ issue = 1 }) } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'en progreso' } } `
+            -Now  { $script:t2 += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t2) } `
+            -Sleep { param($sec) } `
+            -Supervise { $script:supervised++ } | Out-Null
+        # 10 polls before the 100s timeout, one supervision every 2 -> at least 3 calls.
+        $script:supervised | Should -BeGreaterThan 2
+    }
+    It 'SuperviseEvery 0 disables supervision entirely' {
+        $script:t3 = 0
+        $script:supervised2 = 0
+        Invoke-SessionWatch -TimeoutSec 50 -SuperviseEvery 0 `
+            -ReadSessions { @([pscustomobject]@{ issue = 1 }) } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'en progreso' } } `
+            -Now  { $script:t3 += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t3) } `
+            -Sleep { param($sec) } `
+            -Supervise { $script:supervised2++ } | Out-Null
+        $script:supervised2 | Should -Be 0
+    }
     It 'auto-cleans each finished session exactly once' {
         Mock Invoke-SessionCleanup { @('mock teardown') }
         $r = Invoke-SessionWatch -AutoClean `

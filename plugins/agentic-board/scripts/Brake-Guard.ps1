@@ -332,6 +332,7 @@ function Read-BrakeMarker {
                     endToEnd     = ($o.endToEnd -is [bool] -and $o.endToEnd)
                     armedAt      = "$($o.armedAt)"
                     budgetMinutes = $budgetMin
+                    repo         = "$($o.repo)".Trim()
                     path         = $candidate
                     emptied      = $tampered
                 }
@@ -377,7 +378,10 @@ function New-BrakeMarkerJson {
         # time from armedAt and, past this many minutes, refuses further work commands (handoff and
         # wrap-up stay allowed). 0 = no budget enforcement. Until this field, the 120-minute budget
         # existed only as a sentence in the brief - a limit nothing could apply.
-        [int]$BudgetMinutes = 0
+        [int]$BudgetMinutes = 0,
+        # owner/name, recorded so a denial can SIGNAL the issue (#565): without the repo the hook
+        # knows which issue braked but has nowhere to say it, and a stopped run sat silent.
+        [string]$Repo = ''
     )
     $irr = @($Irreversible | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
     if ($irr.Count -eq 0) { $irr = @('merge','deploy','refresh','publish','delete') }
@@ -387,6 +391,7 @@ function New-BrakeMarkerJson {
         endToEnd     = $EndToEnd
         armedAt      = $ArmedAt
         budgetMinutes = [Math]::Max(0, $BudgetMinutes)
+        repo         = "$Repo".Trim()
         branch       = $Branch
         host         = $HostName
         note         = 'Written by /board expert auto. Removing this file disarms the brake for this worktree.'
@@ -420,7 +425,8 @@ function Set-BrakeArmedState {
         [string]$HostName = '',
         [string]$ArmedAt = '',
         [bool]$EndToEnd = $false,
-        [int]$BudgetMinutes = 0
+        [int]$BudgetMinutes = 0,
+        [string]$Repo = ''
     )
     $path = Get-BrakeMarkerPath -WorkPath $WorkPath
     if (-not $Armed) {
@@ -434,7 +440,7 @@ function Set-BrakeArmedState {
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     Set-Content -LiteralPath $path -Encoding UTF8 -Value (
         New-BrakeMarkerJson -Issue $Issue -Irreversible $Irreversible -ArmedAt $ArmedAt `
-            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd -BudgetMinutes $BudgetMinutes)
+            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd -BudgetMinutes $BudgetMinutes -Repo $Repo)
     return 'armed'
 }
 
@@ -649,6 +655,108 @@ function New-BrakeDenyJson {
         }
     }
     return ($payload | ConvertTo-Json -Depth 5 -Compress)
+}
+
+# ── Run signals (#565): a stopped run must not sit silent ─────────────────────────
+# Until now a denial's only output went to the MODEL's stdin - the human learned about a braked
+# or out-of-budget run by noticing the PR never appeared. Every deny now (a) appends to a local
+# denial log, and (b) posts ONE issue comment per (kind, issue) - deduped by a marker file so a
+# retrying agent cannot flood the issue. All best-effort: a signal failure never changes a verdict.
+
+function Get-SignalMarkerPath {
+    param([Parameter(Mandatory)][string]$WorkPath, [Parameter(Mandatory)][string]$Kind, [int]$Issue = 0)
+    return (Join-Path (Join-Path $WorkPath '.agentic-board') "signal-$Kind-$Issue.posted")
+}
+
+function Test-SignalPosted {
+    param([Parameter(Mandatory)][string]$WorkPath, [Parameter(Mandatory)][string]$Kind, [int]$Issue = 0)
+    return (Test-Path -LiteralPath (Get-SignalMarkerPath -WorkPath $WorkPath -Kind $Kind -Issue $Issue))
+}
+
+function Set-SignalPosted {
+    param([Parameter(Mandatory)][string]$WorkPath, [Parameter(Mandatory)][string]$Kind, [int]$Issue = 0)
+    try {
+        $p = Get-SignalMarkerPath -WorkPath $WorkPath -Kind $Kind -Issue $Issue
+        $dir = Split-Path $p -Parent
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Set-Content -LiteralPath $p -Encoding UTF8 -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))
+        return $true
+    } catch { return $false }
+}
+
+# Append one line to the local denial log. Best-effort; the log is the offline trace the
+# supervisor and the human can read even when no comment could be posted.
+function Write-DenialLog {
+    param([Parameter(Mandatory)][string]$WorkPath, [string]$Kind = '', [string]$Action = '', [int]$Issue = 0)
+    try {
+        $dir = Join-Path $WorkPath '.agentic-board'
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $line = (@{ at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); kind = $Kind; action = $Action; issue = $Issue } | ConvertTo-Json -Compress)
+        Add-Content -LiteralPath (Join-Path $dir 'denials.jsonl') -Encoding UTF8 -Value $line
+        return $true
+    } catch { return $false }
+}
+
+# The comment body for a run signal. Pure, so tests pin the wording that reaches the human.
+function New-SignalCommentBody {
+    param(
+        [Parameter(Mandatory)][string]$Kind,   # 'brake' | 'budget'
+        [string]$Action = '',
+        [int]$Issue = 0,
+        [int]$ElapsedMinutes = 0,
+        [int]$MaxMinutes = 0
+    )
+    if ($Kind -eq 'budget') {
+        return @"
+<!-- [abios-signal] budget issue=$Issue -->
+## Autonomous run signal — BUDGET spent
+
+The autonomous run for #$Issue reached **$ElapsedMinutes of its $MaxMinutes-minute budget** and the
+tool layer is now refusing further work commands (#564). The run was told to wrap up: commit/push
+its WIP, save a handoff, and report. If no PR or handoff appears shortly, the session likely needs
+attention — check ``.agentic-board/logs/issue-$Issue.log`` or relaunch with a fresh budget.
+
+*(Posted once per run by the brake hook — #565.)*
+"@
+    }
+    return @"
+<!-- [abios-signal] brake issue=$Issue -->
+## Autonomous run signal — BRAKE engaged
+
+The autonomous run for #$Issue attempted an action marked irreversible (**$Action**) and the
+PreToolUse guard refused it (#516). This usually means the run reached "PR ready" and tried to
+close its own loop — the work is likely waiting for a human review + merge. If there is no PR on
+this issue yet, check ``.agentic-board/logs/issue-$Issue.log``.
+
+*(Posted once per run by the brake hook — #565.)*
+"@
+}
+
+<#
+    Emit the run signal for a denial (#565): local log always, issue comment once per (kind,
+    issue). Called by the hook AFTER the deny payload is already written - nothing here can
+    change a verdict, and every step is try/caught because the hook must stay quiet.
+#>
+function Send-RunSignal {
+    param(
+        [Parameter(Mandatory)]$Marker,
+        [Parameter(Mandatory)][string]$Kind,
+        [string]$Action = '',
+        [int]$ElapsedMinutes = 0,
+        [int]$MaxMinutes = 0
+    )
+    try {
+        $root = Split-Path (Split-Path $Marker.path -Parent) -Parent
+        if (-not $root) { return }
+        $null = Write-DenialLog -WorkPath $root -Kind $Kind -Action $Action -Issue ([int]$Marker.issue)
+        if (-not $Marker.issue -or -not "$($Marker.repo)".Trim()) { return }
+        if (Test-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue)) { return }
+        if (-not $env:GH_TOKEN) { return }
+        $body = New-SignalCommentBody -Kind $Kind -Action $Action -Issue ([int]$Marker.issue) `
+                    -ElapsedMinutes $ElapsedMinutes -MaxMinutes $MaxMinutes
+        & gh issue comment "$($Marker.issue)" --repo "$($Marker.repo)" --body $body 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $null = Set-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue) }
+    } catch { }
 }
 
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.

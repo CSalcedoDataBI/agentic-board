@@ -69,3 +69,14 @@ Describe 'Get-FleetVerdict (termination policy)' {
         $v.shouldStop | Should -BeFalse
     }
 }
+
+Describe 'New-StallCommentBody - the stall signal the human actually sees (#565)' {
+    It 'names the issue, the age, the threshold, the log and the takeover command' {
+        $b = New-StallCommentBody -Issue 42 -AgeMin 45 -ThresholdMin 30
+        $b | Should -Match '\[abios-stall\] issue=42'
+        $b | Should -Match '45 minutes with no PR'
+        $b | Should -Match '30 min'
+        $b | Should -Match 'issue-42\.log'
+        $b | Should -Match '-Start 42 -TakeOver'
+    }
+}

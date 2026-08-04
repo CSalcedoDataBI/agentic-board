@@ -1250,7 +1250,7 @@ function Start-WorktreeSession {
         $armIntent = ([bool]$StopAtPR) -or ($SessionBudgetMinutes -gt 0)
         $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed $armIntent -Issue $IssueNum `
                     -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
-                    -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes
+                    -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes -Repo $Repo
         if ($state -eq 'armed') {
             Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
             if ($SessionBudgetMinutes -gt 0) {
@@ -2328,10 +2328,21 @@ function Invoke-SessionWatch {
         [scriptblock]$GetStatus = { param($s) Get-SessionLiveStatus $s },
         [scriptblock]$ReadSessions = { Read-SessionRegistryRaw },
         [scriptblock]$Now = { Get-Date },
-        [scriptblock]$Sleep = { param($sec) Start-Sleep -Seconds $sec }
+        [scriptblock]$Sleep = { param($sec) Start-Sleep -Seconds $sec },
+        # Stall detection rides the watch (#565): every -SuperviseEvery cycles the fleet
+        # supervisor runs with -Post, so a stalled session gets its [abios-stall] issue comment
+        # WITHOUT the human having to remember a separate command. Injectable for tests;
+        # 0 disables.
+        [int]$SuperviseEvery = 10,
+        [scriptblock]$Supervise = {
+            try { & (Join-Path $PSScriptRoot 'Fleet-Supervisor.ps1') -Check -Post } catch {
+                Write-Host "  WARN supervisor: $_" -ForegroundColor DarkYellow
+            }
+        }
     )
     $start   = & $Now
     $cleaned = @{}
+    $cycle   = 0
     while ($true) {
         $sessions = @(& $ReadSessions)
         if ($sessions.Count -eq 0) {
@@ -2366,6 +2377,8 @@ function Invoke-SessionWatch {
             Write-Host ("  Timeout ({0}s) con {1} sesion(es) aun en progreso." -f $TimeoutSec, $pending) -ForegroundColor DarkYellow
             return [pscustomobject]@{ allDone = $false; timedOut = $true; cleaned = @($cleaned.Keys) }
         }
+        $cycle++
+        if ($SuperviseEvery -gt 0 -and ($cycle % $SuperviseEvery) -eq 0) { & $Supervise }
         & $Sleep $PollSec
     }
 }
