@@ -512,6 +512,15 @@ function Test-IsBudgetExemptCommand {
         if (-not $seg) { continue }
         if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
         $sawSegment = $true
+        # An exempt PREFIX must not smuggle more work in the same segment (round 3): the splitter
+        # does not split on a lone `&`, and redirections / subexpressions ride inside the segment
+        # - `git status & npm run build`, `git status > src/app.ts`, `git commit -m $(npm run
+        # build)` all began with wrap-up and carried work. An exempt segment must be INERT: no
+        # background operator, no redirection, no subexpression. A LEADING `& ` is PowerShell's
+        # call operator - part of the launcher shape the patterns accept - so only that one is
+        # stripped before the check. The cost is a conservative refusal of, say, a commit message
+        # containing '&' - the deny message says how to rephrase.
+        if (($seg -replace '^&\s+', '') -match '[&<>]|\$\(') { return $false }
         $segExempt = $false
         foreach ($p in $script:BudgetExemptPatterns) {
             if ($seg -match $p) { $segExempt = $true; break }
