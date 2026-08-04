@@ -714,7 +714,12 @@ if ($copilotRequested -and (Test-CopilotUnavailableReview $reviews)) {
     # answers anything left the marker unarmed and every PR paid the full wait forever. Silence is
     # weaker evidence than an explicit refusal, so it gets a 1-day cooldown instead of the full
     # -CopilotCooldownDays — a slow day should not silence the reviewer for a week.
-    $copilotAnswered = [bool](@($reviews) | Where-Object { $_.author.login -match '(?i)copilot' })
+    # "Answered" means answered FOR THE CURRENT HEAD (external review, round 2): a stale Copilot
+    # review of an earlier commit is not an answer to this run's request, and treating it as one
+    # suppressed the cooldown in exactly the repeat-timeout scenario this change removes.
+    $copilotAnswered = [bool](@($reviews) | Where-Object {
+        $_.author.login -match '(?i)copilot' -and "$($_.commit.oid)".Trim() -eq "$($prState.headRefOid)".Trim()
+    })
     if (Test-CopilotSilentTimeout -Requested $copilotRequested -Answered $copilotAnswered -Now (Get-Date) -Deadline $reviewDeadline) {
         if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays(1) -Reason "Copilot stayed silent past the $TimeoutMinutes-minute review timeout") {
             Write-Host ("  Copilot no contesto en {0} min - marcado NO disponible para {1} por 1 dia; el proximo PR no pagara esta espera (#563)." -f $TimeoutMinutes, $copilotOwner) -ForegroundColor DarkYellow
