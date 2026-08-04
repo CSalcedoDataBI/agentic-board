@@ -168,7 +168,12 @@ param(
     [switch]$TakeOver,
     # Irreversible brake (#440): brief the launched session to stop at a reviewed PR instead of
     # ordering the merge. Set by /expert auto when the contract marks `merge` as irreversible.
+    # When neither -StopAtPR nor -AllowMerge is specified, Resolve-LaunchBrake brakes by default (#598).
     [switch]$StopAtPR,
+    # Explicit opt-in to autonomous merging (#598). A launched session NEVER merges on its own
+    # unless the human passes this flag — the default is to stop at a reviewed PR. Pass
+    # -AllowMerge only when a fully autonomous close is intentional and the issue has been reviewed.
+    [switch]$AllowMerge,
     # Path to the full brief for the launched session (e.g. .agentic-board/expert-brief-<n>.md),
     # which it is told to read first and treat as overriding the generic steps.
     [string]$BriefFile     = "",
@@ -1013,6 +1018,25 @@ query($o:String!, $r:String!, $n:Int!) {
 # Parallel session launcher (mode 5 -Launch): one visible Claude session per
 # worktree, each briefed to work its own issue end-to-end.
 # ==============================================================================
+
+# Compute the effective brake for a launched session (#598).
+# All launched sessions stop at a reviewed PR by default — a session that merges its
+# own PR has no human review and the board has no safety check on the result (proven on
+# 2026-08-03: two sessions merged unreviewed, one shipped a DoD item it had not built).
+# -AllowMerge is the explicit opt-in for autonomous merging; -StopAtPR:$false from an
+# expert contract that allows merging is also honoured. -AllowMerge beats everything.
+# Pure (no side effects) -> unit-testable. Called from the -Launch and -Fleet paths.
+function Resolve-LaunchBrake {
+    param(
+        [bool]$AllowMerge,
+        # Was -StopAtPR explicitly bound by the caller? ($PSBoundParameters.ContainsKey('StopAtPR'))
+        [bool]$StopAtPRBound,
+        [bool]$StopAtPR
+    )
+    if ($AllowMerge) { return $false }
+    if ($StopAtPRBound) { return $StopAtPR }
+    return $true    # default: brake for every fleet/launch session (#598)
+}
 
 # The one-line first message a spawned Claude session receives. Pure -> testable.
 # -Cli is threaded (default 'claude') so Phase-2 adapters can specialize the leading
@@ -2226,7 +2250,9 @@ if ($Relaunch -gt 0) {
     $oauthPresent = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN','User')
     $authVar      = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
     $marker       = New-FleetSessionMarker $Relaunch (New-FleetRunId)
-    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
+    $relaunchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
+        -StopAtPRBound $PSBoundParameters.ContainsKey('StopAtPR') -StopAtPR ([bool]$StopAtPR)
+    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$relaunchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
     # Start-WorktreeSession returns $null on a failed/missing-worktree spawn. Registering
     # then would fall back to the coordinator PID and poison the registry - so only record a
     # session that actually launched.
@@ -2757,6 +2783,13 @@ if ($Parallel.Count -gt 0) {
         }
     }
 
+    # All -Launch/-Fleet sessions arm the brake by default (#598). -AllowMerge is the
+    # explicit opt-in for autonomous merging; an expert contract that allows merging
+    # is honoured via an explicit -StopAtPR:$false. See Resolve-LaunchBrake for the logic.
+    $launchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
+        -StopAtPRBound $PSBoundParameters.ContainsKey('StopAtPR') `
+        -StopAtPR ([bool]$StopAtPR)
+
     # -- Launch: one visible session per worktree. -Fleet probes CLIs and picks one
     # per issue (fallback claude); plain -Launch keeps the shipped claude-only path.
     # -Fleet TAKES OVER the launch (elseif), so the two never both spawn in one run.
@@ -2823,7 +2856,7 @@ if ($Parallel.Count -gt 0) {
                 $marker    = New-FleetSessionMarker $entry.issue $runId
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
                                                -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `
-                                               -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
+                                               -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
                 $via = if ($spawn.usesWt) { "wt" } else { "pwsh" }
                 if ($spawn.process -and -not $spawn.usesWt) {
                     Write-SessionRegistryEntry -IssueNum $entry.issue -SessionPid $spawn.process.Id -Via $via -Cli $actualCli -FleetSession $marker
@@ -2837,7 +2870,8 @@ if ($Parallel.Count -gt 0) {
             # -MaxConcurrent (0 = capacity-only) caps how many run at once.
             $dispatched = @(Invoke-FleetDispatch -Queue $fleetPlan -NoQuotaClis $noQuota -LaunchSession $launchHook -MaxConcurrent $MaxConcurrent)
             Write-Host ""
-            Write-Host ("Fleet lanzada: {0} sesion(es) en oleadas por capacidad (fallback claude)." -f $dispatched.Count) -ForegroundColor Yellow
+            $fleetBrakeMsg = if ($launchBrake) { "freno ARMADO (sesiones paran en el PR listo)." } else { "ATENCION: freno desarmado con -AllowMerge." }
+            Write-Host ("Fleet lanzada: {0} sesion(es) en oleadas por capacidad (fallback claude). {1}" -f $dispatched.Count, $fleetBrakeMsg) -ForegroundColor Yellow
         }
     } elseif ($Launch) {
         Write-Host ""
@@ -2856,7 +2890,7 @@ if ($Parallel.Count -gt 0) {
                 # New-IssueWorktree / Get-IssueWorktreePath - the grouped-worktree layout).
                 $previewPath = Get-IssueWorktreePath $r.repo $r.issue (Split-Path (Get-Location) -Parent)
                 $marker = New-FleetSessionMarker $r.issue $runId
-                Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Preview | Out-Null
+                Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Preview | Out-Null
             }
         } else {
             Write-Host "----- LANZANDO SESIONES CLAUDE -----" -ForegroundColor Cyan
@@ -2883,7 +2917,7 @@ if ($Parallel.Count -gt 0) {
             foreach ($r in $started) {
                 if ($r.workPath) {
                     $marker = New-FleetSessionMarker $r.issue $runId
-                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
+                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
                     $launched++
                     # Track the spawned session's own PID (pwsh window is reliable; a wt
                     # launcher forks and exits, so keep the host PID there).
@@ -2896,7 +2930,8 @@ if ($Parallel.Count -gt 0) {
                 }
             }
             Write-Host ""
-            Write-Host ("Lanzadas: {0} sesion(es). Cada una trabaja su issue hasta el PR + review gate." -f $launched) -ForegroundColor Yellow
+            $brakeMsg = if ($launchBrake) { "el freno esta ARMADO: las sesiones paran en el PR listo (no mergean solas)." } else { "ATENCION: freno desarmado con -AllowMerge - las sesiones PUEDEN mergear autonomamente." }
+            Write-Host ("Lanzadas: {0} sesion(es). {1}" -f $launched, $brakeMsg) -ForegroundColor Yellow
         }
     }
 

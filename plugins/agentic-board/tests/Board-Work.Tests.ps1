@@ -568,6 +568,26 @@ Describe 'Resolve-ClaudeAuthVar' {
     }
 }
 
+Describe 'Resolve-LaunchBrake — all fleet sessions brake on merge by default (#598)' {
+    It 'brakes when no flags are given (the new safe default for plain -Parallel -Launch)' {
+        Resolve-LaunchBrake -AllowMerge $false -StopAtPRBound $false -StopAtPR $false | Should -BeTrue
+    }
+    It '-AllowMerge $true opts out of the brake explicitly' {
+        Resolve-LaunchBrake -AllowMerge $true -StopAtPRBound $false -StopAtPR $false | Should -BeFalse
+    }
+    It 'honours an explicit -StopAtPR:$true even without -AllowMerge' {
+        Resolve-LaunchBrake -AllowMerge $false -StopAtPRBound $true -StopAtPR $true | Should -BeTrue
+    }
+    It 'honours an explicit -StopAtPR:$false (an expert contract that allows merging)' {
+        # Expert-Auto.ps1 passes -StopAtPR:$false when the contract does not mark merge irreversible.
+        # That explicit opt-out must be respected; the default brake must not override it.
+        Resolve-LaunchBrake -AllowMerge $false -StopAtPRBound $true -StopAtPR $false | Should -BeFalse
+    }
+    It '-AllowMerge wins over an explicit -StopAtPR:$true' {
+        Resolve-LaunchBrake -AllowMerge $true -StopAtPRBound $true -StopAtPR $true | Should -BeFalse
+    }
+}
+
 Describe 'Build-WorktreeLaunch' {
     It 'builds a Windows Terminal tab command when wt is present' {
         Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { [pscustomobject]@{ Name = 'wt' } }

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Fleet sessions launched with `-Parallel -Launch` now stop at a reviewed PR by default** (#598).
+  Previously, a session launched without an expert contract could merge its own PR with no review:
+  it was running with `--permission-mode bypassPermissions`, was briefed to call `Board-Merge.ps1`,
+  and nothing in the tool layer refused it. On 2026-08-03, two such sessions merged their own PRs
+  with `reviews: []` and no `[abios-review]` record; post-merge review found that one PR had not
+  built the central item of its issue's DoD. Fix: all `-Launch` and `-Fleet` sessions now arm the
+  brake by default — `Resolve-LaunchBrake` returns `$true` (stop at PR) unless `-AllowMerge` is
+  explicitly passed or the caller explicitly passes `-StopAtPR:$false` (an expert contract that
+  allows merging). This aligns the plain fleet path with the expert path, where the brake was
+  already mechanical. The `-Relaunch` path receives the same default. Three new Pester tests
+  cover: default brakes, `-AllowMerge` opt-out, explicit `-StopAtPR:$false` honored.
+
 ## [0.34.0] - 2026-08-04
 
 **The pending queue, cleared by the tool's own expert mode.** All seven triaged issues on the
