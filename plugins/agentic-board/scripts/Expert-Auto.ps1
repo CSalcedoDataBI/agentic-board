@@ -320,7 +320,7 @@ query($o:String!,$r:String!,$n:Int!,$c:String){
   repository(owner:$o,name:$r){
     issue(number:$n){ subIssues(first:50, after:$c){
       pageInfo { hasNextPage endCursor }
-      nodes { number title state } } }
+      nodes { number title state repository { nameWithOwner } } } }
   }
 }','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$Epic")
         if ($cursor) { $ghArgs += @('-f',"c=$cursor") }
@@ -337,6 +337,16 @@ query($o:String!,$r:String!,$n:Int!,$c:String){
     # best-effort (the dependencies API may not exist for the account - degrade to unblocked,
     # same as Board-Work's own gate); the PR read fail-closes into prKnown=$false, which the
     # verdict routes to InFlight rather than Ready.
+    # Cross-repo sub-issues are EXCLUDED with a warning (external review round 4): GitHub allows
+    # them, and resolving their number against the epic's repo would brief and dispatch the
+    # same-number issue in the WRONG repository. Walking a foreign repo is out of this walker's
+    # scope - saying so beats guessing.
+    $foreign = @($subs | Where-Object { "$($_.repository.nameWithOwner)" -and "$($_.repository.nameWithOwner)" -ne $repo })
+    foreach ($f in $foreign) {
+        Write-Host ("  WARN sub-issue #{0} vive en {1} (otro repo) - el caminante no lo despacha; trabajalo alla." -f $f.number, $f.repository.nameWithOwner) -ForegroundColor DarkYellow
+    }
+    $subs = @($subs | Where-Object { -not "$($_.repository.nameWithOwner)" -or "$($_.repository.nameWithOwner)" -eq $repo })
+
     $enriched = @()
     foreach ($s in $subs) {
         $openBlockers = @()
