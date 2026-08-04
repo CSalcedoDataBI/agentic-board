@@ -305,3 +305,54 @@ Describe 'Test-GateWaitDone - CI and review waited concurrently (#562)' {
             Should -BeTrue    # CI settles -> nothing else to wait for
     }
 }
+
+Describe 'Test-FreshReviewArrived - ANY review of the current head ends the wait (#563)' {
+    BeforeAll {
+        $script:Head = 'abc123def456abc123def456abc123def456abcd'
+        $script:Old  = '999999999999999999999999999999999999aaaa'
+        function script:Rev([string]$who, [string]$oid) {
+            [pscustomobject]@{ state = 'COMMENTED'; author = @{ login = $who }; commit = @{ oid = $oid } }
+        }
+    }
+
+    It 'a HUMAN review of the current head ends the wait - not only Copilot''s' {
+        Test-FreshReviewArrived -Reviews @((script:Rev 'cristobal' $script:Head)) -HeadSha $script:Head | Should -BeTrue
+    }
+    It 'a Copilot review of the current head ends the wait (unchanged behavior)' {
+        Test-FreshReviewArrived -Reviews @((script:Rev 'copilot-pull-request-reviewer' $script:Head)) -HeadSha $script:Head | Should -BeTrue
+    }
+    It 'a STALE review (earlier commit) does NOT end the wait - it is evidence the gate will refuse' {
+        Test-FreshReviewArrived -Reviews @((script:Rev 'copilot' $script:Old)) -HeadSha $script:Head | Should -BeFalse
+    }
+    It 'no reviews -> keep waiting' {
+        Test-FreshReviewArrived -Reviews @() -HeadSha $script:Head | Should -BeFalse
+    }
+    It 'fails closed with no head SHA - cannot place any review, so none counts as arrival' {
+        Test-FreshReviewArrived -Reviews @((script:Rev 'copilot' $script:Head)) -HeadSha '' | Should -BeFalse
+    }
+    It 'ignores null entries' {
+        Test-FreshReviewArrived -Reviews @($null, (script:Rev 'x' $script:Head)) -HeadSha $script:Head | Should -BeTrue
+    }
+}
+
+Describe 'Test-CopilotSilentTimeout - silence past the deadline is evidence too (#563)' {
+    # The defect: the cooldown only armed on an explicit "cannot review" answer. A silent Copilot
+    # taught the gate nothing, so EVERY PR paid the full review timeout, forever.
+    BeforeAll {
+        $script:T0 = [datetime]'2026-08-03T10:00:00'
+        $script:Deadline = $script:T0.AddMinutes(6)
+    }
+
+    It 'arms when requested + silent + deadline passed' {
+        Test-CopilotSilentTimeout -Requested $true -Answered $false -Now $script:Deadline.AddSeconds(1) -Deadline $script:Deadline | Should -BeTrue
+    }
+    It 'does NOT arm before the deadline - a slow reviewer is not an absent one yet' {
+        Test-CopilotSilentTimeout -Requested $true -Answered $false -Now $script:T0.AddMinutes(3) -Deadline $script:Deadline | Should -BeFalse
+    }
+    It 'does NOT arm when Copilot answered (the explicit-refusal path owns that case)' {
+        Test-CopilotSilentTimeout -Requested $true -Answered $true -Now $script:Deadline.AddMinutes(1) -Deadline $script:Deadline | Should -BeFalse
+    }
+    It 'does NOT arm when Copilot was never requested - a skipped run has nothing new to learn' {
+        Test-CopilotSilentTimeout -Requested $false -Answered $false -Now $script:Deadline.AddMinutes(1) -Deadline $script:Deadline | Should -BeFalse
+    }
+}

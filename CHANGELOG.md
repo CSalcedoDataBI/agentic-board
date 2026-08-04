@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Fixed
+- **The review wait learns from silence, and any reviewer's answer counts** (#563, part of epic
+  #561). Two defects made every PR pay the full review timeout forever: the wait loop broke only
+  on a review whose *author* was Copilot — a human or external review landing mid-poll kept it
+  spinning — and the per-account cooldown (#367) armed only on an explicit "cannot review"
+  answer, so a Copilot that was simply *silent* taught the gate nothing. Now the wait ends on
+  **any review bound to the current head commit** (stale reviews of earlier commits keep
+  waiting — they are exactly the evidence the gate refuses), and silence past the timeout arms a
+  **1-day cooldown** (weaker evidence than an explicit refusal, which keeps its
+  `-CopilotCooldownDays` default of 7). Verified by 10 new Pester tests; mutation-checked
+  (author-only arrival and inverted silence check reintroduced → 5 tests red → restored).
 - **The review gate's CI wait now has a ceiling, and the CI and review waits run concurrently**
   (#562, part of epic #561). `gh pr checks --watch` was the only unbounded wait in the codebase:
   a queued or never-scheduled workflow hung the entire session indefinitely, with no signal. The

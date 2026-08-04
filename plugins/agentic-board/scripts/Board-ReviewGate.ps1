@@ -13,6 +13,10 @@
          skips the request AND the wait and routes straight to self-review,
          until a cooldown (-CopilotCooldownDays) expires or -EnableCopilot is
          passed. So a quota-blocked account is not re-asked on every PR (#367).
+         SILENCE arms it too (#563): a requested Copilot that never answers
+         within the review timeout gets a 1-day marker, so the next PR skips
+         the wait instead of paying it forever. And the wait itself breaks on
+         ANY review bound to the current head, not only Copilot's.
       2. If the PR touches any *.tmdl (a PBIP semantic model), runs the two
          model-quality gates and BLOCKS on either (M3.3):
            - TMDL diff review (Tmdl-DiffReview.ps1 -FailOnBreaking): a BREAKING
@@ -331,6 +335,44 @@ function Test-GateWaitDone {
     return ($ciDone -and $reviewDone)
 }
 
+<#
+    Did a review land FOR THE CURRENT HEAD? (#563)
+
+    The wait loop used to break only on a review whose AUTHOR matched 'copilot' — a human or an
+    external reviewer landing mid-poll kept the loop spinning for the full timeout even though the
+    thing being waited for (an answer about this diff) had already arrived. Any review bound to the
+    current head ends the wait now. Stale reviews from earlier commits do NOT end it: they are
+    exactly the evidence Get-ReviewEvidence refuses, so breaking on them would end the wait with
+    nothing to show for it. Pure.
+#>
+function Test-FreshReviewArrived {
+    param(
+        $Reviews = @(),
+        [string]$HeadSha = ''
+    )
+    $head = "$HeadSha".Trim()
+    if (-not $head) { return $false }
+    return [bool](@($Reviews) | Where-Object { $_ -and "$($_.commit.oid)".Trim() -eq $head })
+}
+
+<#
+    Did Copilot stay SILENT past the review deadline? (#563)
+
+    The per-account cooldown (#367) only armed when Copilot ANSWERED "cannot review" — an explicit
+    refusal review object. A Copilot that never says anything taught the gate nothing, so every PR
+    burned the full review timeout forever, which is the worst of both: the wait was always paid
+    and the self-healing never triggered. Silence past the deadline is now evidence too. Pure.
+#>
+function Test-CopilotSilentTimeout {
+    param(
+        [bool]$Requested,
+        [bool]$Answered,
+        [Parameter(Mandatory)][datetime]$Now,
+        [Parameter(Mandatory)][datetime]$Deadline
+    )
+    return ($Requested -and (-not $Answered) -and ($Now -ge $Deadline))
+}
+
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
 if ($env:ABIOS_REVIEWGATE_DOTSOURCE) { return }
 
@@ -628,10 +670,12 @@ while ($true) {
     $verdictCi = Get-ChecksVerdict -Checks $parsedList -Parsed $parsedOk
 
     # Review snapshot — while one is awaited, and at least once so the verdict section always has
-    # PR state (decision, threads, head SHA) even when no review was requested.
+    # PR state (decision, threads, head SHA) even when no review was requested. ANY review bound
+    # to the current head ends the wait, not just Copilot's (#563) — a human or external reviewer
+    # answering first is an answer.
     if (-not $prState -or ($copilotRequested -and -not $reviewArrived)) {
         $prState = Get-ReviewState
-        $reviewArrived = [bool](@($prState.reviews.nodes) | Where-Object { $_.author.login -match '(?i)copilot' })
+        $reviewArrived = Test-FreshReviewArrived -Reviews @($prState.reviews.nodes) -HeadSha "$($prState.headRefOid)"
     }
 
     if (Test-GateWaitDone -ChecksSettled ([bool]$verdictCi.Settled) `
@@ -680,6 +724,17 @@ if ($copilotRequested -and (Test-CopilotUnavailableReview $reviews)) {
     $cooldownDays = [Math]::Max(1, $CopilotCooldownDays)
     if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays($cooldownDays) -Reason 'Copilot answered: unable to review (quota/limit)') {
         Write-Host ("  Copilot sin disponibilidad detectada - marcado NO disponible para {0} por {1} dia(s); no lo volvere a solicitar/esperar hasta entonces (#367)." -f $copilotOwner, $cooldownDays) -ForegroundColor DarkYellow
+    }
+} elseif ($copilotRequested) {
+    # SILENCE past the deadline arms the cooldown too (#563). Without this, a Copilot that never
+    # answers anything left the marker unarmed and every PR paid the full wait forever. Silence is
+    # weaker evidence than an explicit refusal, so it gets a 1-day cooldown instead of the full
+    # -CopilotCooldownDays — a slow day should not silence the reviewer for a week.
+    $copilotAnswered = [bool](@($reviews) | Where-Object { $_.author.login -match '(?i)copilot' })
+    if (Test-CopilotSilentTimeout -Requested $copilotRequested -Answered $copilotAnswered -Now (Get-Date) -Deadline $reviewDeadline) {
+        if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays(1) -Reason "Copilot stayed silent past the $TimeoutMinutes-minute review timeout") {
+            Write-Host ("  Copilot no contesto en {0} min - marcado NO disponible para {1} por 1 dia; el proximo PR no pagara esta espera (#563)." -f $TimeoutMinutes, $copilotOwner) -ForegroundColor DarkYellow
+        }
     }
 }
 
