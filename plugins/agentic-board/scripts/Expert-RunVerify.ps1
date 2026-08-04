@@ -80,21 +80,32 @@ function Test-RunArtifactsComplete {
     $marker  = $script:EvidenceMarker
     $missing = @()
 
-    # A surface satisfies its requirement with the marker AND substance: the link stub
-    # (references the file) or the full block. Marker alone is a stamp anyone can leave.
+    # The pre-#570 FULL block's signature is its results table header - NOT the '## Evidence'
+    # heading, which the link stub also emits (review round 1: heading-as-fallback let a stub
+    # with no link, or one pointing at another issue's file, pass for this one).
+    $legacyBlock = '| Test | Command | Result | Detail |'
+
+    # A surface satisfies its requirement with the marker AND substance: the stub that
+    # references THIS issue's file, or a legacy full block. Marker alone is a stamp.
     $satisfies = {
         param($content)
         if ([string]::IsNullOrWhiteSpace($content)) { return $false }
         if (-not "$content".Contains($marker)) { return $false }
         if (-not "$EvidenceRef".Trim()) { return $true }
-        return ("$content".Contains($EvidenceRef) -or "$content".Contains('## Evidence'))
+        return ("$content".Contains($EvidenceRef) -or "$content".Contains($legacyBlock))
     }
 
     # 1. Versioned evidence file — the durable record that outlives the PR, and since #570 the
-    #    SINGLE source of truth the other two surfaces point at.
-    if ([string]::IsNullOrWhiteSpace($EvidenceFileContent) -or
-        -not "$EvidenceFileContent".Contains($marker)) {
-        $missing += 'evidence/<issue>.md (file missing or marker absent)'
+    #    SINGLE source of truth the other two surfaces point at. In EvidenceRef mode it must
+    #    carry SUBSTANCE beyond the marker (a table row or a section heading): pointers backed
+    #    by a marker-only file would be evidence of nothing (review round 1).
+    $fileOk = -not [string]::IsNullOrWhiteSpace($EvidenceFileContent) -and
+              "$EvidenceFileContent".Contains($marker)
+    if ($fileOk -and "$EvidenceRef".Trim()) {
+        $fileOk = ("$EvidenceFileContent" -match '(?m)^\s*\|') -or ("$EvidenceFileContent" -match '(?m)^##\s')
+    }
+    if (-not $fileOk) {
+        $missing += 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'
     }
 
     # 2. PR body — the marker + link stub that surfaces on the PR page.

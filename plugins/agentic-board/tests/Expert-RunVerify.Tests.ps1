@@ -42,7 +42,7 @@ Describe 'Test-RunArtifactsComplete — each artifact is named when missing' {
             -PrBodyContent       $script:GoodPrBody `
             -IssueCommentBodies  @($script:GoodComment)
         $r.complete | Should -BeFalse
-        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing or marker absent)'
+        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'
     }
 
     It 'names the PR body block when the body has no marker' {
@@ -91,7 +91,7 @@ Describe 'Test-RunArtifactsComplete — fails closed (unreadable = missing, not 
             -PrBodyContent       $script:GoodPrBody `
             -IssueCommentBodies  @($script:GoodComment)
         $r.complete | Should -BeFalse
-        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing or marker absent)'
+        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'
     }
 
     It 'whitespace-only evidence file content is treated as missing' {
@@ -100,7 +100,7 @@ Describe 'Test-RunArtifactsComplete — fails closed (unreadable = missing, not 
             -PrBodyContent       $script:GoodPrBody `
             -IssueCommentBodies  @($script:GoodComment)
         $r.complete | Should -BeFalse
-        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing or marker absent)'
+        $r.missing  | Should -Contain 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'
     }
 
     It 'a non-empty PR body without the marker is treated as missing' {
@@ -179,7 +179,7 @@ Describe 'Expert-RunVerify CLI — the evidence file is resolved from the WORKIN
 
 Describe 'Evidence once + links (#570)' {
     BeforeAll {
-        $script:FullBlock = "<!-- [abios-evidence] -->`n## Evidence`n| Test | ... |"
+        $script:FullBlock = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| a | b | PASS | c |"
         $script:Stub      = "<!-- [abios-evidence] -->`n## Evidence`n`nFull evidence (single source of truth): [evidence/42.md](https://github.com/o/r/blob/b/evidence/42.md)"
     }
 
@@ -208,5 +208,36 @@ Describe 'Evidence once + links (#570)' {
         $r = Test-RunArtifactsComplete -EvidenceFileContent '' -PrBodyContent $script:Stub `
                 -IssueCommentBodies @($script:Stub) -EvidenceRef 'evidence/42.md'
         $r.complete | Should -BeFalse
+    }
+}
+
+Describe 'Round-1 closures on the evidence-link mode (#570)' {
+    It 'a stub pointing at ANOTHER issue''s file does not pass for this one' {
+        $wrongStub = "<!-- [abios-evidence] -->`n## Evidence`n`nFull evidence (single source of truth): [evidence/99.md](x)"
+        $full = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| a | b | PASS | c |"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $full -PrBodyContent $wrongStub `
+                -IssueCommentBodies @($wrongStub) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
+    }
+    It 'marker + heading with no link is NOT a legacy block - the table header is the signature' {
+        $headingOnly = "<!-- [abios-evidence] -->`n## Evidence"
+        $full = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| a | b | PASS | c |"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $full -PrBodyContent $headingOnly `
+                -IssueCommentBodies @($headingOnly) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
+    }
+    It 'a marker-only FILE cannot anchor the pointers - the source of truth needs substance' {
+        $stub = "<!-- [abios-evidence] -->`nFull evidence (single source of truth): evidence/42.md"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent '<!-- [abios-evidence] -->' -PrBodyContent $stub `
+                -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
+        $r.missing | Should -Contain 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'
+    }
+    It 'a hand-authored evidence file with sections (no generated table) still counts as substance' {
+        $hand = "# [abios-evidence] #42`n## What was tested`ntexto`n## Review`nmas texto"
+        $stub = "<!-- [abios-evidence] -->`nFull evidence: evidence/42.md"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $hand -PrBodyContent $stub `
+                -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeTrue
     }
 }
