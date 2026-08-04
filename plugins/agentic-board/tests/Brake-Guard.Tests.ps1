@@ -1123,8 +1123,16 @@ Describe 'The enforced time budget (#564)' {
         }
         It 'the explicit WIP shapes stay allowed (round 5)' {
             Test-IsBudgetExemptCommand -Command 'git push origin HEAD:issue-42-branch' | Should -BeTrue
-            Test-IsBudgetExemptCommand -Command 'git push -u origin issue-42-branch' | Should -BeTrue
             Test-IsBudgetExemptCommand -Command 'git push --set-upstream origin HEAD:issue-7-fix' | Should -BeTrue
+        }
+        It 'bare refspecs are refused - `git push origin v1.0` publishes the TAG when one exists (round 8)' {
+            Test-IsBudgetExemptCommand -Command 'git push origin v1.0' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push -u origin issue-42-branch' | Should -BeFalse
+        }
+        It 'gh comment is CREATE-only: delete/edit-last refused, body required (round 8)' {
+            Test-IsBudgetExemptCommand -Command 'gh issue comment 42 --delete-last --yes' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'gh pr comment 42 --edit-last --body "x"' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'gh issue comment 42' | Should -BeFalse
         }
         It 'git diff --output writes a file through a read-shaped command - refused (round 4)' {
             Test-IsBudgetExemptCommand -Command 'git diff --output=src/app.ts' | Should -BeFalse

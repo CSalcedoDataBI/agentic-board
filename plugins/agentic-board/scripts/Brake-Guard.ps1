@@ -545,7 +545,10 @@ $script:BudgetExemptPatterns = @(
     # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
     # is push and stays allowed.
     '^git\s+stash(\s+(push|save)\b.*)?\s*$'
-    '^gh\s+(pr|issue)\s+(comment|view)\b'                          # report where it stopped / read for the handoff
+    # Reporting is CREATE-only (round 8): `gh issue comment --delete-last --yes` destroys a
+    # comment through the same verb. The exempt shape must carry a body and no delete/edit flag.
+    '^gh\s+(pr|issue)\s+comment\b(?=[^;|&]*\s--body(-file)?\b)(?![^;|&]*\s--(delete-last|edit-last)\b)'
+    '^gh\s+(pr|issue)\s+view\b'                                    # read what it needs for the handoff
 )
 
 <#
@@ -568,19 +571,17 @@ function Test-IsWipPushSegment {
     $ref = $tokens[1]
     if ($ref -match '^[-+]') { return $false }              # no flags, no +force refspec
     if ($ref.Contains('*')) { return $false }               # wildcard refspecs move ref FAMILIES
-    if ($ref.Contains(':')) {
-        $src, $target = $ref -split ':', 2
-        if (-not $src)    { return $false }                 # `:branch` is git's DELETE spelling
-        if (-not $target) { return $false }
-    } else {
-        $target = $ref
-    }
+    # The refspec must be EXPLICIT source:target (round 8): a bare name is ambiguous - `git push
+    # origin v1.0` publishes the TAG v1.0 when one exists, and a pure classifier cannot know.
+    if (-not $ref.Contains(':')) { return $false }
+    $src, $target = $ref -split ':', 2
+    if (-not $src)    { return $false }                     # `:branch` is git's DELETE spelling
+    if (-not $target) { return $false }
     $target = $target -replace '^refs/heads/', ''
     # The target must be a BRANCH (round 7): refs/tags/, refs/notes/ and any other namespace
     # publish something that is not the WIP branch this exemption exists for.
     if ($target -match '^refs/') { return $false }
     if ($target -in @('main', 'master', 'head')) { return $false }
-    if (-not $ref.Contains(':') -and $ref -eq 'head') { return $false }  # bare HEAD -> target unknown
     return $true
 }
 
