@@ -90,12 +90,23 @@ function Test-RunArtifactsComplete {
     # The reference match is BOUNDARY-AWARE (round 2): a raw substring accepted
     # 'evidence/42.md.bak' as a reference to 'evidence/42.md'.
     $refPattern = if ("$EvidenceRef".Trim()) { [regex]::Escape($EvidenceRef) + '(?![\w.\-])' } else { '' }
+    # The legacy fallback demands a DATA row too (round 5): header + separator without rows is
+    # scaffolding on a surface exactly as it is in the file.
+    $hasLegacyBlock = {
+        param($content)
+        if (-not "$content".Contains($legacyBlock)) { return $false }
+        $rows = @(("$content" -split "`r?`n") | Where-Object {
+            $l = "$_".Trim()
+            $l -match '^\|' -and $l -notmatch '^\|[\s:\-|]+\|?\s*$' -and $l -ne $legacyBlock
+        })
+        return ($rows.Count -gt 0)
+    }
     $satisfies = {
         param($content)
         if ([string]::IsNullOrWhiteSpace($content)) { return $false }
         if (-not "$content".Contains($marker)) { return $false }
         if (-not $refPattern) { return $true }
-        return (("$content" -match $refPattern) -or "$content".Contains($legacyBlock))
+        return (("$content" -match $refPattern) -or (& $hasLegacyBlock $content))
     }
 
     # 1. Versioned evidence file — the durable record that outlives the PR, and since #570 the

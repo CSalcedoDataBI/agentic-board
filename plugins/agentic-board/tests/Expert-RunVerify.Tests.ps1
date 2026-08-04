@@ -294,3 +294,13 @@ Describe 'Round-4 closure: table scaffolding is not evidence (#570)' {
                 -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md').complete | Should -BeTrue
     }
 }
+
+Describe 'Round-5 closure: surface scaffolding is not a legacy block (#570)' {
+    It 'a PR body with header+separator but no data row and no link is INCOMPLETE' {
+        $scaffold = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| --- | --- | --- | --- |"
+        $full = "<!-- [abios-evidence] -->`n## Evidence`n| Test | Command | Result | Detail |`n| g | p | PASS | ok |"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $full -PrBodyContent $scaffold `
+                -IssueCommentBodies @($scaffold) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
+    }
+}
