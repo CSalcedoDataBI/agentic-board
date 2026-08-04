@@ -104,3 +104,50 @@ Describe 'Format-EnrichedEpicBody' {
         ([regex]::Matches($b, [regex]::Escape($script:Placeholder))).Count | Should -BeGreaterOrEqual 5
     }
 }
+
+Describe 'Resolve-TextParam (#419 - file-backed parameters)' {
+    BeforeAll {
+        $script:TmpDir = Join-Path $TestDrive 'resolve-text'
+        New-Item -ItemType Directory -Force $script:TmpDir | Out-Null
+    }
+
+    It 'returns the inline value when filePath is empty' {
+        Resolve-TextParam '' 'inline text' | Should -BeExactly 'inline text'
+    }
+
+    It 'returns the inline value when filePath is whitespace-only' {
+        Resolve-TextParam '   ' 'inline text' | Should -BeExactly 'inline text'
+    }
+
+    It 'reads and returns file content when a valid file is provided' {
+        $f = Join-Path $script:TmpDir 'desc.txt'
+        Set-Content -Path $f -Value 'content from file' -NoNewline
+        Resolve-TextParam $f '' | Should -Match 'content from file'
+    }
+
+    It 'treats text containing slash-commands as data (not executed) when loaded from a file' {
+        $f = Join-Path $script:TmpDir 'slashes.txt'
+        $payload = "/board plan - use /scan and /knowledge to research; see /expert auto"
+        Set-Content -Path $f -Value $payload -NoNewline
+        $result = Resolve-TextParam $f ''
+        $result | Should -Match '/board'
+        $result | Should -Match '/scan'
+        $result | Should -Match '/knowledge'
+    }
+
+    It 'a file with a destructive-looking command is returned as plain text, never executed' {
+        $f = Join-Path $script:TmpDir 'destructive.txt'
+        Set-Content -Path $f -Value 'Remove-Item /etc/passwd -Force' -NoNewline
+        Resolve-TextParam $f '' | Should -BeExactly 'Remove-Item /etc/passwd -Force'
+    }
+
+    It 'throws when the file path is set but the file does not exist' {
+        { Resolve-TextParam (Join-Path $script:TmpDir 'nonexistent.txt') '' } | Should -Throw "*does not exist*"
+    }
+
+    It 'prefers the file when both a file and an inline value are supplied (file wins)' {
+        $f = Join-Path $script:TmpDir 'wins.txt'
+        Set-Content -Path $f -Value 'from file' -NoNewline
+        Resolve-TextParam $f 'inline should be ignored' | Should -BeExactly 'from file'
+    }
+}

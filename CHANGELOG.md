@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Fixed
+- **Large inline text payloads no longer abort Board-Plan / Board-Handoff** (#419). The tool-layer
+  path guard pattern-matches the full command string: prose containing slash-commands (`/board`,
+  `/scan`, `/knowledge`, `/expert`) passed as inline parameters was misread as a filesystem path
+  and caused the whole command to abort before the script ran — accounting for 65 field failures
+  across 945 sessions (Board-Plan.ps1 at 30.3% failure rate, Board-Handoff.ps1 at 22%). The fix
+  is to keep large payloads off the command line entirely. `Board-Plan.ps1` now accepts
+  `-DescriptionFile`, `-ResearchFile`, and `-PriorArtFile` (each a path to a plain-text file);
+  `Board-Handoff.ps1` now accepts `-BodyFile` (path to a JSON file with `NextStep`, `Done`,
+  `OpenThreads`, `Traps`, `KeyFiles` keys). Inline parameters remain supported unchanged for short
+  text. The new `Resolve-TextParam` and `Read-HandoffBodyFile` pure helpers are covered by 14 new
+  Pester tests (file reads content, slashes treated as data, destructive text never executed,
+  missing-file and directory-path throw, file wins over inline — a field present in the JSON
+  overrides even when explicitly empty, while an absent field falls back to the inline default).
 - **`-AutoClean` teardown now kills the Windows Terminal tab shell and deletes the worktree folder** (#413). `Board-Work.ps1 -Sessions -Watch -AutoClean` previously left the `pwsh -NoExit` tab shell alive (its handle blocked `git worktree remove` from deleting the directory) and printed a manual-cleanup note. The fix: before running `git worktree remove`, teardown finds the tab's shell by its launch-script command line (`launch-<n>.ps1` — exact match on the issue number, so sibling sessions are never touched), kills it via `Stop-ProcessTree`, waits 500 ms for the OS to release the handle, then runs `Remove-Item` after `git` de-registers the worktree. When no shell is found (session already closed, or non-`wt` launch), teardown falls back to the same attempt. Two helper additions: `Find-WtTabShellCore` (pure, testable) + `Find-WtTabShell` (thin CIM wrapper, mockable) in `BoardWork.Processes.ps1`; 6 new Pester tests including the "do not kill a different issue's shell" guard.
 - **`Publish-DocsWiki.ps1` no longer generates `Docs-Command-*` wiki pages** (#418).
   `commands/*.md` files are agent instruction files (system prompts addressed to an AI),
