@@ -150,7 +150,9 @@ function Find-FleetOrphans {
 # Returns the first matching object, or $null when none match.
 function Find-WtTabShellCore {
     param([object[]]$Processes, [int]$IssueNum)
-    $pattern = 'launch-' + [regex]::Escape($IssueNum.ToString()) + '\.ps1'
+    # (?![\w.]) refuses a trailing word char or dot, so `launch-8.ps1.bak` / `launch-8.ps10`
+    # never match - the guarantee is "this exact launch script", not "contains its name".
+    $pattern = 'launch-' + [regex]::Escape($IssueNum.ToString()) + '\.ps1(?![\w.])'
     return @($Processes | Where-Object { $_.CommandLine -match $pattern }) | Select-Object -First 1
 }
 

@@ -1906,7 +1906,7 @@ function Invoke-SessionCleanup {
     # refuse and keep everything for a later retry. A merged session is torn down as usual: its
     # work landed, so what remains is scratch. -ForceRemoveWorktree is the deliberate discard.
     # The check is read-only, so it also runs under -DryRun and makes the plan predictive.
-    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and (Test-Path $Session.workPath)) {
+    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and (Test-Path -LiteralPath $Session.workPath)) {
         $out = @(git -C $Session.workPath status --porcelain 2>&1)
         # FAIL CLOSED: an unreadable worktree (corrupt metadata, index lock, no git) yields no
         # output, which must NOT be read as "clean" - that would hand the --force exactly the
@@ -1952,7 +1952,7 @@ function Invoke-SessionCleanup {
             $worktreeGone = -not (Test-WorktreeStillRegistered -Porcelain $after -Path $wtPathForGit -Branch $Session.branch)
             # Litter, not a blocker: git let it go, so the teardown continues. Try to delete
             # the folder - the shell kill above should have released the directory handle (#413).
-            if ($worktreeGone -and (Test-Path $Session.workPath)) {
+            if ($worktreeGone -and (Test-Path -LiteralPath $Session.workPath)) {
                 Remove-Item -LiteralPath $Session.workPath -Recurse -Force -ErrorAction SilentlyContinue
                 if (Test-Path $Session.workPath) {
                     $actions += "NOTA git solto el worktree pero la carpeta sigue en disco: $($Session.workPath) - borrarla a mano si persiste"
