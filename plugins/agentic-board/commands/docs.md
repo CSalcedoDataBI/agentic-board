@@ -10,13 +10,19 @@ Route the request to the docs publisher.
 - `deepwiki` → run `Get-DeepWikiStatus.ps1` to report DeepWiki indexing status for this repo.
 - no argument → show this menu.
 
-## What gets published
+## Generated vs routed
 
-`/docs wiki` generates and pushes every wiki page in one operation:
+`/docs` has two distinct jobs:
+
+- **`/docs wiki`** generates pages from repo content — the README and the knowledge registry — and pushes them to the GitHub Wiki. This content is legitimately ours to generate because it lives in the repo; the wiki is a publishing surface for it.
+- **`/docs deepwiki`** does not generate anything. It resolves the repo, checks its privacy, and reports (or navigates to) the AI-authored wiki on DeepWiki. DeepWiki writes explanation — how the code works, architecture diagrams, module overviews — content no generator can produce by copying the repo it just read.
+
+`commands/*.md` files are agent instruction files (system prompts), not documentation. Generating a wiki page from an instruction file produces a verbatim copy of the AI's system prompt, not a user manual. Those pages were dropped in #418; for code and architecture reference, route to `/docs deepwiki` instead.
+
+## What `/docs wiki` publishes
 
 **Product docs** (always):
 - `Docs-Home` — from `README.md` (HTML stripped)
-- `Docs-Command-<X>` — one page per `commands/*.md` file (frontmatter stripped)
 
 **Knowledge registry** (when `knowledge/registry.json` exists):
 - `Home` — index of domains and reference counts
