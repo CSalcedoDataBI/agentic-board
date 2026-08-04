@@ -645,7 +645,10 @@ while ($true) {
 # while CI was still running would otherwise be invisible to a verdict computed from stale state.
 $prState = Get-ReviewState
 
-# CI verdict, from the last snapshot.
+# CI verdict, from the last snapshot. The deadline bounds the WAIT, not the validity of a late
+# result: if checks settle green while the loop is still open for the review side, that pass is
+# real and counts. The invariant that matters is fail-closed and it holds on every path - a pass
+# requires a PARSED, SETTLED, all-green snapshot; pending-at-exit and unreadable both block.
 $checksOk     = $true
 $ciTimedOut   = $false
 $failedChecks = @($verdictCi.Failed)
