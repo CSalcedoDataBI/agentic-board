@@ -303,14 +303,29 @@ if ($Epic -gt 0) {
     if ($LASTEXITCODE -ne 0 -or -not $epicJson) { throw "Expert-Auto: no pude leer el epic #$Epic en $repo." }
     $epicObj  = $epicJson | ConvertFrom-Json
 
-    $subsRaw = gh api graphql -f query='
-query($o:String!,$r:String!,$n:Int!){
+    # Paginated (external review round 1): first:50 without pageInfo silently truncated a large
+    # epic and could report it complete with open sub-issues still unread. Fail CLOSED per page.
+    # The cursor travels as a -f VARIABLE, never spliced into the query text - PowerShell drops
+    # embedded quotes passing args to gh.exe and an unquoted cursor breaks every paginated read
+    # past 100 items (#329).
+    $subs = @()
+    $cursor = ''
+    do {
+        $ghArgs = @('api','graphql','-f','query=
+query($o:String!,$r:String!,$n:Int!,$c:String){
   repository(owner:$o,name:$r){
-    issue(number:$n){ subIssues(first:50){ nodes { number title state } } }
+    issue(number:$n){ subIssues(first:50, after:$c){
+      pageInfo { hasNextPage endCursor }
+      nodes { number title state } } }
   }
-}' -F "o=$($rp[0])" -F "r=$($rp[1])" -F "n=$Epic" 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $subsRaw) { throw "Expert-Auto: no pude leer los sub-issues del epic #$Epic." }
-    $subs = @(($subsRaw | ConvertFrom-Json).data.repository.issue.subIssues.nodes)
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$Epic")
+        if ($cursor) { $ghArgs += @('-f',"c=$cursor") }
+        $subsRaw = gh @ghArgs 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $subsRaw) { throw "Expert-Auto: no pude leer los sub-issues del epic #$Epic." }
+        $page = ($subsRaw | ConvertFrom-Json).data.repository.issue.subIssues
+        $subs += @($page.nodes)
+        $cursor = if ($page.pageInfo.hasNextPage) { "$($page.pageInfo.endCursor)" } else { '' }
+    } while ($cursor)
     if ($subs.Count -eq 0) { throw "Expert-Auto: el epic #$Epic no tiene sub-issues nativos - usa /board plan para crearlos, o -Issue para un issue suelto." }
 
     # Enrich each sub-issue with its OPEN blockers and its linked-PR facts. Blockers are
@@ -384,9 +399,25 @@ query($o:String!,$r:String!,$n:Int!){
         if ($DryRun) {
             Write-Host ("  [DryRun] #{0}: brief -> {1}; lanzaria Board-Work -Parallel {0} -Launch -StopAtPR:{2} -BudgetMinutes {3}" -f $s.number, $briefPath, $stopAtPR, $budgetMin) -ForegroundColor DarkYellow
         } else {
-            & (Join-Path $PSScriptRoot 'Board-Work.ps1') -ProjectNum $ProjectNum -Parallel $s.number -Launch -TokenVar $TokenVar `
-                -StopAtPR:$stopAtPR -BriefFile $briefPath -Irreversible @($contract.autonomy.irreversible) -EndToEnd:$EndToEnd `
-                -BudgetMinutes $budgetMin
+            # CHILD process, not in-process `&` (external review round 1): Board-Work's -Parallel
+            # mode ends with `exit 0`, which in-process terminates THIS walker after the first
+            # launch and silently drops the rest of the wave. Invoked via -Command, not -File:
+            # -File flattens array arguments (the '129,130'->'129130' defect, PR #131), and a
+            # flattened -Irreversible list would arm a brake whose vocabulary matches nothing.
+            # Single-quoted values with doubled quotes so paths survive verbatim. A launch
+            # failure warns and the wave continues - the sub-issues are independent.
+            $sq = { param($v) "'" + ("$v" -replace "'", "''") + "'" }
+            $irrLiteral = (@($contract.autonomy.irreversible) | ForEach-Object { & $sq $_ }) -join ','
+            if (-not $irrLiteral) { $irrLiteral = "" }
+            $bwCmd = "& $(& $sq (Join-Path $PSScriptRoot 'Board-Work.ps1')) -ProjectNum $ProjectNum -Parallel $($s.number) -Launch " +
+                     "-TokenVar $(& $sq $TokenVar) -BriefFile $(& $sq $briefPath) -BudgetMinutes $budgetMin " +
+                     "-Irreversible @($irrLiteral)" +
+                     $(if ($stopAtPR) { ' -StopAtPR' } else { '' }) +
+                     $(if ($EndToEnd) { ' -EndToEnd' } else { '' })
+            & pwsh -NoProfile -Command $bwCmd
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host ("  WARN #{0}: el lanzamiento devolvio {1} - revisa arriba; la ola continua." -f $s.number, $LASTEXITCODE) -ForegroundColor DarkYellow
+            }
         }
     }
     Write-Host ""
