@@ -82,3 +82,12 @@ branch already proven merged by its PR (#273/PR #275). The proof is the PR, not 
   headRefOid == tip) rather than judged. Under `-Auto` the unmerged classes are listed and
   **skipped entirely**, never deleted: "cannot ask" resolves to keep. The dirty-worktree and
   current-worktree guards still apply.
+
+## State-dir garbage collection (#574)
+
+`/board doctor` audits git refs; the STATE dir (`.agentic-board/`) has its own reaper:
+`scripts/Clear-AbiosState.ps1` (plan only; `-Force` executes; `-MaxAgeDays`, default 14). It
+removes only regenerable per-run debris — briefings, launch scripts, expert briefs, per-issue
+logs, signal markers, compaction snapshots — never the durable records (sessions history, run
+ledger marker, contract, denial log, fleet files), never a live session's files, never anything
+it does not recognize. Run it when the state dir has accumulated months of dead runs.
