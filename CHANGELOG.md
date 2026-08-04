@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Changed
+- **The always-loaded instruction payload shrank ~60%** (#573, part of epic #561). Every
+  `/board` invocation loaded ~72 KB of instructions (≈18k tokens, ~9% of a 200k window) before
+  reading a single line of the actual issue — `commands/board.md` described all 22 verbs in full
+  and `projects-admin/SKILL.md` duplicated the three biggest. The ten heavyweight verbs (work,
+  plan, fill, field, changelog, handoff, doctor, cerrar-ciclo, telemetry, triage) now live in
+  per-verb reference files loaded **on demand** when that verb runs; the command keeps the menu,
+  one-line routing and the safety rules, and the skill keeps identity/anchoring/conventions and
+  the routing table. board.md: 34.7→9.7 KB; SKILL.md: 31.6→12.7 KB. No content was deleted —
+  every recipe moved verbatim into its reference. Contract intact: command-surface suite green
+  and README regions unchanged (docs-freshness gate). This weight was causing the very
+  auto-compactions the run-ledger machinery exists to survive — paying the disease and the cure.
 - **The brake hook stops taxing every tool call in every session** (#572, part of epic #561).
   The PreToolUse hook fires on every Bash/Edit/Write in *every* session and paid a full pwsh
   interpreter spawn (**measured ~1.3 s** on the reference machine) just to discover that no
