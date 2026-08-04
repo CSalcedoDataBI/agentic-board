@@ -311,8 +311,13 @@ function Read-BrakeMarker {
                 # An armed marker with nothing in its list brakes on nothing - which is the same
                 # as no brake at all, reached by overwriting the file with `{}`. A present marker
                 # always means armed; fall back to the full vocabulary rather than to silence.
+                # EXCEPT a budget-only marker (#565 round 6): there the empty list is the
+                # contract's own choice (merge allowed, only the time limit armed), declared by
+                # a strict boolean the same way endToEnd is - and edits to this file are already
+                # tamper-denied by the hook, so the declaration is as protected as the brake.
+                $budgetOnly = ($o.budgetOnly -is [bool] -and $o.budgetOnly)
                 $tampered = $false
-                if ($irr.Count -eq 0) {
+                if ($irr.Count -eq 0 -and -not $budgetOnly) {
                     $irr = @('merge','deploy','refresh','publish','delete')
                     $tampered = $true
                 }
@@ -381,16 +386,22 @@ function New-BrakeMarkerJson {
         [int]$BudgetMinutes = 0,
         # owner/name, recorded so a denial can SIGNAL the issue (#565): without the repo the hook
         # knows which issue braked but has nowhere to say it, and a stopped run sat silent.
-        [string]$Repo = ''
+        [string]$Repo = '',
+        # This marker exists ONLY to carry the budget (#565 review round 6): the launch armed it
+        # because BudgetMinutes > 0, not because the contract brakes on anything. An empty
+        # irreversible list is then INTENTIONAL and must stay empty - the anti-tamper fallback
+        # (empty -> full vocabulary) would otherwise deny merges to a contract that allows them.
+        [bool]$BudgetOnly = $false
     )
     $irr = @($Irreversible | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
-    if ($irr.Count -eq 0) { $irr = @('merge','deploy','refresh','publish','delete') }
+    if ($irr.Count -eq 0 -and -not $BudgetOnly) { $irr = @('merge','deploy','refresh','publish','delete') }
     return ([ordered]@{
         issue        = $Issue
         irreversible = $irr
         endToEnd     = $EndToEnd
         armedAt      = $ArmedAt
         budgetMinutes = [Math]::Max(0, $BudgetMinutes)
+        budgetOnly   = $BudgetOnly
         repo         = "$Repo".Trim()
         branch       = $Branch
         host         = $HostName
@@ -426,7 +437,8 @@ function Set-BrakeArmedState {
         [string]$ArmedAt = '',
         [bool]$EndToEnd = $false,
         [int]$BudgetMinutes = 0,
-        [string]$Repo = ''
+        [string]$Repo = '',
+        [bool]$BudgetOnly = $false
     )
     $path = Get-BrakeMarkerPath -WorkPath $WorkPath
     if (-not $Armed) {
@@ -440,7 +452,8 @@ function Set-BrakeArmedState {
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     Set-Content -LiteralPath $path -Encoding UTF8 -Value (
         New-BrakeMarkerJson -Issue $Issue -Irreversible $Irreversible -ArmedAt $ArmedAt `
-            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd -BudgetMinutes $BudgetMinutes -Repo $Repo)
+            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd -BudgetMinutes $BudgetMinutes `
+            -Repo $Repo -BudgetOnly $BudgetOnly)
     return 'armed'
 }
 

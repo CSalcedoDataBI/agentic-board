@@ -1248,9 +1248,13 @@ function Start-WorktreeSession {
         # can only enforce what the marker records, and a launch whose contract does not brake on
         # merge still deserves its time limit. -StopAtPR without a budget arms exactly as before.
         $armIntent = ([bool]$StopAtPR) -or ($SessionBudgetMinutes -gt 0)
+        # A marker armed ONLY for the budget declares it (#565 round 6), so an intentionally
+        # empty irreversible list stays empty instead of inheriting the anti-tamper full
+        # vocabulary - the contract said this run may merge, and the budget must not unsay it.
+        $budgetOnly = (-not [bool]$StopAtPR) -and ($SessionBudgetMinutes -gt 0)
         $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed $armIntent -Issue $IssueNum `
                     -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
-                    -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes -Repo $Repo
+                    -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes -Repo $Repo -BudgetOnly $budgetOnly
         if ($state -eq 'armed') {
             Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
             if ($SessionBudgetMinutes -gt 0) {

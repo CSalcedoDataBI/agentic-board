@@ -1321,3 +1321,36 @@ Describe 'Quoted text is data, not shell syntax (#565 review)' {
         Test-IsBudgetExemptCommand -Command 'git status & npm run build' | Should -BeFalse
     }
 }
+
+Describe 'Budget-only markers preserve an intentionally empty brake list (#565 round 6)' {
+    It 'budgetOnly + empty list brakes on NOTHING - the contract said this run may merge' {
+        $json = New-BrakeMarkerJson -Issue 7 -Irreversible @() -BudgetMinutes 60 -BudgetOnly $true
+        $o = $json | ConvertFrom-Json
+        @($o.irreversible).Count | Should -Be 0
+        $o.budgetOnly | Should -BeTrue
+    }
+    It 'WITHOUT budgetOnly, an empty list still falls back to the full vocabulary (anti-tamper unchanged)' {
+        $json = New-BrakeMarkerJson -Issue 7 -Irreversible @()
+        @(($json | ConvertFrom-Json).irreversible) | Should -Contain 'merge'
+    }
+    It 'Read-BrakeMarker honours budgetOnly: empty list stays empty, not tampered' {
+        $wt = Join-Path $TestDrive 'bo-wt'
+        $dir = Join-Path $wt '.agentic-board'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'brake-armed.json') -Encoding UTF8 -Value (
+            New-BrakeMarkerJson -Issue 7 -Irreversible @() -ArmedAt '2026-08-03 10:00:00' -BudgetMinutes 60 -BudgetOnly $true)
+        $m = Read-BrakeMarker -StartDir $wt
+        @($m.irreversible).Count | Should -Be 0
+        $m.emptied | Should -BeFalse
+        (Test-IsBrakedCommand -Command 'gh pr merge 42' -Irreversible $m.irreversible) | Should -BeNullOrEmpty
+    }
+    It 'a hand-emptied list with budgetOnly as a STRING does not disarm (strict boolean, like endToEnd)' {
+        $wt = Join-Path $TestDrive 'bo-wt2'
+        $dir = Join-Path $wt '.agentic-board'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'brake-armed.json') -Encoding UTF8 -Value '{"issue":7,"irreversible":[],"budgetOnly":"true"}'
+        $m = Read-BrakeMarker -StartDir $wt
+        @($m.irreversible) | Should -Contain 'merge'
+        $m.emptied | Should -BeTrue
+    }
+}
