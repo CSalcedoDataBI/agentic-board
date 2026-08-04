@@ -60,6 +60,7 @@ function Resolve-DeepWikiIndex {
 if ($MyInvocation.InvocationName -eq '.' -or $env:ABIOS_DOTSOURCE_GUARD -eq '1') { return }
 
 # ── Resolve repo ─────────────────────────────────────────────────────────────
+. (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
 if (-not $Repo) { $Repo = Get-RepoFromOrigin -Path $Root }
 if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo must be owner/name (got '$Repo')." }
@@ -71,8 +72,8 @@ if ($null -ne $OverrideIsPrivate) {
     $isPrivate = [bool]$OverrideIsPrivate
 } else {
     try {
-        $raw = (gh api "repos/$Repo" --jq '.private' 2>$null | Out-String).Trim()
-        $isPrivate = ($raw -eq 'true')
+        $raw = Invoke-Gh -GhArgs @('api', "repos/$Repo", '--jq', '.private') -What "check privacy for $Repo"
+        $isPrivate = ($raw -join '').Trim() -eq 'true'
     } catch {
         # Best-effort: if gh fails, assume public (DeepWiki probe will clarify)
         $isPrivate = $false
