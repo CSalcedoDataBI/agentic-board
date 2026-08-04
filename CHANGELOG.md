@@ -32,6 +32,15 @@
   pages`, `does NOT link to any Docs-Command-* page`) enforce the invariant.
 
 ### Added
+- **`/docs` is now a router, not a generator** (#417). `commands/docs.md` documents the split
+  between what is generated and what is routed: `/docs wiki` generates pages from repo content
+  (README + knowledge registry) and pushes them to the GitHub Wiki; `/docs deepwiki` resolves the
+  repo, checks visibility, and reports (or navigates to) the AI-authored wiki on DeepWiki without
+  generating anything. `commands/*.md` agent instruction files are explicitly excluded from
+  generation — publishing them verbatim produces AI system prompts dressed as documentation.
+  Three new Pester tests enforce the contract: `commands/docs.md` must not reference
+  `Docs-Command-*` pages (regression guard for #418), must document both subcommands, and must
+  declare the public-repos-only limit for DeepWiki at the point of use.
 - **DeepWiki MCP integration** (#416). Three connected pieces: (1) `mcp.json` toolkit catalog
   entry registers the DeepWiki MCP server (`cognitionai/deepwiki`, three tools:
   `read_wiki_structure` / `read_wiki_contents` / `ask_question`) so `/tools` can install it via
