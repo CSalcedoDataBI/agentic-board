@@ -480,13 +480,19 @@ function Get-BudgetState {
 # What an over-budget run is still allowed to do from a SHELL tool: save its state and leave.
 # Everything here is reversible wrap-up - the brake patterns are checked BEFORE this exemption in
 # the hook, so `git push origin HEAD:main` is still a refused merge, exempt list or not.
+#
+# Every pattern is ANCHORED to the start of the segment (external review, #564 round 1): matched
+# anywhere, an exempt token became a free pass - `npm run build -- git status` contained "git
+# status" and sailed through. The COMMAND must be the wrap-up, not merely mention one. The only
+# permitted prefixes are the launcher shapes (`&`, `pwsh -File ...`) that genuinely execute the
+# exempt script.
 $script:BudgetExemptPatterns = @(
-    '\bboard-handoff\.ps1\b'        # /board handoff -Save: THE thing the budget wants it to run
-    '\bboard-runledger\.ps1\b'      # closing the run ledger is part of leaving cleanly
-    '(^|\s)/board\s+handoff\b'      # the slash-command spelling
-    $script:GitCmd + '(status|diff|log|add|commit|push|stash)\b'  # commit + push the WIP
-    '\bgh\s+(pr|issue)\s+comment\b' # report where it stopped
-    '\bgh\s+(pr|issue)\s+view\b'    # read what it needs to write the handoff
+    '^(?:& )?\S*board-handoff\.ps1\b'                              # the handoff script, invoked directly
+    '^(?:& )?\S*board-runledger\.ps1\b'                            # closing the run ledger
+    '^(?:& )?(?:pwsh|powershell)\b[^;|&]*\b(board-handoff|board-runledger)\.ps1\b'  # via a pwsh launcher
+    '^/board\s+handoff\b'                                          # the slash-command spelling
+    ('^' + $script:GitCmd + '(status|diff|log|add|commit|push|stash)\b')  # commit + push the WIP
+    '^gh\s+(pr|issue)\s+(comment|view)\b'                          # report where it stopped / read for the handoff
 )
 
 # True when an over-budget shell command is part of wrapping up rather than more work. Pure.
@@ -512,10 +518,15 @@ function Test-IsBudgetExemptCommand {
 }
 
 # Writes an over-budget run may still make: the handoff surfaces and the run's own state dir.
+# `..` anywhere in the path refuses outright (external review, #564 round 1): this core is pure
+# (no filesystem), so it cannot resolve `C:\repo\.handoffs\..\src\app.ts` - and no legitimate
+# wrap-up write ever needs a parent-directory hop. Refusing the shape closes the escape without
+# needing the resolution.
 function Test-IsBudgetExemptWrite {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
     if (-not "$Path".Trim()) { return $false }
     $p = "$Path" -replace '\\', '/'
+    if ($p -match '(^|/)\.\.(/|$)') { return $false }
     return [bool]($p -match '(?i)(^|/)(HANDOFF\.md|active-handoff\.md)$|(^|/)\.handoffs(/|$)|(^|/)\.agentic-board(/|$)|(^|/)MEMORY\.md$|(^|/)evidence/[^/]+\.md$')
 }
 

@@ -58,6 +58,11 @@ Describe 'Get-ContractBudgetMinutes - the budget the launch hands to the brake m
     It 'a malformed value falls back to the default instead of crashing the launch' {
         Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = 'lots' } } | Should -Be 120
     }
+    It 'preserves an explicit 0 as "no enforcement" (external review: presence, not truthiness)' {
+        # Truthiness read a configured 0 as absent and silently re-armed the 120-minute default
+        # the owner had just switched off.
+        Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = 0 } } | Should -Be 0
+    }
 }
 
 Describe 'The enforced budget is explained in the brief (#564)' {

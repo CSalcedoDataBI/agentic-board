@@ -1103,6 +1103,16 @@ Describe 'The enforced time budget (#564)' {
             # EVERY segment must be exempt - the same per-segment rule the brake applies, in reverse.
             Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Save; npm run build' | Should -BeFalse
         }
+        It 'refuses work that merely CONTAINS an exempt phrase (external review: anchored, not matched anywhere)' {
+            # `npm run build -- git status` contained "git status" and sailed through the
+            # unanchored first cut. The command must BE the wrap-up, not mention one.
+            Test-IsBudgetExemptCommand -Command 'npm run build -- git status' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'echo see Board-Handoff.ps1 for details' | Should -BeFalse
+        }
+        It 'still allows the pwsh-launcher shape after anchoring' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -NoProfile -File scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command "& 'C:\repo\scripts\Board-Handoff.ps1' -Save" | Should -BeTrue
+        }
         It 'an empty command is not exempt' {
             Test-IsBudgetExemptCommand -Command '' | Should -BeFalse
         }
@@ -1120,6 +1130,10 @@ Describe 'The enforced time budget (#564)' {
         It 'refuses source files - that is more work' {
             Test-IsBudgetExemptWrite -Path 'C:\repo\src\app.ts' | Should -BeFalse
             Test-IsBudgetExemptWrite -Path 'C:\repo\scripts\Board-Work.ps1' | Should -BeFalse
+        }
+        It 'refuses a `..` escape through an allowed directory (external review: pure core cannot resolve, so it refuses the shape)' {
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.agentic-board\..\src\app.ts' | Should -BeFalse
+            Test-IsBudgetExemptWrite -Path 'C:\repo\.handoffs\..\src\app.ts' | Should -BeFalse
         }
     }
 

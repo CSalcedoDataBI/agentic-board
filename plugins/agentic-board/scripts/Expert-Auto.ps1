@@ -189,9 +189,21 @@ $closingSection
 # would be the reporting-intent-as-fact defect again. Pure.
 function Get-ContractBudgetMinutes {
     param([Parameter(Mandatory)][hashtable]$Contract)
+    # Presence, not truthiness (external review, #564 round 1): a configured maxMinutes of 0 is a
+    # deliberate "no budget enforcement" and must reach the marker as 0 - truthiness read it as
+    # absent and silently re-armed the 120-minute default the owner had just switched off.
     $maxMin = 120
-    if ($Contract.budget -and $Contract.budget.maxMinutes) {
-        try { $maxMin = [Math]::Max(0, [int]$Contract.budget.maxMinutes) } catch { $maxMin = 120 }
+    $b = $Contract.budget
+    if ($b) {
+        $has = $false; $val = $null
+        if ($b -is [hashtable]) {
+            if ($b.ContainsKey('maxMinutes')) { $has = $true; $val = $b['maxMinutes'] }
+        } elseif ($b.PSObject -and $b.PSObject.Properties['maxMinutes']) {
+            $has = $true; $val = $b.PSObject.Properties['maxMinutes'].Value
+        }
+        if ($has) {
+            try { $maxMin = [Math]::Max(0, [int]$val) } catch { $maxMin = 120 }
+        }
     }
     return $maxMin
 }
