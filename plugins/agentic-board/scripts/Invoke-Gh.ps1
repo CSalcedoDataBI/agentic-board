@@ -198,10 +198,14 @@ function Invoke-GhCached {
             $age = ((Get-Date) - (Get-Item -LiteralPath $path).LastWriteTime).TotalSeconds
             if ($age -lt $TtlSec) {
                 $cached = Get-Content -LiteralPath $path -Raw
-                # A HIT must behave exactly like a fresh -Json call would; a corrupt entry
-                # falls through to a real fetch instead of throwing a cache artifact.
-                if ($Json) { return ($cached | ConvertFrom-Json) }
-                return $cached
+                # A HIT must behave exactly like a fresh -Json call would; a corrupt OR EMPTY
+                # entry (Set-Content is not atomic across processes - a concurrent reader can
+                # see a truncated file) is a MISS, never a $null handed to the caller as "the
+                # board has no fields" (external review round 1).
+                if (-not [string]::IsNullOrWhiteSpace($cached)) {
+                    if ($Json) { return ($cached | ConvertFrom-Json) }
+                    return $cached
+                }
             }
         } catch { }
     }

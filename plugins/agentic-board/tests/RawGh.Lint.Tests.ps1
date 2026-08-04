@@ -55,7 +55,11 @@ BeforeAll {
 }
 
 Describe 'Raw gh lint - the wrapper is the only door that gets wider (#571)' {
-    It 'no script exceeds its frozen raw-gh baseline (new raw calls are a regression)' {
+    It 'every script matches its frozen raw-gh count EXACTLY - a ratchet, not a ceiling' {
+        # Exact match on purpose (external review round 1): a ceiling left headroom - migrate
+        # one call without lowering the baseline, and a later NEW raw call hides in the gap.
+        # Count went UP -> a new raw call (regression). Count went DOWN -> good work, lower the
+        # baseline entry so the gain is locked in.
         $violations = @()
         foreach ($f in Get-ChildItem -LiteralPath $script:ScriptsDir -Filter *.ps1 |
                  Where-Object { $_.Name -ne 'Invoke-Gh.ps1' }) {
@@ -63,19 +67,17 @@ Describe 'Raw gh lint - the wrapper is the only door that gets wider (#571)' {
             $allowed = if ($script:Baseline.ContainsKey($f.Name)) { $script:Baseline[$f.Name] } else { 0 }
             if ($count -gt $allowed) {
                 $violations += "{0}: {1} raw gh call(s), baseline {2} - route new calls through Invoke-Gh (#303: bare gh turns a 401 into an empty result)" -f $f.Name, $count, $allowed
+            } elseif ($count -lt $allowed) {
+                $violations += "{0}: {1} raw gh call(s), baseline {2} - lower this file's baseline entry to {1} so the reduction is locked in" -f $f.Name, $count, $allowed
             }
         }
         $violations | Should -BeNullOrEmpty
     }
 
-    It 'the baseline itself only shrinks: no listed file is already clean (else drop its entry)' {
-        # A baseline entry for a file with zero raw calls is a stale allowance a future raw
-        # call could hide under. Keeping the list honest is part of the lint.
+    It 'no baseline entry points at a file that no longer exists' {
         $stale = @()
         foreach ($name in $script:Baseline.Keys) {
-            $path = Join-Path $script:ScriptsDir $name
-            if (-not (Test-Path -LiteralPath $path)) { $stale += "$name (file gone)"; continue }
-            if ((script:Get-RawGhCount -Path $path) -eq 0) { $stale += "$name (already clean)" }
+            if (-not (Test-Path -LiteralPath (Join-Path $script:ScriptsDir $name))) { $stale += "$name (file gone)" }
         }
         $stale | Should -BeNullOrEmpty
     }
