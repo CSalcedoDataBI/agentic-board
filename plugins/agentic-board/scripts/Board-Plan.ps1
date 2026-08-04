@@ -45,6 +45,17 @@
     Enriched item: the Definition of Done / test plan (rendered as a bullet list).
     Any omitted enriched section renders a detectable TBD placeholder.
 
+.PARAMETER PriorArt
+    The prior-art record (queries run, candidates found with stars/license/
+    adoption, and the build / reference / extend decision). Rendered as a
+    "## Prior-art gate" section in the epic body. One of -PriorArt or
+    -NoPriorArt is REQUIRED - the script throws before creating anything
+    if neither is supplied.
+
+.PARAMETER NoPriorArt
+    Explicitly skip the prior-art search for genuinely novel work. The skip
+    is written into the epic body so the omission is visible, not invisible.
+
 .PARAMETER Repo
     owner/name. Default: derived from the current directory's origin remote.
 
@@ -59,7 +70,10 @@
     Windows USER env var holding the PAT. Defaults to GITHUB_TOKEN_PERSONAL.
 
 .EXAMPLE
-    .\Board-Plan.ps1 -Title "plan: PBIR migration" -Tasks "inventory reports", "convert themes", "validate rendering" -Description "Goal: ..."
+    .\Board-Plan.ps1 -Title "plan: PBIR migration" -Tasks "inventory reports", "convert themes", "validate rendering" -Description "Goal: ..." -PriorArt "Searched: gh search repos pbir migration ... Decision: build (no existing tool covers PBIR)."
+
+.EXAMPLE
+    .\Board-Plan.ps1 -Title "plan: novel internal tooling" -Tasks "task A", "task B" -Description "Goal: ..." -NoPriorArt
 #>
 [CmdletBinding()]
 param(
