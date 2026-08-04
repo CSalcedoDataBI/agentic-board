@@ -13,6 +13,10 @@
          skips the request AND the wait and routes straight to self-review,
          until a cooldown (-CopilotCooldownDays) expires or -EnableCopilot is
          passed. So a quota-blocked account is not re-asked on every PR (#367).
+         SILENCE arms it too (#563): a requested Copilot that never answers
+         within the review timeout gets a 1-day marker, so the next PR skips
+         the wait instead of paying it forever. And the wait itself breaks on
+         ANY review bound to the current head, not only Copilot's.
       2. If the PR touches any *.tmdl (a PBIP semantic model), runs the two
          model-quality gates and BLOCKS on either (M3.3):
            - TMDL diff review (Tmdl-DiffReview.ps1 -FailOnBreaking): a BREAKING
@@ -331,6 +335,24 @@ function Test-GateWaitDone {
     return ($ciDone -and $reviewDone)
 }
 
+<#
+    Did Copilot stay SILENT past the review deadline? (#563)
+
+    The per-account cooldown (#367) only armed when Copilot ANSWERED "cannot review" — an explicit
+    refusal review object. A Copilot that never says anything taught the gate nothing, so every PR
+    burned the full review timeout forever, which is the worst of both: the wait was always paid
+    and the self-healing never triggered. Silence past the deadline is now evidence too. Pure.
+#>
+function Test-CopilotSilentTimeout {
+    param(
+        [bool]$Requested,
+        [bool]$Answered,
+        [Parameter(Mandatory)][datetime]$Now,
+        [Parameter(Mandatory)][datetime]$Deadline
+    )
+    return ($Requested -and (-not $Answered) -and ($Now -ge $Deadline))
+}
+
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
 if ($env:ABIOS_REVIEWGATE_DOTSOURCE) { return }
 
@@ -587,6 +609,7 @@ query($o:String!, $r:String!, $n:Int!) {
       reviewDecision
       reviews(last:20) { nodes { author { login } state body submittedAt commit { oid } } }
       reviewThreads(first:50) { nodes { isResolved } }
+      comments(last:100) { nodes { body } }
     }
   }
 }'
@@ -628,10 +651,15 @@ while ($true) {
     $verdictCi = Get-ChecksVerdict -Checks $parsedList -Parsed $parsedOk
 
     # Review snapshot — while one is awaited, and at least once so the verdict section always has
-    # PR state (decision, threads, head SHA) even when no review was requested.
+    # PR state (decision, threads, head SHA) even when no review was requested. Arrival is judged
+    # by the SAME evidence rule as the final verdict (#563): any GitHub review OR recorded external
+    # review ([abios-review] comment) bound to the current head ends the wait — a human, Codex, or
+    # Copilot answering first is an answer. Stale evidence of earlier commits keeps waiting.
     if (-not $prState -or ($copilotRequested -and -not $reviewArrived)) {
         $prState = Get-ReviewState
-        $reviewArrived = [bool](@($prState.reviews.nodes) | Where-Object { $_.author.login -match '(?i)copilot' })
+        $reviewArrived = (Get-ReviewEvidence -Reviews @($prState.reviews.nodes) `
+                             -CommentBodies @(@($prState.comments.nodes) | ForEach-Object { "$($_.body)" }) `
+                             -HeadSha "$($prState.headRefOid)").reviewed
     }
 
     if (Test-GateWaitDone -ChecksSettled ([bool]$verdictCi.Settled) `
@@ -676,23 +704,33 @@ $decision   = $prState.reviewDecision
 # If Copilot answered that it could NOT review (no quota), remember it per account so the NEXT PR skips
 # the request + the wait entirely (#367). Only when we actually requested it this run — a skipped run
 # has nothing new to learn. Best-effort: a marker write failure never affects the gate verdict.
-if ($copilotRequested -and (Test-CopilotUnavailableReview $reviews)) {
+if ($copilotRequested -and (Test-CopilotUnavailableReview -Reviews $reviews -HeadSha "$($prState.headRefOid)")) {
     $cooldownDays = [Math]::Max(1, $CopilotCooldownDays)
     if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays($cooldownDays) -Reason 'Copilot answered: unable to review (quota/limit)') {
         Write-Host ("  Copilot sin disponibilidad detectada - marcado NO disponible para {0} por {1} dia(s); no lo volvere a solicitar/esperar hasta entonces (#367)." -f $copilotOwner, $cooldownDays) -ForegroundColor DarkYellow
     }
+} elseif ($copilotRequested) {
+    # SILENCE past the deadline arms the cooldown too (#563). Without this, a Copilot that never
+    # answers anything left the marker unarmed and every PR paid the full wait forever. Silence is
+    # weaker evidence than an explicit refusal, so it gets a 1-day cooldown instead of the full
+    # -CopilotCooldownDays — a slow day should not silence the reviewer for a week.
+    # "Answered" means answered FOR THE CURRENT HEAD (external review, round 2): a stale Copilot
+    # review of an earlier commit is not an answer to this run's request, and treating it as one
+    # suppressed the cooldown in exactly the repeat-timeout scenario this change removes.
+    $copilotAnswered = [bool](@($reviews) | Where-Object {
+        $_.author.login -match '(?i)copilot' -and "$($_.commit.oid)".Trim() -eq "$($prState.headRefOid)".Trim()
+    })
+    if (Test-CopilotSilentTimeout -Requested $copilotRequested -Answered $copilotAnswered -Now (Get-Date) -Deadline $reviewDeadline) {
+        if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays(1) -Reason "Copilot stayed silent past the $TimeoutMinutes-minute review timeout") {
+            Write-Host ("  Copilot no contesto en {0} min - marcado NO disponible para {1} por 1 dia; el proximo PR no pagara esta espera (#563)." -f $TimeoutMinutes, $copilotOwner) -ForegroundColor DarkYellow
+        }
+    }
 }
 
-# Evidence that someone ACTUALLY reviewed (#510). Comments are read separately from reviews because
-# the reviewers that show up on this repo comment instead of submitting review objects.
-$commentBodies = @()
-try {
-    $cj = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','comments') -What "leer los comentarios del PR #$PR"
-    $commentBodies = @(($cj | ConvertFrom-Json).comments | ForEach-Object { "$($_.body)" })
-} catch {
-    # Fail CLOSED: an unreadable comment list must not be able to manufacture "reviewed".
-    Write-Host "  WARN no pude leer los comentarios del PR - la evidencia de revision se cuenta solo por reviews." -ForegroundColor DarkYellow
-}
+# Evidence that someone ACTUALLY reviewed (#510). Comments arrive in the same authoritative
+# GraphQL read as the reviews (#563) — one source, one failure mode: an unreadable state already
+# failed the gate inside Get-ReviewState, so evidence can never be computed from half a picture.
+$commentBodies = @(@($prState.comments.nodes) | ForEach-Object { "$($_.body)" })
 $evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies $commentBodies -HeadSha "$($prState.headRefOid)"
 
 Write-Host ""

@@ -25,6 +25,25 @@ Describe 'Test-CopilotUnavailableReview (recognise the no-quota answer)' {
         Test-CopilotUnavailableReview @( (Review 'alice' 'we reached their quota limit last week') ) | Should -BeFalse
     }
     It 'is false on no reviews' { Test-CopilotUnavailableReview @() | Should -BeFalse }
+
+    Context 'head-bound refusals (#563)' {
+        BeforeAll {
+            function script:ShaReview($login, $body, $oid) {
+                [pscustomobject]@{ author = [pscustomobject]@{ login = $login }; body = $body; commit = [pscustomobject]@{ oid = $oid } }
+            }
+            $script:Head = 'abc123def456abc123def456abc123def456abcd'
+            $script:Old  = '999999999999999999999999999999999999aaaa'
+        }
+        It 'with -HeadSha, a STALE refusal (earlier commit) does not count - it is not an answer to this request' {
+            Test-CopilotUnavailableReview -Reviews @( (ShaReview 'Copilot' 'unable to review right now' $script:Old) ) -HeadSha $script:Head | Should -BeFalse
+        }
+        It 'with -HeadSha, a refusal bound to the current head DOES count' {
+            Test-CopilotUnavailableReview -Reviews @( (ShaReview 'Copilot' 'unable to review right now' $script:Head) ) -HeadSha $script:Head | Should -BeTrue
+        }
+        It 'without -HeadSha the old any-refusal behavior holds (backward compatible)' {
+            Test-CopilotUnavailableReview -Reviews @( (ShaReview 'Copilot' 'unable to review right now' $script:Old) ) | Should -BeTrue
+        }
+    }
 }
 
 Describe 'Get-CopilotSkipDecision (skip while the cooldown holds)' {
