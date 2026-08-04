@@ -193,3 +193,37 @@ Describe 'visualGroups - the owner approves SECTIONS, not file rows (#567)' {
         $r.reason | Should -Match '1 seccion'
     }
 }
+
+Describe 'Get-ApplicableDodGates - the DoD scales to the diff (#569)' {
+    BeforeAll {
+        $script:AllDod = @{ ci = $true; build = $true; lint = $true; tests = $true; bpa = $true; tmdlBreaking = $true }
+    }
+
+    It 'a docs-only diff owes only ci' {
+        $g = Get-ApplicableDodGates -Dod $script:AllDod -ChangedPaths @('README.md', 'docs/design.md')
+        ($g | Sort-Object) | Should -Be @('ci')
+    }
+    It 'a code diff owes build/lint/tests/ci but not the model gates' {
+        $g = Get-ApplicableDodGates -Dod $script:AllDod -ChangedPaths @('scripts/App.ps1')
+        ($g | Sort-Object) | Should -Be @('build','ci','lint','tests')
+    }
+    It 'a model diff owes everything' {
+        $g = Get-ApplicableDodGates -Dod $script:AllDod -ChangedPaths @('model/Ventas.tmdl', 'scripts/x.ps1')
+        ($g | Sort-Object) | Should -Be @('bpa','build','ci','lint','tests','tmdlBreaking')
+    }
+    It 'an EMPTY diff owes every enabled gate - not knowing never waives a check (fail closed)' {
+        $g = Get-ApplicableDodGates -Dod $script:AllDod -ChangedPaths @()
+        @($g).Count | Should -Be 6
+    }
+    It 'it only ever DISABLES: a gate the contract turned off never comes back' {
+        $dod = @{ ci = $true; build = $true; lint = $false; tests = $true; bpa = $false; tmdlBreaking = $true }
+        $g = Get-ApplicableDodGates -Dod $dod -ChangedPaths @('model/Ventas.tmdl')
+        $g | Should -Not -Contain 'lint'
+        $g | Should -Not -Contain 'bpa'
+        $g | Should -Contain 'tmdlBreaking'
+    }
+    It 'an unknown custom gate is always owed - unrecognized never means excused' {
+        $dod = @{ ci = $true; sonar = $true }
+        (Get-ApplicableDodGates -Dod $dod -ChangedPaths @('README.md')) | Should -Contain 'sonar'
+    }
+}
