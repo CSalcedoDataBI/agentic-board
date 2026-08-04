@@ -8,48 +8,43 @@
     raw-call count may only go DOWN. Migrate a call, lower the number here; add a raw call, this
     test names the file and fails.
 
-    The scan is a heuristic (a regex over non-comment lines), so the baseline is per-file counts
-    rather than exact locations - good enough to catch drift without false-failing on refactors
-    that merely move lines within a file. #>
+    The scan walks the PowerShell AST and counts real CommandAst invocations of `gh` (round 3 of
+    external review: a regex over lines counted user-facing STRINGS like "usa: gh issue reopen"
+    as call sites, and every phantom allowance was headroom a real new call could hide under). #>
 
 BeforeAll {
     $script:ScriptsDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
-    $script:RawGhPattern = '(^|[\s;({=|])(&\s*)?gh(\.exe)?\s+(api|pr|issue|project|repo|release|search|label|auth|workflow)\b'
 
     function script:Get-RawGhCount {
         param([string]$Path)
-        $n = 0
-        foreach ($line in (Get-Content -LiteralPath $Path)) {
-            $t = $line.Trim()
-            if ($t.StartsWith('#')) { continue }
-            if ($t -match $script:RawGhPattern) { $n++ }
-        }
-        $n
+        $tokens = $null; $errs = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errs)
+        $cmds = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)
+        @($cmds | Where-Object { $_.GetCommandName() -eq 'gh' }).Count
     }
 
-    # The frozen baseline (2026-08-04, after migrating Board-Work's worst offenders in #571).
-    # A file not listed here has ZERO tolerated raw calls.
+    # The frozen baseline (2026-08-04, AST counts, after migrating Board-Work's worst offenders
+    # in #571). A file not listed here has ZERO tolerated raw calls.
     $script:Baseline = @{
-        'Board-Work.ps1'            = 10
+        'Board-Work.ps1'            = 8
         'Apply-FieldPreset.ps1'     = 6
         'Board-Plan.ps1'            = 6
         'Board-ReviewGate.ps1'      = 5
+        'Board-Merge.ps1'           = 5
+        'New-BoardPR.ps1'           = 4
         'Expert-Auto.ps1'           = 4
-        'Board-Merge.ps1'           = 3
         'Board-Breakdown.ps1'       = 3
-        'New-BoardPR.ps1'           = 3
         'Set-BoardField.ps1'        = 3
         'Board-Doctor.ps1'          = 2
         'Expert-RunVerify.ps1'      = 2
         'Fleet-Handoff.ps1'         = 2
         'Publish-DocsWiki.ps1'      = 2
-        'Apply-LabelPreset.ps1'     = 1
-        'Brake-Guard.ps1'           = 1
         'Resolve-SkillOwner.ps1'    = 1
         'Fleet-Plan.ps1'            = 1
         'Fleet-Supervisor.ps1'      = 1
         'Get-ToolkitFreshness.ps1'  = 1
         'Install-RepoTemplates.ps1' = 1
+        'Apply-LabelPreset.ps1'     = 1
         'Board-Handoff.ps1'         = 1
     }
 }
