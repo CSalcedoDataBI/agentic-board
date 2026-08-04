@@ -1354,3 +1354,16 @@ Describe 'Budget-only markers preserve an intentionally empty brake list (#565 r
         $m.emptied | Should -BeTrue
     }
 }
+
+Describe 'Round-7 exemption closures (#565)' {
+    It 'push target must be a BRANCH - tags, other namespaces and wildcards are not WIP' {
+        Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/tags/v1' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/notes/x' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'git push origin refs/heads/*:refs/heads/*' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/heads/issue-42' | Should -BeTrue
+    }
+    It 'the runledger exemption refuses -Start - beginning new run state is not wrap-up' {
+        Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-RunLedger.ps1 -Start -Issue 42' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'scripts/Board-RunLedger.ps1 -Close -Issue 42' | Should -BeTrue
+    }
+}

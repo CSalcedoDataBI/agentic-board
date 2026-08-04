@@ -1251,7 +1251,10 @@ function Start-WorktreeSession {
         # A marker armed ONLY for the budget declares it (#565 round 6), so an intentionally
         # empty irreversible list stays empty instead of inheriting the anti-tamper full
         # vocabulary - the contract said this run may merge, and the budget must not unsay it.
-        $budgetOnly = (-not [bool]$StopAtPR) -and ($SessionBudgetMinutes -gt 0)
+        # Only when the list is ACTUALLY empty (round 7): with any verb present (say deploy),
+        # the declaration would later excuse a hand-emptied list from the anti-tamper fallback.
+        $irrClean = @($Irreversible | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        $budgetOnly = (-not [bool]$StopAtPR) -and ($SessionBudgetMinutes -gt 0) -and ($irrClean.Count -eq 0)
         $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed $armIntent -Issue $IssueNum `
                     -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
                     -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes -Repo $Repo -BudgetOnly $budgetOnly

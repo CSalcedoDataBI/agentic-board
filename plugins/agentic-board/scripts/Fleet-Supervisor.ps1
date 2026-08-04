@@ -51,11 +51,13 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
 
 # ------------------------------------------------------------------ pure verdict core
-# A session is stalled when it has run past the threshold with NO PR yet (an open PR is
-# progress, so it is never stalled). Pure -> unit-testable.
+# A session is stalled when it has run AT LEAST the threshold with NO PR yet (an open PR is
+# progress, so it is never stalled). Inclusive on purpose (#565 round 7): the watch's final
+# supervisor pass fires at its timeout, and with `-gt` a session at exactly the threshold slid
+# under it - the default 30-min watch ended with the 30-min stall never posted. Pure.
 function Test-SessionStalled {
     param([object]$Session, [int]$ThresholdMin)
-    return ([string]::IsNullOrEmpty("$($Session.pr)")) -and ([int]$Session.ageMin -gt $ThresholdMin)
+    return ([string]::IsNullOrEmpty("$($Session.pr)")) -and ([int]$Session.ageMin -ge $ThresholdMin)
 }
 
 function Get-StalledSessions {

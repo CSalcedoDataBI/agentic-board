@@ -518,7 +518,8 @@ function Get-BudgetState {
 $script:BudgetExemptHandoffSave = '(?=[^;|&]*\s-save\b)(?![^;|&]*\s-resume\b)'
 $script:BudgetExemptPatterns = @(
     ('^(?:& )?(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
-    '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
+    # -Start begins NEW run state - the runledger's wrap-up verbs are update/close (round 7).
+    '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?![^;|&]*\s-start\b)(?=\s|$)'
     # Via a pwsh launcher: the exempt script must be the -File TARGET, and the prefix may carry
     # ONLY known non-executing host flags (round 5): "any flag-shaped token" admitted -Command,
     # and `pwsh -command build.ps1 -file ...board-handoff.ps1` executes build.ps1 with '-file ...'
@@ -526,7 +527,7 @@ $script:BudgetExemptPatterns = @(
     # at all is the round-2 fix (a -Command string that merely MENTIONED the script was a free
     # pass); the closed flag list is what makes the -File the one the host actually honours.
     ('^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
-    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
+    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?![^;|&]*\s-start\b)(?=\s|$)'
     ('^/board\s+handoff\b' + $script:BudgetExemptHandoffSave)      # the slash-command spelling
     # Wrap-up git takes NO global flags (round 6): the $script:GitCmd gap admitted `-c
     # diff.external=build.cmd`, and git then executes the configured helper - the exemption
@@ -566,6 +567,7 @@ function Test-IsWipPushSegment {
     if ($tokens[0] -match '^[-+]') { return $false }        # remote must be a name, not a flag
     $ref = $tokens[1]
     if ($ref -match '^[-+]') { return $false }              # no flags, no +force refspec
+    if ($ref.Contains('*')) { return $false }               # wildcard refspecs move ref FAMILIES
     if ($ref.Contains(':')) {
         $src, $target = $ref -split ':', 2
         if (-not $src)    { return $false }                 # `:branch` is git's DELETE spelling
@@ -574,6 +576,9 @@ function Test-IsWipPushSegment {
         $target = $ref
     }
     $target = $target -replace '^refs/heads/', ''
+    # The target must be a BRANCH (round 7): refs/tags/, refs/notes/ and any other namespace
+    # publish something that is not the WIP branch this exemption exists for.
+    if ($target -match '^refs/') { return $false }
     if ($target -in @('main', 'master', 'head')) { return $false }
     if (-not $ref.Contains(':') -and $ref -eq 'head') { return $false }  # bare HEAD -> target unknown
     return $true
