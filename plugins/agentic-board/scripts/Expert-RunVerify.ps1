@@ -105,13 +105,20 @@ function Test-RunArtifactsComplete {
     $fileOk = -not [string]::IsNullOrWhiteSpace($EvidenceFileContent) -and
               "$EvidenceFileContent".Contains($marker)
     if ($fileOk -and "$EvidenceRef".Trim()) {
-        # Substance = a table row, or sections that are NOT just the link stub written back into
-        # the file (round 2: the stub emits '## Evidence' too, and a stub pointing at itself
-        # would have made the source of truth a circle with nothing inside).
-        $isStubShaped = "$EvidenceFileContent".Contains('Full evidence (single source of truth)')
-        $hasTableRow  = ("$EvidenceFileContent" -match '(?m)^\s*\|')
-        $hasSections  = ("$EvidenceFileContent" -match '(?m)^##\s')
-        $fileOk = $hasTableRow -or ($hasSections -and -not $isStubShaped)
+        # Substance = a table row, or sections WITH BODY TEXT (round 3): a bare '## Evidence'
+        # heading passed round 2's check, and headings are structure, not evidence. A body line
+        # is anything that is not a heading, not the marker comment, not the stub's link line,
+        # and not blank.
+        $hasTableRow = ("$EvidenceFileContent" -match '(?m)^\s*\|')
+        $bodyLines = @(("$EvidenceFileContent" -split "`r?`n") | Where-Object {
+            $l = "$_".Trim()
+            $l -and
+            -not $l.StartsWith('#') -and
+            -not $l.StartsWith('<!--') -and
+            -not $l.StartsWith('Full evidence') -and
+            -not $l.StartsWith('**Summary:**')
+        })
+        $fileOk = $hasTableRow -or ($bodyLines.Count -gt 0)
     }
     if (-not $fileOk) {
         $missing += 'evidence/<issue>.md (file missing, marker absent, or no substantive content)'

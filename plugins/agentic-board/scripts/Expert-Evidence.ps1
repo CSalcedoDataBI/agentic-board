@@ -70,13 +70,16 @@ function Format-EvidenceLinkStub {
         [Parameter(Mandatory)][int]$Issue,
         [object[]]$Results = @(),
         [string]$Repo = '',
-        [string]$Branch = ''
+        # The DEFAULT/base branch, not the PR branch (review round 3): the merge flow deletes the
+        # PR branch, so a branch-pinned link 404s exactly when the comment becomes the durable
+        # record. The default-branch link is a 404 only until the merge, then correct forever.
+        [string]$BaseBranch = ''
     )
     $rows = @($Results)
     $passed = @($rows | Where-Object { "$($_.result)".ToUpperInvariant() -eq 'PASS' }).Count
     $failed = @($rows | Where-Object { "$($_.result)".ToUpperInvariant() -eq 'FAIL' }).Count
     $path = "evidence/$Issue.md"
-    $link = if ($Repo -and $Branch) { "[$path](https://github.com/$Repo/blob/$Branch/$path)" } else { "``$path``" }
+    $link = if ($Repo -and $BaseBranch) { "[$path](https://github.com/$Repo/blob/$BaseBranch/$path)" } else { "``$path``" }
     @(
         '<!-- [abios-evidence] -->'
         '## Evidence'

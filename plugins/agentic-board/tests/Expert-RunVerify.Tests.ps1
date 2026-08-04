@@ -264,3 +264,18 @@ Describe 'Round-2 closures (#570)' {
         $r.complete | Should -BeTrue
     }
 }
+
+Describe 'Round-3 closure: a heading-only file is structure, not evidence (#570)' {
+    It 'marker + bare "## Evidence" heading with no body is INCOMPLETE' {
+        $stub = "<!-- [abios-evidence] -->`nFull evidence: evidence/42.md"
+        $r = Test-RunArtifactsComplete -EvidenceFileContent "<!-- [abios-evidence] -->`n## Evidence" `
+                -PrBodyContent $stub -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
+    }
+    It 'sections WITH body text still count (hand-authored evidence)' {
+        $hand = "# [abios-evidence] #42`n## What was tested`nel guard se rompio a proposito y la prueba fallo`n"
+        $stub = "<!-- [abios-evidence] -->`nFull evidence: evidence/42.md"
+        (Test-RunArtifactsComplete -EvidenceFileContent $hand -PrBodyContent $stub `
+                -IssueCommentBodies @($stub) -EvidenceRef 'evidence/42.md').complete | Should -BeTrue
+    }
+}

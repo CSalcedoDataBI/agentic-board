@@ -53,11 +53,13 @@ Describe 'Get-EvidenceTargets' {
 }
 
 Describe 'Format-EvidenceLinkStub - one source of truth, two pointers (#570)' {
-    It 'carries the marker, the summary and the linked path' {
-        $s = Format-EvidenceLinkStub -Issue 42 -Results @(@{ result = 'PASS' }, @{ result = 'PASS' }, @{ result = 'FAIL' }) -Repo 'o/r' -Branch 'issue-42-x'
+    It 'carries the marker, the summary and the linked path on the DURABLE base branch' {
+        # Base branch, not PR branch: the merge flow deletes the PR branch, and the comment is
+        # the record that outlives it (round 3).
+        $s = Format-EvidenceLinkStub -Issue 42 -Results @(@{ result = 'PASS' }, @{ result = 'PASS' }, @{ result = 'FAIL' }) -Repo 'o/r' -BaseBranch 'main'
         $s | Should -Match '\[abios-evidence\]'
         $s | Should -Match '2 passed / 1 failed'
-        $s | Should -Match 'https://github.com/o/r/blob/issue-42-x/evidence/42.md'
+        $s | Should -Match 'https://github.com/o/r/blob/main/evidence/42.md'
     }
     It 'falls back to the plain path when repo/branch are unknown' {
         $s = Format-EvidenceLinkStub -Issue 7
