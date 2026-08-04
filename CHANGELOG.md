@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Changed
+- **The brake hook stops taxing every tool call in every session** (#572, part of epic #561).
+  The PreToolUse hook fires on every Bash/Edit/Write in *every* session and paid a full pwsh
+  interpreter spawn (**measured ~1.3 s** on the reference machine) just to discover that no
+  brake marker exists — the case for every session except a launched autonomous run. At 100
+  tool calls per session that was ~2 minutes of pure interpreter startup, paid by every user in
+  every repo, and the tool had no way to see it (#568's blindness, costing #572's tax).
+  `Brake-PreCheck.cmd` now answers the common case in **~0.25 s** (5× cheaper): no marker in
+  the working directory or three ancestors → exit 0 without ever starting pwsh. Fail direction
+  unchanged: an armed worktree always reaches the real PowerShell guard with its fail-closed
+  behavior intact, and stdin passes through untouched. Verified by 4 new tests, including an
+  end-to-end deny through the shim over real stdin and a no-pwsh timing bound.
 - **GitHub reads gain a cache, and the fail-closed wrapper gains a lint that stops the
   bleeding** (#571, part of epic #561). Every gh invocation is a fresh process + TLS round trip
   and nothing was cached — a clean work cycle made ~50–65 calls, many re-reading facts that had
