@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- **The product agenda policy is written down** (#576, closing epic #561's list). CONTRIBUTING
+  now states the rebalance rule the architecture review argued for: releases should carry
+  user-facing value (the last measured week ran 8:1 self-directed); before building a new
+  self-control mechanism, ask what *measurement* would make it unnecessary; and field evidence
+  (`/board telemetry`, now with durations) outranks introspection when picking the next piece
+  of work. A policy, not a gate — deliberately unenforced.
+
 ### Changed
 - **`Board-Work.ps1` sheds its inline job scheduler and process killer** (#575, part of epic
   #561; first slice of the monolith split). The 3,176-line dispatcher — 18.7% of all script
