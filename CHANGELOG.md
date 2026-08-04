@@ -7,9 +7,11 @@
   #561). Two defects made every PR pay the full review timeout forever: the wait loop broke only
   on a review whose *author* was Copilot — a human or external review landing mid-poll kept it
   spinning — and the per-account cooldown (#367) armed only on an explicit "cannot review"
-  answer, so a Copilot that was simply *silent* taught the gate nothing. Now the wait ends on
-  **any review bound to the current head commit** (stale reviews of earlier commits keep
-  waiting — they are exactly the evidence the gate refuses), and silence past the timeout arms a
+  answer, so a Copilot that was simply *silent* taught the gate nothing. Now the wait's arrival
+  test is the **same evidence rule as the verdict** — any GitHub review *or recorded external
+  review* (`[abios-review]` comment) bound to the current head commit ends it (stale evidence of
+  earlier commits keeps waiting), the PR comments arrive in the same authoritative GraphQL read
+  as the reviews (one call fewer per poll), and silence past the timeout arms a
   **1-day cooldown** (weaker evidence than an explicit refusal, which keeps its
   `-CopilotCooldownDays` default of 7). Verified by 10 new Pester tests; mutation-checked
   (author-only arrival and inverted silence check reintroduced → 5 tests red → restored).

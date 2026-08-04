@@ -336,26 +336,6 @@ function Test-GateWaitDone {
 }
 
 <#
-    Did a review land FOR THE CURRENT HEAD? (#563)
-
-    The wait loop used to break only on a review whose AUTHOR matched 'copilot' — a human or an
-    external reviewer landing mid-poll kept the loop spinning for the full timeout even though the
-    thing being waited for (an answer about this diff) had already arrived. Any review bound to the
-    current head ends the wait now. Stale reviews from earlier commits do NOT end it: they are
-    exactly the evidence Get-ReviewEvidence refuses, so breaking on them would end the wait with
-    nothing to show for it. Pure.
-#>
-function Test-FreshReviewArrived {
-    param(
-        $Reviews = @(),
-        [string]$HeadSha = ''
-    )
-    $head = "$HeadSha".Trim()
-    if (-not $head) { return $false }
-    return [bool](@($Reviews) | Where-Object { $_ -and "$($_.commit.oid)".Trim() -eq $head })
-}
-
-<#
     Did Copilot stay SILENT past the review deadline? (#563)
 
     The per-account cooldown (#367) only armed when Copilot ANSWERED "cannot review" — an explicit
@@ -629,6 +609,7 @@ query($o:String!, $r:String!, $n:Int!) {
       reviewDecision
       reviews(last:20) { nodes { author { login } state body submittedAt commit { oid } } }
       reviewThreads(first:50) { nodes { isResolved } }
+      comments(last:100) { nodes { body } }
     }
   }
 }'
@@ -670,12 +651,15 @@ while ($true) {
     $verdictCi = Get-ChecksVerdict -Checks $parsedList -Parsed $parsedOk
 
     # Review snapshot — while one is awaited, and at least once so the verdict section always has
-    # PR state (decision, threads, head SHA) even when no review was requested. ANY review bound
-    # to the current head ends the wait, not just Copilot's (#563) — a human or external reviewer
-    # answering first is an answer.
+    # PR state (decision, threads, head SHA) even when no review was requested. Arrival is judged
+    # by the SAME evidence rule as the final verdict (#563): any GitHub review OR recorded external
+    # review ([abios-review] comment) bound to the current head ends the wait — a human, Codex, or
+    # Copilot answering first is an answer. Stale evidence of earlier commits keeps waiting.
     if (-not $prState -or ($copilotRequested -and -not $reviewArrived)) {
         $prState = Get-ReviewState
-        $reviewArrived = Test-FreshReviewArrived -Reviews @($prState.reviews.nodes) -HeadSha "$($prState.headRefOid)"
+        $reviewArrived = (Get-ReviewEvidence -Reviews @($prState.reviews.nodes) `
+                             -CommentBodies @(@($prState.comments.nodes) | ForEach-Object { "$($_.body)" }) `
+                             -HeadSha "$($prState.headRefOid)").reviewed
     }
 
     if (Test-GateWaitDone -ChecksSettled ([bool]$verdictCi.Settled) `
@@ -738,16 +722,10 @@ if ($copilotRequested -and (Test-CopilotUnavailableReview $reviews)) {
     }
 }
 
-# Evidence that someone ACTUALLY reviewed (#510). Comments are read separately from reviews because
-# the reviewers that show up on this repo comment instead of submitting review objects.
-$commentBodies = @()
-try {
-    $cj = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','comments') -What "leer los comentarios del PR #$PR"
-    $commentBodies = @(($cj | ConvertFrom-Json).comments | ForEach-Object { "$($_.body)" })
-} catch {
-    # Fail CLOSED: an unreadable comment list must not be able to manufacture "reviewed".
-    Write-Host "  WARN no pude leer los comentarios del PR - la evidencia de revision se cuenta solo por reviews." -ForegroundColor DarkYellow
-}
+# Evidence that someone ACTUALLY reviewed (#510). Comments arrive in the same authoritative
+# GraphQL read as the reviews (#563) — one source, one failure mode: an unreadable state already
+# failed the gate inside Get-ReviewState, so evidence can never be computed from half a picture.
+$commentBodies = @(@($prState.comments.nodes) | ForEach-Object { "$($_.body)" })
 $evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies $commentBodies -HeadSha "$($prState.headRefOid)"
 
 Write-Host ""

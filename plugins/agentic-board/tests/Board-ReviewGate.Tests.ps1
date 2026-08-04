@@ -306,7 +306,10 @@ Describe 'Test-GateWaitDone - CI and review waited concurrently (#562)' {
     }
 }
 
-Describe 'Test-FreshReviewArrived - ANY review of the current head ends the wait (#563)' {
+Describe 'Wait-loop arrival reuses Get-ReviewEvidence - ANY answer for the current head ends the wait (#563)' {
+    # The loop calls Get-ReviewEvidence (already pinned exhaustively above) for arrival. These
+    # tests pin the PROPERTY that matters to the wait: humans, Copilot and recorded external
+    # reviews all count as arrival; stale evidence of earlier commits does not.
     BeforeAll {
         $script:Head = 'abc123def456abc123def456abc123def456abcd'
         $script:Old  = '999999999999999999999999999999999999aaaa'
@@ -315,23 +318,14 @@ Describe 'Test-FreshReviewArrived - ANY review of the current head ends the wait
         }
     }
 
-    It 'a HUMAN review of the current head ends the wait - not only Copilot''s' {
-        Test-FreshReviewArrived -Reviews @((script:Rev 'cristobal' $script:Head)) -HeadSha $script:Head | Should -BeTrue
+    It 'a HUMAN review of the current head is an arrival - not only Copilot''s' {
+        (Get-ReviewEvidence -Reviews @((script:Rev 'cristobal' $script:Head)) -HeadSha $script:Head).reviewed | Should -BeTrue
     }
-    It 'a Copilot review of the current head ends the wait (unchanged behavior)' {
-        Test-FreshReviewArrived -Reviews @((script:Rev 'copilot-pull-request-reviewer' $script:Head)) -HeadSha $script:Head | Should -BeTrue
+    It 'a recorded EXTERNAL review ([abios-review] comment) is an arrival - the gate''s own channel counts' {
+        (Get-ReviewEvidence -CommentBodies @("<!-- [abios-review] codex/gpt-5.5 sha=$script:Head -->") -HeadSha $script:Head).reviewed | Should -BeTrue
     }
-    It 'a STALE review (earlier commit) does NOT end the wait - it is evidence the gate will refuse' {
-        Test-FreshReviewArrived -Reviews @((script:Rev 'copilot' $script:Old)) -HeadSha $script:Head | Should -BeFalse
-    }
-    It 'no reviews -> keep waiting' {
-        Test-FreshReviewArrived -Reviews @() -HeadSha $script:Head | Should -BeFalse
-    }
-    It 'fails closed with no head SHA - cannot place any review, so none counts as arrival' {
-        Test-FreshReviewArrived -Reviews @((script:Rev 'copilot' $script:Head)) -HeadSha '' | Should -BeFalse
-    }
-    It 'ignores null entries' {
-        Test-FreshReviewArrived -Reviews @($null, (script:Rev 'x' $script:Head)) -HeadSha $script:Head | Should -BeTrue
+    It 'a STALE review (earlier commit) is NOT an arrival - it is evidence the verdict will refuse' {
+        (Get-ReviewEvidence -Reviews @((script:Rev 'copilot' $script:Old)) -HeadSha $script:Head).reviewed | Should -BeFalse
     }
 }
 
