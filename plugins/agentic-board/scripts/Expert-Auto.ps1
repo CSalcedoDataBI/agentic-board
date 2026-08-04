@@ -209,14 +209,12 @@ function Get-ContractBudgetMinutes {
             $has = $true; $val = $b.PSObject.Properties['maxMinutes'].Value
         }
         if ($has) {
-            # TryParse, not a cast (round 7): casts accept shapes that are not numbers - a
-            # boolean is 1/0, and a blank behaves differently per host - and every one of those
-            # must mean "malformed -> default", never "0 -> enforcement silently off".
-            if ($val -is [int] -or $val -is [long]) { $maxMin = [Math]::Max(0, [int]$val) }
-            else {
-                $parsed = 0
-                if ([int]::TryParse("$val", [ref]$parsed)) { $maxMin = [Math]::Max(0, $parsed) }
-            }
+            # TryParse for EVERY shape (rounds 7/12): casts accept non-numbers (a boolean is
+            # 1/0) and a JSON 2147483648 arrives as Int64 and overflows an [int] cast into a
+            # crash at launch. Whatever does not parse as a plain Int32 means "malformed ->
+            # default", never a crash and never "enforcement silently off".
+            $parsed = 0
+            if ([int]::TryParse("$val", [ref]$parsed)) { $maxMin = [Math]::Max(0, $parsed) }
         }
     }
     return $maxMin

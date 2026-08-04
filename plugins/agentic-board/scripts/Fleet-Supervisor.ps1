@@ -75,7 +75,10 @@ function Test-FleetComplete {
 
 # The stall comment body. Pure, so tests pin the wording that reaches the human (#565).
 function New-StallCommentBody {
-    param([int]$Issue = 0, [int]$AgeMin = 0, [int]$ThresholdMin = 30)
+    param([int]$Issue = 0, [int]$AgeMin = 0, [int]$ThresholdMin = 30, [int]$ProjectNum = 0)
+    # The suggested command must be RUNNABLE as pasted (#565 round 12): Board-Work refuses
+    # -Start without -ProjectNum, so the board number rides along when known.
+    $projArg = if ($ProjectNum -gt 0) { "-ProjectNum $ProjectNum " } else { "-ProjectNum <board> " }
     return @"
 <!-- [abios-stall] issue=$Issue -->
 ## Autonomous run signal — session STALLED
@@ -83,7 +86,7 @@ function New-StallCommentBody {
 The session working #$Issue has been running **$AgeMin minutes with no PR** (threshold:
 $ThresholdMin min). It may be stuck, waiting on something, or dead. Check
 ``.agentic-board/logs/issue-$Issue.log``, or take the issue over with
-``Board-Work.ps1 -Start $Issue -TakeOver``.
+``Board-Work.ps1 $projArg-Start $Issue -TakeOver``.
 
 *(Posted once per issue by the fleet supervisor — #565.)*
 "@
@@ -157,7 +160,7 @@ function Get-StallMarkerName {
 # Post the [abios-stall] comment for each stalled session, once per SESSION (marker in the state
 # dir). Best-effort: a posting failure is a WARN, never a changed verdict.
 function Publish-StallSignals {
-    param([object[]]$Stalled, [int]$ThresholdMin, [switch]$Quiet)
+    param([object[]]$Stalled, [int]$ThresholdMin, [int]$BoardNum = 0, [switch]$Quiet)
     $state = Get-AbiosStateDir
     foreach ($s in @($Stalled)) {
         if (-not $s.issue -or -not $s.repo) { continue }
@@ -167,7 +170,7 @@ function Publish-StallSignals {
         $mark = if ($state) { Join-Path $state (Get-StallMarkerName -Session $s) } else { $null }
         if ($mark -and (Test-Path -LiteralPath $mark)) { continue }
         try {
-            $body = New-StallCommentBody -Issue ([int]$s.issue) -AgeMin ([int]$s.ageMin) -ThresholdMin $ThresholdMin
+            $body = New-StallCommentBody -Issue ([int]$s.issue) -AgeMin ([int]$s.ageMin) -ThresholdMin $ThresholdMin -ProjectNum $BoardNum
             # Bounded like the hook's signal post (#565 review round 2): this now runs inside the
             # session watch loop, and a hung gh call would wedge the watch - best-effort must
             # stay best-effort. Body by file, 15 seconds, then the child is killed.
@@ -208,7 +211,7 @@ if ($Json) {
     # -Post still posts under -Json (round 9): the early return silently made the switch a no-op
     # for exactly the automation (watch loops, scripts) most likely to combine them. -Quiet keeps
     # the stdout contract pure JSON (round 10) - publisher status must not corrupt the payload.
-    if ($Post -and @($verdict.stalled).Count -gt 0) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin -Quiet }
+    if ($Post -and @($verdict.stalled).Count -gt 0) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin -BoardNum $ProjectNum -Quiet }
     $verdict | ConvertTo-Json -Depth 6; return
 }
 
@@ -227,7 +230,7 @@ Write-Host ("Veredicto: {0}" -f $verdict.reason) -ForegroundColor Cyan
 if (@($verdict.stalled).Count -gt 0) {
     Write-Host ("  Estancados: {0}" -f ((@($verdict.stalled).issue) -join ', ')) -ForegroundColor Red
     Write-Host "  Sugerencia: re-planifica (Fleet-Plan.ps1) o retoma con Board-Work.ps1 -Start <n> -TakeOver." -ForegroundColor DarkYellow
-    if ($Post) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin }
+    if ($Post) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin -BoardNum $ProjectNum }
 }
 if ($verdict.shouldStop) {
     Write-Host "  >> STOP: el fleet deberia detenerse." -ForegroundColor Magenta

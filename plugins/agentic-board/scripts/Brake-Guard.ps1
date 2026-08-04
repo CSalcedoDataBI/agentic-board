@@ -834,26 +834,17 @@ function Send-RunSignal {
         }
         $body = New-SignalCommentBody -Kind $Kind -Action $Action -Issue ([int]$Marker.issue) `
                     -ElapsedMinutes $ElapsedMinutes -MaxMinutes $MaxMinutes
-        # HARD TIME BOUND (#565 review round 1): this runs on the PreToolUse hook path, and the
-        # harness waits for the hook process to exit - a hanging network call here would delay
-        # the denial it rides on. The body travels by file (no argument-quoting minefield), the
-        # post gets 10 seconds, and past that the child is killed and the dedup marker is NOT
-        # written, so a later denial retries the signal.
+        # FULLY out-of-band (#565 review rounds 1+12): the harness waits for the hook process to
+        # exit, so even a bounded synchronous wait taxed every denial. The dedup marker is
+        # written FIRST (optimistic - it is what stops a retrying agent from flooding the issue),
+        # then a detached child performs the post on its own clock and cleans up after itself.
+        # If the post fails, the comment is lost but denials.jsonl keeps the local trace - that
+        # is what best-effort means here, and it is stated rather than pretended otherwise.
+        if (-not (Set-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue))) { return }
         $bodyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-signal-" + [guid]::NewGuid().ToString('N') + ".md")
         Set-Content -LiteralPath $bodyFile -Encoding UTF8 -Value $body
-        try {
-            $proc = Start-Process -FilePath 'gh' -ArgumentList @(
-                        'issue','comment',"$($Marker.issue)",'--repo',"$($Marker.repo)",'--body-file',$bodyFile
-                    ) -WindowStyle Hidden -PassThru -RedirectStandardOutput ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-signal-out-" + [guid]::NewGuid().ToString('N'))) `
-                      -RedirectStandardError  ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-signal-err-" + [guid]::NewGuid().ToString('N')))
-            if ($proc.WaitForExit(10000)) {
-                if ($proc.ExitCode -eq 0) { $null = Set-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue) }
-            } else {
-                try { $proc.Kill() } catch { }
-            }
-        } finally {
-            Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
-        }
+        $childCmd = "try { gh issue comment $([int]$Marker.issue) --repo '$($Marker.repo)' --body-file '$bodyFile' *> `$null } finally { Remove-Item -LiteralPath '$bodyFile' -Force -ErrorAction SilentlyContinue }"
+        Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-Command',$childCmd) -WindowStyle Hidden | Out-Null
     } catch { }
 }
 
