@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Brake-PreToolUseHook.ps1\""
+            "command": "cmd /d /c \"${CLAUDE_PLUGIN_ROOT}/scripts/Brake-PreCheck.cmd\""
           }
         ]
       }
