@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- **A stopped run now signals instead of sitting silent** (#565, part of epic #561). A braked,
+  out-of-budget, or stalled run was invisible from outside — the deny payload reached only the
+  model, the supervisor's verdict existed only on a terminal nobody was required to watch, and
+  the human learned about a stall by noticing the PR never appeared. Three surfaces fix that:
+  every hook denial appends to a local `denials.jsonl` **and posts one `[abios-signal]` issue
+  comment per (kind, issue)** — deduped by a marker file so a retrying agent cannot flood the
+  issue (the brake marker now records the repo to make posting possible); the fleet supervisor
+  gained **`-Post`**, publishing an `[abios-stall]` comment for each session past the threshold
+  with no PR; and the session watch **runs the supervisor automatically every 10 poll cycles**,
+  so stalls surface without a separate human command. All signaling is best-effort and can never
+  change a verdict. Verified by 14 new Pester tests across the guard, supervisor and watch.
 - **The expert run's time budget is now enforced, not advisory** (#564, part of epic #561).
   `Get-BudgetVerdict` computed a handoff verdict that *nothing ever called* — the contract's
   120-minute budget existed only as a sentence in the brief, so a runaway run had no wall-clock

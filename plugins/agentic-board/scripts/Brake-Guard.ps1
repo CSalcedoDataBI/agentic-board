@@ -311,8 +311,13 @@ function Read-BrakeMarker {
                 # An armed marker with nothing in its list brakes on nothing - which is the same
                 # as no brake at all, reached by overwriting the file with `{}`. A present marker
                 # always means armed; fall back to the full vocabulary rather than to silence.
+                # EXCEPT a budget-only marker (#565 round 6): there the empty list is the
+                # contract's own choice (merge allowed, only the time limit armed), declared by
+                # a strict boolean the same way endToEnd is - and edits to this file are already
+                # tamper-denied by the hook, so the declaration is as protected as the brake.
+                $budgetOnly = ($o.budgetOnly -is [bool] -and $o.budgetOnly)
                 $tampered = $false
-                if ($irr.Count -eq 0) {
+                if ($irr.Count -eq 0 -and -not $budgetOnly) {
                     $irr = @('merge','deploy','refresh','publish','delete')
                     $tampered = $true
                 }
@@ -332,6 +337,7 @@ function Read-BrakeMarker {
                     endToEnd     = ($o.endToEnd -is [bool] -and $o.endToEnd)
                     armedAt      = "$($o.armedAt)"
                     budgetMinutes = $budgetMin
+                    repo         = "$($o.repo)".Trim()
                     path         = $candidate
                     emptied      = $tampered
                 }
@@ -377,16 +383,26 @@ function New-BrakeMarkerJson {
         # time from armedAt and, past this many minutes, refuses further work commands (handoff and
         # wrap-up stay allowed). 0 = no budget enforcement. Until this field, the 120-minute budget
         # existed only as a sentence in the brief - a limit nothing could apply.
-        [int]$BudgetMinutes = 0
+        [int]$BudgetMinutes = 0,
+        # owner/name, recorded so a denial can SIGNAL the issue (#565): without the repo the hook
+        # knows which issue braked but has nowhere to say it, and a stopped run sat silent.
+        [string]$Repo = '',
+        # This marker exists ONLY to carry the budget (#565 review round 6): the launch armed it
+        # because BudgetMinutes > 0, not because the contract brakes on anything. An empty
+        # irreversible list is then INTENTIONAL and must stay empty - the anti-tamper fallback
+        # (empty -> full vocabulary) would otherwise deny merges to a contract that allows them.
+        [bool]$BudgetOnly = $false
     )
     $irr = @($Irreversible | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
-    if ($irr.Count -eq 0) { $irr = @('merge','deploy','refresh','publish','delete') }
+    if ($irr.Count -eq 0 -and -not $BudgetOnly) { $irr = @('merge','deploy','refresh','publish','delete') }
     return ([ordered]@{
         issue        = $Issue
         irreversible = $irr
         endToEnd     = $EndToEnd
         armedAt      = $ArmedAt
         budgetMinutes = [Math]::Max(0, $BudgetMinutes)
+        budgetOnly   = $BudgetOnly
+        repo         = "$Repo".Trim()
         branch       = $Branch
         host         = $HostName
         note         = 'Written by /board expert auto. Removing this file disarms the brake for this worktree.'
@@ -420,7 +436,9 @@ function Set-BrakeArmedState {
         [string]$HostName = '',
         [string]$ArmedAt = '',
         [bool]$EndToEnd = $false,
-        [int]$BudgetMinutes = 0
+        [int]$BudgetMinutes = 0,
+        [string]$Repo = '',
+        [bool]$BudgetOnly = $false
     )
     $path = Get-BrakeMarkerPath -WorkPath $WorkPath
     if (-not $Armed) {
@@ -434,7 +452,8 @@ function Set-BrakeArmedState {
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     Set-Content -LiteralPath $path -Encoding UTF8 -Value (
         New-BrakeMarkerJson -Issue $Issue -Irreversible $Irreversible -ArmedAt $ArmedAt `
-            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd -BudgetMinutes $BudgetMinutes)
+            -Branch $Branch -HostName $HostName -EndToEnd $EndToEnd -BudgetMinutes $BudgetMinutes `
+            -Repo $Repo -BudgetOnly $BudgetOnly)
     return 'armed'
 }
 
@@ -499,7 +518,10 @@ function Get-BudgetState {
 $script:BudgetExemptHandoffSave = '(?=[^;|&]*\s-save\b)(?![^;|&]*\s-resume\b)'
 $script:BudgetExemptPatterns = @(
     ('^(?:& )?(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
-    '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
+    # POSITIVE verbs only (rounds 7/11): -Start begins NEW run state, and PowerShell binds
+    # unambiguous abbreviations (`-S` reaches -Start), so a blocklist of the literal spelling
+    # was not enough - the exemption now requires the full wrap-up verb, -Update or -Close.
+    '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1\b(?=[^;|&]*\s-(update|close)\b)'
     # Via a pwsh launcher: the exempt script must be the -File TARGET, and the prefix may carry
     # ONLY known non-executing host flags (round 5): "any flag-shaped token" admitted -Command,
     # and `pwsh -command build.ps1 -file ...board-handoff.ps1` executes build.ps1 with '-file ...'
@@ -507,58 +529,116 @@ $script:BudgetExemptPatterns = @(
     # at all is the round-2 fix (a -Command string that merely MENTIONED the script was a free
     # pass); the closed flag list is what makes the -File the one the host actually honours.
     ('^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
-    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
+    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-runledger\.ps1\b(?=[^;|&]*\s-(update|close)\b)'
     ('^/board\s+handoff\b' + $script:BudgetExemptHandoffSave)      # the slash-command spelling
     # Wrap-up git takes NO global flags (round 6): the $script:GitCmd gap admitted `-c
     # diff.external=build.cmd`, and git then executes the configured helper - the exemption
     # became an execution primitive. The brake keeps the flag-tolerant matcher (it must not be
     # shaken off by a flag); the exemption is a positive allowlist and stays strict instead.
-    '^git\s+(status|diff|log|add|commit|push)\b'
+    # The read-only verbs refuse --output (round 4 of #565): `git diff --output=src/app.ts`
+    # WRITES a source file through a command that reads as inspection - a shell-only side door
+    # around Test-IsBudgetExemptWrite.
+    '^git\s+(status|diff|log)(?![^;|&]*\s--output(=|\s|$))\b'
+    '^git\s+(add|commit)\b'
+    # push is handled by Test-IsWipPushSegment below, not by a pattern: five rounds of review
+    # each found one more push spelling a regex missed, and the readable token walk closed them
+    # all at once (#565 rounds 2-5).
     # stash is SAVE-ONLY (round 4): pop/apply/branch mutate the worktree and drop/clear destroy
     # state - exactly the "more work / lost work" the budget exists to stop. Bare `git stash`
     # is push and stays allowed.
     '^git\s+stash(\s+(push|save)\b.*)?\s*$'
-    '^gh\s+(pr|issue)\s+(comment|view)\b'                          # report where it stopped / read for the handoff
+    # Reporting is CREATE-only (round 8): `gh issue comment --delete-last --yes` destroys a
+    # comment through the same verb. The exempt shape must carry a body and no delete/edit flag.
+    '^gh\s+(pr|issue)\s+comment\b(?=[^;|&]*\s--body(-file)?\b)(?![^;|&]*\s--(delete-last|edit-last)\b)'
+    '^gh\s+(pr|issue)\s+view\b'                                    # read what it needs for the handoff
 )
+
+<#
+    Is this segment the ONE push shape the budget excuses - an explicit WIP-branch push? (#565)
+
+    Five review rounds each found a push spelling a regex allowlist missed (--mirror, +refspec,
+    :ref deletes, default-branch targets, and finally IMPLICIT pushes - `git push` with no
+    refspec publishes wherever the upstream points, which nothing pure can see). So the rule is
+    now positive and total: exactly `git push [-u|--set-upstream] <remote> <refspec>`, where the
+    refspec is explicit and its target is not main/master/HEAD. Anything implicit, forced,
+    deleting, wholesale or default-branch-bound is not "save your WIP". Pure.
+#>
+function Test-IsWipPushSegment {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Seg)
+    if ($Seg -notmatch '^git\s+push(\s|$)') { return $false }
+    $tokens = @((($Seg -replace '^git\s+push', '').Trim() -split '\s+') |
+                Where-Object { $_ -and $_ -notin @('-u', '--set-upstream') })
+    if ($tokens.Count -ne 2) { return $false }              # explicit remote + refspec, nothing else
+    if ($tokens[0] -match '^[-+]') { return $false }        # remote must be a name, not a flag
+    $ref = $tokens[1]
+    if ($ref -match '^[-+]') { return $false }              # no flags, no +force refspec
+    if ($ref.Contains('*')) { return $false }               # wildcard refspecs move ref FAMILIES
+    # The refspec must be EXPLICIT source:target (round 8): a bare name is ambiguous - `git push
+    # origin v1.0` publishes the TAG v1.0 when one exists, and a pure classifier cannot know.
+    if (-not $ref.Contains(':')) { return $false }
+    $src, $target = $ref -split ':', 2
+    if (-not $src)    { return $false }                     # `:branch` is git's DELETE spelling
+    if (-not $target) { return $false }
+    $target = $target -replace '^refs/heads/', ''
+    # The target must be a BRANCH (round 7): refs/tags/, refs/notes/ and any other namespace
+    # publish something that is not the WIP branch this exemption exists for.
+    if ($target -match '^refs/') { return $false }
+    if ($target -in @('main', 'master', 'head')) { return $false }
+    return $true
+}
 
 # True when an over-budget shell command is part of wrapping up rather than more work. Pure.
 function Test-IsBudgetExemptCommand {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Command)
-    # Backticks are checked on the RAW command (round 4): the normalizer strips them, so a Bash
-    # substitution (`git status `npm run build``) normalized into text the anchored patterns
-    # accept - the nested command would already have run by then. Conservative on purpose: a
-    # PowerShell escape backtick in a message is rare in wrap-up commands and easy to rephrase.
+    # Backticks and `$(` are checked on the RAW command (rounds 4/8): the normalizer strips
+    # backticks, and both forms EXECUTE even inside double quotes, so no amount of quoting makes
+    # them data. Conservative on purpose - easy to rephrase out of a wrap-up command.
     if ("$Command".Contains('`')) { return $false }
-    $norm = ConvertTo-NormalizedCommand $Command
-    if (-not $norm) { return $false }
+    if ("$Command" -match '\$\(') { return $false }
+    # TWO views of the command (#565 review). The FULL view (quotes stripped, as the shell sees
+    # arguments) drives the pattern match - a quoted script path must still match the launcher
+    # shape. The MASKED view (quoted spans -> QUOTEDARG) drives the metacharacter scan - a commit
+    # message or comment body legitimately says "(#42)", and the budget deny explicitly tells the
+    # run to leave exactly that kind of comment; text in quotes is data to the shell (the two
+    # forms that are not - $() and backticks - were just refused on the raw command above).
+    # If the two views disagree about the segment count (a quoted span carried a separator),
+    # refuse conservatively rather than pair them wrong.
+    $maskedCmd = ("$Command" -replace '"[^"]*"', ' QUOTEDARG ') -replace "'[^']*'", ' QUOTEDARG '
+    $normFull   = ConvertTo-NormalizedCommand $Command
+    $normMasked = ConvertTo-NormalizedCommand $maskedCmd
+    if (-not $normFull -or -not $normMasked) { return $false }
+
+    $splitClean = {
+        param($text)
+        $segs = @()
+        foreach ($segment in ($text -split $script:SegmentSeparator)) {
+            $seg = $segment.Trim()
+            if (-not $seg) { continue }
+            if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
+            $segs += $seg
+        }
+        return ,$segs
+    }
+    $fullSegs   = & $splitClean $normFull
+    $maskedSegs = & $splitClean $normMasked
+    if ($fullSegs.Count -ne $maskedSegs.Count -or $fullSegs.Count -eq 0) { return $false }
+
     # EVERY segment must be exempt: `Board-Handoff.ps1 -Save; npm run build` is more work wearing
     # a handoff as a hat - the same per-segment rule the brake itself applies, in reverse.
-    $sawSegment = $false
-    foreach ($segment in ($norm -split $script:SegmentSeparator)) {
-        $seg = $segment.Trim()
-        if (-not $seg) { continue }
-        if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
-        $sawSegment = $true
-        # An exempt PREFIX must not smuggle more work in the same segment (round 3): the splitter
-        # does not split on a lone `&`, and redirections / subexpressions ride inside the segment
-        # - `git status & npm run build`, `git status > src/app.ts`, `git commit -m $(npm run
-        # build)` all began with wrap-up and carried work. An exempt segment must be INERT: no
-        # background operator, no redirection, no subexpression. A LEADING `& ` is PowerShell's
-        # call operator - part of the launcher shape the patterns accept - so only that one is
-        # stripped before the check. The cost is a conservative refusal of, say, a commit message
-        # containing '&' - the deny message says how to rephrase. Parentheses are refused too
-        # (round 4): `git status (npm run build)` / `@(npm run build)` are PowerShell execution
-        # forms that survive normalization, and no wrap-up command needs them. And `#` (round 8):
-        # commented-out text satisfied the handoff's -save lookahead while the host received
-        # -resume - a wrap-up command has no business carrying a comment.
-        if (($seg -replace '^&\s+', '') -match '[&<>()#]') { return $false }
+    for ($i = 0; $i -lt $fullSegs.Count; $i++) {
+        # An exempt segment must be INERT in its SHELL SYNTAX (rounds 3/4/8): no background
+        # operator, no redirection, no grouping, no comment - judged on the MASKED view so quoted
+        # message text does not trip it. A LEADING `& ` is PowerShell's call operator - part of
+        # the launcher shape the patterns accept - so only that one is stripped first.
+        if (($maskedSegs[$i] -replace '^&\s+', '') -match '[&<>()#]') { return $false }
         $segExempt = $false
         foreach ($p in $script:BudgetExemptPatterns) {
-            if ($seg -match $p) { $segExempt = $true; break }
+            if ($fullSegs[$i] -match $p) { $segExempt = $true; break }
         }
+        if (-not $segExempt) { $segExempt = Test-IsWipPushSegment -Seg $fullSegs[$i] }
         if (-not $segExempt) { return $false }
     }
-    return $sawSegment
+    return $true
 }
 
 # Writes an over-budget run may still make: the handoff surfaces and the run's own state dir.
@@ -649,6 +729,123 @@ function New-BrakeDenyJson {
         }
     }
     return ($payload | ConvertTo-Json -Depth 5 -Compress)
+}
+
+# ── Run signals (#565): a stopped run must not sit silent ─────────────────────────
+# Until now a denial's only output went to the MODEL's stdin - the human learned about a braked
+# or out-of-budget run by noticing the PR never appeared. Every deny now (a) appends to a local
+# denial log, and (b) posts ONE issue comment per (kind, issue) - deduped by a marker file so a
+# retrying agent cannot flood the issue. All best-effort: a signal failure never changes a verdict.
+
+function Get-SignalMarkerPath {
+    param([Parameter(Mandatory)][string]$WorkPath, [Parameter(Mandatory)][string]$Kind, [int]$Issue = 0)
+    return (Join-Path (Join-Path $WorkPath '.agentic-board') "signal-$Kind-$Issue.posted")
+}
+
+function Test-SignalPosted {
+    param([Parameter(Mandatory)][string]$WorkPath, [Parameter(Mandatory)][string]$Kind, [int]$Issue = 0)
+    return (Test-Path -LiteralPath (Get-SignalMarkerPath -WorkPath $WorkPath -Kind $Kind -Issue $Issue))
+}
+
+function Set-SignalPosted {
+    param([Parameter(Mandatory)][string]$WorkPath, [Parameter(Mandatory)][string]$Kind, [int]$Issue = 0)
+    try {
+        $p = Get-SignalMarkerPath -WorkPath $WorkPath -Kind $Kind -Issue $Issue
+        $dir = Split-Path $p -Parent
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Set-Content -LiteralPath $p -Encoding UTF8 -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))
+        return $true
+    } catch { return $false }
+}
+
+# Append one line to the local denial log. Best-effort; the log is the offline trace the
+# supervisor and the human can read even when no comment could be posted.
+function Write-DenialLog {
+    param([Parameter(Mandatory)][string]$WorkPath, [string]$Kind = '', [string]$Action = '', [int]$Issue = 0)
+    try {
+        $dir = Join-Path $WorkPath '.agentic-board'
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $line = (@{ at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); kind = $Kind; action = $Action; issue = $Issue } | ConvertTo-Json -Compress)
+        Add-Content -LiteralPath (Join-Path $dir 'denials.jsonl') -Encoding UTF8 -Value $line
+        return $true
+    } catch { return $false }
+}
+
+# The comment body for a run signal. Pure, so tests pin the wording that reaches the human.
+function New-SignalCommentBody {
+    param(
+        [Parameter(Mandatory)][string]$Kind,   # 'brake' | 'budget'
+        [string]$Action = '',
+        [int]$Issue = 0,
+        [int]$ElapsedMinutes = 0,
+        [int]$MaxMinutes = 0
+    )
+    if ($Kind -eq 'budget') {
+        return @"
+<!-- [abios-signal] budget issue=$Issue -->
+## Autonomous run signal — BUDGET spent
+
+The autonomous run for #$Issue reached **$ElapsedMinutes of its $MaxMinutes-minute budget** and the
+tool layer is now refusing further work commands (#564). The run was told to wrap up: commit/push
+its WIP, save a handoff, and report. If no PR or handoff appears shortly, the session likely needs
+attention — check ``.agentic-board/logs/issue-$Issue.log`` or relaunch with a fresh budget.
+
+*(Posted once per run by the brake hook — #565.)*
+"@
+    }
+    return @"
+<!-- [abios-signal] brake issue=$Issue -->
+## Autonomous run signal — BRAKE engaged
+
+The autonomous run for #$Issue attempted an action marked irreversible (**$Action**) and the
+PreToolUse guard refused it (#516). This usually means the run reached "PR ready" and tried to
+close its own loop — the work is likely waiting for a human review + merge. If there is no PR on
+this issue yet, check ``.agentic-board/logs/issue-$Issue.log``.
+
+*(Posted once per run by the brake hook — #565.)*
+"@
+}
+
+<#
+    Emit the run signal for a denial (#565): local log always, issue comment once per (kind,
+    issue). Called by the hook AFTER the deny payload is already written - nothing here can
+    change a verdict, and every step is try/caught because the hook must stay quiet.
+#>
+function Send-RunSignal {
+    param(
+        [Parameter(Mandatory)]$Marker,
+        [Parameter(Mandatory)][string]$Kind,
+        [string]$Action = '',
+        [int]$ElapsedMinutes = 0,
+        [int]$MaxMinutes = 0
+    )
+    try {
+        $root = Split-Path (Split-Path $Marker.path -Parent) -Parent
+        if (-not $root) { return }
+        $null = Write-DenialLog -WorkPath $root -Kind $Kind -Action $Action -Issue ([int]$Marker.issue)
+        if (-not $Marker.issue -or -not "$($Marker.repo)".Trim()) { return }
+        if (Test-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue)) { return }
+        # Hydrate the token the way the board scripts do (#565 review round 2): a spawned tab
+        # does not always inherit GH_TOKEN, and returning here meant the promised comment
+        # silently never happened. If the user env has none either, still TRY - gh may carry
+        # its own CLI auth, and a failed post just leaves the dedup marker unwritten.
+        if (-not $env:GH_TOKEN) {
+            $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL', 'User')
+        }
+        $body = New-SignalCommentBody -Kind $Kind -Action $Action -Issue ([int]$Marker.issue) `
+                    -ElapsedMinutes $ElapsedMinutes -MaxMinutes $MaxMinutes
+        # FULLY out-of-band (#565 review rounds 1+12): the harness waits for the hook process to
+        # exit, so even a bounded synchronous wait taxed every denial. The dedup marker is
+        # written FIRST (optimistic - it is what stops a retrying agent from flooding the issue),
+        # then a detached child performs the post on its own clock and cleans up after itself.
+        # If the post fails, the comment is lost but denials.jsonl keeps the local trace - that
+        # is what best-effort means here, and it is stated rather than pretended otherwise.
+        if (-not (Set-SignalPosted -WorkPath $root -Kind $Kind -Issue ([int]$Marker.issue))) { return }
+        $bodyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-signal-" + [guid]::NewGuid().ToString('N') + ".md")
+        Set-Content -LiteralPath $bodyFile -Encoding UTF8 -Value $body
+        $childCmd = "try { gh issue comment $([int]$Marker.issue) --repo '$($Marker.repo)' --body-file '$bodyFile' *> `$null } finally { Remove-Item -LiteralPath '$bodyFile' -Force -ErrorAction SilentlyContinue }"
+        Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-Command',$childCmd) -WindowStyle Hidden | Out-Null
+    } catch { }
 }
 
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.

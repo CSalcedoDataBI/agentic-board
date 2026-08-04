@@ -1248,9 +1248,16 @@ function Start-WorktreeSession {
         # can only enforce what the marker records, and a launch whose contract does not brake on
         # merge still deserves its time limit. -StopAtPR without a budget arms exactly as before.
         $armIntent = ([bool]$StopAtPR) -or ($SessionBudgetMinutes -gt 0)
+        # A marker armed ONLY for the budget declares it (#565 round 6), so an intentionally
+        # empty irreversible list stays empty instead of inheriting the anti-tamper full
+        # vocabulary - the contract said this run may merge, and the budget must not unsay it.
+        # Only when the list is ACTUALLY empty (round 7): with any verb present (say deploy),
+        # the declaration would later excuse a hand-emptied list from the anti-tamper fallback.
+        $irrClean = @($Irreversible | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        $budgetOnly = (-not [bool]$StopAtPR) -and ($SessionBudgetMinutes -gt 0) -and ($irrClean.Count -eq 0)
         $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed $armIntent -Issue $IssueNum `
                     -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
-                    -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes
+                    -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes -Repo $Repo -BudgetOnly $budgetOnly
         if ($state -eq 'armed') {
             Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
             if ($SessionBudgetMinutes -gt 0) {
@@ -2328,10 +2335,35 @@ function Invoke-SessionWatch {
         [scriptblock]$GetStatus = { param($s) Get-SessionLiveStatus $s },
         [scriptblock]$ReadSessions = { Read-SessionRegistryRaw },
         [scriptblock]$Now = { Get-Date },
-        [scriptblock]$Sleep = { param($sec) Start-Sleep -Seconds $sec }
+        [scriptblock]$Sleep = { param($sec) Start-Sleep -Seconds $sec },
+        # Stall detection rides the watch (#565): every -SuperviseEvery cycles the fleet
+        # supervisor runs with -Post, so a stalled session gets its [abios-stall] issue comment
+        # WITHOUT the human having to remember a separate command. Injectable for tests;
+        # 0 disables.
+        [int]$SuperviseEvery = 10,
+        # Bounded (#565 round 11): the supervisor makes its own gh reads before the bounded
+        # posting path, so a hung network call inside it would freeze the watch loop it rides.
+        # It runs as a child killed at 120s; its output is replayed so the verdict stays visible.
+        [scriptblock]$Supervise = {
+            try {
+                $sup = Join-Path $PSScriptRoot 'Fleet-Supervisor.ps1'
+                $outF = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-sup-" + [guid]::NewGuid().ToString('N') + ".txt")
+                $errF = "$outF.err"
+                $p = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-File',$sup,'-Check','-Post','-ProjectNum',"$ProjectNum") `
+                        -WindowStyle Hidden -PassThru -RedirectStandardOutput $outF -RedirectStandardError $errF
+                if (-not $p.WaitForExit(120000)) {
+                    try { $p.Kill() } catch { }
+                    Write-Host "  WARN supervisor: no termino en 120s - se corto (senal best-effort)." -ForegroundColor DarkYellow
+                }
+                if (Test-Path $outF) { Get-Content $outF | ForEach-Object { Write-Host $_ }; Remove-Item $outF, $errF -Force -ErrorAction SilentlyContinue }
+            } catch {
+                Write-Host "  WARN supervisor: $_" -ForegroundColor DarkYellow
+            }
+        }
     )
     $start   = & $Now
     $cleaned = @{}
+    $cycle   = 0
     while ($true) {
         $sessions = @(& $ReadSessions)
         if ($sessions.Count -eq 0) {
@@ -2364,8 +2396,15 @@ function Invoke-SessionWatch {
         }
         if ((((& $Now) - $start)).TotalSeconds -ge $TimeoutSec) {
             Write-Host ("  Timeout ({0}s) con {1} sesion(es) aun en progreso." -f $TimeoutSec, $pending) -ForegroundColor DarkYellow
+            # Final supervisor pass BEFORE leaving (#565 review): with the defaults, the stall
+            # threshold (30 min) and the watch timeout (30 min) coincide, so returning here
+            # without one last -Post pass meant a full default watch could end with the stall
+            # never posted anywhere.
+            if ($SuperviseEvery -gt 0) { & $Supervise }
             return [pscustomobject]@{ allDone = $false; timedOut = $true; cleaned = @($cleaned.Keys) }
         }
+        $cycle++
+        if ($SuperviseEvery -gt 0 -and ($cycle % $SuperviseEvery) -eq 0) { & $Supervise }
         & $Sleep $PollSec
     }
 }

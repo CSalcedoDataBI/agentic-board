@@ -1100,6 +1100,45 @@ Describe 'The enforced time budget (#564)' {
             Test-IsBudgetExemptCommand -Command 'git commit -m "wip: out of budget"' | Should -BeTrue
             Test-IsBudgetExemptCommand -Command 'git push origin HEAD:issue-42-branch' | Should -BeTrue
         }
+        It 'push is WIP-shaped only: mirror/all/tags/force/delete/:ref forms are NOT wrap-up (#565 round 2)' {
+            Test-IsBudgetExemptCommand -Command 'git push --mirror origin' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push --all origin' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push --tags origin' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push --force origin HEAD:feature' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push -f origin HEAD:feature' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin --delete old-branch' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin :old-branch' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin +HEAD:feature' | Should -BeFalse   # force refspec (round 3)
+        }
+        It 'push to the DEFAULT branch is never wrap-up, whatever the contract says (round 4)' {
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD:main' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin main' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/heads/master' | Should -BeFalse
+        }
+        It 'IMPLICIT pushes are not wrap-up - the upstream may point anywhere, including main (round 5)' {
+            Test-IsBudgetExemptCommand -Command 'git push' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push -u origin HEAD' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD' | Should -BeFalse
+        }
+        It 'the explicit WIP shapes stay allowed (round 5)' {
+            Test-IsBudgetExemptCommand -Command 'git push origin HEAD:issue-42-branch' | Should -BeTrue
+            Test-IsBudgetExemptCommand -Command 'git push --set-upstream origin HEAD:issue-7-fix' | Should -BeTrue
+        }
+        It 'bare refspecs are refused - `git push origin v1.0` publishes the TAG when one exists (round 8)' {
+            Test-IsBudgetExemptCommand -Command 'git push origin v1.0' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git push -u origin issue-42-branch' | Should -BeFalse
+        }
+        It 'gh comment is CREATE-only: delete/edit-last refused, body required (round 8)' {
+            Test-IsBudgetExemptCommand -Command 'gh issue comment 42 --delete-last --yes' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'gh pr comment 42 --edit-last --body "x"' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'gh issue comment 42' | Should -BeFalse
+        }
+        It 'git diff --output writes a file through a read-shaped command - refused (round 4)' {
+            Test-IsBudgetExemptCommand -Command 'git diff --output=src/app.ts' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git log --output out.txt' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'git diff HEAD~1' | Should -BeTrue
+        }
         It 'allows reporting where it stopped' {
             Test-IsBudgetExemptCommand -Command 'gh pr comment 90 --body "out of budget, handoff saved"' | Should -BeTrue
         }
@@ -1195,5 +1234,146 @@ Describe 'The enforced time budget (#564)' {
             # list can never become a side door for the irreversible.
             Test-IsBrakedCommand -Command 'git push origin HEAD:main' -Irreversible @('merge') | Should -Be 'merge'
         }
+    }
+}
+
+Describe 'Run signals - a stopped run must not sit silent (#565)' {
+    # A denial's only output used to go to the MODEL. These pin: the local denial log, the
+    # once-per-(kind,issue) dedup markers, and the comment bodies the human actually reads.
+    Context 'signal markers (dedup)' {
+        It 'round-trips: not posted -> set -> posted' {
+            $wt = Join-Path $TestDrive 'sig-wt'
+            New-Item -ItemType Directory -Path $wt -Force | Out-Null
+            Test-SignalPosted -WorkPath $wt -Kind 'brake' -Issue 42 | Should -BeFalse
+            Set-SignalPosted  -WorkPath $wt -Kind 'brake' -Issue 42 | Should -BeTrue
+            Test-SignalPosted -WorkPath $wt -Kind 'brake' -Issue 42 | Should -BeTrue
+        }
+        It 'kinds and issues dedup independently' {
+            $wt = Join-Path $TestDrive 'sig-wt2'
+            New-Item -ItemType Directory -Path $wt -Force | Out-Null
+            Set-SignalPosted  -WorkPath $wt -Kind 'brake' -Issue 42 | Should -BeTrue
+            Test-SignalPosted -WorkPath $wt -Kind 'budget' -Issue 42 | Should -BeFalse
+            Test-SignalPosted -WorkPath $wt -Kind 'brake' -Issue 43 | Should -BeFalse
+        }
+    }
+
+    Context 'denial log' {
+        It 'appends parseable JSONL lines' {
+            $wt = Join-Path $TestDrive 'log-wt'
+            New-Item -ItemType Directory -Path $wt -Force | Out-Null
+            Write-DenialLog -WorkPath $wt -Kind 'brake' -Action 'merge' -Issue 7 | Should -BeTrue
+            Write-DenialLog -WorkPath $wt -Kind 'budget' -Issue 7 | Should -BeTrue
+            $lines = Get-Content (Join-Path $wt '.agentic-board\denials.jsonl')
+            @($lines).Count | Should -Be 2
+            ($lines[0] | ConvertFrom-Json).action | Should -Be 'merge'
+            ($lines[1] | ConvertFrom-Json).kind   | Should -Be 'budget'
+        }
+    }
+
+    Context 'comment bodies' {
+        It 'the brake signal names the action, the issue and the log to check' {
+            $b = New-SignalCommentBody -Kind 'brake' -Action 'merge' -Issue 42
+            $b | Should -Match '\[abios-signal\] brake issue=42'
+            $b | Should -Match '\*\*merge\*\*'
+            $b | Should -Match 'issue-42\.log'
+        }
+        It 'the budget signal carries the elapsed/max numbers' {
+            $b = New-SignalCommentBody -Kind 'budget' -Issue 42 -ElapsedMinutes 130 -MaxMinutes 120
+            $b | Should -Match '\[abios-signal\] budget issue=42'
+            $b | Should -Match '130 of its 120-minute budget'
+        }
+    }
+
+    Context 'Send-RunSignal fail direction' {
+        It 'logs locally and never throws when the marker has no repo (nothing to post to)' {
+            $wt = Join-Path $TestDrive 'send-wt'
+            $dir = Join-Path $wt '.agentic-board'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $markerPath = Join-Path $dir 'brake-armed.json'
+            Set-Content -LiteralPath $markerPath -Value '{}'
+            $marker = @{ issue = 9; repo = ''; path = $markerPath }
+            { Send-RunSignal -Marker $marker -Kind 'brake' -Action 'merge' } | Should -Not -Throw
+            Test-Path (Join-Path $dir 'denials.jsonl') | Should -BeTrue
+            # No repo -> no comment attempt -> no dedup marker written.
+            Test-SignalPosted -WorkPath $wt -Kind 'brake' -Issue 9 | Should -BeFalse
+        }
+    }
+}
+
+Describe 'The marker round-trips the repo (#565)' {
+    It 'New-BrakeMarkerJson carries repo and Read shape parses it back' {
+        $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge') -Repo 'owner/name'
+        ($json | ConvertFrom-Json).repo | Should -Be 'owner/name'
+    }
+    It 'a marker without repo reads as empty (older runs keep working, they just cannot signal)' {
+        $json = New-BrakeMarkerJson -Issue 7 -Irreversible @('merge')
+        ($json | ConvertFrom-Json).repo | Should -Be ''
+    }
+}
+
+Describe 'Quoted text is data, not shell syntax (#565 review)' {
+    # The budget deny tells the run to leave a comment and commit its WIP - and those messages
+    # legitimately contain "(#42)" and similar. The metacharacter scan judges SHELL SYNTAX only:
+    # quoted spans are masked first, while $() and backticks stay refused even inside quotes
+    # (they execute there).
+    It 'allows the exact wrap-up the deny message asks for' {
+        Test-IsBudgetExemptCommand -Command 'git commit -m "wip: out of budget (#42)"' | Should -BeTrue
+        Test-IsBudgetExemptCommand -Command 'gh issue comment 42 --body "out of budget, handoff saved (#42) - see log"' | Should -BeTrue
+    }
+    It 'still refuses execution forms even inside double quotes' {
+        Test-IsBudgetExemptCommand -Command 'git commit -m "done $(npm run build)"' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'gh issue comment 42 --body "x `npm run build` y"' | Should -BeFalse
+    }
+    It 'still refuses UNQUOTED operators' {
+        Test-IsBudgetExemptCommand -Command 'git status > src/app.ts' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'git status & npm run build' | Should -BeFalse
+    }
+}
+
+Describe 'Budget-only markers preserve an intentionally empty brake list (#565 round 6)' {
+    It 'budgetOnly + empty list brakes on NOTHING - the contract said this run may merge' {
+        $json = New-BrakeMarkerJson -Issue 7 -Irreversible @() -BudgetMinutes 60 -BudgetOnly $true
+        $o = $json | ConvertFrom-Json
+        @($o.irreversible).Count | Should -Be 0
+        $o.budgetOnly | Should -BeTrue
+    }
+    It 'WITHOUT budgetOnly, an empty list still falls back to the full vocabulary (anti-tamper unchanged)' {
+        $json = New-BrakeMarkerJson -Issue 7 -Irreversible @()
+        @(($json | ConvertFrom-Json).irreversible) | Should -Contain 'merge'
+    }
+    It 'Read-BrakeMarker honours budgetOnly: empty list stays empty, not tampered' {
+        $wt = Join-Path $TestDrive 'bo-wt'
+        $dir = Join-Path $wt '.agentic-board'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'brake-armed.json') -Encoding UTF8 -Value (
+            New-BrakeMarkerJson -Issue 7 -Irreversible @() -ArmedAt '2026-08-03 10:00:00' -BudgetMinutes 60 -BudgetOnly $true)
+        $m = Read-BrakeMarker -StartDir $wt
+        @($m.irreversible).Count | Should -Be 0
+        $m.emptied | Should -BeFalse
+        (Test-IsBrakedCommand -Command 'gh pr merge 42' -Irreversible $m.irreversible) | Should -BeNullOrEmpty
+    }
+    It 'a hand-emptied list with budgetOnly as a STRING does not disarm (strict boolean, like endToEnd)' {
+        $wt = Join-Path $TestDrive 'bo-wt2'
+        $dir = Join-Path $wt '.agentic-board'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'brake-armed.json') -Encoding UTF8 -Value '{"issue":7,"irreversible":[],"budgetOnly":"true"}'
+        $m = Read-BrakeMarker -StartDir $wt
+        @($m.irreversible) | Should -Contain 'merge'
+        $m.emptied | Should -BeTrue
+    }
+}
+
+Describe 'Round-7 exemption closures (#565)' {
+    It 'push target must be a BRANCH - tags, other namespaces and wildcards are not WIP' {
+        Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/tags/v1' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/notes/x' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'git push origin refs/heads/*:refs/heads/*' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'git push origin HEAD:refs/heads/issue-42' | Should -BeTrue
+    }
+    It 'the runledger exemption is POSITIVE-verb only: -Update/-Close pass, -Start and its abbreviations do not (rounds 7/11)' {
+        Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-RunLedger.ps1 -Start -Issue 42' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-RunLedger.ps1 -S -Epic 1' | Should -BeFalse
+        Test-IsBudgetExemptCommand -Command 'scripts/Board-RunLedger.ps1 -Close -Issue 42' | Should -BeTrue
+        Test-IsBudgetExemptCommand -Command 'scripts/Board-RunLedger.ps1 -Update -Issue 42 -Note done' | Should -BeTrue
     }
 }
