@@ -1087,6 +1087,10 @@ Describe 'The enforced time budget (#564)' {
         It 'allows the handoff save (THE thing the budget wants it to run)' {
             Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Save' | Should -BeTrue
         }
+        It 'refuses a handoff -Resume: resuming is the START of more work, not the end of it (round 7)' {
+            Test-IsBudgetExemptCommand -Command 'pwsh -File scripts/Board-Handoff.ps1 -Resume' | Should -BeFalse
+            Test-IsBudgetExemptCommand -Command 'scripts/Board-Handoff.ps1 -Resume' | Should -BeFalse
+        }
         It 'allows committing and pushing the WIP' {
             Test-IsBudgetExemptCommand -Command 'git add -A' | Should -BeTrue
             Test-IsBudgetExemptCommand -Command 'git commit -m "wip: out of budget"' | Should -BeTrue

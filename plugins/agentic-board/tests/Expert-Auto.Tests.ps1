@@ -63,11 +63,23 @@ Describe 'Get-ContractBudgetMinutes - the budget the launch hands to the brake m
         # the owner had just switched off.
         Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = 0 } } | Should -Be 0
     }
+    It 'a blank or boolean value is MALFORMED -> default, never "enforcement silently off" (round 7)' {
+        Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = '' } } | Should -Be 120
+        Get-ContractBudgetMinutes -Contract @{ budget = @{ maxMinutes = $true } } | Should -Be 120
+    }
 }
 
-Describe 'The enforced budget is explained in the brief (#564)' {
-    It 'tells the run the budget is mechanical and names the allowed wrap-up' {
+Describe 'The brief tells the truth about the budget (#564 round 7)' {
+    It 'a zero-budget contract is NOT briefed as mechanically enforced' {
+        $c = @{ role = 'r'; autonomy = @{ irreversible = @('merge') }; dod = @{ ci = $true }
+                budget = @{ maxIterations = 8; maxMinutes = 0 } }
+        $b = Format-AutoBrief -Contract $c -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)no enforced time budget'
+        $b | Should -Not -Match '(?i)is ENFORCED, not advisory'
+    }
+    It 'a positive budget states the enforced number and names the allowed wrap-up' {
         $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '120 min'
         $b | Should -Match '(?i)enforced'
         $b | Should -Match '(?i)handoff'
     }

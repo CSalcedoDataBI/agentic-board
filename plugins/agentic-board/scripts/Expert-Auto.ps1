@@ -74,6 +74,16 @@ function Format-AutoBrief {
         "`nAdopt the agent type ``$($Contract.roleAgent)`` for this run — its definition is your persona.`n"
     } else { '' }
 
+    # Say what is TRUE about the budget (round 7): a contract with maxMinutes 0 has enforcement
+    # deliberately off, and briefing that run "the tool layer will refuse you" would be false
+    # operator guidance - the same overclaim shape #516 removed from the brake.
+    $budgetMin = Get-ContractBudgetMinutes -Contract $Contract
+    $budgetSentence = if ($budgetMin -gt 0) {
+        "The time budget ($budgetMin min) is ENFORCED, not advisory: past it, the tool layer refuses further work commands and only the wrap-up (handoff, commit/push WIP, report) still passes. When that happens, wrap up — do not fight the refusal."
+    } else {
+        "This contract sets no enforced time budget. Still hand off (``/board handoff -Save``) rather than grind when progress stalls."
+    }
+
     # The closing section. Both branches STOP; the ordered one also says why the order is inert.
     $closingSection = if ($EndToEnd) { @"
 ## STOP before the irreversible — including the close you were ordered to make
@@ -130,10 +140,7 @@ are the method.
    Then act on what you decided: an in-scope problem → fix it in the loop and continue;
    an out-of-scope finding → file a sanitized 'discovered' issue on the board and keep going.
 6. **Loop until done or budget**: keep iterating until the DoD is green — then leave the PR ready
-   and STOP before merge — or the budget is spent -> ``/board handoff -Save``. The time budget is
-   ENFORCED, not advisory: past it, the tool layer refuses further work commands and only the
-   wrap-up (handoff, commit/push WIP, report) still passes. When that happens, wrap up — do not
-   fight the refusal.
+   and STOP before merge — or the budget is spent -> ``/board handoff -Save``. $budgetSentence
 7. **Report** — before you report anything, run ``/board expert verify`` for this issue and its PR.
    It reads the three evidence artifacts and answers COMPLETE or INCOMPLETE, naming what is missing.
    **Quote its verdict in your final report.** If it says INCOMPLETE you are not done: record what it
@@ -202,7 +209,14 @@ function Get-ContractBudgetMinutes {
             $has = $true; $val = $b.PSObject.Properties['maxMinutes'].Value
         }
         if ($has) {
-            try { $maxMin = [Math]::Max(0, [int]$val) } catch { $maxMin = 120 }
+            # TryParse, not a cast (round 7): casts accept shapes that are not numbers - a
+            # boolean is 1/0, and a blank behaves differently per host - and every one of those
+            # must mean "malformed -> default", never "0 -> enforcement silently off".
+            if ($val -is [int] -or $val -is [long]) { $maxMin = [Math]::Max(0, [int]$val) }
+            else {
+                $parsed = 0
+                if ([int]::TryParse("$val", [ref]$parsed)) { $maxMin = [Math]::Max(0, $parsed) }
+            }
         }
     }
     return $maxMin

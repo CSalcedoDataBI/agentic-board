@@ -489,17 +489,23 @@ function Get-BudgetState {
 # The exact basename, preceded by nothing or a path separator (round 6): `\S*` before the name
 # accepted any SUFFIX match, so `Evil-Board-Handoff.ps1` rode the exemption of the script it
 # merely ends like.
-$script:BudgetExemptScript = '(?:[^\s;|&]*[\\/])?(board-handoff|board-runledger)\.ps1'
+# The handoff script must be invoked with -save (round 7): Board-Handoff.ps1 also exposes
+# -Resume, which is the START of more work, not the end of it. The runledger's verbs are all
+# wrap-up, so it carries no such constraint. The lookahead is safe against smuggling because an
+# exempt segment is already required to be INERT (no ;, &, |, redirections or subexpressions).
+$script:BudgetExemptHandoffSave = '(?=[^;|&]*\s-save\b)'
 $script:BudgetExemptPatterns = @(
-    ('^(?:& )?' + $script:BudgetExemptScript + '(?=\s|$)')         # the wrap-up scripts, invoked directly
+    ('^(?:& )?(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
+    '^(?:& )?(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
     # Via a pwsh launcher: the exempt script must be the -File TARGET, and the prefix may carry
     # ONLY known non-executing host flags (round 5): "any flag-shaped token" admitted -Command,
     # and `pwsh -command build.ps1 -file ...board-handoff.ps1` executes build.ps1 with '-file ...'
     # as its ARGUMENTS - the -File this pattern trusted never reaches the host. Requiring -File
     # at all is the round-2 fix (a -Command string that merely MENTIONED the script was a free
     # pass); the closed flag list is what makes the -File the one the host actually honours.
-    ('^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+' + $script:BudgetExemptScript + '(?=\s|$)')
-    '^/board\s+handoff\b'                                          # the slash-command spelling
+    ('^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-handoff\.ps1\b' + $script:BudgetExemptHandoffSave)
+    '^(?:& )?(?:pwsh|powershell)\s+(?:(?:-noprofile|-nologo|-noninteractive|-mta|-sta|-executionpolicy\s+[^\s;|&]+)\s+)*-file\s+(?:[^\s;|&]*[\\/])?board-runledger\.ps1(?=\s|$)'
+    ('^/board\s+handoff\b' + $script:BudgetExemptHandoffSave)      # the slash-command spelling
     # Wrap-up git takes NO global flags (round 6): the $script:GitCmd gap admitted `-c
     # diff.external=build.cmd`, and git then executes the configured helper - the exemption
     # became an execution primitive. The brake keeps the flag-tolerant matcher (it must not be
