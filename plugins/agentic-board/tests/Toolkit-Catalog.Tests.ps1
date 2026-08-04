@@ -5,6 +5,7 @@ BeforeAll {
     $script:ToolkitsDir = Join-Path $PSScriptRoot '..' 'presets' 'toolkits' | Resolve-Path
     $script:QualityPath = Join-Path $script:ToolkitsDir 'quality.json'
     $script:BiPath      = Join-Path $script:ToolkitsDir 'bi.json'
+    $script:McpPath     = Join-Path $script:ToolkitsDir 'mcp.json'
 
     $script:RequiredKeys = @('name','owner','repo','kind','path','license','homepage','profiles','install','purpose')
 
@@ -14,22 +15,26 @@ BeforeAll {
 }
 
 Describe 'Toolkit catalogs' {
-    It 'both catalog files exist' {
+    It 'all catalog files exist (quality, bi, mcp)' {
         Test-Path $script:QualityPath | Should -BeTrue
         Test-Path $script:BiPath      | Should -BeTrue
+        Test-Path $script:McpPath     | Should -BeTrue
     }
 
-    It 'both parse as valid JSON arrays' {
+    It 'all parse as valid JSON arrays' {
         { Get-Catalog $script:QualityPath } | Should -Not -Throw
         { Get-Catalog $script:BiPath }      | Should -Not -Throw
+        { Get-Catalog $script:McpPath }     | Should -Not -Throw
         @(Get-Catalog $script:QualityPath).Count | Should -BeGreaterThan 0
         @(Get-Catalog $script:BiPath).Count      | Should -BeGreaterThan 0
+        @(Get-Catalog $script:McpPath).Count     | Should -BeGreaterThan 0
     }
 }
 
 Describe 'Entry schema' -ForEach @(
     @{ File = 'quality.json' }
     @{ File = 'bi.json' }
+    @{ File = 'mcp.json' }
 ) {
     BeforeEach {
         $path = Join-Path $script:ToolkitsDir $File
@@ -61,13 +66,13 @@ Describe 'Entry schema' -ForEach @(
         foreach ($e in $script:entries) { @($e.profiles).Count | Should -BeGreaterThan 0 }
     }
 
-    It "<File>: kind is skill-clone or plugin, with matching path/install" {
+    It "<File>: kind is skill-clone, plugin, or mcp, with matching path/install" {
         foreach ($e in $script:entries) {
-            $e.kind | Should -BeIn @('skill-clone','plugin')
-            if ($e.kind -eq 'plugin') {
-                [string]::IsNullOrWhiteSpace([string]$e.install) | Should -BeFalse -Because "$($e.name) is a plugin — needs an install command"
-                $e.path | Should -BeNullOrEmpty -Because "$($e.name) is a plugin — path must be null"
-                [string]::IsNullOrWhiteSpace([string]$e.detect) | Should -BeFalse -Because "$($e.name) is a plugin — needs a detect id (marketplace/plugin) for gap detection"
+            $e.kind | Should -BeIn @('skill-clone','plugin','mcp')
+            if ($e.kind -in 'plugin','mcp') {
+                [string]::IsNullOrWhiteSpace([string]$e.install) | Should -BeFalse -Because "$($e.name) is $($e.kind) — needs an install command"
+                $e.path | Should -BeNullOrEmpty -Because "$($e.name) is $($e.kind) — path must be null"
+                [string]::IsNullOrWhiteSpace([string]$e.detect) | Should -BeFalse -Because "$($e.name) is $($e.kind) — needs a detect id for gap detection"
             } else {
                 [string]::IsNullOrWhiteSpace([string]$e.path) | Should -BeFalse -Because "$($e.name) is skill-clone — needs a path"
             }
@@ -105,6 +110,32 @@ Describe 'quality.json content' {
             $e.kind     | Should -Be 'skill-clone'
             $e.profiles | Should -Contain 'quality'
         }
+    }
+}
+
+Describe 'mcp.json content (#416)' {
+    BeforeEach { $script:mcp = @(Get-Catalog $script:McpPath) }
+
+    It 'includes deepwiki-mcp entry from Cognition' {
+        $dw = $script:mcp | Where-Object { $_.name -eq 'deepwiki-mcp' }
+        $dw              | Should -Not -BeNullOrEmpty
+        $dw.kind         | Should -Be 'mcp'
+        $dw.owner        | Should -Be 'Cognition'
+        $dw.detect       | Should -Be 'deepwiki'
+        $dw.install      | Should -Match 'claude mcp add'
+        $dw.install      | Should -Match 'deepwiki'
+    }
+
+    It 'every mcp entry carries documentation profile' {
+        foreach ($e in $script:mcp) {
+            @($e.profiles) | Should -Contain 'documentation'
+        }
+    }
+
+    It 'deepwiki-mcp install command references the SSE endpoint' {
+        $dw = $script:mcp | Where-Object { $_.name -eq 'deepwiki-mcp' }
+        $dw.install | Should -Match 'sse'
+        $dw.install | Should -Match 'deepwiki\.com'
     }
 }
 
