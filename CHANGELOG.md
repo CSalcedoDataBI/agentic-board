@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **`-AutoClean` teardown now kills the Windows Terminal tab shell and deletes the worktree folder** (#413). `Board-Work.ps1 -Sessions -Watch -AutoClean` previously left the `pwsh -NoExit` tab shell alive (its handle blocked `git worktree remove` from deleting the directory) and printed a manual-cleanup note. The fix: before running `git worktree remove`, teardown finds the tab's shell by its launch-script command line (`launch-<n>.ps1` — exact match on the issue number, so sibling sessions are never touched), kills it via `Stop-ProcessTree`, waits 500 ms for the OS to release the handle, then runs `Remove-Item` after `git` de-registers the worktree. When no shell is found (session already closed, or non-`wt` launch), teardown falls back to the same attempt. Two helper additions: `Find-WtTabShellCore` (pure, testable) + `Find-WtTabShell` (thin CIM wrapper, mockable) in `BoardWork.Processes.ps1`; 6 new Pester tests including the "do not kill a different issue's shell" guard.
 - **`Publish-DocsWiki.ps1` no longer generates `Docs-Command-*` wiki pages** (#418).
   `commands/*.md` files are agent instruction files (system prompts addressed to an AI),
   not documentation. Publishing them verbatim produced a 31 KB `Docs-Command-Board` page

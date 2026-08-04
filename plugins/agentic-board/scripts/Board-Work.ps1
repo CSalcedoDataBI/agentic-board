@@ -1886,7 +1886,19 @@ function Invoke-SessionCleanup {
         $actions += "kill PID $($Session.sessionPid) (ventana pwsh propia - libera el worktree)"
         if (-not $DryRun) { Stop-ProcessTree -TargetPid ([int]$Session.sessionPid) | Out-Null }
     } elseif ($Session.via -eq 'wt') {
-        $actions += "NO mato PID (sesion wt: el shell real de la pestana no se rastrea; cierra la pestana si el worktree queda bloqueado)"
+        # Find the tab shell by its launch script: `wt` spawns `pwsh -NoExit -File launch-<n>.ps1`.
+        # The issue number in the script path makes the match exact - no risk of killing a shell
+        # for a different issue. Find-WtTabShell is mockable in tests (#413).
+        $tabShell = Find-WtTabShell $Session.issue
+        if ($tabShell) {
+            $actions += "kill PID $($tabShell.ProcessId) (pwsh tab shell de wt, launch-$($Session.issue).ps1 - libera el worktree)"
+            if (-not $DryRun) {
+                Stop-ProcessTree -TargetPid ([int]$tabShell.ProcessId) | Out-Null
+                Start-Sleep -Milliseconds 500   # give the OS time to release the directory handle
+            }
+        } else {
+            $actions += "tab shell de wt no encontrado para issue #$($Session.issue) (ya cerrado o no lanzado via wt)"
+        }
     }
     # The removal below is --force, which also wipes a DIRTY worktree, destroying whatever the
     # session left uncommitted or untracked (#276). A session that finished WITHOUT merging
@@ -1894,7 +1906,7 @@ function Invoke-SessionCleanup {
     # refuse and keep everything for a later retry. A merged session is torn down as usual: its
     # work landed, so what remains is scratch. -ForceRemoveWorktree is the deliberate discard.
     # The check is read-only, so it also runs under -DryRun and makes the plan predictive.
-    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and (Test-Path $Session.workPath)) {
+    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and (Test-Path -LiteralPath $Session.workPath)) {
         $out = @(git -C $Session.workPath status --porcelain 2>&1)
         # FAIL CLOSED: an unreadable worktree (corrupt metadata, index lock, no git) yields no
         # output, which must NOT be read as "clean" - that would hand the --force exactly the
@@ -1938,10 +1950,15 @@ function Invoke-SessionCleanup {
                 return $actions
             }
             $worktreeGone = -not (Test-WorktreeStillRegistered -Porcelain $after -Path $wtPathForGit -Branch $Session.branch)
-            # Litter, not a blocker: git let it go, so the teardown continues. Name the path -
-            # nothing else will ever clean it up, since git no longer knows about it.
-            if ($worktreeGone -and (Test-Path $Session.workPath)) {
-                $actions += "NOTA git solto el worktree pero la carpeta sigue en disco (handle abierto?): $($Session.workPath) - borrala a mano; sigo con la rama y el registro"
+            # Litter, not a blocker: git let it go, so the teardown continues. Try to delete
+            # the folder - the shell kill above should have released the directory handle (#413).
+            if ($worktreeGone -and (Test-Path -LiteralPath $Session.workPath)) {
+                Remove-Item -LiteralPath $Session.workPath -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path $Session.workPath) {
+                    $actions += "NOTA git solto el worktree pero la carpeta sigue en disco: $($Session.workPath) - borrarla a mano si persiste"
+                } else {
+                    $actions += "carpeta del worktree eliminada: $($Session.workPath)"
+                }
             }
         }
     }
