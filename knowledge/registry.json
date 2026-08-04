@@ -248,6 +248,15 @@
       "ref": "https://github.com/liberzon/claude-hooks",
       "note": "Prior art for Brake-Guard's per-segment classifier: decomposes compound bash commands and checks each sub-command against allow/deny patterns. Its test suite is a catalogue of evasion classes (subshells, backticks, env-var prefixes, redirections, quoted operators, heredocs, line continuations) - used as an adversarial checklist against our guard in #536/#539, 27 cases, all behaving as intended. MIT, so reusable; we reference the ideas, not the code (ours is PowerShell).",
       "added": "2026-07-30"
+    },
+    {
+      "id": "kn_027",
+      "domain": "Claude-Code",
+      "type": "repo",
+      "title": "skill-recorder (Microsoft)",
+      "ref": "https://github.com/microsoft/skill-recorder",
+      "note": "Desktop app: records an on-screen session and reconstructs it into a SKILL.md or Automation via the GitHub Copilot CLI — authoring a skill from a demonstration instead of from prose. MIT. Needs a Copilot seat + screen-recording permission; install by hand from the pinned release command.",
+      "added": "2026-08-04"
     }
   ]
 }

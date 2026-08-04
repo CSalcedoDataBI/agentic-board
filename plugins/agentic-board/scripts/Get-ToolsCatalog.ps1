@@ -42,6 +42,7 @@ param(
     [string]$Id,
     [string[]]$InstalledNames,
     [string[]]$InstalledPlugins,
+    [string[]]$InstalledMcpServers,
     [switch]$Json
 )
 
@@ -58,13 +59,22 @@ if (-not $PSBoundParameters.ContainsKey('InstalledPlugins')) {
     $pl = Join-Path $PSScriptRoot 'Get-InstalledPlugins.ps1'
     $InstalledPlugins = if (Test-Path $pl) { @(& $pl) } else { @() }
 }
+if (-not $PSBoundParameters.ContainsKey('InstalledMcpServers')) {
+    $ms = Join-Path $PSScriptRoot 'Get-InstalledMcpServers.ps1'
+    $InstalledMcpServers = if (Test-Path $ms) { @(& $ms) } else { @() }
+}
 $haveSkill = @{}; foreach ($n in $InstalledNames)   { if ($n) { $haveSkill[([string]$n).ToLower()]  = $true } }
 $havePlugin = @{}; foreach ($p in $InstalledPlugins) { if ($p) { $havePlugin[([string]$p).ToLower()] = $true } }
+$haveMcp    = @{}; foreach ($m in $InstalledMcpServers) { if ($m) { $haveMcp[([string]$m).ToLower()] = $true } }
 
 function Test-PresetInstalled($e) {
     if ($e.kind -eq 'plugin') {
         $key = if ($e.PSObject.Properties.Name -contains 'detect' -and $e.detect) { $e.detect } else { $e.name }
         return $havePlugin.ContainsKey(([string]$key).ToLower())
+    }
+    if ($e.kind -eq 'mcp') {
+        $key = if ($e.PSObject.Properties.Name -contains 'detect' -and $e.detect) { $e.detect } else { $e.name }
+        return $haveMcp.ContainsKey(([string]$key).ToLower())
     }
     return $haveSkill.ContainsKey(([string]$e.name).ToLower())
 }
@@ -96,8 +106,8 @@ if (Test-Path -LiteralPath $CatalogDir) {
         $stem = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
         foreach ($e in @(Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json)) {
             $installed = Test-PresetInstalled $e
-            $method = if ($e.kind -eq 'plugin' -and $e.install) { $e.install } else { $e.kind }
-            $pkey = if ($e.kind -eq 'plugin') { "plugin:$(([string]($(if ($e.detect) { $e.detect } else { $e.name }))).ToLower())" }
+            $method = if ($e.kind -in 'plugin','mcp' -and $e.install) { $e.install } else { $e.kind }
+            $pkey = if ($e.kind -in 'plugin','mcp') { "$($e.kind):$(([string]($(if ($e.detect) { $e.detect } else { $e.name }))).ToLower())" }
                     elseif ($e.repo -and $e.path) { "skill:$((([string]$e.repo)+'#'+([string]$e.path)).ToLower())" }
                     else { "name:$(([string]$e.name).ToLower())" }
             Add-Key $pkey ([pscustomobject]@{
