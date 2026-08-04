@@ -2,41 +2,19 @@
 <#  Pester tests for Publish-DocsWiki.ps1 page generation (-PagesOnly, no git/network).
     Validates:
       - Docs-Home is generated from README.md (HTML stripped, GENERATED marker present)
-      - One Docs-Command-<X> page per commands/*.md file (frontmatter + agent artifacts stripped)
-      - Navigation links: command pages link back to Docs-Home; Home links to each command
       - Knowledge registry pages (Home + Knowledge-<Domain>) when registry.json exists
       - _Sidebar and _Footer navigation pages
       - Empty states: README with only HTML still produces a Docs-Home
       - Uninitialized wiki produces an actionable error with the wiki URL
+
+    Note: Docs-Command-* pages were dropped in #418.  commands/*.md are agent instruction
+    files (system prompts), not documentation.  Verifying that a page "generates" was never
+    evidence that it "reads" — a 31 KB dump of internal recipes passes the GENERATED marker
+    check while being worse than nothing as documentation.  The generator was removed; for
+    code and architecture reference, route users to DeepWiki instead.
 #>
 BeforeAll {
     $script:Engine = Join-Path $PSScriptRoot '..' 'scripts' 'Publish-DocsWiki.ps1' | Resolve-Path
-
-    # Helper: create a minimal fake repo root with README.md and commands/*.md
-    function New-FakeRoot {
-        param(
-            [string]$ReadmeContent = '',
-            [hashtable]$Commands   = @{}   # basename -> content
-        )
-        $root = Join-Path ([IO.Path]::GetTempPath()) ("docswiki-t-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $root -Force | Out-Null
-        if ($ReadmeContent -or $ReadmeContent -eq '') {
-            $ReadmeContent | Set-Content -LiteralPath (Join-Path $root 'README.md') -Encoding utf8
-        }
-        $cmdsDir = Join-Path $root 'commands'
-        New-Item -ItemType Directory -Path $cmdsDir -Force | Out-Null
-        foreach ($name in $Commands.Keys) {
-            $Commands[$name] | Set-Content -LiteralPath (Join-Path $cmdsDir "$name.md") -Encoding utf8
-        }
-        # Also put commands dir at the expected relative path for the script (../commands from scripts/)
-        # The script resolves $commandsDir = Join-Path $PSScriptRoot '..' 'commands'
-        # so we wire a symlink-free approach: override by setting $env:ABIOS_DOCS_COMMANDS_DIR if
-        # the script supports it, or simply use the real commands dir (which always exists).
-        #
-        # Because -PagesOnly uses the REAL commandsDir (relative to PSScriptRoot), we test with
-        # both the real commands dir and the README we supply via -Root.
-        $root
-    }
 
     # Helper: run the script in -PagesOnly mode and return a hashtable of page-name -> content
     function Invoke-PagesOnly {
@@ -83,12 +61,9 @@ Describe 'Publish-DocsWiki — page set' {
         $script:Pages.Keys | Should -Contain 'Docs-Home'
     }
 
-    It 'generates one Docs-Command-<X> page per command file' {
-        $commandFiles = @(Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'commands') -Filter '*.md' -File)
-        foreach ($cf in $commandFiles) {
-            $expectedSlug = 'Docs-Command-' + ($cf.BaseName.Substring(0,1).ToUpper() + $cf.BaseName.Substring(1))
-            $script:Pages.Keys | Should -Contain $expectedSlug -Because "commands/$($cf.Name) must produce a wiki page"
-        }
+    It 'does NOT generate any Docs-Command-* pages' {
+        $cmdPages = @($script:Pages.Keys | Where-Object { $_ -like 'Docs-Command-*' })
+        $cmdPages | Should -BeNullOrEmpty -Because 'commands/*.md are agent prompts, not documentation (#418)'
     }
 
     It 'generates _Sidebar navigation page' {
@@ -99,10 +74,10 @@ Describe 'Publish-DocsWiki — page set' {
         $script:Pages.Keys | Should -Contain '_Footer'
     }
 
-    It 'generates exactly 3 + (command files) + (knowledge pages) total pages' {
-        $commandCount = @(Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'commands') -Filter '*.md' -File).Count
-        $knExtra      = Get-KnowledgePageCount -Root $script:RepoRoot
-        $script:Pages.Count | Should -Be ($commandCount + 3 + $knExtra)
+    It 'generates exactly 3 + (knowledge pages) total pages' {
+        $knExtra = Get-KnowledgePageCount -Root $script:RepoRoot
+        # Fixed set: Docs-Home + _Sidebar + _Footer (+ optional knowledge pages)
+        $script:Pages.Count | Should -Be (3 + $knExtra)
     }
 }
 
@@ -138,68 +113,12 @@ Describe 'Publish-DocsWiki — Docs-Home content' {
         $script:DocsHomePage | Should -Match 'agentic-board'
     }
 
-    It 'links to each command page' {
-        $commandFiles = @(Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'commands') -Filter '*.md' -File)
-        $content = $script:DocsHomePage   # capture before foreach to avoid scope drift
-        foreach ($cf in $commandFiles) {
-            $slug    = 'Docs-Command-' + ($cf.BaseName.Substring(0,1).ToUpper() + $cf.BaseName.Substring(1))
-            $pattern = [regex]::Escape("($slug)")
-            $content | Should -Match $pattern -Because "Home must link to $slug"
-        }
+    It 'does NOT link to any Docs-Command-* page' {
+        $script:DocsHomePage | Should -Not -Match 'Docs-Command-' -Because 'command pages were dropped in #418'
     }
 
     It 'contains a "Last published" datestamp' {
         $script:DocsHomePage | Should -Match 'Last published \d{4}-\d{2}-\d{2}'
-    }
-}
-
-# ─────────────────────────────────────────────────────────────────────────────────────
-Describe 'Publish-DocsWiki — Docs-Command-<X> content' {
-    BeforeAll {
-        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
-        $script:Out      = Join-Path ([IO.Path]::GetTempPath()) ("docswiki-cmds-" + [guid]::NewGuid().ToString('N'))
-        $script:Pages    = Invoke-PagesOnly -Root $script:RepoRoot -OutDir $script:Out
-        # Pick the 'board' command page as the representative rich test subject
-        $script:BoardPage = $script:Pages['Docs-Command-Board']
-    }
-    AfterAll { if ($script:Out -and (Test-Path $script:Out)) { Remove-Item $script:Out -Recurse -Force } }
-
-    It 'each command page carries the GENERATED marker' {
-        foreach ($key in ($script:Pages.Keys | Where-Object { $_ -like 'Docs-Command-*' })) {
-            $script:Pages[$key] | Should -Match 'GENERATED by /docs wiki' -Because "$key must carry the generated marker"
-        }
-    }
-
-    It 'each command page strips the YAML frontmatter' {
-        foreach ($key in ($script:Pages.Keys | Where-Object { $_ -like 'Docs-Command-*' })) {
-            $script:Pages[$key] | Should -Not -Match '(?m)^---$' -Because "$key must not contain raw YAML frontmatter"
-        }
-    }
-
-    It 'strips the "You are running the agentic-board /X command." line' {
-        $script:BoardPage | Should -Not -Match 'You are running the agentic-board /board command\.'
-    }
-
-    It 'strips the "Arguments: $ARGUMENTS" template artifact' {
-        foreach ($key in ($script:Pages.Keys | Where-Object { $_ -like 'Docs-Command-*' })) {
-            $script:Pages[$key] | Should -Not -Match '\$ARGUMENTS' -Because "$key must not contain the raw template variable"
-        }
-    }
-
-    It 'includes the description from frontmatter as a blockquote' {
-        # board.md description starts with "Administer/automate a GitHub Projects board"
-        $script:BoardPage | Should -Match '> Administer/automate a GitHub Projects board'
-    }
-
-    It 'includes substantive command content (not just the header)' {
-        # The board page documents its verbs — check one known verb keyword
-        $script:BoardPage | Should -Match '\bwork\b'
-    }
-
-    It 'links back to Docs-Home' {
-        foreach ($key in ($script:Pages.Keys | Where-Object { $_ -like 'Docs-Command-*' })) {
-            $script:Pages[$key] | Should -Match '\[← Product Docs\]\(Docs-Home\)' -Because "$key must link back to Docs-Home"
-        }
     }
 }
 
@@ -285,14 +204,8 @@ Describe 'Publish-DocsWiki — _Sidebar content' {
         $script:SidebarPage | Should -Match '\[Home\]\(Docs-Home\)'
     }
 
-    It 'links to each command page' {
-        $commandFiles = @(Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'commands') -Filter '*.md' -File)
-        $content = $script:SidebarPage
-        foreach ($cf in $commandFiles) {
-            $slug    = 'Docs-Command-' + ($cf.BaseName.Substring(0,1).ToUpper() + $cf.BaseName.Substring(1))
-            $pattern = [regex]::Escape("($slug)")
-            $content | Should -Match $pattern -Because "_Sidebar must link to $slug"
-        }
+    It 'does NOT link to any Docs-Command-* page' {
+        $script:SidebarPage | Should -Not -Match 'Docs-Command-' -Because 'command pages were dropped in #418'
     }
 
     It 'contains a Knowledge section linking to Home' {

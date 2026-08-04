@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`Publish-DocsWiki.ps1` no longer generates `Docs-Command-*` wiki pages** (#418).
+  `commands/*.md` files are agent instruction files (system prompts addressed to an AI),
+  not documentation. Publishing them verbatim produced a 31 KB `Docs-Command-Board` page
+  full of internal recipes, script paths and conditional branches — instructions readable
+  only by the agent that would execute them. The `_Sidebar` no longer links to command
+  pages. `Docs-Home` is now purely the README with HTML stripped. Stale `Docs-Command-*`
+  pages left in the wiki are automatically removed on the next publish (the clone-write-
+  `git add -A` cycle stages their deletion). The CI freshness step is annotated to explain
+  why "it generates" was never evidence that "it reads" — a check that cannot ask that
+  question will report green on garbage forever. For code and architecture reference, route
+  to DeepWiki instead of generating. 15 Pester tests updated; the `Docs-Command-<X>`
+  describe block (7 tests) was removed; 2 new tests (`does NOT generate any Docs-Command-*
+  pages`, `does NOT link to any Docs-Command-* page`) enforce the invariant.
+
 ### Added
 - **`/board plan` prior-art gate** (#415). `Board-Plan.ps1` now refuses to create an epic
   unless the caller provides either `-PriorArt "<block>"` (queries run, candidates found with
