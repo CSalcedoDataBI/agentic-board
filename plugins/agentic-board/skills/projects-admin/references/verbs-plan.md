@@ -12,8 +12,15 @@ Loaded on demand by /board (#573).
      goal + substantial tasks, show the same proposal, and WAIT for approval. Link the doc in
      the description ONLY as a full `https://github.com/<owner>/<repo>/blob/<branch>/<path>`
      URL on a PUSHED ref — relative paths render broken in issues.
-  Then run `scripts/Board-Plan.ps1 -Title "plan: <feature>" -Tasks "A","B",... -Description "..."`
-  — it ensures plan/plan-task labels, creates the epic, reuses Board-Breakdown for NATIVE
+  **Before running the script, search for prior art** — this is a gate, not a suggestion:
+  run `gh search repos <topic> --sort=stars --limit=10` and `gh search code <pattern>` to find
+  existing tools or approaches. Record what you found (queries, candidates, stars/license/adoption,
+  decision: build / reference / extend) and pass it via `-PriorArt "<block>"`. If the work is
+  genuinely novel and no search makes sense, pass `-NoPriorArt` instead — the skip is written into
+  the epic body so the omission is visible rather than invisible (same shape as `-Rationale` in
+  `/board triage`). The script throws if neither is supplied.
+  Then run `scripts/Board-Plan.ps1 -Title "plan: <feature>" -Tasks "A","B",... -Description "..." -PriorArt "<block>"`
+  — it ensures plan/plan-task labels, creates the epic (with the prior-art block in the body), reuses Board-Breakdown for NATIVE
   Optionally enrich the epic with the four standard items the **`/board expert`** auto-mode
   reads: `-Research "<prior-art / docs found>"`, `-RoleSeed "<expert role objective>"`,
   `-Deliverables "d1","d2"`, `-TestPlan "DoD1","DoD2"` (here `-Description` becomes the Goal).

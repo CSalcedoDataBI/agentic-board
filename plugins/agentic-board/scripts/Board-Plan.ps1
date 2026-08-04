@@ -70,6 +70,8 @@ param(
     [string]$RoleSeed = "",
     [string[]]$Deliverables = @(),
     [string[]]$TestPlan = @(),
+    [string]$PriorArt = "",
+    [switch]$NoPriorArt,
     [string]$Repo = "",
     [string]$Owner = "",
     [int]   $ProjectNum = 0,
@@ -107,11 +109,49 @@ function Format-EnrichedEpicBody {
     ) -join "`n"
 }
 
+# Format-PriorArtGateBlock renders the mandatory prior-art section that lands in every epic body.
+# With -NoPriorArt the section records the explicit skip so the omission is visible, not silent.
+function Format-PriorArtGateBlock {
+    [CmdletBinding()]
+    param(
+        [string]$PriorArt = "",
+        [switch]$NoPriorArt
+    )
+    if ($NoPriorArt) {
+        return @(
+            "## Prior-art gate",
+            "_Skipped with -NoPriorArt — record findings here before merging if possible._"
+        ) -join "`n"
+    }
+    @(
+        "## Prior-art gate",
+        $PriorArt.Trim()
+    ) -join "`n"
+}
+
+# Assert-PriorArtPresent enforces the gate: an epic cannot be created without either a
+# prior-art block or an explicit -NoPriorArt skip. A silent skip is invisible; a recorded
+# skip is auditable. Same shape as the -Rationale requirement in Board-Triage.
+function Assert-PriorArtPresent {
+    [CmdletBinding()]
+    param(
+        [string]$PriorArt = "",
+        [switch]$NoPriorArt
+    )
+    if (-not $NoPriorArt -and [string]::IsNullOrWhiteSpace($PriorArt)) {
+        throw ("Board-Plan: a prior-art search is required before creating an epic.`n" +
+               "Run 'gh search repos <topic>' and pass findings via -PriorArt, " +
+               "or use -NoPriorArt to record an explicit skip " +
+               "(the skip is written into the epic body so the omission is visible, not silent).")
+    }
+}
+
 # Dot-source guard: tests set $env:ABIOS_BOARDPLAN_DOTSOURCE to load the pure formatter only.
 if ($env:ABIOS_BOARDPLAN_DOTSOURCE) { return }
 
 if (-not $Title)                          { throw "Board-Plan: -Title is required." }
 if (-not $Tasks -or $Tasks.Count -eq 0)   { throw "Board-Plan: -Tasks is required (one or more task titles)." }
+Assert-PriorArtPresent -PriorArt $PriorArt -NoPriorArt:$NoPriorArt
 
 # The single resolver for owner/name from this clone's origin (#281). Do NOT inline the regex
 # again: the copy-pasted version ate any dot in the repo name (midominio.com -> midominio).
@@ -147,6 +187,9 @@ if ($enriched) {
 } elseif ($Description) {
     $body += "$Description`n`n"
 }
+# Prior-art gate block always lands in the epic body so the build-vs-reference decision is auditable.
+$body += (Format-PriorArtGateBlock -PriorArt $PriorArt -NoPriorArt:$NoPriorArt)
+$body += "`n`n"
 $body += "## Tasks (native sub-issues)`n$taskOverview`n`nCreated by /board plan - work them with /board work."
 
 # Same trap as the children (#281): a failing `gh` does not throw, so without these checks the
