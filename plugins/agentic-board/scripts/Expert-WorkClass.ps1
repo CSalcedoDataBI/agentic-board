@@ -279,10 +279,14 @@ if (Test-HumanMustApprove -Class $verdict.class -Policy $policy) {
 # Which DoD gates THIS diff owes (#569): derived from the same changed paths, so a docs fix does
 # not pay a model migration's toll. An unreadable diff owes every enabled gate.
 $contractForGates = Read-ExpertContract
+# RAW values, no [bool] coercion (review round 2): [bool]'false' is $true in PowerShell, so the
+# cast re-enabled exactly the string-disabled gates the helper's strict parser refuses.
 $dodTable = @{}
-if ($contractForGates.dod) { foreach ($k in $contractForGates.dod.Keys) { $dodTable[$k] = [bool]$contractForGates.dod[$k] } }
+if ($contractForGates.dod) { foreach ($k in $contractForGates.dod.Keys) { $dodTable[$k] = $contractForGates.dod[$k] } }
 $owed = @(Get-ApplicableDodGates -Dod $dodTable -ChangedPaths $changed)
-$skipped = @($dodTable.Keys | Where-Object { $dodTable[$_] -and ($owed -notcontains $_) })
+# "Skipped" = enabled by the same strict rule the helper uses, minus what the diff owes.
+$enabledAll = @(Get-ApplicableDodGates -Dod $dodTable -ChangedPaths @())
+$skipped = @($enabledAll | Where-Object { $owed -notcontains $_ })
 Write-Host ""
 Write-Host ("  DoD que APLICA a este diff : {0}" -f $(if ($owed.Count) { ($owed | Sort-Object) -join ', ' } else { '(ninguna)' })) -ForegroundColor Cyan
 if ($skipped.Count) {
