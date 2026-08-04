@@ -56,6 +56,37 @@ function Get-EvidenceTargets {
     $out.ToArray()
 }
 
+<#
+    The LINK STUB for the PR body and the issue comment (#570).
+
+    The full block used to be COPIED to three destinations - the same content written three ways,
+    drifting independently and re-verified separately (the "INCOMPLETE -> record -> re-run" loop
+    mostly existed to keep three copies in sync). Now the versioned file is the single source of
+    truth and the other two surfaces carry this stub: the durable [abios-evidence] marker, the
+    summary line, and the path/link to the file. Pure.
+#>
+function Format-EvidenceLinkStub {
+    param(
+        [Parameter(Mandatory)][int]$Issue,
+        [object[]]$Results = @(),
+        [string]$Repo = '',
+        [string]$Branch = ''
+    )
+    $rows = @($Results)
+    $passed = @($rows | Where-Object { "$($_.result)".ToUpperInvariant() -eq 'PASS' }).Count
+    $failed = @($rows | Where-Object { "$($_.result)".ToUpperInvariant() -eq 'FAIL' }).Count
+    $path = "evidence/$Issue.md"
+    $link = if ($Repo -and $Branch) { "[$path](https://github.com/$Repo/blob/$Branch/$path)" } else { "``$path``" }
+    @(
+        '<!-- [abios-evidence] -->'
+        '## Evidence'
+        ''
+        "**Summary:** $passed passed / $failed failed"
+        ''
+        "Full evidence (single source of truth): $link"
+    ) -join "`n"
+}
+
 # Dot-source guard: tests set $env:ABIOS_EXPERTEVIDENCE_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_EXPERTEVIDENCE_DOTSOURCE) { return }
 

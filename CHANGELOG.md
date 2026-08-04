@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+- **Evidence is written once, linked twice** (#570, part of epic #561). The same evidence block
+  used to be copied to three destinations (PR body, issue comment, `evidence/<issue>.md`) —
+  three copies of one content, drifting independently, and the "INCOMPLETE → record → re-run"
+  loop mostly existed to keep them in sync. Now `evidence/<issue>.md` is the **single source of
+  truth** and the PR body and issue comment carry a **link stub**
+  (`Format-EvidenceLinkStub`: marker + pass/fail summary + link to the file). The completion
+  check tightened accordingly: a surface satisfies its requirement with the marker **plus
+  substance** (the file reference or a full block — pre-#570 runs stay valid); a bare marker is
+  a stamp anyone can leave, and now reads as missing. Verified by 7 new Pester tests.
+
 ### Added
 - **The definition of done scales to the diff** (#569, part of epic #561). The contract's six
   gates all defaulted to `true` and the brief listed them flat, so a 10-line docs fix owed the

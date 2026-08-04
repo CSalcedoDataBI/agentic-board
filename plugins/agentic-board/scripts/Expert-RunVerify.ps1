@@ -70,25 +70,40 @@ function Test-RunArtifactsComplete {
         # PR body content. Null or empty = PR body is blank or could not be read.
         [AllowEmptyString()][AllowNull()][string]$PrBodyContent,
         # All comment bodies on the issue. Empty = no comments were found.
-        [string[]]$IssueCommentBodies = @()
+        [string[]]$IssueCommentBodies = @(),
+        # The evidence file's repo-relative path, e.g. 'evidence/532.md' (#570). When given, the
+        # PR body and the issue comment must not only carry the marker but REFERENCE this file
+        # (the link stub) or carry a full '## Evidence' block (pre-#570 runs stay valid). A bare
+        # marker with neither is a stamp, not evidence.
+        [string]$EvidenceRef = ''
     )
     $marker  = $script:EvidenceMarker
     $missing = @()
 
-    # 1. Versioned evidence file — the durable record that outlives the PR.
+    # A surface satisfies its requirement with the marker AND substance: the link stub
+    # (references the file) or the full block. Marker alone is a stamp anyone can leave.
+    $satisfies = {
+        param($content)
+        if ([string]::IsNullOrWhiteSpace($content)) { return $false }
+        if (-not "$content".Contains($marker)) { return $false }
+        if (-not "$EvidenceRef".Trim()) { return $true }
+        return ("$content".Contains($EvidenceRef) -or "$content".Contains('## Evidence'))
+    }
+
+    # 1. Versioned evidence file — the durable record that outlives the PR, and since #570 the
+    #    SINGLE source of truth the other two surfaces point at.
     if ([string]::IsNullOrWhiteSpace($EvidenceFileContent) -or
         -not "$EvidenceFileContent".Contains($marker)) {
         $missing += 'evidence/<issue>.md (file missing or marker absent)'
     }
 
-    # 2. PR body — the marker that surfaces on the PR page and is SHA-bound.
-    if ([string]::IsNullOrWhiteSpace($PrBodyContent) -or
-        -not "$PrBodyContent".Contains($marker)) {
-        $missing += '[abios-evidence] block in PR body'
+    # 2. PR body — the marker + link stub that surfaces on the PR page.
+    if (-not (& $satisfies $PrBodyContent)) {
+        $missing += '[abios-evidence] block or link stub in PR body'
     }
 
     # 3. Issue comment — the durable marker that stays visible after the PR is closed.
-    $hasComment = @($IssueCommentBodies | Where-Object { "$_".Contains($marker) }).Count -gt 0
+    $hasComment = @($IssueCommentBodies | Where-Object { & $satisfies $_ }).Count -gt 0
     if (-not $hasComment) {
         $missing += '[abios-evidence] comment on the issue'
     }
@@ -173,7 +188,8 @@ if (Test-Path -LiteralPath $evidencePath) {
 $result = Test-RunArtifactsComplete `
     -EvidenceFileContent $evidenceContent `
     -PrBodyContent       $prBody `
-    -IssueCommentBodies  $commentBodies
+    -IssueCommentBodies  $commentBodies `
+    -EvidenceRef         "evidence/$Issue.md"
 
 Write-Host ""
 Write-Host (Format-RunVerifyVerdict -Result $result)

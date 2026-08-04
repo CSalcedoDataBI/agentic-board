@@ -51,7 +51,7 @@ Describe 'Test-RunArtifactsComplete — each artifact is named when missing' {
             -PrBodyContent       'Closes #99' `
             -IssueCommentBodies  @($script:GoodComment)
         $r.complete | Should -BeFalse
-        $r.missing  | Should -Contain '[abios-evidence] block in PR body'
+        $r.missing  | Should -Contain '[abios-evidence] block or link stub in PR body'
     }
 
     It 'names the issue comment when no comment carries the marker' {
@@ -110,7 +110,7 @@ Describe 'Test-RunArtifactsComplete — fails closed (unreadable = missing, not 
             -PrBodyContent       'Closes #532' `
             -IssueCommentBodies  @($script:GoodComment)
         $r.complete | Should -BeFalse
-        $r.missing  | Should -Contain '[abios-evidence] block in PR body'
+        $r.missing  | Should -Contain '[abios-evidence] block or link stub in PR body'
     }
 
     It 'ordinary PR chatter in the comment list is not an evidence comment' {
@@ -174,5 +174,39 @@ Describe 'Expert-RunVerify CLI — the evidence file is resolved from the WORKIN
     It 'never derives the repo root by walking up from the script location' {
         # The exact defect: Join-Path $PSScriptRoot '..' '..' '..'
         $script:Src | Should -Not -Match "PSScriptRoot\s+'\.\.'\s+'\.\.'\s+'\.\.'"
+    }
+}
+
+Describe 'Evidence once + links (#570)' {
+    BeforeAll {
+        $script:FullBlock = "<!-- [abios-evidence] -->`n## Evidence`n| Test | ... |"
+        $script:Stub      = "<!-- [abios-evidence] -->`n## Evidence`n`nFull evidence (single source of truth): [evidence/42.md](https://github.com/o/r/blob/b/evidence/42.md)"
+    }
+
+    It 'the link stub satisfies the PR-body and issue-comment requirements' {
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $script:FullBlock -PrBodyContent $script:Stub `
+                -IssueCommentBodies @($script:Stub) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeTrue
+    }
+    It 'a BARE marker with neither link nor block is a stamp, not evidence - INCOMPLETE' {
+        $bare = '<!-- [abios-evidence] -->'
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $script:FullBlock -PrBodyContent $bare `
+                -IssueCommentBodies @($bare) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
+        @($r.missing).Count | Should -Be 2
+    }
+    It 'a pre-#570 full block in the PR body stays valid (backward compatible)' {
+        $r = Test-RunArtifactsComplete -EvidenceFileContent $script:FullBlock -PrBodyContent $script:FullBlock `
+                -IssueCommentBodies @($script:FullBlock) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeTrue
+    }
+    It 'without -EvidenceRef the old marker-only behavior holds' {
+        $bare = '<!-- [abios-evidence] -->'
+        (Test-RunArtifactsComplete -EvidenceFileContent $script:FullBlock -PrBodyContent $bare -IssueCommentBodies @($bare)).complete | Should -BeTrue
+    }
+    It 'the FILE must still carry the real marker - a stub cannot vouch for a missing source of truth' {
+        $r = Test-RunArtifactsComplete -EvidenceFileContent '' -PrBodyContent $script:Stub `
+                -IssueCommentBodies @($script:Stub) -EvidenceRef 'evidence/42.md'
+        $r.complete | Should -BeFalse
     }
 }
