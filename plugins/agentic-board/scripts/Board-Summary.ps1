@@ -44,6 +44,23 @@ $script:ClosingSummaryBlocks = @(
     @{ Key = 'NeedFromYou'; Label = 'Que necesito de ti';  Empty = 'Nada — esto quedo listo.' }
 )
 
+function Get-ClosingSummaryBlocks {
+    <#  The contract as DATA, for the second consumer.
+
+        The renderer below is only half the surface: most of what the user reads is written by
+        the agent following commands/*.md, not printed by a script. Those prompts must demand
+        the same four blocks, with the same headings and the same when-empty sentences — and a
+        paraphrase hand-copied into seven files is a paraphrase that drifts (#200/#202 is the
+        same lesson for the README). So the prompt text is GENERATED from this list by
+        Update-Docs.ps1: change a label here and every command file goes stale until it is
+        regenerated, which the docs-freshness gate reports. #>
+    [CmdletBinding()]
+    param()
+    foreach ($b in $script:ClosingSummaryBlocks) {
+        [pscustomobject]@{ Key = $b.Key; Label = $b.Label; Empty = $b.Empty }
+    }
+}
+
 function Format-ClosingSummary {
     [CmdletBinding()]
     param(

@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+- **Every typed command now carries the four-block closing summary (#493).** v0.35.0 shipped the
+  renderer (#492) and nothing consumed it: not one command file or script referenced it, so in
+  practice each flow still ended however its author felt like ending it. The contract is now
+  attached to all seven command surfaces (`/board`, `/docs`, `/expert`, `/knowledge`, `/scan`,
+  `/skills`, `/tools`) as a generated region, and the generator reads the four headings — and each
+  block's when-empty sentence — from the renderer itself, so the text an agent is told to write and
+  the text a script prints cannot drift apart.
+
+  Hand-copying the same paragraph into seven prompts would have re-created the drift #200/#202
+  already fixed for the README, so this reuses that machinery instead: `Update-Docs.ps1` owns a
+  third derived region, `<!-- BEGIN:closing-summary -->`, and the existing docs-freshness CI gate
+  now fails when a command file drifts from the renderer. A command file **missing** the region is
+  a failure rather than a skip — otherwise a newly added command would ship with no closing
+  contract and nothing would notice.
+
+  Asserted rather than eyeballed, per the epic's Definition of Done: `CommandSurface.Tests.ps1`
+  checks every command file for the region, all four headings and all four when-empty sentences,
+  reading the expected values from the renderer so the test can never become a stale second copy.
+  Verified by breaking it both ways — deleting one file's region fails 3 tests and the gate; renaming
+  one label in the renderer fails 7 tests and marks all seven files stale.
+
 ## [0.35.0] - 2026-08-05
 
 **The trust release: what a run says now has to be what happened.** Two days of dogfooding — the

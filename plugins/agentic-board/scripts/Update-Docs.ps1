@@ -21,6 +21,16 @@
     Everything outside those markers is left untouched, so the editorial prose
     around them is safe to keep hand-writing.
 
+    It also owns a third derived region, this one in EVERY commands/*.md file
+    (#493):
+
+        <!-- BEGIN:closing-summary -->  ... the four-block contract ...  <!-- END:closing-summary -->
+
+    Its source is the renderer (Board-Summary.ps1), so the four blocks an agent
+    is told to write are literally the four blocks a script prints. A command
+    file with no such region FAILS rather than being skipped - otherwise a newly
+    added command would ship with no closing contract and nothing would notice.
+
 .PARAMETER Check
     Read-only: regenerate in memory and compare to what is on disk. Writes
     nothing. Exit 1 if the README is stale (so the docs-freshness gate #203 can
@@ -96,6 +106,36 @@ function Format-CatalogTable {
     $lines -join "`n"
 }
 
+# Render the closing-summary contract as the instruction block every command file carries
+# (#493). The four headings and their when-empty sentences come from the renderer
+# (Board-Summary.ps1 -> Get-ClosingSummaryBlocks), so the text an agent is told to write and
+# the text a script prints can never disagree. Pure -> testable.
+function Format-ClosingSummaryPrompt {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Blocks)
+    if (-not $Blocks -or $Blocks.Count -eq 0) { throw "Format-ClosingSummaryPrompt: no blocks supplied - the closing-summary contract cannot be empty." }
+    $lines = @(
+        '**Closing summary — required (#491).** End your reply to the user with these four blocks,'
+        'in this order, with these exact headings. Never drop one: when a block has nothing in it,'
+        'write its when-empty sentence instead. A silent block is indistinguishable from an answer'
+        'that got cut off, which is the failure this contract exists to remove.'
+        ''
+        '| # | Heading | When there is nothing to say |'
+        '|---|---|---|'
+    )
+    $i = 0
+    foreach ($b in $Blocks) {
+        $i++
+        $lines += "| $i | **$($b.Label)** | $($b.Empty) |"
+    }
+    $lines += @(
+        ''
+        'Write them in the language the user is speaking, in words a BI professional can act on.'
+        'This block is generated from the shared renderer — to change the wording, change the'
+        'renderer, not this text.'
+    )
+    $lines -join "`n"
+}
+
 # The newline a file predominantly uses. A Windows working copy with autocrlf
 # checks README out as CRLF; emitting an LF-only generated region into it would
 # read back as "stale" on every -Check and rewrite the region needlessly. So the
@@ -168,6 +208,14 @@ $pluginRaw = [System.IO.File]::ReadAllText($pluginJson)
 $catalog = Get-CommandCatalog -CommandsDir $commandsDir
 $version = Get-PluginVersion -Raw $pluginRaw
 
+# The closing-summary contract lives in the renderer; read it through the same dot-source guard
+# the tests use, so this generator never keeps its own copy of the four blocks (#493).
+$summaryScript = (Resolve-Path (Join-Path $PSScriptRoot 'Board-Summary.ps1')).Path
+$prevGuard = $env:ABIOS_BOARDSUMMARY_DOTSOURCE
+$env:ABIOS_BOARDSUMMARY_DOTSOURCE = '1'
+try { . $summaryScript } finally { $env:ABIOS_BOARDSUMMARY_DOTSOURCE = $prevGuard }
+$summaryPrompt = Format-ClosingSummaryPrompt -Blocks @(Get-ClosingSummaryBlocks)
+
 # Match the README's own newline so the generated region does not read back as
 # "stale" purely from CRLF-vs-LF (Format-CatalogTable emits LF).
 $nl              = Get-DominantNewline -Text $readme
@@ -185,19 +233,52 @@ $stale = @()
 if ((Set-MarkedRegion -Text $readme -Name 'commands' -Content $commandsContent) -ne $readme) { $stale += 'command catalog' }
 if ((Set-MarkedRegion -Text $readme -Name 'version'  -Content $versionContent)  -ne $readme) { $stale += 'version' }
 
+# Every command file carries the closing-summary contract (#493). A file MISSING the region is
+# an error, not a skip: a new command that never got the markers would otherwise ship with no
+# closing contract at all, which is exactly the gap this replaces.
+$commandWrites  = @()   # { Path, Name, Content } pending write
+$commandMissing = @()
+foreach ($cmdFile in (Get-ChildItem -Path $commandsDir -Filter '*.md' -File | Sort-Object Name)) {
+    $raw = [System.IO.File]::ReadAllText($cmdFile.FullName)
+    $cnl = Get-DominantNewline -Text $raw
+    $content = "$cnl" + (($summaryPrompt -replace "`r?`n", $cnl)) + "$cnl"
+    try {
+        $newRaw = Set-MarkedRegion -Text $raw -Name 'closing-summary' -Content $content
+    } catch {
+        $commandMissing += $cmdFile.Name
+        continue
+    }
+    if ($newRaw -ne $raw) {
+        $commandWrites += [pscustomobject]@{ Path = $cmdFile.FullName; Name = $cmdFile.Name; Content = $newRaw }
+    }
+}
+if ($commandMissing.Count) { $stale += "closing-summary markers missing in: $($commandMissing -join ', ')" }
+if ($commandWrites.Count)  { $stale += "closing summary in $($commandWrites.Count) command file(s)" }
+
 if ($Check) {
-    Write-Host "=== Docs check  ($([System.IO.Path]::GetFileName($ReadmePath))) ===" -ForegroundColor Cyan
+    Write-Host "=== Docs check  ($([System.IO.Path]::GetFileName($ReadmePath)) + commands) ===" -ForegroundColor Cyan
     if ($stale.Count -eq 0) {
-        Write-Host "  OK  README derived regions are up to date (commands, version)" -ForegroundColor Green
+        Write-Host "  OK  derived regions are up to date (commands, version, closing summary)" -ForegroundColor Green
         exit 0
     }
-    Write-Host "  FAIL  README is stale in: $($stale -join ', ')" -ForegroundColor Red
-    Write-Host "        Run Update-Docs.ps1 (no args) and commit the result." -ForegroundColor DarkGray
+    Write-Host "  FAIL  stale in: $($stale -join ', ')" -ForegroundColor Red
+    if ($commandMissing.Count) {
+        Write-Host "        Add the region to each file listed above:" -ForegroundColor DarkGray
+        Write-Host "          <!-- BEGIN:closing-summary --><!-- END:closing-summary -->" -ForegroundColor DarkGray
+    }
+    Write-Host "        Then run Update-Docs.ps1 (no args) and commit the result." -ForegroundColor DarkGray
+    exit 1
+}
+
+# A missing region cannot be repaired by regenerating - the markers are authored, not derived.
+if ($commandMissing.Count) {
+    Write-Host "FAIL  closing-summary markers missing in: $($commandMissing -join ', ')" -ForegroundColor Red
+    Write-Host "      Add <!-- BEGIN:closing-summary --><!-- END:closing-summary --> to each, then re-run." -ForegroundColor DarkGray
     exit 1
 }
 
 if ($stale.Count -eq 0) {
-    Write-Host "README already up to date (commands, version) - nothing to write." -ForegroundColor DarkGray
+    Write-Host "Docs already up to date (commands, version, closing summary) - nothing to write." -ForegroundColor DarkGray
     exit 0
 }
 
@@ -208,9 +289,18 @@ if ($DryRun) {
     Write-Host $table
     Write-Host ""
     Write-Host "Version marker -> v$version" -ForegroundColor Cyan
+    if ($commandWrites.Count) {
+        Write-Host ""
+        Write-Host "Closing summary would be refreshed in: $(($commandWrites.Name) -join ', ')" -ForegroundColor Cyan
+    }
     exit 0
 }
 
-[System.IO.File]::WriteAllText($ReadmePath, $updated, $Utf8NoBom)
-Write-Host "OK  regenerated README regions: $($stale -join ', ')" -ForegroundColor Green
+if ((Set-MarkedRegion -Text $readme -Name 'commands' -Content $commandsContent) -ne $readme -or
+    (Set-MarkedRegion -Text $readme -Name 'version'  -Content $versionContent)  -ne $readme) {
+    [System.IO.File]::WriteAllText($ReadmePath, $updated, $Utf8NoBom)
+}
+foreach ($w in $commandWrites) { [System.IO.File]::WriteAllText($w.Path, $w.Content, $Utf8NoBom) }
+
+Write-Host "OK  regenerated: $($stale -join ', ')" -ForegroundColor Green
 Write-Host "    ($($catalog.Count) commands from frontmatter; version v$version from plugin.json)" -ForegroundColor DarkGray

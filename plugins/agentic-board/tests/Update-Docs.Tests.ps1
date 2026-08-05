@@ -171,3 +171,33 @@ Describe 'Set-MarkedRegion' {
         $twice | Should -Be $once
     }
 }
+
+Describe 'Format-ClosingSummaryPrompt (#493)' {
+    BeforeAll {
+        $script:SampleBlocks = @(
+            [pscustomobject]@{ Key = 'Found'; Label = 'Que encontre'; Empty = 'Nada fuera de lo esperado.' }
+            [pscustomobject]@{ Key = 'Did';   Label = 'Que hice';     Empty = 'Nada - no se cambio nada.' }
+        )
+    }
+    It 'renders one numbered row per block, in the order given' {
+        $out = Format-ClosingSummaryPrompt -Blocks $script:SampleBlocks
+        $out | Should -Match '(?m)^\| 1 \| \*\*Que encontre\*\* \|'
+        $out | Should -Match '(?m)^\| 2 \| \*\*Que hice\*\* \|'
+        ([regex]::Matches($out, '(?m)^\| \d+ \|')).Count | Should -Be 2
+    }
+    It 'carries each block''s when-empty sentence, so the prompt and the renderer agree' {
+        $out = Format-ClosingSummaryPrompt -Blocks $script:SampleBlocks
+        foreach ($b in $script:SampleBlocks) { $out | Should -BeLike "*$($b.Empty)*" }
+    }
+    It 'tells the reader never to drop a block' {
+        Format-ClosingSummaryPrompt -Blocks $script:SampleBlocks | Should -Match '(?i)never drop'
+    }
+    It 'points edits at the renderer instead of the generated text' {
+        Format-ClosingSummaryPrompt -Blocks $script:SampleBlocks | Should -Match '(?i)change the'
+    }
+    It 'throws on an empty contract instead of emitting an empty instruction' {
+        # A silently empty block is the exact failure this whole epic removes; generating an
+        # instruction with no blocks in it would reintroduce it one level up.
+        { Format-ClosingSummaryPrompt -Blocks @() } | Should -Throw
+    }
+}

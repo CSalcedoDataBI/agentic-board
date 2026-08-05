@@ -93,6 +93,47 @@ Describe 'Command surface — /tools referenced-tools catalog (#384)' {
     }
 }
 
+Describe 'Command surface — every command ends with the closing summary (#493)' {
+    <#  The epic's Definition of Done is "asserted, not eyeballed": a command that forgets the
+        four-block contract must FAIL here, not be noticed later by a user reading a run that
+        stops mid-thought. The expected headings are read from the renderer itself, so this test
+        can never drift into being a second, stale copy of the contract. #>
+    BeforeAll {
+        $summaryScript = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Summary.ps1' | Resolve-Path
+        $prev = $env:ABIOS_BOARDSUMMARY_DOTSOURCE
+        $env:ABIOS_BOARDSUMMARY_DOTSOURCE = '1'
+        try { . $summaryScript } finally { $env:ABIOS_BOARDSUMMARY_DOTSOURCE = $prev }
+        $script:Blocks = @(Get-ClosingSummaryBlocks)
+    }
+
+    It 'the renderer exposes the four contract blocks as data' {
+        $script:Blocks.Count | Should -Be 4 -Because 'the contract is found / did / pending / need-from-you'
+        @($script:Blocks.Key) | Should -Be @('Found', 'Did', 'Pending', 'NeedFromYou') -Because 'order is meaning: the reader scans a fixed shape'
+    }
+
+    It '<Name> carries the generated closing-summary region' -ForEach $CommandCases {
+        $raw = Get-Content -LiteralPath $Path -Raw
+        $raw | Should -Match '<!--\s*BEGIN:closing-summary\b' -Because "$Name is a user-facing command surface; without the region it ships with no closing contract"
+        $raw | Should -Match '<!--\s*END:closing-summary\s*-->' -Because "$Name needs a closed region for the generator to fill"
+    }
+
+    It '<Name> states every one of the four headings' -ForEach $CommandCases {
+        $raw = Get-Content -LiteralPath $Path -Raw
+        foreach ($b in $script:Blocks) {
+            $raw | Should -BeLike "*$($b.Label)*" -Because "$Name must ask for the '$($b.Label)' block by name - a paraphrase is what drifts"
+        }
+    }
+
+    It '<Name> states the when-empty sentence for every block' -ForEach $CommandCases {
+        # An empty block that renders as silence is the failure mode #492 fixed in the renderer;
+        # the prompt half has to carry the same instruction or the agent just omits the block.
+        $raw = Get-Content -LiteralPath $Path -Raw
+        foreach ($b in $script:Blocks) {
+            $raw | Should -BeLike "*$($b.Empty)*" -Because "$Name must tell the agent what to write when '$($b.Label)' is empty"
+        }
+    }
+}
+
 Describe 'Command surface — /docs routing contract (#417)' {
     It 'commands/docs.md does not reference Docs-Command-* pages (dropped in #418)' {
         $docsFile = Join-Path $script:CommandsDir 'docs.md'
