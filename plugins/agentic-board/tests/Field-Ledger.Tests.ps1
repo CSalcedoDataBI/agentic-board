@@ -116,3 +116,22 @@ Describe 'Safety: the scanner is read-only over the transcript store' {
         }
     }
 }
+
+Describe 'durationMin + firstTs - the ledger stops being time-blind (#568)' {
+    It 'Update-LedgerRow records the duration and the first-event stamp' {
+        $l = @(Update-LedgerRow -Ledger @() -SessionId 's1' -Project 'p' -Events 10 -Bytes 100 -Incidents 0 -DurationMin 42 -FirstTs '2026-08-03T09:18:00Z' -ScannedAt '2026-08-03T10:00:00Z')
+        $l[0].durationMin | Should -Be 42
+        $l[0].firstTs     | Should -Be '2026-08-03T09:18:00Z'
+    }
+    It 'the schema carries both columns' {
+        $script:LedgerColumns | Should -Contain 'durationMin'
+        $script:LedgerColumns | Should -Contain 'firstTs'
+    }
+    It 'an update preserves the row shape for later incremental math' {
+        $l = @(Update-LedgerRow -Ledger @() -SessionId 's1' -Project 'p' -Events 10 -Bytes 100 -Incidents 0 -DurationMin 10 -FirstTs 'T0' -ScannedAt 'S1')
+        $l2 = @(Update-LedgerRow -Ledger $l -SessionId 's1' -Project 'p' -Events 20 -Bytes 200 -Incidents 1 -DurationMin 55 -FirstTs 'T0' -ScannedAt 'S2')
+        $l2.Count | Should -Be 1
+        $l2[0].durationMin | Should -Be 55
+        $l2[0].firstTs | Should -Be 'T0'
+    }
+}

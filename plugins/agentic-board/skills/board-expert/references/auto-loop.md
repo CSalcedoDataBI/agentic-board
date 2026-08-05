@@ -20,9 +20,12 @@ guiding principle: **total self-use of agentic-board — never improvise your ow
    - in-scope problem → fix it in the loop and continue;
    - out-of-scope finding → file a sanitized `discovered` issue on the board (`/board`, the
      `abios-feedback` sanitization criteria) and keep going.
-6. **Loop until done or budget** (`Get-BudgetVerdict`): keep iterating until the DoD is green —
-   then **leave the PR ready and STOP before merge** (the irreversible line) — or the budget is
-   spent → `/board handoff -Save` so a later session resumes.
+6. **Loop until done or budget**: keep iterating until the DoD is green — then **leave the PR
+   ready and STOP before merge** (the irreversible line) — or the budget is spent →
+   `/board handoff -Save` so a later session resumes. The time budget is **enforced
+   mechanically** (#564): it travels in the brake marker, and past `maxMinutes` the PreToolUse
+   hook refuses further work commands — only the wrap-up (handoff, commit/push WIP, report)
+   still passes. A refused command past the budget is the control working, not an obstacle.
 7. **Report** — final evidence + updated board + a PR awaiting the human's merge approval.
 
 ## The capability map (each need → an agentic-board capability)

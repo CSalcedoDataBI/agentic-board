@@ -15,11 +15,26 @@ for the user to pick (they can answer with just the number):
                      construye, prueba dejando evidencia, se auto-usa agentic-board para el
                      trabajo lateral que encuentra, y FRENA antes de lo irreversible (merge/
                      deploy/refresh/publish/delete) — deja el PR listo para tu OK.
+2a. auto -Epic <n>  → CAMINAR el épico completo, ola por ola: despacha los sub-issues LISTOS
+                     (abiertos, sin PR, sin bloqueadores abiertos), una sesión autónoma cada uno.
+                     Idempotente: mergeas los PRs de la ola y re-ejecutas el mismo comando para
+                     la siguiente. Un comando por OLA en vez de un lanzamiento por sub-issue.
+2b. auto <issue> de punta a punta
+                   → REGISTRA tu orden de terminarlo — pero HOY NO SE CIERRA SOLO. El
+                     mecanismo que lo permitía tenía dos agujeros que no podía defender
+                     (issue #541), así que está cerrado: toda ruta de merge está negada para
+                     todo run. La sesión deja el PR listo y el cierre lo haces tú, igual que
+                     sin la orden. Se te avisa al lanzar; no falla en silencio.
 3. roles [why "<texto>"]
                    → ver el CATÁLOGO de roles efectivo (los de fábrica + los locales del
                      proyecto, marcando cuál sobreescribe a cuál y cuántas skills engancha de
                      verdad). Con `why` explica qué rol ganó para un texto de plan y por qué
                      keyword.
+4. verify <issue> <pr>
+                   → COMPROBAR que el run dejó su evidencia de verdad, en vez de decir que la
+                     dejó: lee los tres artefactos (archivo versionado, bloque en el PR,
+                     comentario en el issue) y responde COMPLETO o INCOMPLETO nombrando qué
+                     falta. Falla cerrado: lo que no se puede leer cuenta como ausente.
 ```
 
 First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (default
@@ -39,6 +54,20 @@ ready-made agent definitions such as `wshobson/agents`), propose a complete role
 `Add-ExpertRole` **only after the user confirms**: writing a role changes how every future plan is
 classified, so it is never a silent side effect of `config`.
 
+## verify
+Run `scripts/Expert-RunVerify.ps1 -Issue <n> -PR <n>`. It reads the three evidence artifacts a run
+owes under its contract — `evidence/<issue>.md`, the `[abios-evidence]` block in the PR body, and
+the `[abios-evidence]` comment on the issue — and prints COMPLETE or INCOMPLETE **naming every
+artifact that is missing**, not just the first. Exit 1 when incomplete.
+
+It fails closed: content it cannot read is missing content, never assumed present. That is the whole
+point — a run that reports "evidence recorded" is making a claim about itself, and this is the one
+claim it does not get to make. The `auto` brief instructs the run to quote this verdict in its final
+report, so a run cannot report done while the check says otherwise.
+
+The evidence file is resolved from the WORKING repository (git's toplevel, else the current
+directory) — never relative to the script, which lives in the plugin cache once installed.
+
 ## roles
 Run `scripts/Expert-Roles.ps1 -List`, or `scripts/Expert-Roles.ps1 -Why "<plan text>"`.
 
@@ -48,7 +77,25 @@ factory role. A role hooking **0 skills** is printed in yellow: it will give the
 toolset. See `references/roles.md` for the schema and the merge rules.
 
 ## auto
-Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n>`. It reads the contract, composes the
+
+**The end-to-end order (`-EndToEnd`) — RECORDED, NOT HONOURED.** When the user ORDERS the finish —
+"de punta a punta", "llévalo hasta el final", "ciérralo tú", "end to end" — add `-EndToEnd`. It is
+an ORDER, never a stored setting: it travels with that instruction and is good for that run only,
+so never infer it from a previous run or from the contract. If the user did not say it, do not
+pass it.
+
+**It does not currently let the run merge.** The mechanism that honoured it opened the gate's own
+script for an ordered run, and external review found that opening it made two holes reachable that
+no command-string check can close (#541): changing directory before invoking the gate made the gate
+skip all four of its conditions, and the "a real review exists" condition was satisfied by a PR
+comment the run itself can post. So every merge route is refused for every run, ordered or not, and
+deploy/publish/refresh/delete stay with the human as always.
+
+Still pass it when the user says it: the launched session is told the order was given and cannot yet
+be acted on, which is what stops it reading its own refusal as a failure to work around. And tell
+the user plainly that the close is still theirs — never imply the run will finish it.
+
+Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`. It reads the contract, composes the
 autonomous brief (role objective + enriched plan + DoD + the capability map + the irreversible
 line), and launches a dedicated Claude session in an isolated worktree (reusing the fleet/launch
 machinery). You are freed; monitor with `/board work -Sessions -Watch`. The launched session:

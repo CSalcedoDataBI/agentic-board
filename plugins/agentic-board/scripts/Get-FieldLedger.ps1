@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Ledger and incremental watermark for /board field — the field-observation sweep.
+    Ledger and incremental watermark for /board telemetry — the field-observation sweep.
 
 .DESCRIPTION
     Discovers local session transcripts and decides which ones still need reading. The unit of
@@ -28,7 +28,12 @@ $ErrorActionPreference = 'Stop'
 
 # ── Pure core ───────────────────────────────────────────────────────────────────
 
-$script:LedgerColumns = @('sessionId','project','title','events','bytes','scannedAt','usedTool','incidents')
+# durationMin + firstTs (#568): the columns that let the ledger answer "where did the time go".
+# The schema measured everything except time - events and bytes, never seconds. firstTs is the
+# session's FIRST event stamp, persisted so an incremental rescan (which only parses the slice
+# after the watermark) can still state the TOTAL duration instead of overwriting it with the
+# slice's.
+$script:LedgerColumns = @('sessionId','project','title','events','bytes','scannedAt','usedTool','incidents','durationMin','firstTs')
 
 function Get-LedgerKey {
     # A session id is unique per project directory, not globally: worktrees and re-clones reuse ids.
@@ -88,6 +93,8 @@ function Update-LedgerRow {
         [Parameter(Mandatory)][string]$Project,
         [int]$Events, [long]$Bytes, [int]$Incidents,
         [string]$UsedTool = 'no',
+        [int]$DurationMin = 0,
+        [string]$FirstTs = '',
         [Parameter(Mandatory)][string]$ScannedAt
     )
     $key = Get-LedgerKey -Project $Project -SessionId $SessionId
@@ -101,7 +108,7 @@ function Update-LedgerRow {
             $out.Add([pscustomobject]@{
                 sessionId = $SessionId; project = $Project; title = $row.title
                 events = $Events; bytes = $Bytes; scannedAt = $ScannedAt
-                usedTool = $UsedTool; incidents = $Incidents })
+                usedTool = $UsedTool; incidents = $Incidents; durationMin = $DurationMin; firstTs = $FirstTs })
         } else {
             $out.Add($row)
         }
@@ -110,7 +117,7 @@ function Update-LedgerRow {
         $out.Add([pscustomobject]@{
             sessionId = $SessionId; project = $Project; title = ''
             events = $Events; bytes = $Bytes; scannedAt = $ScannedAt
-            usedTool = $UsedTool; incidents = $Incidents })
+            usedTool = $UsedTool; incidents = $Incidents; durationMin = $DurationMin; firstTs = $FirstTs })
     }
     $out.ToArray()
 }

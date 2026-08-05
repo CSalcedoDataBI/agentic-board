@@ -29,6 +29,11 @@ function New-ExpertContract {
     @{
         role     = ""
         autonomy = @{ irreversible = @('merge','deploy','refresh','publish','delete') }
+        # WHAT the change produces, not which action performs it (#529). The owner's rule is
+        # "código lo cierra el agente; lo que se juzga mirándolo lo apruebo yo", and a flat action
+        # list cannot say that. Empty lists here mean "use the defaults" (Expert-WorkClass), so a
+        # project only writes the patterns that are actually special about it.
+        workClass = @{ visualPatterns = @(); humanApproves = @('visual') }
         dod      = @{ ci = $true; build = $true; lint = $true; tests = $true; bpa = $true; tmdlBreaking = $true }
         evidence = @{ pr = $true; issueComment = $true; file = $true }
         boardSelfDrive = @{ createIssues = $true; label = 'discovered'; cap = 10 }

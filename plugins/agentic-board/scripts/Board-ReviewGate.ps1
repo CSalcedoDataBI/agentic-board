@@ -13,6 +13,10 @@
          skips the request AND the wait and routes straight to self-review,
          until a cooldown (-CopilotCooldownDays) expires or -EnableCopilot is
          passed. So a quota-blocked account is not re-asked on every PR (#367).
+         SILENCE arms it too (#563): a requested Copilot that never answers
+         within the review timeout gets a 1-day marker, so the next PR skips
+         the wait instead of paying it forever. And the wait itself breaks on
+         ANY review bound to the current head, not only Copilot's.
       2. If the PR touches any *.tmdl (a PBIP semantic model), runs the two
          model-quality gates and BLOCKS on either (M3.3):
            - TMDL diff review (Tmdl-DiffReview.ps1 -FailOnBreaking): a BREAKING
@@ -22,15 +26,27 @@
          Both degrade safely: no model, no BPA rules file, or no Tabular Editor
          is a WARN + skip, never a block - a merge is only ever stopped by an
          actual finding. A non-BI repo never triggers either.
-      3. Waits for CI checks on the PR (gh pr checks --watch). "No checks
+      3. Waits for CI checks AND the requested review in ONE bounded loop
+         (#562). Both waits are independent, so they run concurrently: total
+         wait is max(CI, review), not their sum. The CI side is capped at
+         -CiTimeoutMinutes — the previous `gh pr checks --watch` had no
+         timeout, so a queued/stuck workflow hung the session indefinitely;
+         now it expires into an explicit "CI still pending" BLOCK. "No checks
          configured" counts as pass, with a note.
-      4. Waits (up to -TimeoutMinutes) for the requested review to arrive,
-         then reports: review decision, every review with author/state/body,
-         and unresolved review-thread count.
+      4. Reports: review decision, every review with author/state/body, and
+         unresolved review-thread count.
       5. Verdict via exit code:
            0 -> gate PASSED (checks ok, no CHANGES_REQUESTED, no unresolved
-                threads, no TMDL-breaking / BPA-error findings)
+                threads, no TMDL-breaking / BPA-error findings, AND somebody
+                actually reviewed)
            1 -> gate BLOCKED (address the printed feedback, push, re-run)
+           2 -> gate UNREVIEWED (#510): nothing is wrong, but nobody looked.
+                Distinct from 0 on purpose - `claude-review` reported a passing
+                check having left zero reviews, and a caller reading only the
+                exit code could not tell "reviewed, found nothing" from "the
+                reviewer never spoke". Anything testing `-eq 0` fails closed.
+                Clear it by reviewing for real (-RecordReview registers an
+                external review) or, when a review buys nothing, -AllowUnreviewed.
 
     -InstallRuleset (once per repo, optional): installs a repository ruleset
     that requires a PR before merging into the default branch. Repo admins
@@ -49,6 +65,12 @@
 .PARAMETER TimeoutMinutes
     Max minutes to wait for the requested review. Default 6.
 
+.PARAMETER CiTimeoutMinutes
+    Max minutes to wait for CI checks to settle. Default 25 (the repo's CI
+    jobs cap at 20). Expiry is an explicit block ("CI still pending"), never
+    a silent hang — this bound exists because the unbounded watch was the
+    only wait in the codebase with no ceiling (#562).
+
 .PARAMETER MaxLines
     Small-PR guard: warn when additions+deletions exceed this. Default 600.
 
@@ -64,6 +86,22 @@
     Forget the Copilot-unavailable marker for this repo's owner and request Copilot again this run
     (use when Copilot access is back before the cooldown expires).
 
+.PARAMETER AllowUnreviewed
+    Pass a PR that nobody reviewed (exit 0 instead of 2). For changes where a review buys nothing -
+    a typo in a comment, a regenerated file. It is the deliberate exception, not the way past the
+    gate: it prints that nobody looked at the code.
+
+.PARAMETER RecordReview
+    Register an external review on the PR (with -Reviewer and -Summary) so the gate counts it. This
+    is how a reviewer with no GitHub identity - second-opinion / Codex, or a careful human read -
+    stops being invisible to a gate that can otherwise only see GitHub review objects.
+
+.PARAMETER Reviewer
+    Who performed the external review (e.g. 'codex/gpt-5.5'). Used with -RecordReview.
+
+.PARAMETER Summary
+    What the external review found. Used with -RecordReview.
+
 .PARAMETER TokenVar
     Windows USER env var holding the PAT. Defaults to GITHUB_TOKEN_PERSONAL.
 
@@ -71,6 +109,8 @@
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -InstallRuleset
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -EnableCopilot
+    .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RecordReview -Reviewer 'codex/gpt-5.5' -Summary '4 rondas, 12 hallazgos, todos corregidos'
+    .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -AllowUnreviewed
 #>
 [CmdletBinding()]
 param(
@@ -78,12 +118,23 @@ param(
     [int]   $PR = 0,
     [switch]$InstallRuleset,
     [int]   $TimeoutMinutes = 6,
+    # Ceiling for the CI wait (#562). The old `--watch` could hang forever on a queued workflow.
+    [int]   $CiTimeoutMinutes = 25,
     [int]   $MaxLines = 600,
     [int]   $MaxFiles = 20,
     # Days to remember "this account has no Copilot" before the gate tries it again (#367).
     [int]   $CopilotCooldownDays = 7,
     # Forget the Copilot-unavailable marker for this repo's owner and try Copilot again now.
     [switch]$EnableCopilot,
+    # Accept a PR that nobody reviewed. Deliberate opt-out for the cases where a review buys
+    # nothing (a typo in a comment, a generated file). Exists so the honest verdict below can be
+    # the DEFAULT without stalling trivial work - never as the routine way past the gate.
+    [switch]$AllowUnreviewed,
+    # Record an external review (second-opinion / Codex / a human read) as a PR comment the gate
+    # will recognise. This is how a reviewer with no GitHub identity gets counted (#510).
+    [switch]$RecordReview,
+    [string]$Reviewer = "external",
+    [string]$Summary  = "",
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL"
 )
 
@@ -109,6 +160,197 @@ function Find-ForeignCommits {
         }
     }
     return @($foreign)
+}
+
+# Marker that identifies a review published as a PR COMMENT rather than as a GitHub review object.
+# Needed because the reviewers that actually show up on this repo do not all submit review objects:
+# the `claude-review` workflow comments, and an external reviewer (second-opinion / Codex) has no
+# GitHub identity at all. Without a way to recognise those, the gate can only ever see "0 reviews".
+$script:ExternalReviewMarker = '[abios-review]'
+
+<#
+    Decide whether THIS DIFF was actually reviewed, and by whom (#510).
+
+    The distinction the gate was missing: "reviewed, found nothing" and "the reviewer never spoke"
+    both arrived as zero findings, and the second one was reported as a pass. A green check from a
+    reviewer that produced no review is not evidence of anything, and on this repo it was the only
+    reviewer - Copilot has been quota-blocked for weeks.
+
+    EVERY piece of evidence is bound to the PR's head SHA, and that is not a detail. Counting any
+    review ever left on the PR reproduces the original defect one level up: push three more commits
+    after an approval and the gate would authorise a diff nobody had read, on the strength of a
+    review of different code. So a review counts only for the commit it was performed on.
+
+    The cost is deliberate and small: a new push invalidates the evidence and the reviewer has to
+    look again (or re-record). That is the correct reading - the new commits genuinely have not
+    been reviewed.
+
+    Counts two kinds of evidence, both SHA-bound:
+      - a submitted GitHub review whose commit is the current head
+      - a PR comment carrying `[abios-review] <who> sha=<head>`
+
+    Returns @{ reviewed; github; external; reviewers; stale }. `stale` counts evidence that exists
+    but belongs to an older commit, so the caller can say WHY it does not count. Pure.
+#>
+function Get-ReviewEvidence {
+    param(
+        $Reviews = @(),              # nodes with .state, .author.login, .commit.oid
+        [string[]]$CommentBodies = @(),
+        [string]$HeadSha = ''
+    )
+    $head = "$HeadSha".Trim()
+
+    # Literal containment, NOT -like: the marker's own square brackets are a wildcard character
+    # class to -like, which threw "wildcard pattern is not valid" and would have made every
+    # external review invisible - the exact blindness this function exists to remove.
+    $marker    = $script:ExternalReviewMarker
+    $allExt    = @(@($CommentBodies) | Where-Object { "$_".Contains($marker) })
+    $allGh     = @(@($Reviews) | Where-Object { $_ -and "$($_.state)".Trim() })
+
+    # With no head SHA to compare against we cannot prove ANY evidence belongs to this diff. Fail
+    # closed: report nothing reviewed rather than accept evidence we cannot place.
+    if (-not $head) {
+        return @{ reviewed = $false; github = 0; external = 0; reviewers = @()
+                  stale = ($allGh.Count + $allExt.Count) }
+    }
+
+    $gh  = @($allGh  | Where-Object { "$($_.commit.oid)".Trim() -eq $head })
+    $ext = @($allExt | Where-Object { "$_" -match ('(?i)sha\s*=\s*' + [regex]::Escape($head)) })
+
+    $names = @()
+    foreach ($r in $gh) { if ($r.author.login) { $names += "$($r.author.login)" } }
+    foreach ($c in $ext) {
+        # `<!-- [abios-review] codex/gpt-5.5 sha=abc… -->` -> "codex/gpt-5.5". Non-greedy up to the
+        # sha; excluding '-' from the name (the first attempt) cut "codex/gpt-5.5" at its hyphen.
+        $name = ''
+        if ("$c" -match '(?i)\[abios-review\]\s*(.*?)\s*(?:sha\s*=|-->|\r|\n|$)') { $name = $Matches[1].Trim() }
+        $names += $(if ($name) { $name } else { 'external' })
+    }
+    return @{
+        reviewed  = (($gh.Count + $ext.Count) -gt 0)
+        github    = $gh.Count
+        external  = $ext.Count
+        reviewers = @($names | Where-Object { $_ } | Select-Object -Unique)
+        stale     = (($allGh.Count - $gh.Count) + ($allExt.Count - $ext.Count))
+    }
+}
+
+# Names that identify the automated REVIEWER job rather than a build/test job. Matched loosely
+# because `gh pr checks` reports the check-run display name, which repos namespace differently
+# (`PR Review (@claude) / claude-review`, `claude-review`, `Copilot review`...). Being generous
+# here is safe: the only thing this unlocks is ignoring a reviewer's red AFTER a real review is
+# already on record, and every non-reviewer failure still blocks.
+$script:ReviewerCheckPattern = '(?i)(claude|copilot)[-_ /]*review|review[-_ /]*(claude|copilot)|^\s*pr[-_ ]?review\s*$'
+
+function Test-IsReviewerCheck {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Name)
+    if (-not "$Name".Trim()) { return $false }
+    return [bool]("$Name" -match $script:ReviewerCheckPattern)
+}
+
+<#
+    Is the ONLY thing red the automated reviewer?
+
+    Gates a narrow allowance: a reviewer job failing asks "was this reviewed?", not "does the code
+    work?" - and once a real review is on record for the commit, that question is answered. Without
+    it, every PR that edits `pr-review.yml` deadlocks, because `claude-code-action` skips itself on
+    exactly those PRs.
+
+    $Parsed says whether the check list was read from STRUCTURED data. It is not a formality: the
+    first cut scraped the human-readable `gh pr checks` output, so any failure printed in a shape
+    the regex missed would silently vanish from the list, a reviewer failure would then be the only
+    one seen, and a genuinely broken build would be waved through. Unparsed => never downgrade.
+#>
+function Test-OnlyReviewerChecksFailed {
+    param(
+        [string[]]$FailedChecks = @(),
+        [bool]$Parsed = $false,
+        # The snapshot must be SETTLED for the allowance to mean anything (#562, external review):
+        # with checks still pending at the CI deadline, "the only FAILURE is the reviewer" says
+        # nothing about the pending ones - excusing the reviewer there would excuse the timeout.
+        [bool]$Settled = $true
+    )
+    if (-not $Parsed)  { return $false }                      # cannot enumerate -> never downgrade
+    if (-not $Settled) { return $false }                      # pending checks -> nothing is excused
+    $names = @(@($FailedChecks) | Where-Object { "$_".Trim() })
+    if ($names.Count -eq 0) { return $false }                 # nothing named -> nothing to excuse
+    foreach ($n in $names) { if (-not (Test-IsReviewerCheck $n)) { return $false } }
+    return $true
+}
+
+<#
+    Classify one structured snapshot of `gh pr checks --json name,bucket` (#562).
+
+    Buckets per gh: pass / fail / pending / skipping / cancel. 'cancel' counts as failed (a
+    cancelled check did not pass) and 'skipping' as settled-ok — both mirror the previous
+    verdict logic, just computed from one snapshot instead of trusting --watch's exit code.
+
+    Fails closed: an unparsed snapshot ($Parsed=$false) reports Settled=$false and Ok=$false,
+    so the caller keeps polling and, at the deadline, blocks with a readable reason instead of
+    inventing a pass from data it never saw. An empty parsed list is the "no checks configured"
+    case — settled and ok, with NoChecks so the caller can print the note. Pure.
+#>
+function Get-ChecksVerdict {
+    param(
+        $Checks = @(),
+        [bool]$Parsed = $false
+    )
+    if (-not $Parsed) {
+        return @{ Parsed = $false; Settled = $false; Ok = $false; NoChecks = $false; Failed = @(); Pending = @() }
+    }
+    $list = @(@($Checks) | Where-Object { $_ })
+    if ($list.Count -eq 0) {
+        return @{ Parsed = $true; Settled = $true; Ok = $true; NoChecks = $true; Failed = @(); Pending = @() }
+    }
+    $failed  = @($list | Where-Object { "$($_.bucket)" -in @('fail','cancel') } | ForEach-Object { "$($_.name)" })
+    $pending = @($list | Where-Object { "$($_.bucket)" -eq 'pending' }          | ForEach-Object { "$($_.name)" })
+    return @{
+        Parsed   = $true
+        Settled  = ($pending.Count -eq 0)
+        Ok       = ($pending.Count -eq 0 -and $failed.Count -eq 0)
+        NoChecks = $false
+        Failed   = $failed
+        Pending  = $pending
+    }
+}
+
+<#
+    Should the combined CI+review wait loop exit? (#562)
+
+    The two waits are independent, so the loop runs them CONCURRENTLY and exits only when both
+    sides are done: the CI side when checks settle or its deadline passes, the review side when
+    no review is being waited on, or one arrived, or its deadline passes. This is what turns
+    the old sequential worst case (CI wait + full review wait) into max(CI, review). Pure.
+#>
+function Test-GateWaitDone {
+    param(
+        [bool]$ChecksSettled,
+        [bool]$WaitingReview,
+        [Parameter(Mandatory)][datetime]$Now,
+        [Parameter(Mandatory)][datetime]$CiDeadline,
+        [Parameter(Mandatory)][datetime]$ReviewDeadline
+    )
+    $ciDone     = $ChecksSettled -or ($Now -ge $CiDeadline)
+    $reviewDone = (-not $WaitingReview) -or ($Now -ge $ReviewDeadline)
+    return ($ciDone -and $reviewDone)
+}
+
+<#
+    Did Copilot stay SILENT past the review deadline? (#563)
+
+    The per-account cooldown (#367) only armed when Copilot ANSWERED "cannot review" — an explicit
+    refusal review object. A Copilot that never says anything taught the gate nothing, so every PR
+    burned the full review timeout forever, which is the worst of both: the wait was always paid
+    and the self-healing never triggered. Silence past the deadline is now evidence too. Pure.
+#>
+function Test-CopilotSilentTimeout {
+    param(
+        [bool]$Requested,
+        [bool]$Answered,
+        [Parameter(Mandatory)][datetime]$Now,
+        [Parameter(Mandatory)][datetime]$Deadline
+    )
+    return ($Requested -and (-not $Answered) -and ($Now -ge $Deadline))
 }
 
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
@@ -168,6 +410,40 @@ if ($InstallRuleset) {
 }
 
 if ($PR -le 0) { throw "Usa -PR <numero> (o -InstallRuleset)." }
+
+# ── Record an external review so the gate can see it (#510) ───────────────────
+# A reviewer without a GitHub identity (second-opinion / Codex, or a careful human read) leaves no
+# review object, so to the gate it was indistinguishable from nobody looking. This writes the
+# evidence in the one place that survives the session: the PR itself.
+if ($RecordReview) {
+    # A summary is REQUIRED. Without it this is a one-flag way to stamp "reviewed" on a PR nobody
+    # read - the same empty assurance the whole issue is about, just with a different author.
+    # Having to state what the review found is the cheapest available proof that one happened.
+    if (-not "$Summary".Trim()) {
+        throw "-RecordReview exige -Summary: escribe QUE encontro la revision. Registrar una revision vacia es exactamente el problema que este gate arregla (#510)."
+    }
+    $headJson = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','headRefOid') `
+                          -What "leer el head del PR #$PR"
+    $headSha  = "$(($headJson | ConvertFrom-Json).headRefOid)".Trim()
+    if (-not $headSha) { throw "No pude leer el head del PR #$PR - sin el, la revision no queda atada a este diff." }
+
+    # The SHA is what makes the record mean something: it attests to THIS diff, not to the PR in
+    # general. A later push leaves it behind as stale evidence instead of vouching for code the
+    # reviewer never saw.
+    $body = @"
+<!-- $script:ExternalReviewMarker $Reviewer sha=$headSha -->
+## Revision externa - $Reviewer
+
+**Commit revisado:** ``$headSha``
+
+$Summary
+"@
+    $null = Invoke-Gh -GhArgs @('pr','comment',"$PR",'--repo',$Repo,'--body',$body) `
+                      -What "registrar la revision externa en el PR #$PR"
+    Write-Host "OK revision de '$Reviewer' registrada sobre el commit $($headSha.Substring(0,[Math]::Min(7,$headSha.Length))) del PR #$PR." -ForegroundColor Green
+    Write-Host "   Si empujas commits nuevos, esta revision deja de contar - y debe ser asi." -ForegroundColor DarkGray
+    exit 0
+}
 
 Write-Host "=== Review gate  $Repo  PR #$PR ===" -ForegroundColor Cyan
 Write-Host ""
@@ -316,26 +592,11 @@ if ($tmdlChanged) {
     }
 }
 
-# ── 2. CI checks ───────────────────────────────────────────────────────────────
-Write-Host ""
-Write-Host "  Esperando checks de CI..." -ForegroundColor Cyan
-$checksOk = $true
-$checksOut = gh pr checks $PR --repo $Repo --watch 2>&1
-$checksExit = $LASTEXITCODE
-$checksText = ($checksOut | Out-String).Trim()
-if ($checksText) { Write-Host $checksText }
-if ($checksExit -ne 0) {
-    if ($checksText -match '(?i)no checks') {
-        Write-Host "  (sin checks configurados - cuenta como pass, considera /board automate)" -ForegroundColor DarkGray
-    } else {
-        $checksOk = $false
-        Write-Host "  FAIL hay checks fallando" -ForegroundColor Red
-    }
-} else {
-    Write-Host "  OK  checks en verde" -ForegroundColor Green
-}
-
-# ── 3. Wait for the review, then collect decision + threads ───────────────────
+# ── 2+3. CI checks AND review, waited together (bounded + concurrent, #562) ───
+# The old shape was two waits in sequence: `gh pr checks --watch` (no timeout — the only unbounded
+# wait in the codebase; a queued workflow hung the session forever) and THEN a review poll. They
+# are independent, so one loop now polls both: worst case is max(CI, review), not their sum, and
+# the CI side expires at -CiTimeoutMinutes into an explicit "still pending" block.
 function Get-ReviewState {
     # THE gate verdict read. -Graphql throws on exit OR errors[] so a failed read can never come
     # back as 0 reviews / 0 unresolved / null decision -> a false GATE PASSED that authorizes a
@@ -344,9 +605,11 @@ function Get-ReviewState {
 query($o:String!, $r:String!, $n:Int!) {
   repository(owner:$o, name:$r) {
     pullRequest(number:$n) {
+      headRefOid
       reviewDecision
-      reviews(last:20) { nodes { author { login } state body submittedAt } }
+      reviews(last:20) { nodes { author { login } state body submittedAt commit { oid } } }
       reviewThreads(first:50) { nodes { isResolved } }
+      comments(last:100) { nodes { body } }
     }
   }
 }'
@@ -355,19 +618,83 @@ query($o:String!, $r:String!, $n:Int!) {
     return $q.data.repository.pullRequest
 }
 
+Write-Host ""
+if ($copilotRequested) {
+    Write-Host "  Esperando checks de CI (max $CiTimeoutMinutes min) y el review (max $TimeoutMinutes min) EN PARALELO..." -ForegroundColor Cyan
+} else {
+    Write-Host "  Esperando checks de CI (max $CiTimeoutMinutes min)..." -ForegroundColor Cyan
+}
+
+$ciDeadline     = (Get-Date).AddMinutes([Math]::Max(1, $CiTimeoutMinutes))
+$reviewDeadline = (Get-Date).AddMinutes([Math]::Max(1, $TimeoutMinutes))
+$verdictCi      = Get-ChecksVerdict -Checks @() -Parsed $false
+$reviewArrived  = $false
 # NOTE: variable must NOT be named $pr - PowerShell vars are case-insensitive and it would
 # collide with the [int]$PR parameter (type conversion crash).
-$prState = Get-ReviewState
-if ($copilotRequested) {
-    Write-Host ""
-    Write-Host "  Esperando el review (max $TimeoutMinutes min)..." -ForegroundColor Cyan
-    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    while ((Get-Date) -lt $deadline) {
-        $reviews = @($prState.reviews.nodes)
-        if ($reviews.Count -gt 0 -and ($reviews | Where-Object { $_.author.login -match '(?i)copilot' })) { break }
-        Start-Sleep -Seconds 20
-        $prState = Get-ReviewState
+$prState        = $null
+
+while ($true) {
+    # CI snapshot — STRUCTURED read only (the display-text table was a merge decision made from
+    # human-readable output; see the #510 history above). A failed read keeps polling and, at the
+    # deadline, blocks — it can never invent a pass.
+    $checksJson = gh pr checks $PR --repo $Repo --json name,bucket 2>$null
+    $parsedList = @(); $parsedOk = $false
+    if ($checksJson) {
+        try { $parsedList = @($checksJson | ConvertFrom-Json); $parsedOk = $true } catch { }
+    } else {
+        # Empty stdout is either "no checks configured" (benign) or a transient read failure.
+        # Probe the human-readable form to tell them apart: only the explicit "no checks" text
+        # counts as benign; anything else stays unparsed and fails closed at the deadline.
+        $probe = (gh pr checks $PR --repo $Repo 2>&1 | Out-String)
+        if ($probe -match '(?i)no checks') { $parsedList = @(); $parsedOk = $true }
     }
+    $verdictCi = Get-ChecksVerdict -Checks $parsedList -Parsed $parsedOk
+
+    # Review snapshot — while one is awaited, and at least once so the verdict section always has
+    # PR state (decision, threads, head SHA) even when no review was requested. Arrival is judged
+    # by the SAME evidence rule as the final verdict (#563): any GitHub review OR recorded external
+    # review ([abios-review] comment) bound to the current head ends the wait — a human, Codex, or
+    # Copilot answering first is an answer. Stale evidence of earlier commits keeps waiting.
+    if (-not $prState -or ($copilotRequested -and -not $reviewArrived)) {
+        $prState = Get-ReviewState
+        $reviewArrived = (Get-ReviewEvidence -Reviews @($prState.reviews.nodes) `
+                             -CommentBodies @(@($prState.comments.nodes) | ForEach-Object { "$($_.body)" }) `
+                             -HeadSha "$($prState.headRefOid)").reviewed
+    }
+
+    if (Test-GateWaitDone -ChecksSettled ([bool]$verdictCi.Settled) `
+                          -WaitingReview ($copilotRequested -and -not $reviewArrived) `
+                          -Now (Get-Date) -CiDeadline $ciDeadline -ReviewDeadline $reviewDeadline) { break }
+    Start-Sleep -Seconds 15
+}
+
+# Re-read PR state AFTER the wait so the verdict below judges the PRESENT, not a snapshot from
+# early in the CI wait (#562, external review): a review that requested changes or a thread opened
+# while CI was still running would otherwise be invisible to a verdict computed from stale state.
+$prState = Get-ReviewState
+
+# CI verdict, from the last snapshot. The deadline bounds the WAIT, not the validity of a late
+# result: if checks settle green while the loop is still open for the review side, that pass is
+# real and counts. The invariant that matters is fail-closed and it holds on every path - a pass
+# requires a PARSED, SETTLED, all-green snapshot; pending-at-exit and unreadable both block.
+$checksOk     = $true
+$ciTimedOut   = $false
+$failedChecks = @($verdictCi.Failed)
+$checksParsed = [bool]$verdictCi.Parsed
+if ($verdictCi.NoChecks) {
+    Write-Host "  (sin checks configurados - cuenta como pass, considera /board automate)" -ForegroundColor DarkGray
+} elseif (-not $verdictCi.Parsed) {
+    $checksOk = $false
+    Write-Host "  FAIL no pude leer los checks del PR dentro del limite - se bloquea por precaucion, no como pass." -ForegroundColor Red
+} elseif (-not $verdictCi.Settled) {
+    $checksOk = $false; $ciTimedOut = $true
+    Write-Host ("  FAIL checks aun PENDIENTES tras {0} min: {1}" -f $CiTimeoutMinutes, (@($verdictCi.Pending) -join ', ')) -ForegroundColor Red
+    Write-Host "       (limite del gate #562 - antes esto esperaba sin techo y colgaba la sesion)" -ForegroundColor DarkGray
+} elseif (-not $verdictCi.Ok) {
+    $checksOk = $false
+    Write-Host ("  FAIL hay checks fallando: {0}" -f ($failedChecks -join ', ')) -ForegroundColor Red
+} else {
+    Write-Host "  OK  checks en verde" -ForegroundColor Green
 }
 
 $reviews    = @($prState.reviews.nodes)
@@ -377,12 +704,34 @@ $decision   = $prState.reviewDecision
 # If Copilot answered that it could NOT review (no quota), remember it per account so the NEXT PR skips
 # the request + the wait entirely (#367). Only when we actually requested it this run — a skipped run
 # has nothing new to learn. Best-effort: a marker write failure never affects the gate verdict.
-if ($copilotRequested -and (Test-CopilotUnavailableReview $reviews)) {
+if ($copilotRequested -and (Test-CopilotUnavailableReview -Reviews $reviews -HeadSha "$($prState.headRefOid)")) {
     $cooldownDays = [Math]::Max(1, $CopilotCooldownDays)
     if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays($cooldownDays) -Reason 'Copilot answered: unable to review (quota/limit)') {
         Write-Host ("  Copilot sin disponibilidad detectada - marcado NO disponible para {0} por {1} dia(s); no lo volvere a solicitar/esperar hasta entonces (#367)." -f $copilotOwner, $cooldownDays) -ForegroundColor DarkYellow
     }
+} elseif ($copilotRequested) {
+    # SILENCE past the deadline arms the cooldown too (#563). Without this, a Copilot that never
+    # answers anything left the marker unarmed and every PR paid the full wait forever. Silence is
+    # weaker evidence than an explicit refusal, so it gets a 1-day cooldown instead of the full
+    # -CopilotCooldownDays — a slow day should not silence the reviewer for a week.
+    # "Answered" means answered FOR THE CURRENT HEAD (external review, round 2): a stale Copilot
+    # review of an earlier commit is not an answer to this run's request, and treating it as one
+    # suppressed the cooldown in exactly the repeat-timeout scenario this change removes.
+    $copilotAnswered = [bool](@($reviews) | Where-Object {
+        $_.author.login -match '(?i)copilot' -and "$($_.commit.oid)".Trim() -eq "$($prState.headRefOid)".Trim()
+    })
+    if (Test-CopilotSilentTimeout -Requested $copilotRequested -Answered $copilotAnswered -Now (Get-Date) -Deadline $reviewDeadline) {
+        if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays(1) -Reason "Copilot stayed silent past the $TimeoutMinutes-minute review timeout") {
+            Write-Host ("  Copilot no contesto en {0} min - marcado NO disponible para {1} por 1 dia; el proximo PR no pagara esta espera (#563)." -f $TimeoutMinutes, $copilotOwner) -ForegroundColor DarkYellow
+        }
+    }
 }
+
+# Evidence that someone ACTUALLY reviewed (#510). Comments arrive in the same authoritative
+# GraphQL read as the reviews (#563) — one source, one failure mode: an unreadable state already
+# failed the gate inside Get-ReviewState, so evidence can never be computed from half a picture.
+$commentBodies = @(@($prState.comments.nodes) | ForEach-Object { "$($_.body)" })
+$evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies $commentBodies -HeadSha "$($prState.headRefOid)"
 
 Write-Host ""
 Write-Host "----- RESULTADO DEL REVIEW -----" -ForegroundColor Cyan
@@ -402,18 +751,64 @@ Write-Host "--------------------------------" -ForegroundColor Cyan
 Write-Host ""
 
 # ── 4. Verdict ─────────────────────────────────────────────────────────────────
+# A failing REVIEWER check asks "was this reviewed?", not "does the code work?". Once a real
+# review is on record for this commit, that question is answered and the reviewer job's own red
+# is no longer a reason to block - otherwise the flow deadlocks in a case that is routine:
+# `claude-code-action` SKIPS ITSELF (and exits success) on any PR that edits its own workflow
+# file, so its verification correctly reports "nobody reviewed" and would then block that PR
+# forever, no matter how carefully a human or an external reviewer read it.
+# Narrow on purpose: only when EVERY failing check is a reviewer job AND real evidence exists.
+if (-not $checksOk -and $evidence.reviewed -and (Test-OnlyReviewerChecksFailed -FailedChecks $failedChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
+    $checksOk = $true
+    Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($failedChecks -join ', ')) -ForegroundColor DarkYellow
+    Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray
+    Write-Host "        contestada, asi que deja de ser motivo de bloqueo." -ForegroundColor DarkGray
+}
+
 $blockers = @()
-if (-not $checksOk)                        { $blockers += "checks de CI fallando" }
+if (-not $checksOk) {
+    $blockers += $(if ($ciTimedOut) { "checks de CI aun pendientes tras $CiTimeoutMinutes min (limite del gate, #562)" }
+                   else             { "checks de CI fallando" })
+}
 if ($decision -eq "CHANGES_REQUESTED")     { $blockers += "review pide cambios (CHANGES_REQUESTED)" }
 if ($unresolved -gt 0)                     { $blockers += "$unresolved hilo(s) de review sin resolver" }
 if ($tmdlBlocked)                          { $blockers += "cambios TMDL BREAKING en el modelo (M3.3)" }
 if ($bpaBlocked)                           { $blockers += "violaciones BPA de severidad error (M3.3)" }
 
 if ($blockers.Count -eq 0) {
-    Write-Host "GATE PASSED - seguro mergear (gh pr merge $PR --repo $Repo --squash --delete-branch)." -ForegroundColor Green
-    if ($reviews.Count -eq 0) {
-        Write-Host "RECUERDA: llegaron 0 reviews (solicitud aceptada no garantiza review) -" -ForegroundColor Yellow
-        Write-Host "el self-review de 'gh pr diff $PR' es OBLIGATORIO antes del merge." -ForegroundColor Yellow
+    # THE #510 fix. "Reviewed and found nothing" and "nobody ever looked" used to print the same
+    # GATE PASSED with a reminder underneath - and a caller that reads the exit code saw a pass
+    # either way. Silence is not approval, so the second case gets its own verdict and its own
+    # exit code: anything testing `-eq 0` now fails closed, while still telling it apart from a
+    # real block (exit 1).
+    if (-not $evidence.reviewed -and -not $AllowUnreviewed) {
+        Write-Host "GATE SIN REVISAR - los checks estan en verde, pero NADIE reviso ESTE diff." -ForegroundColor Yellow
+        if (-not "$($prState.headRefOid)".Trim()) {
+            # Fail-closed, but say WHICH failure: blaming the user for not reviewing when the gate
+            # could not even read the head commit would send them chasing the wrong thing.
+            Write-Host "  No pude leer el commit actual del PR, asi que no puedo probar que ninguna" -ForegroundColor Yellow
+            Write-Host "  revision corresponda a este codigo. Se rechaza por precaucion, no por falta de review." -ForegroundColor Yellow
+        } elseif ($evidence.stale -gt 0) {
+            Write-Host ("  Hay {0} revision(es) en el PR, pero de commits ANTERIORES - no cubren el codigo actual." -f $evidence.stale) -ForegroundColor Yellow
+            Write-Host "  Empujaste cambios despues de que se reviso; esos cambios no los ha visto nadie." -ForegroundColor DarkGray
+        } else {
+            Write-Host "  0 reviews de GitHub y 0 revisiones externas registradas." -ForegroundColor Yellow
+        }
+        Write-Host "  Un check verde de un reviewer que no dejo review no es evidencia de nada (#510)." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  Salidas legitimas, en orden de preferencia:" -ForegroundColor Cyan
+        Write-Host "   1. Que alguien revise de verdad - el revisor externo (second-opinion) sirve," -ForegroundColor Cyan
+        Write-Host "      y se registra con -RecordReview -Reviewer <quien> -Summary <que encontro>." -ForegroundColor DarkGray
+        Write-Host "   2. Si de verdad no amerita revision (typo, archivo generado): -AllowUnreviewed." -ForegroundColor DarkGray
+        Write-Host ""
+        exit 2
+    }
+    Write-Host "GATE PASSED - seguro mergear." -ForegroundColor Green
+    if ($evidence.reviewed) {
+        Write-Host ("  Revisado por: {0} ({1} review(s) de GitHub, {2} externa(s))." -f `
+            ($evidence.reviewers -join ', '), $evidence.github, $evidence.external) -ForegroundColor Green
+    } else {
+        Write-Host "  NOTA: pasa SIN revision porque se pidio -AllowUnreviewed. Nadie miro este codigo." -ForegroundColor DarkYellow
     }
     exit 0
 } else {
@@ -422,3 +817,7 @@ if ($blockers.Count -eq 0) {
     Write-Host "Atiende el feedback, push, y re-ejecuta este gate." -ForegroundColor Yellow
     exit 1
 }
+
+
+
+

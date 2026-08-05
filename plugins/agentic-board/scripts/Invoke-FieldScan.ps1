@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    /board field — sweep local session transcripts and report how agentic-board behaved (#476).
+    /board telemetry — sweep local session transcripts and report how agentic-board behaved (#476).
 
 .DESCRIPTION
     Joins stage 1 (Get-FieldLedger: which sessions still owe work) to stage 2 (Get-FieldEpisodes:
@@ -41,7 +41,7 @@ $transcript = Get-TranscriptRoot -Override $ProjectsRoot
 $ledgerPath = Join-Path $root 'ledger.csv'
 $recordDir  = Join-Path $root 'episodes'
 
-Write-Host "=== /board field  —  sweep ===" -ForegroundColor Cyan
+Write-Host "=== /board telemetry  —  sweep ===" -ForegroundColor Cyan
 Write-Host "  transcripts : $transcript  (read-only)"
 Write-Host "  field root  : $root"
 
@@ -87,10 +87,18 @@ foreach ($p in $pending) {
 
     $events = [System.Collections.Generic.List[object]]::new()
     $i = 0
+    # Timestamp bounds of the WHOLE transcript (#568, review round 2): the loop reads every line
+    # anyway, so a cheap regex captures the true first/last stamps - the parsed-event subset is
+    # pre-filtered (tool_use/tool_result/user) and its bounds undercount the session.
+    $fileFirstTs = ''; $fileLastTs = ''
     try {
         $reader = [System.IO.File]::OpenText($src.path)
         try {
             while ($null -ne ($line = $reader.ReadLine())) {
+                if ($line -match '"timestamp"\s*:\s*"([^"]+)"') {
+                    if (-not $fileFirstTs) { $fileFirstTs = $Matches[1] }
+                    $fileLastTs = $Matches[1]
+                }
                 # Cheap pre-filter: a line with none of these markers cannot become an event the
                 # detectors use, and ConvertFrom-Json over 571 MB is the whole cost of the sweep.
                 if ($i -ge $p.fromEvent -and $line.Length -gt 20 -and
@@ -108,6 +116,19 @@ foreach ($p in $pending) {
 
     $episodes = @(Get-FieldEpisodes -Events (Join-FieldResults -Events $events.ToArray()) -Window $Window)
     $used = if ($episodes.Count) { 'yes' } else { 'no' }
+
+    # Session wall-clock (#568) from the FULL transcript bounds captured above - never from the
+    # filtered event subset, and immune to incremental watermarks because every scan streams the
+    # whole file. UNKNOWN stays $null in memory and in the record file - only the CSV coerces to
+    # 0 (a cell cannot hold null); fabricating a zero elsewhere is a claim, not a measurement.
+    $firstTs = $fileFirstTs
+    $sessionDurationMin = $null
+    if ($fileFirstTs -and $fileLastTs) {
+        $t0 = ConvertTo-FieldTimestamp -Ts $fileFirstTs
+        $t1 = ConvertTo-FieldTimestamp -Ts $fileLastTs
+        if ($t0 -and $t1 -and $t1 -ge $t0) { $sessionDurationMin = [int][Math]::Round(($t1 - $t0).TotalMinutes) }
+    }
+
     if ($episodes.Count) {
         $withTool++
         $totalEpisodes += $episodes.Count
@@ -115,20 +136,25 @@ foreach ($p in $pending) {
             $toolTally[$e.tool] = 1 + [int]$toolTally[$e.tool]
             foreach ($s in $e.signals) { $signalTally[$s] = 1 + [int]$signalTally[$s] }
         }
-        # Per-session record, redacted. Traceable back to the transcript by event index.
+        # Per-session record, redacted. Traceable back to the transcript by event index; carries
+        # the time dimension (#568) so later analysis can finally say where the minutes went.
         $rec = [pscustomobject]@{
             sessionId = $p.sessionId; project = $p.project; scannedAt = (Get-Date).ToUniversalTime().ToString('o')
             events = $src.events
+            durationMin = $sessionDurationMin
             episodes = @($episodes | ForEach-Object {
-                [pscustomobject]@{ index = $_.index; tool = Protect-FieldText -Text $_.tool; failed = $_.failed; signals = $_.signals }
+                [pscustomobject]@{ index = $_.index; tool = Protect-FieldText -Text $_.tool; failed = $_.failed; signals = $_.signals
+                                   ts = $_.ts; durationMs = $_.durationMs }
             })
         }
         $rec | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $recordDir "$($p.project)__$($p.sessionId).json") -Encoding UTF8
     }
 
-    # Only now — the events were actually processed.
+    # Only now — the events were actually processed. The CSV coerces an unknown duration to 0
+    # (a cell cannot hold null); the record file above kept the honest null.
     $ledger = @(Update-LedgerRow -Ledger $ledger -SessionId $p.sessionId -Project $p.project `
                     -Events $src.events -Bytes $src.bytes -Incidents $episodes.Count -UsedTool $used `
+                    -DurationMin $(if ($null -eq $sessionDurationMin) { 0 } else { $sessionDurationMin }) -FirstTs $firstTs `
                     -ScannedAt ((Get-Date).ToUniversalTime().ToString('o')))
 }
 Write-Progress -Activity "Escaneando sesiones" -Completed

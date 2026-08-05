@@ -168,10 +168,27 @@ param(
     [switch]$TakeOver,
     # Irreversible brake (#440): brief the launched session to stop at a reviewed PR instead of
     # ordering the merge. Set by /expert auto when the contract marks `merge` as irreversible.
+    # When neither -StopAtPR nor -AllowMerge is specified, Resolve-LaunchBrake brakes by default (#598).
     [switch]$StopAtPR,
+    # Explicit opt-in to autonomous merging (#598). A launched session NEVER merges on its own
+    # unless the human passes this flag — the default is to stop at a reviewed PR. Pass
+    # -AllowMerge only when a fully autonomous close is intentional and the issue has been reviewed.
+    [switch]$AllowMerge,
     # Path to the full brief for the launched session (e.g. .agentic-board/expert-brief-<n>.md),
     # which it is told to read first and treat as overriding the generic steps.
     [string]$BriefFile     = "",
+    # The contract's irreversible action list, recorded in the brake marker so the mechanical
+    # guard (#516) refuses exactly what this run's contract brakes on - no more, no less.
+    # Empty with -StopAtPR falls back to the default vocabulary rather than arming nothing.
+    [string[]]$Irreversible = @(),
+    # The human ORDERED this run to finish end-to-end (#530). Travels with the instruction, not with
+    # a setting on disk: it is recorded in the brake marker so the merge decision -- taken later,
+    # when the facts exist -- still knows what was actually asked for.
+    [switch]$EndToEnd,
+    # The contract's time budget in minutes, recorded in the brake marker so the PreToolUse hook
+    # can ENFORCE it (#564): past this, only wrap-up commands (handoff, commit/push, report) pass.
+    # 0 = no budget enforcement.
+    [int]$BudgetMinutes    = 0,
     [string]$TokenVar      = "GITHUB_TOKEN_PERSONAL",
     # Only a plain env-var identifier - it gets interpolated into the spawned
     # -Command string, so reject anything that could inject (';', quotes, spaces).
@@ -190,6 +207,9 @@ $ErrorActionPreference = "Stop"
 # not read as an empty board or a write that silently no-op'd. Pure at load; dot-sourced before
 # the guard so unit tests get the seam. Session-monitor reads deliberately stay best-effort.
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# Board reads that report their own truncation (#484). A capped item-list returns exit 0 and a
+# SHORT list, which this script used to print as "sin pendientes" over a board full of Backlog.
+. (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 # owner/name resolver from origin (dot-safe regex) - cerrar-ciclo (#302) resolves the current repo.
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
 
@@ -244,7 +264,11 @@ function Resolve-StatusOptionId($statusNode, [string]$canonical) {
 # rather than asserting a schema it never read.
 function Get-StatusOptionNames([int]$num) {
     try {
-        $fields = (gh project field-list $num --owner $Owner --format json --limit 50 | ConvertFrom-Json).fields
+        # Through the wrapper + cache (#571): this exact line was the anti-pattern quoted in
+        # Invoke-Gh.ps1's header (a 401 read as "the board has no fields"), still live here.
+        # Board field schemas change rarely; 5 minutes of staleness is free speed.
+        $fields = (Invoke-GhCached -GhArgs @('project','field-list',"$num",'--owner',$Owner,'--format','json','--limit','50') `
+                       -What "leer los campos del board #$num" -Json -TtlSec 300).fields
         @(($fields | Where-Object { $_.name -eq 'Status' } | Select-Object -First 1).options | ForEach-Object { $_.name })
     } catch { @() }
 }
@@ -332,7 +356,9 @@ function Write-SessionRegistryEntry {
         cli          = $Cli
         fleetSession = $FleetSession
         host         = $env:COMPUTERNAME
-        started      = (Get-Date -Format "yyyy-MM-dd HH:mm")
+        # Seconds, not minutes (#568): this stamp is the start of every duration the tool can
+        # ever compute about its own runs; minute granularity threw away the precision for free.
+        started      = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     }
     $entries | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p
 }
@@ -540,9 +566,12 @@ function Get-IssueBlockers([string]$repo, [int]$issueNum) {
         $issueLabels = @((gh issue view $issueNum --repo $repo --json labels | ConvertFrom-Json).labels.name)
         if ($issueLabels -contains "blocked") { $blockers += "label 'blocked' presente" }
     } catch { }
-    # Native blocked-by dependencies (best-effort: API may not exist for the account)
+    # Native blocked-by dependencies (best-effort: API may not exist for the account). Through
+    # the wrapper (#571): the raw 2>$null read made a 401 indistinguishable from "no blockers" -
+    # the try/catch keeps the degrade, but now only a REAL absence degrades silently.
     try {
-        $deps = gh api "repos/$repo/issues/$issueNum/dependencies/blocked_by" 2>$null | ConvertFrom-Json
+        $deps = Invoke-Gh -GhArgs @('api',"repos/$repo/issues/$issueNum/dependencies/blocked_by") `
+                          -What "leer los bloqueadores de #$issueNum" -Json
         foreach ($d in @($deps | Where-Object { $_.state -eq "open" })) {
             $blockers += "bloqueado por #$($d.number) '$($d.title)' (abierto)"
         }
@@ -551,9 +580,13 @@ function Get-IssueBlockers([string]$repo, [int]$issueNum) {
 }
 
 # Last [abios-claim] fingerprint comment on an issue (or empty). Wrapped so the
-# multi-session lock path can be unit-tested without a live gh call.
+# multi-session lock path can be unit-tested without a live gh call. Best-effort by contract
+# (an unreadable claim list must not block a start), so the wrapper's throw degrades to ''.
 function Get-LastClaim([string]$repo, [int]$issueNum) {
-    return (gh api "repos/$repo/issues/$issueNum/comments" --jq '[.[] | select(.body | startswith("[abios-claim]"))] | last | .body' 2>$null)
+    try {
+        return (Invoke-Gh -GhArgs @('api',"repos/$repo/issues/$issueNum/comments",'--jq','[.[] | select(.body | startswith("[abios-claim]"))] | last | .body') `
+                          -What "leer los claims de #$issueNum")
+    } catch { return '' }
 }
 
 # Build the durable [abios-claim] fingerprint comment body. Pure -> unit-testable,
@@ -600,7 +633,7 @@ function Get-IssueLinkedWork {
     $prs = @(); $commits = @()
     $rp = $Repo -split '/'
     try {
-        $data = gh api graphql -f query='
+        $data = Invoke-Gh -GhArgs @('api','graphql','-f','query=
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){
     issue(number:$n){
@@ -609,13 +642,14 @@ query($o:String!,$r:String!,$n:Int!){
       }
     }
   }
-}' -F "o=$($rp[0])" -F "r=$($rp[1])" -F "n=$IssueNum" 2>$null | ConvertFrom-Json
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$IssueNum") -What "leer los PRs de #$IssueNum" -Graphql
         $prs = @($data.data.repository.issue.closedByPullRequestsReferences.nodes)
     } catch { }
     # GitHub commit search indexes the DEFAULT branch. Filter to the exact (#n) token
     # so #12 never matches #123 (substring search would).
     try {
-        $hits = gh search commits "#$IssueNum" --repo $Repo --json sha,commit --limit 20 2>$null | ConvertFrom-Json
+        $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit','20') `
+                          -What "buscar commits de #$IssueNum" -Json
         $rx = "\(#$IssueNum\)"
         $commits = @($hits | Where-Object { $_.commit.message -match $rx } |
                      ForEach-Object { [pscustomobject]@{ sha = $_.sha } })
@@ -776,14 +810,31 @@ function New-IssueWorkspace {
 
     $dirty     = @(git status --porcelain 2>$null)
     $curBranch = git branch --show-current 2>$null
+    # Detect another LIVE session already using this working copy (#225): a clean tree on
+    # master is no defence — a foreign session can switch branches mid-work and corrupt the
+    # next commit. Read-SessionRegistry returns only live (process exists) entries.
+    $myPid = 0
+    try { $myPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+    $cwd   = (Get-Location).Path.TrimEnd('\', '/')
+    $conflictEntry = $null
+    if ($myPid) {
+        $conflictEntry = @(Read-SessionRegistry) | Where-Object {
+            $_.sessionPid -ne $myPid -and
+            ($_.workPath -and $_.workPath.TrimEnd('\', '/') -ieq $cwd)
+        } | Select-Object -First 1
+    }
+    $liveConflict = [bool]$conflictEntry
     # Batch (-PreferWorktree) always isolates. Single start keeps the classic
     # dirty-tree / other-issue-branch guard: never switch a busy working copy.
-    $needWorktree = $PreferWorktree -or `
+    $needWorktree = $PreferWorktree -or $liveConflict -or `
                     ($dirty.Count -gt 0 -and $curBranch -ne $branchName) -or `
                     ($curBranch -and $curBranch -match '^issue-\d+' -and $curBranch -ne $branchName)
     if ($needWorktree) {
         if (-not $PreferWorktree) {
-            Write-Host "  OCUPADO: working tree ocupado (rama actual: $curBranch) - uso un worktree aislado:" -ForegroundColor Yellow
+            $reason = if ($liveConflict) {
+                "otra sesion viva (issue #$($conflictEntry.issue), PID $($conflictEntry.sessionPid)) usa este mismo directorio de trabajo"
+            } else { "working tree ocupado (rama actual: $curBranch)" }
+            Write-Host "  OCUPADO: $reason - uso un worktree aislado:" -ForegroundColor Yellow
         }
         return (New-IssueWorktree $repo $issueNum $branchName $baseRef)
     }
@@ -967,6 +1018,25 @@ query($o:String!, $r:String!, $n:Int!) {
 # Parallel session launcher (mode 5 -Launch): one visible Claude session per
 # worktree, each briefed to work its own issue end-to-end.
 # ==============================================================================
+
+# Compute the effective brake for a launched session (#598).
+# All launched sessions stop at a reviewed PR by default — a session that merges its
+# own PR has no human review and the board has no safety check on the result (proven on
+# 2026-08-03: two sessions merged unreviewed, one shipped a DoD item it had not built).
+# -AllowMerge is the explicit opt-in for autonomous merging; -StopAtPR:$false from an
+# expert contract that allows merging is also honoured. -AllowMerge beats everything.
+# Pure (no side effects) -> unit-testable. Called from the -Launch and -Fleet paths.
+function Resolve-LaunchBrake {
+    param(
+        [bool]$AllowMerge,
+        # Was -StopAtPR explicitly bound by the caller? ($PSBoundParameters.ContainsKey('StopAtPR'))
+        [bool]$StopAtPRBound,
+        [bool]$StopAtPR
+    )
+    if ($AllowMerge) { return $false }
+    if ($StopAtPRBound) { return $StopAtPR }
+    return $true    # default: brake for every fleet/launch session (#598)
+}
 
 # The one-line first message a spawned Claude session receives. Pure -> testable.
 # -Cli is threaded (default 'claude') so Phase-2 adapters can specialize the leading
@@ -1177,6 +1247,13 @@ function Start-WorktreeSession {
         [string]$FleetSession = '',
         [switch]$StopAtPR,
         [string]$BriefFile = '',
+        [string[]]$Irreversible = @(),
+    # The human ORDERED this run to finish end-to-end (#530). Travels with the instruction, not with
+    # a setting on disk: it is recorded in the brake marker so the merge decision -- taken later,
+    # when the facts exist -- still knows what was actually asked for.
+    [switch]$EndToEnd,
+        # Contract time budget in minutes, written into the brake marker for the hook to enforce (#564).
+        [int]$SessionBudgetMinutes = 0,
         [switch]$Preview
     )
     $abios = Get-AbiosDir
@@ -1196,6 +1273,46 @@ function Start-WorktreeSession {
     if (-not $WorkPath -or -not (Test-Path $WorkPath)) {
         Write-Host "  WARN #${IssueNum}: worktree '$WorkPath' no existe - no se lanza sesion." -ForegroundColor DarkYellow
         return $null
+    }
+    # ARM THE BRAKE (#516). The briefing below still ASKS the session to stop at a reviewed PR;
+    # this marker is what makes the refusal mechanical. The PreToolUse hook
+    # (Brake-PreToolUseHook.ps1) finds it by walking up from the session's cwd and denies the
+    # irreversible call before it runs. Written only for a real launch: a -Preview must not leave
+    # a live control behind, and an unarmed run must not find a stale marker from an armed one.
+    try {
+        . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
+        $armedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        # A positive budget arms the marker on its own (#564, external review round 2): the hook
+        # can only enforce what the marker records, and a launch whose contract does not brake on
+        # merge still deserves its time limit. -StopAtPR without a budget arms exactly as before.
+        $armIntent = ([bool]$StopAtPR) -or ($SessionBudgetMinutes -gt 0)
+        # A marker armed ONLY for the budget declares it (#565 round 6), so an intentionally
+        # empty irreversible list stays empty instead of inheriting the anti-tamper full
+        # vocabulary - the contract said this run may merge, and the budget must not unsay it.
+        # Only when the list is ACTUALLY empty (round 7): with any verb present (say deploy),
+        # the declaration would later excuse a hand-emptied list from the anti-tamper fallback.
+        $irrClean = @($Irreversible | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        $budgetOnly = (-not [bool]$StopAtPR) -and ($SessionBudgetMinutes -gt 0) -and ($irrClean.Count -eq 0)
+        $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed $armIntent -Issue $IssueNum `
+                    -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
+                    -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes -Repo $Repo -BudgetOnly $budgetOnly
+        if ($state -eq 'armed') {
+            Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
+            if ($SessionBudgetMinutes -gt 0) {
+                Write-Host ("      presupuesto: {0} min - vencido, el hook solo deja pasar el cierre (handoff/commit/report)" -f $SessionBudgetMinutes) -ForegroundColor DarkGray
+            }
+        } elseif ($state -eq 'disarmed') {
+            Write-Host ("  OK  #{0}: freno DESARMADO (marcador de un run previo retirado)" -f $IssueNum) -ForegroundColor DarkGray
+        }
+    } catch {
+        if ($StopAtPR -or $SessionBudgetMinutes -gt 0) {
+            # An unarmed run that believes it is armed is the #440 failure. Say so and refuse to
+            # launch rather than spawn a session with a brake that exists only on paper.
+            Write-Host "  FAIL #${IssueNum}: no se pudo armar el freno ($_). No se lanza la sesion." -ForegroundColor Red
+            return $null
+        }
+        # A marker we failed to CLEAR only ever over-blocks, so that direction warns and continues.
+        Write-Host "  WARN #${IssueNum}: no pude retirar el marcador de freno previo ($_). El merge seguira bloqueado en ese worktree." -ForegroundColor DarkYellow
     }
     # Persist the briefing so the spawned session reads it without command-line quoting.
     Set-Content -LiteralPath $briefingFile -Value (Get-SessionBriefing $IssueNum $Repo $Branch $WorkPath $Cli -StopAtPR:$StopAtPR -BriefFile $BriefFile) -Encoding UTF8
@@ -1510,383 +1627,14 @@ function Build-FleetPlan([object[]]$Started, [hashtable]$CliMap) {
         [PSCustomObject]@{ issue=$r.issue; repo=$r.repo; branch=$r.branch; workPath=$r.workPath; cli=$cli }
     }
 }
-
 # ==============================================================================
-# Governor - machine capacity (Phase 2). Get-DispatchPlan/Invoke-FleetDispatch
-# pace launches to what the box can carry: free RAM / per-session budget, capped
-# by cores-2, and pausing while CPU is saturated.
+# Governor (capacity) + process supervision moved to part files (#575): the same
+# functions, dot-sourced so this 3,100-line dispatcher stops holding a job scheduler
+# and a process killer inline. Loaded HERE (before the CLI and before the dot-source
+# guard) so tests that dot-source Board-Work keep seeing every function.
 # ==============================================================================
-
-# Normalize raw readings into a capacity snapshot. PURE -> unit-testable (the live
-# CIM calls are isolated in Get-MachineCapacity). CpuLoads is the per-socket
-# LoadPercentage array (Win32_Processor returns one instance per socket); free/total
-# are physical memory in KB (Win32_OperatingSystem reports KB).
-function Get-MachineCapacityCore([object[]]$CpuLoads, [double]$FreePhysicalKB, [double]$TotalPhysicalKB, [int]$LogicalCores) {
-    # LoadPercentage can be momentarily $null; drop those before averaging, default 0.
-    $vals = @($CpuLoads | Where-Object { $_ -ne $null } | ForEach-Object { [double]$_ })
-    $cpu  = if ($vals.Count) { [int][math]::Round((($vals | Measure-Object -Average).Average), 0) } else { 0 }
-    if ($cpu -lt 0) { $cpu = 0 }
-    $freeGB  = [math]::Round(([math]::Max($FreePhysicalKB, 0)  / 1MB), 2)   # KB -> GB (1MB numeric = 1048576)
-    $totalGB = [math]::Round(([math]::Max($TotalPhysicalKB, 0) / 1MB), 2)
-    [PSCustomObject]@{
-        CpuLoadPercent = $cpu
-        FreeRamGB      = $freeGB
-        TotalRamGB     = $totalGB
-        Cores          = $LogicalCores
-    }
-}
-
-# Live capacity: read CPU load + physical memory via CIM and fold into the pure core.
-# CPU via Win32_Processor.LoadPercentage, NEVER Get-Counter (fails c0000bb8 on this
-# localized Windows - see the Phase 2 spec). LogicalCores defaults to the real count
-# but is injectable so the governor can cap/override and tests stay deterministic.
-function Get-MachineCapacity {
-    param([int]$LogicalCores = [Environment]::ProcessorCount)
-    $procs = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue)
-    $loads = @($procs | ForEach-Object { $_.LoadPercentage })
-    $os    = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-    $free  = if ($os) { [double]$os.FreePhysicalMemory }     else { 0 }
-    $total = if ($os) { [double]$os.TotalVisibleMemorySize } else { 0 }
-    Get-MachineCapacityCore $loads $free $total $LogicalCores
-}
-
-# How many sessions to launch in the next wave. PURE -> unit-testable. The concurrency
-# ceiling is the MIN of: free RAM / per-session budget, cores-2 (the same cap the
-# platform uses, floored at 1), and an explicit -MaxConcurrent. The wave is the free
-# slots under that ceiling (ceiling - already running), never more than the pending
-# count. Forward-progress guard: when nothing is running yet, always launch at least 1
-# even if RAM looks exhausted (each session is recoverable in its own worktree, so the
-# governor may be aggressive rather than deadlock).
-function Get-DispatchPlan {
-    param(
-        [double]$FreeRamGB,
-        [int]$Cores,
-        [int]$Pending,
-        [int]$Running = 0,
-        [double]$PerSessionGB = 2.0,
-        [int]$MaxConcurrent = 0
-    )
-    # Clamp degenerate inputs so a corrupt reading can neither produce a negative
-    # ceiling nor (via a negative running count) INFLATE the free-slot math.
-    $Pending = [math]::Max($Pending, 0)
-    $Running = [math]::Max($Running, 0)
-    $ramCap  = [math]::Max([int][math]::Floor($FreeRamGB / [math]::Max($PerSessionGB, 0.1)), 0)
-    $coreCap = [math]::Max($Cores - 2, 1)
-    # Named caps so the binding constraint can be reported (monitor / log visibility).
-    $caps = [ordered]@{ ram = $ramCap; cores = $coreCap }
-    if ($MaxConcurrent -gt 0) { $caps['maxconcurrent'] = $MaxConcurrent }
-    $ceiling  = ($caps.Values | Measure-Object -Minimum).Minimum
-    $capBound = ($caps.GetEnumerator() | Sort-Object Value | Select-Object -First 1).Key
-    $freeSlots = [math]::Max($ceiling - $Running, 0)
-    $wave      = [math]::Min($freeSlots, $Pending)
-    # Which constraint actually decided the wave, for the narrator. -le so an exhausted
-    # or empty queue (Pending <= freeSlots, incl. Pending 0) reads as 'pending', not a cap.
-    $boundBy = if ($Pending -le $freeSlots) { 'pending' } else { $capBound }
-    # Never deadlock: if the queue has work and no session is live, launch one.
-    if ($wave -le 0 -and $Running -le 0 -and $Pending -gt 0) {
-        $wave = 1
-        $boundBy = 'progress-floor'
-    }
-    [PSCustomObject]@{
-        WaveSize     = [int]$wave
-        Concurrency  = [int]$ceiling
-        RamCap       = [int]$ramCap
-        CoreCap      = [int]$coreCap
-        BoundBy      = $boundBy
-        PerSessionGB = $PerSessionGB
-    }
-}
-
-# A launch slot is free when a session has finished (fewer running than the baseline we
-# started waiting at) OR the CPU has cooled below the threshold. PURE -> unit-testable;
-# Wait-FleetSlot polls live state and calls this.
-function Test-SlotFree([int]$StartRunning, [int]$CurrentRunning, [int]$CpuLoad, [int]$CpuThreshold) {
-    return ($CurrentRunning -lt $StartRunning) -or ($CpuLoad -lt $CpuThreshold)
-}
-
-# Block until a launch slot frees or a timeout elapses. Side-effecting (reads the live
-# registry + capacity, sleeps) -> not unit-tested directly; its decision is Test-SlotFree.
-function Wait-FleetSlot {
-    param([int]$CpuThreshold = 85, [int]$TimeoutSec = 300, [int]$PollSec = 5)
-    $baseline = @(Read-SessionRegistry).Count
-    $waited = 0
-    while ($waited -lt $TimeoutSec) {
-        Start-Sleep -Seconds $PollSec
-        $waited += $PollSec
-        $cur = @(Read-SessionRegistry).Count
-        $cpu = (Get-MachineCapacity).CpuLoadPercent
-        if (Test-SlotFree $baseline $cur $cpu $CpuThreshold) { return }
-    }
-}
-
-# The governor loop. Never fires the whole batch at once: each iteration sizes a wave
-# from live capacity (Get-DispatchPlan), launches it, and - if work remains - blocks on
-# Wait-FleetSlot until a session dies or the CPU cools, then re-plans. A CLI known to be
-# out of quota is skipped for the rest of the run (its issue still launches, on claude).
-# The live operations are injected as hooks so the loop is unit-testable with fakes.
-function Invoke-FleetDispatch {
-    param(
-        [object[]]$Queue,                 # items with .issue and .cli (+ whatever LaunchSession needs)
-        [int]$MaxConcurrent = 0,
-        [double]$PerSessionGB = 2.0,
-        [int]$CpuThreshold = 85,
-        [int]$MaxStalls = 120,            # consecutive zero-wave waits before giving up (never hang)
-        [hashtable]$NoQuotaClis = @{},
-        [scriptblock]$LaunchSession,      # & $LaunchSession $item $cli -> the actual CLI launched
-        [scriptblock]$GetCapacity  = { Get-MachineCapacity },
-        [scriptblock]$CountRunning = { @(Read-SessionRegistry).Count },
-        [scriptblock]$WaitForSlot  = { Wait-FleetSlot -CpuThreshold $CpuThreshold }
-    )
-    if (-not $LaunchSession) { throw "Invoke-FleetDispatch requires a -LaunchSession hook." }
-    $items = @($Queue)
-    $idx = 0
-    $waveNum = 0
-    $stalls = 0
-    $launched = @()
-    while ($idx -lt $items.Count) {
-        $cap  = & $GetCapacity
-        $run  = [int](& $CountRunning)
-        $plan = Get-DispatchPlan -FreeRamGB $cap.FreeRamGB -Cores $cap.Cores `
-                                 -Pending ($items.Count - $idx) -Running $run `
-                                 -PerSessionGB $PerSessionGB -MaxConcurrent $MaxConcurrent
-        if ($plan.WaveSize -le 0) {
-            # Ceiling full (sessions still running): wait for a slot to free, then re-plan.
-            # Bounded so a fleet of hung sessions that never free a slot can't loop forever -
-            # after MaxStalls consecutive zero-wave waits, give up and report the remainder.
-            $stalls++
-            if ($stalls -ge $MaxStalls) {
-                Write-Host ("  WARN governor: {0} issue(s) sin lanzar - no se liberaron slots tras {1} esperas." -f ($items.Count - $idx), $stalls) -ForegroundColor DarkYellow
-                break
-            }
-            & $WaitForSlot | Out-Null
-            continue
-        }
-        $stalls = 0
-        $waveNum++
-        for ($k = 0; $k -lt $plan.WaveSize -and $idx -lt $items.Count; $k++, $idx++) {
-            $item = $items[$idx]
-            # Runtime backoff: a CLI known out of quota is skipped for the rest of the run;
-            # the issue still launches on the always-available claude fallback.
-            $cli = $item.cli
-            if ($cli -and $NoQuotaClis.ContainsKey($cli) -and $NoQuotaClis[$cli]) { $cli = 'claude' }
-            # Record the CLI the hook ACTUALLY launched (its return), not our pre-launch guess,
-            # so the dispatch result stays accurate if the hook re-resolves availability.
-            $actual = & $LaunchSession $item $cli
-            $launched += [PSCustomObject]@{ issue = $item.issue; cli = $actual; wave = $waveNum }
-        }
-        # Pace: if work remains, block until the next slot frees before the next wave.
-        if ($idx -lt $items.Count) { & $WaitForSlot | Out-Null }
-    }
-    return $launched
-}
-
-# ==============================================================================
-# Kill layer (Phase 2 task reaper foundation). Every kill path is guarded by
-# Get-SessionGuardSet (this session's PID + ancestor chain) so the tool can never
-# terminate itself, its terminal host, or the Claude host above it. Fleet sessions
-# are (re)parented DESCENDANTS -> not in the guard set -> stay killable.
-# ==============================================================================
-
-# Walk ParentProcessId from a start PID to the root over a pid->parentPid map. PURE ->
-# unit-testable. Returns start + ancestors, and is cycle-safe (a $seen set stops a loop).
-function Get-AncestorChain([int]$StartPid, [hashtable]$ParentMap) {
-    $chain = @()
-    $seen  = @{}
-    $cur   = $StartPid
-    while ($cur -and $cur -gt 0 -and -not $seen.ContainsKey($cur)) {
-        $chain += $cur
-        $seen[$cur] = $true
-        $cur = if ($ParentMap.ContainsKey($cur)) { [int]$ParentMap[$cur] } else { 0 }
-    }
-    return @($chain)
-}
-
-# Live pid->parentPid map from CIM. Thin (one reading) -> mocked in tests. PIDs are cast
-# to [long] (they are unsigned 32-bit) so a value above [int]::MaxValue cannot throw during
-# map construction and silently drop entries from the guard.
-function Get-ProcessParentMap {
-    $map = @{}
-    foreach ($p in @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)) {
-        $map[[long]$p.ProcessId] = [long]$p.ParentProcessId
-    }
-    return $map
-}
-
-# Every transitive child of a root PID over a pid->parentPid map. PURE, cycle-safe. Used
-# to veto a tree-kill whose subtree (taskkill /T kills descendants) contains a guarded PID.
-function Get-DescendantPids([long]$RootPid, [hashtable]$ParentMap) {
-    $children = @{}
-    foreach ($k in $ParentMap.Keys) {
-        $parent = [long]$ParentMap[$k]
-        if (-not $children.ContainsKey($parent)) { $children[$parent] = @() }
-        $children[$parent] += [long]$k
-    }
-    $result = @()
-    $seen   = @{}
-    $stack  = New-Object System.Collections.Stack
-    $stack.Push($RootPid)
-    while ($stack.Count -gt 0) {
-        $cur = $stack.Pop()
-        foreach ($c in @($children[$cur])) {
-            if ($c -and -not $seen.ContainsKey($c)) {
-                $seen[$c] = $true
-                $result += $c
-                $stack.Push($c)
-            }
-        }
-    }
-    return @($result)
-}
-
-# The never-kill set: the given session PID (default this process) + its ancestor chain.
-# ANCESTORS, not descendants: the fleet sessions are descendants and must stay killable,
-# but the coordinator + its hosts must never be a target. An injectable ParentMap keeps it
-# unit-testable; the default reads live CIM.
-function Get-SessionGuardSet([int]$SelfPid = $PID, [hashtable]$ParentMap) {
-    if (-not $ParentMap) { $ParentMap = Get-ProcessParentMap }
-    return @(Get-AncestorChain $SelfPid $ParentMap)
-}
-
-# Subtract the guard set from a target list. PURE -> unit-testable.
-function Remove-GuardedTargets([int[]]$Targets, [int[]]$Guard) {
-    return @($Targets | Where-Object { $Guard -notcontains $_ })
-}
-
-# Tree-deep force kill of a PID and every descendant via `taskkill /PID <id> /T /F` (the
-# reliable Windows tree-kill). SAFETY-CRITICAL and fail-safe:
-#  * the guard is ALWAYS computed from the live process tree (self + ancestors), never
-#    trusted from an omitted/partial caller arg - an extra -Guard only ADDS protection;
-#  * FAILS CLOSED: if the process map can't be built, it refuses (can't verify safety);
-#  * checks the whole TARGET SUBTREE (taskkill /T kills descendants) against the guard, so
-#    a kill whose tree contains the session/an ancestor is refused, not just the root.
-# -DryRun returns the plan without executing, so the decision path is fully unit-testable.
-function Stop-ProcessTree {
-    param(
-        [int]$TargetPid,
-        [int[]]$Guard = @(),
-        [int]$SelfPid = $PID,
-        [hashtable]$ParentMap,
-        [switch]$DryRun
-    )
-    if ($TargetPid -le 0) {
-        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = 'PID invalido' }
-    }
-    if (-not $ParentMap) { try { $ParentMap = Get-ProcessParentMap } catch { $ParentMap = @{} } }
-    if (-not $ParentMap -or $ParentMap.Count -eq 0) {
-        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = 'sin mapa de procesos - fail-closed' }
-    }
-    # Full guard = live self+ancestors (always) UNION any caller-supplied protected PIDs.
-    $fullGuard = @(@(Get-AncestorChain $SelfPid $ParentMap) + @($Guard)) | Select-Object -Unique
-    # taskkill /T kills the whole subtree -> a guarded PID ANYWHERE in the target's tree
-    # (root or descendant) must veto the kill, not only the root.
-    $subtree = @($TargetPid) + @(Get-DescendantPids $TargetPid $ParentMap)
-    $blocked = @($subtree | Where-Object { $fullGuard -contains $_ })
-    if ($blocked.Count -gt 0) {
-        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = ("el arbol incluye PID(s) protegido(s): {0}" -f ($blocked -join ',')) }
-    }
-    $cmd = "taskkill /PID $TargetPid /T /F"
-    if ($DryRun) {
-        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $false; Killed = $false; DryRun = $true; Command = $cmd }
-    }
-    & taskkill /PID $TargetPid /T /F 2>&1 | Out-Null
-    return [PSCustomObject]@{ Pid = $TargetPid; Refused = $false; Killed = ($LASTEXITCODE -eq 0); Command = $cmd }
-}
-
-# The fleet issue a process belongs to, parsed from its command line. PURE. Detection is
-# ISSUE-precise, not a broad substring: a launcher runs `...launch-<n>.ps1`, a CLI reads
-# `...briefing-<n>.txt`, and worktrees live under `...--worktrees\issue-<n>`. Requiring
-# DIGITS right after the artifact keyword avoids matching unrelated scripts (e.g.
-# `launch-server.js`). Returns 0 when the process is not a fleet artifact.
-function Get-FleetIssueFromCommandLine([string]$CommandLine) {
-    if (-not $CommandLine) { return 0 }
-    # Anchored to the EXACT generated artifacts so unrelated commands do not over-match:
-    #   launch-<n>.ps1  (the launcher)   briefing-<n>.txt  (the CLI's prompt file)
-    #   --worktrees\issue-<n>  (the grouped worktree path). e.g. `launch-42-test.ps1` or
-    #   `node tools/issue-123-reproducer.js` are NOT fleet artifacts and return 0.
-    if ($CommandLine -match 'launch-(\d+)\.ps1')            { return [int]$Matches[1] }
-    if ($CommandLine -match 'briefing-(\d+)\.txt')          { return [int]$Matches[1] }
-    if ($CommandLine -match '--worktrees[\\/]issue-(\d+)')  { return [int]$Matches[1] }
-    return 0
-}
-
-# From a list of {ProcessId, CommandLine}, the ESCAPED fleet orphans. PURE. A process is a
-# fleet process when its command line carries a fleet issue artifact. It is an orphan
-# UNLESS (a) its PID is a live registry session, OR (b) its issue belongs to a live
-# session - the latter is essential for `wt` launches, where the registry tracks the host
-# PID (the real spawned pwsh PID is not registered) so PID-only matching would reap a LIVE
-# session. Returns the non-orphan-safe escaped processes.
-function Find-FleetOrphansCore([object[]]$Processes, [int[]]$LivePids, [int[]]$LiveIssues) {
-    $orphans = @()
-    foreach ($p in @($Processes)) {
-        $issue = Get-FleetIssueFromCommandLine $p.CommandLine
-        if ($issue -le 0) { continue }                             # not a fleet artifact
-        if ($LivePids   -contains [int]$p.ProcessId) { continue }  # tracked live PID
-        if ($LiveIssues -contains $issue)            { continue }  # a live session owns this issue (wt)
-        $orphans += $p
-    }
-    return @($orphans)
-}
-
-# Live: escaped fleet processes. Queries ONLY pwsh.exe (every session's launch-<n>.ps1
-# launcher) and node.exe (the CLIs - claude/gemini/codex/copilot all run under node).
-# Deliberately NOT 'claude.exe': that is the Claude Desktop host app, whose renderers would
-# be false-positive kill targets (and are NOT in the guard set). Thin -> the pure core is
-# Find-FleetOrphansCore, cross-checking BOTH live PIDs and live issues.
-function Find-FleetOrphans {
-    $filter = "Name='pwsh.exe' OR Name='node.exe'"
-    $procs = @(Get-CimInstance -ClassName Win32_Process -Filter $filter -ErrorAction SilentlyContinue |
-               Select-Object ProcessId, CommandLine)
-    $live       = @(Read-SessionRegistry)
-    $livePids   = @($live | ForEach-Object { [int]$_.sessionPid })
-    $liveIssues = @($live | ForEach-Object { [int]$_.issue })
-    return Find-FleetOrphansCore $procs $livePids $liveIssues
-}
-
-# Tree-kill a set of fleet candidates, each through the fail-safe Stop-ProcessTree (self +
-# ancestors always excluded). FAIL-SAFE: the live registry session PIDs are ALWAYS folded
-# into the guard here (not just whatever the caller passes), so a legitimate live session
-# inside a candidate's subtree is protected even if the caller omits -Guard (taskkill /T
-# kills descendants). -DryRun plans without killing.
-#
-# RESIDUAL LIMITATION (wt): a `wt` launch registers the host/proxy PID, not the real spawned
-# pwsh. If that proxy dies while the tab still runs, the registry prunes the entry and its
-# issue leaves $liveIssues, so a still-live session could be listed as an orphan. The
-# backstop is the spec-mandated flow: -Reap DEFAULTS to a dry-run listing and requires human
-# confirmation before any forced kill (wired at the CLI in #198) - never an unattended sweep.
-function Invoke-FleetReap {
-    param(
-        [object[]]$Candidates,
-        [int]$SelfPid = $PID,
-        [int[]]$Guard = @(),
-        [hashtable]$ParentMap,
-        [switch]$KillLive,   # whole-fleet teardown (-KillAll): DO kill tracked live sessions
-        [switch]$DryRun
-    )
-    if (-not $ParentMap) { try { $ParentMap = Get-ProcessParentMap } catch { $ParentMap = @{} } }
-    # -Reap protects every live registry session (only escaped orphans should die); -KillAll
-    # (-KillLive) tears the whole fleet down, so it does NOT fold the live PIDs - but the
-    # coordinator is STILL safe because Stop-ProcessTree always excludes self + ancestors.
-    if ($KillLive) {
-        $fullGuard = @($Guard)
-    } else {
-        # FAIL CLOSED: a registry READ FAILURE (throw) is distinct from a legitimately empty
-        # registry - if we cannot enumerate live sessions we cannot verify safety, so refuse
-        # everything rather than proceed with an empty guard.
-        $liveGuard = $null
-        try { $liveGuard = @(Read-SessionRegistry | ForEach-Object { [int]$_.sessionPid }) } catch { $liveGuard = $null }
-        if ($null -eq $liveGuard) {
-            return @(@($Candidates) | ForEach-Object {
-                [PSCustomObject]@{ Pid = [int]$_.ProcessId; Refused = $true; Killed = $false; Reason = 'no se pudo leer el registro de sesiones - fail-closed' }
-            })
-        }
-        $fullGuard = @(@($Guard) + $liveGuard) | Select-Object -Unique
-    }
-    $results = @()
-    foreach ($c in @($Candidates)) {
-        $results += Stop-ProcessTree -TargetPid ([int]$c.ProcessId) -Guard $fullGuard -SelfPid $SelfPid -ParentMap $ParentMap -DryRun:$DryRun
-    }
-    return $results
-}
+. (Join-Path $PSScriptRoot 'BoardWork.Capacity.ps1')
+. (Join-Path $PSScriptRoot 'BoardWork.Processes.ps1')
 
 # ==============================================================================
 # WATCH LAYER (issue #135): auto-detect when the parallel/-Launch sessions finish and
@@ -1981,9 +1729,14 @@ function Get-CloseLoopDisposition {
 # Live completion of one registered session: PR state of its head branch + issue state +
 # whether the host PID is alive. Best-effort (never throws) so a transient gh failure just
 # reads as "still in progress". Wrapped so the watch loop is testable via an injected probe.
+#
+# Rate-limit protection (#414): when gh reports a rate-limit error we return
+# { done=$false; reason='UNKNOWN (rate limit)' } rather than falling through to the PID
+# signal. A dead PID after a rate-limit failure looks identical to a verified completion —
+# both print "LISTO: proceso terminado" — so the distinction matters.
 function Get-SessionLiveStatus {
     param([object]$Session)
-    $prState = ''; $issueState = ''; $prHeadOid = ''; $branchTip = ''
+    $prState = ''; $issueState = ''; $prHeadOid = ''; $branchTip = ''; $rateLimited = $false
     if ($Session.repo -and $Session.branch) {
         # The tip we would delete. Refs are shared across worktrees, so this resolves from here.
         try { $branchTip = (git rev-parse --verify "$($Session.branch)^{commit}" 2>$null) } catch { }
@@ -1991,17 +1744,32 @@ function Get-SessionLiveStatus {
             # Several PRs can share a reused branch name, so do not trust "the newest one":
             # prefer the PR whose head IS our tip, and only fall back to the newest for the
             # non-matching case (where a MERGED state proves nothing anyway).
-            $prs = @(gh pr list --repo $Session.repo --head $Session.branch --state all --json state,headRefOid --limit 20 2>$null | ConvertFrom-Json)
-            $mine = $prs | Where-Object { $branchTip -and $_.headRefOid -eq $branchTip } | Select-Object -First 1
-            $pick = if ($mine) { $mine } elseif ($prs.Count -gt 0) { $prs[0] } else { $null }
-            if ($pick) { $prState = $pick.state; $prHeadOid = $pick.headRefOid }
+            # Capture stderr (2>&1) to detect rate-limit errors rather than silently falling
+            # back to PID liveness as a completion signal (#414).
+            $prRaw = @(gh pr list --repo $Session.repo --head $Session.branch --state all --json state,headRefOid --limit 20 2>&1)
+            if ($LASTEXITCODE -ne 0 -and ($prRaw | Out-String) -match '(?i)(rate.?limit|0/5000)') {
+                $rateLimited = $true
+            } elseif ($LASTEXITCODE -eq 0) {
+                $prs = @($prRaw | ConvertFrom-Json)
+                $mine = $prs | Where-Object { $branchTip -and $_.headRefOid -eq $branchTip } | Select-Object -First 1
+                $pick = if ($mine) { $mine } elseif ($prs.Count -gt 0) { $prs[0] } else { $null }
+                if ($pick) { $prState = $pick.state; $prHeadOid = $pick.headRefOid }
+            }
         } catch { }
     }
-    if ($Session.repo -and $Session.issue) {
+    if (-not $rateLimited -and $Session.repo -and $Session.issue) {
         try {
-            $iss = gh issue view $Session.issue --repo $Session.repo --json state 2>$null | ConvertFrom-Json
-            if ($iss) { $issueState = $iss.state }
+            $issRaw = @(gh issue view $Session.issue --repo $Session.repo --json state 2>&1)
+            if ($LASTEXITCODE -ne 0 -and ($issRaw | Out-String) -match '(?i)(rate.?limit|0/5000)') {
+                $rateLimited = $true
+            } elseif ($LASTEXITCODE -eq 0) {
+                $iss = $issRaw | ConvertFrom-Json
+                if ($iss) { $issueState = $iss.state }
+            }
         } catch { }
+    }
+    if ($rateLimited) {
+        return [pscustomobject]@{ done = $false; reason = 'UNKNOWN (rate limit)'; rateLimited = $true; merged = $false }
     }
     $pidAlive = [bool]($Session.sessionPid -and (Get-Process -Id $Session.sessionPid -ErrorAction SilentlyContinue))
     return Get-SessionCompletion -PrState $prState -IssueState $issueState -PidAlive $pidAlive `
@@ -2020,12 +1788,28 @@ function Read-SessionRegistryRaw {
 
 # Remove one issue's entry from sessions.json (raw read, so a dead-PID pruning pass does
 # not interfere). No-op when the registry is absent. Used by auto-clean.
+#
+# The removed row is ARCHIVED first (#568): removal used to be destruction, so every run's
+# wall-clock cost vanished the moment it finished - "nobody, including the tool, knows whether
+# a run takes 2 minutes or 40" was literally unanswerable. sessions-history.jsonl keeps the row
+# with `ended` and the outcome; best-effort - an archive failure never blocks the cleanup.
 function Remove-SessionRegistryEntry {
-    param([int]$IssueNum)
+    param([int]$IssueNum, [string]$Outcome = '')
     $p = Get-SessionRegistryPath
     if (-not $p -or -not (Test-Path $p)) { return }
     try { $entries = @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return }
+    $gone = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
     $kept = @($entries | Where-Object { [int]$_.issue -ne $IssueNum })
+    try {
+        $histPath = Join-Path (Split-Path $p -Parent) 'sessions-history.jsonl'
+        foreach ($g in $gone) {
+            $row = [ordered]@{}
+            foreach ($prop in $g.PSObject.Properties) { $row[$prop.Name] = $prop.Value }
+            $row['ended']   = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            $row['outcome'] = "$Outcome"
+            Add-Content -LiteralPath $histPath -Encoding UTF8 -Value (([pscustomobject]$row) | ConvertTo-Json -Compress -Depth 4)
+        }
+    } catch { }
     $kept | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p
 }
 
@@ -2146,7 +1930,19 @@ function Invoke-SessionCleanup {
         $actions += "kill PID $($Session.sessionPid) (ventana pwsh propia - libera el worktree)"
         if (-not $DryRun) { Stop-ProcessTree -TargetPid ([int]$Session.sessionPid) | Out-Null }
     } elseif ($Session.via -eq 'wt') {
-        $actions += "NO mato PID (sesion wt: el shell real de la pestana no se rastrea; cierra la pestana si el worktree queda bloqueado)"
+        # Find the tab shell by its launch script: `wt` spawns `pwsh -NoExit -File launch-<n>.ps1`.
+        # The issue number in the script path makes the match exact - no risk of killing a shell
+        # for a different issue. Find-WtTabShell is mockable in tests (#413).
+        $tabShell = Find-WtTabShell $Session.issue
+        if ($tabShell) {
+            $actions += "kill PID $($tabShell.ProcessId) (pwsh tab shell de wt, launch-$($Session.issue).ps1 - libera el worktree)"
+            if (-not $DryRun) {
+                Stop-ProcessTree -TargetPid ([int]$tabShell.ProcessId) | Out-Null
+                Start-Sleep -Milliseconds 500   # give the OS time to release the directory handle
+            }
+        } else {
+            $actions += "tab shell de wt no encontrado para issue #$($Session.issue) (ya cerrado o no lanzado via wt)"
+        }
     }
     # The removal below is --force, which also wipes a DIRTY worktree, destroying whatever the
     # session left uncommitted or untracked (#276). A session that finished WITHOUT merging
@@ -2154,7 +1950,7 @@ function Invoke-SessionCleanup {
     # refuse and keep everything for a later retry. A merged session is torn down as usual: its
     # work landed, so what remains is scratch. -ForceRemoveWorktree is the deliberate discard.
     # The check is read-only, so it also runs under -DryRun and makes the plan predictive.
-    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and (Test-Path $Session.workPath)) {
+    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and (Test-Path -LiteralPath $Session.workPath)) {
         $out = @(git -C $Session.workPath status --porcelain 2>&1)
         # FAIL CLOSED: an unreadable worktree (corrupt metadata, index lock, no git) yields no
         # output, which must NOT be read as "clean" - that would hand the --force exactly the
@@ -2198,10 +1994,15 @@ function Invoke-SessionCleanup {
                 return $actions
             }
             $worktreeGone = -not (Test-WorktreeStillRegistered -Porcelain $after -Path $wtPathForGit -Branch $Session.branch)
-            # Litter, not a blocker: git let it go, so the teardown continues. Name the path -
-            # nothing else will ever clean it up, since git no longer knows about it.
-            if ($worktreeGone -and (Test-Path $Session.workPath)) {
-                $actions += "NOTA git solto el worktree pero la carpeta sigue en disco (handle abierto?): $($Session.workPath) - borrala a mano; sigo con la rama y el registro"
+            # Litter, not a blocker: git let it go, so the teardown continues. Try to delete
+            # the folder - the shell kill above should have released the directory handle (#413).
+            if ($worktreeGone -and (Test-Path -LiteralPath $Session.workPath)) {
+                Remove-Item -LiteralPath $Session.workPath -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path $Session.workPath) {
+                    $actions += "NOTA git solto el worktree pero la carpeta sigue en disco: $($Session.workPath) - borrarla a mano si persiste"
+                } else {
+                    $actions += "carpeta del worktree eliminada: $($Session.workPath)"
+                }
             }
         }
     }
@@ -2237,7 +2038,7 @@ function Invoke-SessionCleanup {
         }
     }
     $actions += "prune #$($Session.issue) de sessions.json"
-    if (-not $DryRun) { Remove-SessionRegistryEntry -IssueNum ([int]$Session.issue) }
+    if (-not $DryRun) { Remove-SessionRegistryEntry -IssueNum ([int]$Session.issue) -Outcome $(if ($PrMerged) { 'pr-merged' } else { 'cleaned' }) }
     return $actions
 }
 
@@ -2256,20 +2057,67 @@ function Invoke-SessionWatch {
         [scriptblock]$GetStatus = { param($s) Get-SessionLiveStatus $s },
         [scriptblock]$ReadSessions = { Read-SessionRegistryRaw },
         [scriptblock]$Now = { Get-Date },
-        [scriptblock]$Sleep = { param($sec) Start-Sleep -Seconds $sec }
+        [scriptblock]$Sleep = { param($sec) Start-Sleep -Seconds $sec },
+        # Zombie detection (#414): dead PID + workPath gone from disk → nothing to clean up,
+        # safe to prune from sessions.json without a gh call. Injectable for tests.
+        [scriptblock]$IsStale = {
+            param($s)
+            ($s.sessionPid -gt 0) -and
+            -not (Get-Process -Id $s.sessionPid -ErrorAction SilentlyContinue) -and
+            $s.workPath -and
+            -not (Test-Path $s.workPath -PathType Container)
+        },
+        # Stall detection rides the watch (#565): every -SuperviseEvery cycles the fleet
+        # supervisor runs with -Post, so a stalled session gets its [abios-stall] issue comment
+        # WITHOUT the human having to remember a separate command. Injectable for tests;
+        # 0 disables.
+        [int]$SuperviseEvery = 10,
+        # Bounded (#565 round 11): the supervisor makes its own gh reads before the bounded
+        # posting path, so a hung network call inside it would freeze the watch loop it rides.
+        # It runs as a child killed at 120s; its output is replayed so the verdict stays visible.
+        [scriptblock]$Supervise = {
+            try {
+                $sup = Join-Path $PSScriptRoot 'Fleet-Supervisor.ps1'
+                $outF = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-sup-" + [guid]::NewGuid().ToString('N') + ".txt")
+                $errF = "$outF.err"
+                $p = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-File',$sup,'-Check','-Post','-ProjectNum',"$ProjectNum") `
+                        -WindowStyle Hidden -PassThru -RedirectStandardOutput $outF -RedirectStandardError $errF
+                if (-not $p.WaitForExit(120000)) {
+                    try { $p.Kill() } catch { }
+                    Write-Host "  WARN supervisor: no termino en 120s - se corto (senal best-effort)." -ForegroundColor DarkYellow
+                }
+                if (Test-Path $outF) { Get-Content $outF | ForEach-Object { Write-Host $_ }; Remove-Item $outF, $errF -Force -ErrorAction SilentlyContinue }
+            } catch {
+                Write-Host "  WARN supervisor: $_" -ForegroundColor DarkYellow
+            }
+        }
     )
     $start   = & $Now
     $cleaned = @{}
+    # Sessions reported LISTO in a previous cycle: skip re-polling (#414).
+    # Reduces API calls from O(registry-size × cycles) to O(pending × cycles).
+    $doneSet = @{}
+    $cycle   = 0
     while ($true) {
-        $sessions = @(& $ReadSessions)
+        # Only poll sessions not yet known to be done (#414 — drop from polling set on LISTO).
+        $sessions = @(& $ReadSessions | Where-Object { -not $doneSet.ContainsKey([int]$_.issue) })
         if ($sessions.Count -eq 0) {
             Write-Host "  No hay sesiones vivas que observar." -ForegroundColor DarkGray
             return [pscustomobject]@{ allDone = $true; timedOut = $false; cleaned = @($cleaned.Keys) }
         }
         $pending = 0
         foreach ($s in $sessions) {
+            # Zombie stale-prune (#414): dead PID + workPath missing → nothing to clean up,
+            # skip the gh calls and remove the entry directly.
+            if (& $IsStale $s) {
+                Write-Host ("  #{0,-4} SKIP: zombie session pruned (PID muerto, worktree ausente)" -f $s.issue) -ForegroundColor DarkGray
+                $doneSet[[int]$s.issue] = $true
+                if (-not $DryRun) { Remove-SessionRegistryEntry -IssueNum ([int]$s.issue) -Outcome 'stale-prune' }
+                continue
+            }
             $st = & $GetStatus $s
             if ($st.done) {
+                $doneSet[[int]$s.issue] = $true   # don't re-poll this session (#414)
                 Write-Host ("  #{0,-4} LISTO: {1}" -f $s.issue, $st.reason) -ForegroundColor Green
                 if ($AutoClean -and -not $cleaned.ContainsKey([int]$s.issue)) {
                     $cleaned[[int]$s.issue] = $true
@@ -2283,7 +2131,9 @@ function Invoke-SessionWatch {
                 }
             } else {
                 $pending++
-                Write-Host ("  #{0,-4} ...   {1}" -f $s.issue, $st.reason) -ForegroundColor DarkGray
+                # Rate-limited sessions get a yellow warning so the human sees the degraded state (#414).
+                $color = if ($st.rateLimited) { 'DarkYellow' } else { 'DarkGray' }
+                Write-Host ("  #{0,-4} ...   {1}" -f $s.issue, $st.reason) -ForegroundColor $color
             }
         }
         if ($pending -eq 0) {
@@ -2292,8 +2142,15 @@ function Invoke-SessionWatch {
         }
         if ((((& $Now) - $start)).TotalSeconds -ge $TimeoutSec) {
             Write-Host ("  Timeout ({0}s) con {1} sesion(es) aun en progreso." -f $TimeoutSec, $pending) -ForegroundColor DarkYellow
+            # Final supervisor pass BEFORE leaving (#565 review): with the defaults, the stall
+            # threshold (30 min) and the watch timeout (30 min) coincide, so returning here
+            # without one last -Post pass meant a full default watch could end with the stall
+            # never posted anywhere.
+            if ($SuperviseEvery -gt 0) { & $Supervise }
             return [pscustomobject]@{ allDone = $false; timedOut = $true; cleaned = @($cleaned.Keys) }
         }
+        $cycle++
+        if ($SuperviseEvery -gt 0 -and ($cycle % $SuperviseEvery) -eq 0) { & $Supervise }
         & $Sleep $PollSec
     }
 }
@@ -2393,7 +2250,9 @@ if ($Relaunch -gt 0) {
     $oauthPresent = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN','User')
     $authVar      = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
     $marker       = New-FleetSessionMarker $Relaunch (New-FleetRunId)
-    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile
+    $relaunchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
+        -StopAtPRBound $PSBoundParameters.ContainsKey('StopAtPR') -StopAtPR ([bool]$StopAtPR)
+    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$relaunchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
     # Start-WorktreeSession returns $null on a failed/missing-worktree spawn. Registering
     # then would fall back to the coordinator PID and poison the registry - so only record a
     # session that actually launched.
@@ -2578,7 +2437,7 @@ if ($CloseLoop) {
         $entry    = @(Read-SessionRegistryRaw | Where-Object { $_.branch -eq $curBranch }) | Select-Object -First 1
         $issueNum = if ($entry) { [int]$entry.issue } elseif ($curBranch -match '^issue-(\d+)') { [int]$Matches[1] } else { 0 }
         if ($issueNum -gt 0) {
-            Remove-SessionRegistryEntry -IssueNum $issueNum
+            Remove-SessionRegistryEntry -IssueNum $issueNum -Outcome 'close-loop'
             Write-Host ("  OK  entrada de sesion del issue #{0} purgada." -f $issueNum) -ForegroundColor DarkGray
         }
     }
@@ -2653,20 +2512,24 @@ query($o:String!, $r:String!) {
     $rows = @()
     foreach ($b in $boards) {
         try {
-            # -Json throws on a failed read (caught below -> honest "?"): a bare read would yield
-            # $null under pwsh 7 and print "pendientes: 0", a false clean for that board (#314).
-            $items   = (Invoke-Gh -GhArgs @('project','item-list',"$($b.number)",'--owner',$b.ownerLogin,'--format','json','--limit','200') `
-                                  -What "listar los items del board #$($b.number)" -Json).items
-            $pending = @($items | Where-Object { Test-Pending $_ }).Count
-            $total   = @($items).Count
+            # Get-BoardItems throws on a failed read (caught below -> honest "?"): a bare read would
+            # yield $null under pwsh 7 and print "pendientes: 0", a false clean for that board (#314).
+            # It ALSO reports a capped read, which the old --limit 200 swallowed: this picker
+            # under-counted every board past the cap and so looked emptier than it was (#484).
+            $read    = Get-BoardItems -Number $b.number -Owner $b.ownerLogin `
+                                      -What "listar los items del board #$($b.number)"
+            $pending = @($read.Items | Where-Object { Test-Pending $_ }).Count
+            $total   = $read.Read
+            $trunc   = $read.Truncated
         } catch {
-            $pending = "?"; $total = "?"
+            $pending = "?"; $total = "?"; $trunc = $false
         }
         $rows += [PSCustomObject]@{
             Num       = $b.number
             Titulo    = $b.title
             Pendientes = $pending
             Items     = $total
+            Trunc     = $trunc
             Url       = "https://github.com/users/$($b.ownerLogin)/projects/$($b.number)"
         }
     }
@@ -2676,8 +2539,16 @@ query($o:String!, $r:String!) {
 
     foreach ($r in $rows) {
         $color = if ($r.Pendientes -is [int] -and $r.Pendientes -gt 0) { "Yellow" } else { "DarkGray" }
-        Write-Host ("  #{0,-3} {1,-45} pendientes: {2,-4} items: {3}" -f $r.Num, $r.Titulo, $r.Pendientes, $r.Items) -ForegroundColor $color
+        # A capped read makes both numbers a FLOOR, not a count - so they are rendered as "N+".
+        # Printing a bare "pendientes: 0" off a short read is the whole bug (#484).
+        $sfx   = if ($r.Trunc) { "+" } else { "" }
+        Write-Host ("  #{0,-3} {1,-45} pendientes: {2,-4} items: {3}" -f `
+                    $r.Num, $r.Titulo, "$($r.Pendientes)$sfx", "$($r.Items)$sfx") -ForegroundColor $color
         Write-Host ("        {0}" -f $r.Url) -ForegroundColor DarkCyan
+    }
+    if (@($rows | Where-Object { $_.Trunc }).Count -gt 0) {
+        Write-Host ""
+        Write-Host "TRUNCADO: los boards marcados con '+' tienen mas items de los que pude leer - sus cuentas son un minimo, no un total." -ForegroundColor Yellow
     }
     Write-Host ""
     Write-Host "Siguiente paso: Board-Work.ps1 -ProjectNum <num> para ver los pendientes de un board." -ForegroundColor Cyan
@@ -2707,10 +2578,15 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
     $statusOpts = Get-StatusOptionNames $ProjectNum
     Show-StatusSchemaWarning $statusOpts $ProjectNum
 
-    # -Json fails closed: a read failure must THROW, not yield an empty list the script then
-    # reports as "Sin pendientes" - the green all-clear over a board full of open issues (#278/#314).
-    $items   = (Invoke-Gh -GhArgs @('project','item-list',"$ProjectNum",'--owner',$Owner,'--format','json','--limit','200') `
-                          -What "listar los items del board #$ProjectNum" -Json).items
+    # Fails closed TWICE over. A read failure THROWS rather than yielding an empty list the script
+    # would report as "Sin pendientes" (#278/#314) - and a read that hit the cap is flagged, because
+    # `gh project item-list` returns items OLDEST-FIRST: on a mature board the cap fills with Done
+    # work and the Backlog falls off the end. At --limit 200 against a 291-item board this printed a
+    # confident "Sin pendientes" over 37 open Backlog items (#484).
+    $read    = Get-BoardItems -Number $ProjectNum -Owner $Owner `
+                              -What "listar los items del board #$ProjectNum"
+    $items   = $read.Items
+    $truncWarn = Get-BoardTruncationWarning $read
     $pending = @($items | Where-Object { Test-Pending $_ })
 
     if ($pending.Count -eq 0) {
@@ -2718,8 +2594,13 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
         # understands. If ANY item sits in a vocabulary we cannot read, 0 matches means
         # "I cannot tell", not "the board is clean" - say that instead of the green
         # all-clear the script used to print over dozens of open issues (#278).
+        # A truncated read means the same thing for a different reason, and outranks both:
+        # zero matches inside a partial list is no evidence of zero matches on the board.
         $unknown = Get-UnknownStatusValues $items
-        if ($unknown.Count -gt 0) {
+        if ($truncWarn) {
+            Write-Host $truncWarn -ForegroundColor Yellow
+            Write-Host "No hay pendientes ENTRE LOS $($read.Read) items que lei - no afirmo que el board este limpio." -ForegroundColor Yellow
+        } elseif ($unknown.Count -gt 0) {
             Write-Host "No puedo saber que hay pendiente: 0 items en Backlog, pero el board usa estados que no reconozco ($($unknown -join ', '))." -ForegroundColor Yellow
             Write-Host "No afirmo que no haya pendientes - revisa el board, o estandarizalo con /board field apply en --migrate." -ForegroundColor DarkGray
         } else {
@@ -2728,6 +2609,14 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
         Write-Host ""
         Write-Host "Board: $boardUrl" -ForegroundColor Cyan
         exit 0
+    }
+
+    # A truncated read still lists what it found - but the list is a FLOOR, and saying so before it
+    # matters more than after: the user picks an issue off the top of this list.
+    if ($truncWarn) {
+        Write-Host $truncWarn -ForegroundColor Yellow
+        Write-Host "Los pendientes de abajo son los que alcance a ver; pueden faltar." -ForegroundColor Yellow
+        Write-Host ""
     }
 
     # Sort: priority name ascending (P0 < P1 < P2), empty priority last
@@ -2750,7 +2639,9 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
         }
     }
     Write-Host ""
-    Write-Host ("Total: {0} pendiente(s)." -f $pending.Count) -ForegroundColor Yellow
+    # "Total" is an exact claim, and a capped read cannot make one - the warning above says the
+    # list may be short, so the number that closes it must agree with the warning, not contradict it.
+    Write-Host ("Total: {0}{1} pendiente(s)." -f $pending.Count, $(if ($truncWarn) { '+ (vistos; la lectura se corto)' } else { '' })) -ForegroundColor Yellow
 
     # Multi-session: show what other LIVE local sessions are working right now.
     # NOT named $sessions: at SCRIPT scope that is the [switch]$Sessions parameter
@@ -2892,6 +2783,13 @@ if ($Parallel.Count -gt 0) {
         }
     }
 
+    # All -Launch/-Fleet sessions arm the brake by default (#598). -AllowMerge is the
+    # explicit opt-in for autonomous merging; an expert contract that allows merging
+    # is honoured via an explicit -StopAtPR:$false. See Resolve-LaunchBrake for the logic.
+    $launchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
+        -StopAtPRBound $PSBoundParameters.ContainsKey('StopAtPR') `
+        -StopAtPR ([bool]$StopAtPR)
+
     # -- Launch: one visible session per worktree. -Fleet probes CLIs and picks one
     # per issue (fallback claude); plain -Launch keeps the shipped claude-only path.
     # -Fleet TAKES OVER the launch (elseif), so the two never both spawn in one run.
@@ -2958,7 +2856,7 @@ if ($Parallel.Count -gt 0) {
                 $marker    = New-FleetSessionMarker $entry.issue $runId
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
                                                -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `
-                                               -StopAtPR:$StopAtPR -BriefFile $BriefFile
+                                               -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
                 $via = if ($spawn.usesWt) { "wt" } else { "pwsh" }
                 if ($spawn.process -and -not $spawn.usesWt) {
                     Write-SessionRegistryEntry -IssueNum $entry.issue -SessionPid $spawn.process.Id -Via $via -Cli $actualCli -FleetSession $marker
@@ -2972,7 +2870,8 @@ if ($Parallel.Count -gt 0) {
             # -MaxConcurrent (0 = capacity-only) caps how many run at once.
             $dispatched = @(Invoke-FleetDispatch -Queue $fleetPlan -NoQuotaClis $noQuota -LaunchSession $launchHook -MaxConcurrent $MaxConcurrent)
             Write-Host ""
-            Write-Host ("Fleet lanzada: {0} sesion(es) en oleadas por capacidad (fallback claude)." -f $dispatched.Count) -ForegroundColor Yellow
+            $fleetBrakeMsg = if ($launchBrake) { "freno ARMADO (sesiones paran en el PR listo)." } else { "ATENCION: freno desarmado con -AllowMerge." }
+            Write-Host ("Fleet lanzada: {0} sesion(es) en oleadas por capacidad (fallback claude). {1}" -f $dispatched.Count, $fleetBrakeMsg) -ForegroundColor Yellow
         }
     } elseif ($Launch) {
         Write-Host ""
@@ -2991,7 +2890,7 @@ if ($Parallel.Count -gt 0) {
                 # New-IssueWorktree / Get-IssueWorktreePath - the grouped-worktree layout).
                 $previewPath = Get-IssueWorktreePath $r.repo $r.issue (Split-Path (Get-Location) -Parent)
                 $marker = New-FleetSessionMarker $r.issue $runId
-                Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile -Preview | Out-Null
+                Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Preview | Out-Null
             }
         } else {
             Write-Host "----- LANZANDO SESIONES CLAUDE -----" -ForegroundColor Cyan
@@ -3018,7 +2917,7 @@ if ($Parallel.Count -gt 0) {
             foreach ($r in $started) {
                 if ($r.workPath) {
                     $marker = New-FleetSessionMarker $r.issue $runId
-                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$StopAtPR -BriefFile $BriefFile
+                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
                     $launched++
                     # Track the spawned session's own PID (pwsh window is reliable; a wt
                     # launcher forks and exits, so keep the host PID there).
@@ -3031,7 +2930,8 @@ if ($Parallel.Count -gt 0) {
                 }
             }
             Write-Host ""
-            Write-Host ("Lanzadas: {0} sesion(es). Cada una trabaja su issue hasta el PR + review gate." -f $launched) -ForegroundColor Yellow
+            $brakeMsg = if ($launchBrake) { "el freno esta ARMADO: las sesiones paran en el PR listo (no mergean solas)." } else { "ATENCION: freno desarmado con -AllowMerge - las sesiones PUEDEN mergear autonomamente." }
+            Write-Host ("Lanzadas: {0} sesion(es). {1}" -f $launched, $brakeMsg) -ForegroundColor Yellow
         }
     }
 
@@ -3082,3 +2982,4 @@ Write-Host "AL TERMINAR: New-BoardPR.ps1 -Issue $Start  (push + PR 'Closes #$Sta
 Write-Host "(asi GitHub llena solo la columna 'Linked pull requests' del board)" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+

@@ -45,6 +45,32 @@
     Enriched item: the Definition of Done / test plan (rendered as a bullet list).
     Any omitted enriched section renders a detectable TBD placeholder.
 
+.PARAMETER PriorArt
+    The prior-art record (queries run, candidates found with stars/license/
+    adoption, and the build / reference / extend decision). Rendered as a
+    "## Prior-art gate" section in the epic body. One of -PriorArt or
+    -NoPriorArt is REQUIRED - the script throws before creating anything
+    if neither is supplied.
+
+.PARAMETER NoPriorArt
+    Explicitly skip the prior-art search for genuinely novel work. The skip
+    is written into the epic body so the omission is visible, not invisible.
+
+.PARAMETER DescriptionFile
+    Path to a plain-text file whose content is used as -Description. Lets agents
+    write long plan descriptions (which often contain slash-commands like /board or
+    /scan) to a temp file rather than passing them inline, where the tool-layer path
+    guard would interpret the slashes as filesystem paths and abort the run (#419).
+    When supplied, -Description is ignored.
+
+.PARAMETER ResearchFile
+    Path to a plain-text file whose content is used as -Research. Same motivation
+    as -DescriptionFile: keeps prose with slashes off the command string (#419).
+
+.PARAMETER PriorArtFile
+    Path to a plain-text file whose content is used as -PriorArt. Same motivation
+    as -DescriptionFile: keeps prose with slashes off the command string (#419).
+
 .PARAMETER Repo
     owner/name. Default: derived from the current directory's origin remote.
 
@@ -59,7 +85,10 @@
     Windows USER env var holding the PAT. Defaults to GITHUB_TOKEN_PERSONAL.
 
 .EXAMPLE
-    .\Board-Plan.ps1 -Title "plan: PBIR migration" -Tasks "inventory reports", "convert themes", "validate rendering" -Description "Goal: ..."
+    .\Board-Plan.ps1 -Title "plan: PBIR migration" -Tasks "inventory reports", "convert themes", "validate rendering" -Description "Goal: ..." -PriorArt "Searched: gh search repos pbir migration ... Decision: build (no existing tool covers PBIR)."
+
+.EXAMPLE
+    .\Board-Plan.ps1 -Title "plan: novel internal tooling" -Tasks "task A", "task B" -Description "Goal: ..." -NoPriorArt
 #>
 [CmdletBinding()]
 param(
@@ -70,6 +99,11 @@ param(
     [string]$RoleSeed = "",
     [string[]]$Deliverables = @(),
     [string[]]$TestPlan = @(),
+    [string]$PriorArt = "",
+    [switch]$NoPriorArt,
+    [string]$DescriptionFile = "",
+    [string]$ResearchFile = "",
+    [string]$PriorArtFile = "",
     [string]$Repo = "",
     [string]$Owner = "",
     [int]   $ProjectNum = 0,
@@ -107,11 +141,67 @@ function Format-EnrichedEpicBody {
     ) -join "`n"
 }
 
+# Format-PriorArtGateBlock renders the mandatory prior-art section that lands in every epic body.
+# With -NoPriorArt the section records the explicit skip so the omission is visible, not silent.
+function Format-PriorArtGateBlock {
+    [CmdletBinding()]
+    param(
+        [string]$PriorArt = "",
+        [switch]$NoPriorArt
+    )
+    if ($NoPriorArt) {
+        return @(
+            "## Prior-art gate",
+            "_Skipped with -NoPriorArt — record findings here before merging if possible._"
+        ) -join "`n"
+    }
+    @(
+        "## Prior-art gate",
+        $PriorArt.Trim()
+    ) -join "`n"
+}
+
+# Resolve a text parameter from an optional file, falling back to the inline value.
+# When filePath is set the file MUST exist (a typo in the path must not silently use
+# whatever inline text happens to be present). Returns the inline value unchanged when
+# filePath is empty or whitespace-only. Pure: tested without hitting the network or the board.
+function Resolve-TextParam([string]$filePath, [string]$inline) {
+    if ([string]::IsNullOrWhiteSpace($filePath)) { return $inline }
+    if (-not (Test-Path -LiteralPath $filePath)) {
+        throw "Board-Plan: file '$filePath' does not exist."
+    }
+    return (Get-Content -LiteralPath $filePath -Raw)
+}
+
+# Assert-PriorArtPresent enforces the gate: an epic cannot be created without either a
+# prior-art block or an explicit -NoPriorArt skip. A silent skip is invisible; a recorded
+# skip is auditable. Same shape as the -Rationale requirement in Board-Triage.
+function Assert-PriorArtPresent {
+    [CmdletBinding()]
+    param(
+        [string]$PriorArt = "",
+        [switch]$NoPriorArt
+    )
+    if (-not $NoPriorArt -and [string]::IsNullOrWhiteSpace($PriorArt)) {
+        throw ("Board-Plan: a prior-art search is required before creating an epic.`n" +
+               "Run 'gh search repos <topic>' and pass findings via -PriorArt, " +
+               "or use -NoPriorArt to record an explicit skip " +
+               "(the skip is written into the epic body so the omission is visible, not silent).")
+    }
+}
+
 # Dot-source guard: tests set $env:ABIOS_BOARDPLAN_DOTSOURCE to load the pure formatter only.
 if ($env:ABIOS_BOARDPLAN_DOTSOURCE) { return }
 
+# Resolve file-backed parameters BEFORE validation so Assert-PriorArtPresent sees the
+# file content (#419: inline payloads with slashes trip the tool-layer path guard).
+$Description = Resolve-TextParam $DescriptionFile $Description
+$Research    = Resolve-TextParam $ResearchFile    $Research
+$PriorArt    = Resolve-TextParam $PriorArtFile    $PriorArt
+
 if (-not $Title)                          { throw "Board-Plan: -Title is required." }
 if (-not $Tasks -or $Tasks.Count -eq 0)   { throw "Board-Plan: -Tasks is required (one or more task titles)." }
+Assert-PriorArtPresent -PriorArt $PriorArt -NoPriorArt:$NoPriorArt
 
 # The single resolver for owner/name from this clone's origin (#281). Do NOT inline the regex
 # again: the copy-pasted version ate any dot in the repo name (midominio.com -> midominio).
@@ -147,6 +237,9 @@ if ($enriched) {
 } elseif ($Description) {
     $body += "$Description`n`n"
 }
+# Prior-art gate block always lands in the epic body so the build-vs-reference decision is auditable.
+$body += (Format-PriorArtGateBlock -PriorArt $PriorArt -NoPriorArt:$NoPriorArt)
+$body += "`n`n"
 $body += "## Tasks (native sub-issues)`n$taskOverview`n`nCreated by /board plan - work them with /board work."
 
 # Same trap as the children (#281): a failing `gh` does not throw, so without these checks the

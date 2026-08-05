@@ -100,18 +100,54 @@ Describe 'Signal: correction' {
     }
 }
 
-Describe 'Signal: silence' {
+Describe 'Signal: silence (calibrated - a FAILURE that went nowhere)' {
+    <#  The first cut fired on 41.4% of all episodes in the real corpus, because "invoked once and
+        moved on" is ordinary work, not a signal. Calibrated to what actually informs: the call
+        FAILED and nothing followed it at all — no retry, no manual fallback, no complaint. That is
+        a user who gave up. #>
 
-    It 'fires when the tool is invoked once and nothing follows' {
-        $ev = @( (E 0 assistant 'Board-Work.ps1 -Sessions') )
-        $ep = @(Get-FieldEpisodes -Events $ev -Window 5)
-        $ep[0].signals | Should -Contain 'silence'
+    It 'fires when a failed invocation is followed by nothing' {
+        $ev = @( (E 0 assistant 'Board-Work.ps1 -Sessions' $true) )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Contain 'silence'
+    }
+
+    It 'does NOT fire when the invocation succeeded and the session moved on' {
+        # The 41.4% case: ordinary work must be silent, not "silence".
+        $ev = @( (E 0 assistant 'Board-Work.ps1 -Sessions' $false) )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'silence'
     }
 
     It 'does not fire when the run continued using the tool' {
-        $ev = @( (E 0 assistant 'Board-Work.ps1 -Start 5'), (E 1 assistant 'New-BoardPR.ps1 -Issue 5') )
-        $ep = @(Get-FieldEpisodes -Events $ev -Window 5)
-        $ep[0].signals | Should -Not -Contain 'silence'
+        $ev = @( (E 0 assistant 'Board-Work.ps1 -Start 5' $true), (E 1 assistant 'New-BoardPR.ps1 -Issue 5') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'silence'
+    }
+}
+
+Describe 'Signal: repetition (calibrated - resolvers are exempt)' {
+    <#  Get-GhAccount.ps1 repeated on 47.4% of its invocations in the real corpus — because it is
+        DESIGNED to be re-invoked per operation to set the token. Counting that as a defect signal
+        made the whole number meaningless. Resolvers and wrappers are exempt; action scripts are
+        not. #>
+
+    It 'exempts a Get- resolver that is meant to be re-invoked' {
+        $ev = @( (E 0 assistant 'Get-GhAccount.ps1'), (E 1 assistant 'Get-GhAccount.ps1') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'repetition'
+    }
+
+    It 'exempts a Resolve- helper' {
+        $ev = @( (E 0 assistant 'Resolve-Board.ps1'), (E 1 assistant 'Resolve-Board.ps1') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'repetition'
+    }
+
+    It 'exempts the gh wrapper' {
+        $ev = @( (E 0 assistant 'Invoke-Gh.ps1'), (E 1 assistant 'Invoke-Gh.ps1') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Not -Contain 'repetition'
+    }
+
+    It 'still fires for an ACTION script - the other direction' {
+        # The exemption must not swallow the signal it exists to sharpen.
+        $ev = @( (E 0 assistant 'Board-Plan.ps1 -Issue 5'), (E 1 assistant 'Board-Plan.ps1 -Issue 5') )
+        (Get-FieldEpisodes -Events $ev -Window 5)[0].signals | Should -Contain 'repetition'
     }
 }
 
@@ -218,5 +254,42 @@ Describe 'Redaction (nothing leaves the machine unscrubbed)' {
         # Over-redaction would make every episode unreadable and the sweep useless.
         $t = 'Board-Work.ps1 -Start 5 failed with exit code 1'
         Protect-FieldText -Text $t | Should -Be $t
+    }
+}
+
+Describe 'The time dimension (#568) - the telemetry can finally say where the minutes went' {
+    It 'ConvertTo-FieldEvent KEEPS the transcript timestamp instead of discarding it' {
+        # ConvertFrom-Json auto-converts ISO stamps to [datetime]; the parser normalizes back to
+        # ISO, so the assertion compares INSTANTS, not string spellings.
+        $line = '{"type":"assistant","timestamp":"2026-08-03T10:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t1","input":{"command":"pwsh Board-Work.ps1 -Start 5"}}]}}'
+        $ts = (ConvertTo-FieldEvent -Line $line -Index 0).ts
+        $ts | Should -Not -BeNullOrEmpty
+        (ConvertTo-FieldTimestamp -Ts $ts) | Should -Be ([datetime]::Parse('2026-08-03T10:00:00.000Z', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind))
+    }
+    It 'ConvertTo-FieldTimestamp parses ISO stamps and returns null for garbage - unknown, never zero' {
+        (ConvertTo-FieldTimestamp -Ts '2026-08-03T10:00:00.000Z') | Should -Not -BeNullOrEmpty
+        (ConvertTo-FieldTimestamp -Ts 'not-a-date') | Should -BeNullOrEmpty
+        (ConvertTo-FieldTimestamp -Ts '') | Should -BeNullOrEmpty
+    }
+    It 'an episode carries ts and the wall-clock duration of its window' {
+        $ev = @(
+            [pscustomobject]@{ index = 0; role = 'assistant'; command = 'pwsh Board-Work.ps1 -Start 5'; isError = $false; text = ''; ts = '2026-08-03T10:00:00Z'; toolUseIds = @(); failedFor = @() }
+            [pscustomobject]@{ index = 1; role = 'assistant'; command = 'echo x'; isError = $false; text = ''; ts = '2026-08-03T10:02:30Z'; toolUseIds = @(); failedFor = @() }
+        )
+        $ep = @(Get-FieldEpisodes -Events $ev -Window 6)[0]
+        $ep.ts | Should -Not -BeNullOrEmpty
+        $ep.durationMs | Should -Be 150000
+    }
+    It 'an unparsable stamp yields null duration, not a fabricated number' {
+        $ev = @(
+            [pscustomobject]@{ index = 0; role = 'assistant'; command = 'pwsh Board-Work.ps1 -Start 5'; isError = $false; text = ''; ts = 'garbage'; toolUseIds = @(); failedFor = @() }
+            [pscustomobject]@{ index = 1; role = 'assistant'; command = 'echo x'; isError = $false; text = ''; ts = '2026-08-03T10:02:30Z'; toolUseIds = @(); failedFor = @() }
+        )
+        $ep = @(Get-FieldEpisodes -Events $ev -Window 6)[0]
+        $ep.durationMs | Should -BeNullOrEmpty
+    }
+    It 'events without a ts property (older fixtures) still classify - time is additive, never breaking' {
+        $ev = @([pscustomobject]@{ index = 0; role = 'assistant'; command = 'pwsh Board-Work.ps1 -Start 5'; isError = $false; text = ''; toolUseIds = @(); failedFor = @() })
+        @(Get-FieldEpisodes -Events $ev -Window 6).Count | Should -Be 1
     }
 }

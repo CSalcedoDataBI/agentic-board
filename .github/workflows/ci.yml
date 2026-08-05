@@ -9,11 +9,16 @@ name: CI
 #     be generated from the current README + commands/ without error.
 
 on:
+  # Gate on the PR only. A push to main is always a merge of something these
+  # same two jobs already passed, so re-running them after the merge doubled
+  # the cost of every change without ever catching anything new.
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -21,7 +26,8 @@ permissions:
 jobs:
   test:
     name: Pester
-    runs-on: windows-latest
+    runs-on: windows-latest   # Pester + pwsh on Windows: the platform the plugin targets
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -52,10 +58,12 @@ jobs:
           name: pester-results
           path: testResults.xml
           if-no-files-found: warn
+          retention-days: 7   # default is 90; a test log is only useful while the PR is open
 
   docs:
     name: Docs freshness
     runs-on: ubuntu-latest   # all-LF checkout, no autocrlf: a clean byte-for-byte diff
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -75,9 +83,16 @@ jobs:
             exit 1
           fi
 
-      # Wiki docs freshness (#406): verify that the wiki pages can still be generated
-      # from the current README + commands/ without error, and that every generated page
+      # Wiki docs freshness (#406, updated #418): verify that the wiki pages can still be
+      # generated from the current README without error, and that every generated page
       # carries the <!-- GENERATED --> marker.  No git/network — pure -PagesOnly run.
+      #
+      # IMPORTANT: "it generates" is NOT evidence that "it reads".  The original check
+      # passed a 31 KB Docs-Command-Board page that read as second-person AI instructions
+      # because commands/*.md are agent prompts, not documentation.  The GENERATED marker
+      # only proves the generator ran — it says nothing about whether the output is useful
+      # or safe to publish.  Docs-Command-* pages were dropped in #418 precisely because
+      # a check that cannot ask "does this read?" will report green on garbage forever.
       - name: Validate wiki doc generation
         shell: pwsh
         run: |

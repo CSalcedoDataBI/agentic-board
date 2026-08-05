@@ -3,22 +3,28 @@
     Generates ALL wiki pages in one clone → commit → push:
       Product docs (always):
         Docs-Home          — from README.md (HTML stripped)
-        Docs-Command-<X>   — one page per commands/*.md file (frontmatter stripped)
       Knowledge registry (when knowledge/registry.json exists at $Root):
         Home               — index of domains and reference counts
         Knowledge-<Domain> — one page per domain
 
     Navigation:
-      _Sidebar — links to all product docs pages + all knowledge domain pages
+      _Sidebar — links to Docs-Home + all knowledge domain pages
       _Footer  — "generated from the repo" notice
 
     All pages carry a <!-- GENERATED --> marker so the wiki is clearly derived output,
     never hand-maintained. Source of truth stays in the repo.
 
+    NOTE: commands/*.md files are agent instruction files, not documentation.
+    Generating one wiki page per command file publishes the agent system prompt verbatim,
+    which reads as second-person orders to an AI, not as a user manual.  Those pages were
+    dropped in #418.  For code and architecture reference, route to DeepWiki instead.
+
     Testable page generation is exposed via -PagesOnly -OutDir (pure, no git/network).
     The clone -> commit -> push path mirrors Publish-KnowledgeWiki: the token travels ONLY
     as an env var read by a one-shot credential helper, never on the command line or in
-    the remote URL. #>
+    the remote URL. Stale pages (e.g. Docs-Command-* left from before #418) are removed
+    automatically on the next publish because the wiki is cloned fresh and git add -A
+    stages any deletions before the commit. #>
 [CmdletBinding()]
 param(
     [string]$Root = (Get-Location).Path,
@@ -67,35 +73,6 @@ function Get-FrontmatterField {
     $fm.Groups[1].Value.Trim()
 }
 
-# Remove the YAML frontmatter block (--- … ---) from the top of a Markdown file.
-function Remove-Frontmatter {
-    param([Parameter(Mandatory)][string]$Text)
-    $stripped = [regex]::Replace($Text, '(?s)^\s*---\r?\n.*?\r?\n---\r?\n?', '')
-    $stripped.Trim()
-}
-
-# Strip agent-specific template artifacts from a command file's body so the wiki
-# page reads as user documentation, not an agent system prompt.
-# Removes: "You are running the agentic-board /X command." lines,
-#          "Arguments: $ARGUMENTS" trailing lines.
-# Replaces: inline $ARGUMENTS occurrences with "<arguments>" for readability.
-function Clean-CommandBody {
-    param([Parameter(Mandatory)][string]$Text)
-    # "You are running …" opener (one or two lines at the very beginning)
-    $Text = [regex]::Replace($Text, '(?m)^You are running the agentic-board /\S+ command\.\r?\n?', '')
-    # "Arguments: $ARGUMENTS" tail (standalone line)
-    $Text = [regex]::Replace($Text, '(?m)^Arguments: \$ARGUMENTS\r?\n?', '')
-    # Remaining $ARGUMENTS occurrences (inline in "If $ARGUMENTS is empty …" patterns)
-    $Text = $Text.Replace('$ARGUMENTS', '<arguments>')
-    $Text.Trim()
-}
-
-# Build the wiki-page slug for a command by its base name (e.g. "board" → "Docs-Command-Board").
-function Get-CommandSlug {
-    param([Parameter(Mandatory)][string]$BaseName)
-    'Docs-Command-' + (($BaseName.Substring(0,1).ToUpper() + $BaseName.Substring(1)) -replace '[^\w-]+', '-')
-}
-
 # Build the wiki-page slug for a knowledge domain (e.g. "Power-Query" → "Knowledge-Power-Query").
 function Get-DomainSlug {
     param([Parameter(Mandatory)][string]$Domain)
@@ -104,16 +81,11 @@ function Get-DomainSlug {
 
 # ── Find source files ────────────────────────────────────────────────────────────────────
 
-# The README lives at the repo root; commands/ is relative to this script's plugin dir.
-$readmePath   = Join-Path $Root 'README.md'
-$commandsDir  = Join-Path $PSScriptRoot '..' 'commands'
+# The README lives at the repo root.
+$readmePath = Join-Path $Root 'README.md'
 
 if (-not (Test-Path -LiteralPath $readmePath)) {
     throw "README.md not found at $readmePath. Run from the repo root or pass -Root."
-}
-$commandsDir = Resolve-Path $commandsDir | Select-Object -ExpandProperty Path
-if (-not (Test-Path -LiteralPath $commandsDir)) {
-    throw "Commands directory not found at $commandsDir."
 }
 
 # ── Build pages in memory ─────────────────────────────────────────────────────────────
@@ -132,48 +104,10 @@ $homeSb = [Text.StringBuilder]::new()
 [void]$homeSb.AppendLine("")
 [void]$homeSb.AppendLine("---")
 [void]$homeSb.AppendLine("")
-
-# Navigation index to command pages
-$cmdFiles = @(Get-ChildItem -LiteralPath $commandsDir -Filter '*.md' -File | Sort-Object Name)
-if ($cmdFiles.Count -gt 0) {
-    [void]$homeSb.AppendLine("## Command reference")
-    [void]$homeSb.AppendLine("")
-    foreach ($cf in $cmdFiles) {
-        $slug = Get-CommandSlug -BaseName $cf.BaseName
-        $desc = Get-FrontmatterField -Raw ([System.IO.File]::ReadAllText($cf.FullName)) -Field 'description'
-        $blurb = if ($desc) { " — $desc" } else { '' }
-        [void]$homeSb.AppendLine("- [/$($cf.BaseName)]($slug)$blurb")
-    }
-    [void]$homeSb.AppendLine("")
-}
 [void]$homeSb.AppendLine("_Last published $Date._")
 
 $pages['Docs-Home'] = $homeSb.ToString()
 $sourceFiles['Docs-Home'] = $readmePath
-
-# --- One page per command --------------------------------------------------------
-foreach ($cf in $cmdFiles) {
-    $raw     = [System.IO.File]::ReadAllText($cf.FullName)
-    $desc    = Get-FrontmatterField -Raw $raw -Field 'description'
-    $body    = Remove-Frontmatter -Text $raw
-    $body    = Clean-CommandBody  -Text $body
-
-    $slug = Get-CommandSlug -BaseName $cf.BaseName
-
-    $pageSb = [Text.StringBuilder]::new()
-    [void]$pageSb.AppendLine("<!-- GENERATED by /docs wiki — do not edit here; edit commands/$($cf.Name) in the repo. -->")
-    if ($desc) {
-        [void]$pageSb.AppendLine("")
-        [void]$pageSb.AppendLine("> $desc")
-    }
-    [void]$pageSb.AppendLine("")
-    [void]$pageSb.AppendLine($body)
-    [void]$pageSb.AppendLine("")
-    [void]$pageSb.AppendLine("[← Product Docs](Docs-Home)")
-
-    $pages[$slug] = $pageSb.ToString()
-    $sourceFiles[$slug] = $cf.FullName
-}
 
 # --- Knowledge registry pages (optional) -----------------------------------------
 # When knowledge/registry.json (or .yaml) exists, generate Home + Knowledge-<Domain>
@@ -239,10 +173,6 @@ $sidebarSb = [Text.StringBuilder]::new()
 [void]$sidebarSb.AppendLine("## Product Docs")
 [void]$sidebarSb.AppendLine("")
 [void]$sidebarSb.AppendLine("- [Home](Docs-Home)")
-foreach ($cf in $cmdFiles) {
-    $slug = Get-CommandSlug -BaseName $cf.BaseName
-    [void]$sidebarSb.AppendLine("- [/$($cf.BaseName)]($slug)")
-}
 [void]$sidebarSb.AppendLine("")
 [void]$sidebarSb.AppendLine("## Knowledge")
 [void]$sidebarSb.AppendLine("")
@@ -284,7 +214,14 @@ if ($PagesOnly) {
 if (-not $Repo) { $Repo = Get-RepoFromOrigin }
 if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo must be owner/name (got '$Repo')." }
 $owner = ($Repo -split '/')[0]
-$ownerVarMap = @{ 'CSalcedoDataBI' = 'GITHUB_TOKEN_PERSONAL'; 'PAL-Devs' = 'GITHUB_TOKEN_BUSINESS' }
+# One map, not four copies (#550).
+$prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
+$env:ABIOS_TOKENVAR_DOTSOURCE = '1'
+. (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
+$env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
+# Built FROM the resolver, owners included: listing them here was a fifth copy of the same rule.
+$ownerVarMap = @{}
+foreach ($o in (Get-KnownOwners)) { $ownerVarMap[$o] = (Get-OwnerTokenVar -Owner $o) }
 if (-not $TokenVar) {
     if ($ownerVarMap.ContainsKey($owner)) { $TokenVar = $ownerVarMap[$owner] }
     else { $TokenVar = 'GITHUB_TOKEN_PERSONAL'; Write-Host "AVISO: owner '$owner' sin mapear — uso la personal (-TokenVar para forzar)." -ForegroundColor Yellow }
@@ -319,6 +256,8 @@ if ($DryRun) {
 }
 
 # ── Clone the wiki, write pages, commit, push ────────────────────────────────────────
+# Any page present in the clone but absent from $pages (e.g. stale Docs-Command-* pages
+# left from before #418) is staged for deletion by git add -A and removed on this push.
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("docswiki-" + [guid]::NewGuid().ToString('N'))
 $helper = 'credential.helper=!f(){ echo username=x-access-token; echo password=$ABIOS_WIKI_TOKEN; };f'
 $env:ABIOS_WIKI_TOKEN = $token

@@ -70,6 +70,17 @@
     local-only file (which is not portable and gets no MEMORY.md pointer). Use -Issue <n> to
     link it instead, which is portable across machines and surfaces in the next session.
 
+.PARAMETER BodyFile
+    Path to a JSON file whose fields populate NextStep / Done / OpenThreads / Traps /
+    KeyFiles. Agents should write the handoff body to a temp file rather than passing
+    prose inline: inline text with slash-commands (/board, /scan, etc.) or path-like
+    strings trips the tool-layer path guard and aborts the whole command before the
+    script runs (#419). Format:
+        { "NextStep": "...", "Done": ["..."], "OpenThreads": ["..."],
+          "Traps": ["..."], "KeyFiles": ["..."] }
+    Any section missing from the file is left as its inline default.
+    When supplied, the corresponding inline params are ignored.
+
 .PARAMETER DryRun
     Print the handoff and the intended comment action without writing or posting.
 
@@ -95,7 +106,8 @@ param(
     # Accept a machine-local, gitignored HANDOFF.md ON PURPOSE when no issue is linked (#304).
     # Without it, a -Save that resolves no issue REFUSES rather than degrading silently.
     [switch]  $Local,
-    [switch]  $DryRun
+    [switch]  $DryRun,
+    [string]  $BodyFile = ""
 )
 
 # ==============================================================================
@@ -306,6 +318,33 @@ function Remove-MemoryIndexLine([string]$body, [string]$marker) {
     return (($kept -join "`n").TrimEnd() + "`n")
 }
 
+# Read handoff body sections from a JSON file (see -BodyFile). Presence is tracked per field
+# (Present.<name>): a field PRESENT in the JSON wins over the inline param even when empty,
+# while a field ABSENT from the JSON falls back to the inline default — the two cases must be
+# distinguishable, which value-normalization alone cannot do (a JSON `null` still counts as
+# present and normalizes to the empty default). A file path that is set but does not exist
+# (or is a directory) throws rather than silently using empty sections.
+# Pure (reads a file, but no gh/git/network): tested in Pester via a temp file. (#419)
+function Read-HandoffBodyFile([string]$filePath) {
+    if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+        throw "Board-Handoff: -BodyFile '$filePath' does not exist."
+    }
+    $raw = Get-Content -LiteralPath $filePath -Raw
+    $data = $raw | ConvertFrom-Json
+    $present = @{}
+    foreach ($f in 'NextStep', 'Done', 'OpenThreads', 'Traps', 'KeyFiles') {
+        $present[$f] = ($null -ne $data.PSObject.Properties[$f])
+    }
+    return [PSCustomObject]@{
+        NextStep    = if ($null -ne $data.NextStep)    { [string]$data.NextStep }        else { "" }
+        Done        = if ($null -ne $data.Done)        { [string[]]@($data.Done) }        else { @() }
+        OpenThreads = if ($null -ne $data.OpenThreads) { [string[]]@($data.OpenThreads) } else { @() }
+        Traps       = if ($null -ne $data.Traps)       { [string[]]@($data.Traps) }       else { @() }
+        KeyFiles    = if ($null -ne $data.KeyFiles)    { [string[]]@($data.KeyFiles) }    else { @() }
+        Present     = $present
+    }
+}
+
 # Decide how a -Save resolves its durability target (#304). A handoff is only portable + memo-backed
 # when an ISSUE carries it (the [abios-handoff] comment resume reads from any machine, plus the
 # MEMORY.md pointer). With no issue, the old code silently wrote a gitignored local-only HANDOFF.md
@@ -329,6 +368,19 @@ function Get-HandoffSaveMode {
 if ($env:ABIOS_HANDOFF_DOTSOURCE) { return }
 
 $ErrorActionPreference = "Stop"
+
+# Resolve file-backed body sections BEFORE any validation (#419: inline payloads with
+# slash-commands or path-like strings trip the tool-layer path guard before the script runs).
+if ($BodyFile) {
+    # Documented contract: a field PRESENT in the file wins over the inline param (even when
+    # explicitly empty); a field ABSENT from the file leaves the inline/default value intact.
+    $bd = Read-HandoffBodyFile $BodyFile
+    if ($bd.Present.NextStep)    { $NextStep    = $bd.NextStep }
+    if ($bd.Present.Done)        { $Done        = $bd.Done }
+    if ($bd.Present.OpenThreads) { $OpenThreads = $bd.OpenThreads }
+    if ($bd.Present.Traps)       { $Traps       = $bd.Traps }
+    if ($bd.Present.KeyFiles)    { $KeyFiles    = $bd.KeyFiles }
+}
 
 # The single resolver for owner/name from this clone's origin (#281). Do NOT inline the regex
 # again: the copy-pasted version ate any dot in the repo name (midominio.com -> midominio).
