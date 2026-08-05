@@ -1,6 +1,33 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+- **`/expert auto` two remaining gaps from #440: no self-inspection and two launch-time footguns.**
+  After PR #468 armed the irreversible brake in the launch briefing, three problems were still
+  open:
+
+  1. **No post-run compliance report (problem 2).** When the run ended — cleanly, in violation, or
+     over budget — nothing checked whether the brake had held and nothing told the human. The brief
+     now embeds the default-branch SHA recorded at launch and instructs the session to compare the
+     current SHA against it before recording Fleet-Findings. `Assert-BrakeCompliance` (pure,
+     testable) decides compliant / violated; `Format-ComplianceReport` writes the verdict as an
+     `[abios-evidence]` comment that surfaces to the human immediately.
+
+  2. **Token scope footgun (problem 3a).** `Expert-Auto.ps1` unconditionally overwrote
+     `GH_TOKEN` with the registry PAT even when the ambient `gh` login was better-scoped. If the
+     PAT lacked `project` scope while the ambient session had it, every board operation inside the
+     launched run failed with `INSUFFICIENT_SCOPES`. Now: `Test-GhScope` (pure, injectable
+     `$StatusText`) checks the ambient login first; the registry PAT is used only as a fallback
+     when the ambient login lacks `project` scope; if neither has it, a warning with a recovery
+     command (`gh auth refresh -s project`) is emitted before launch.
+
+  3. **Stale HEAD footgun (problem 3b).** Before launching, `git fetch origin` runs explicitly
+     and the local default-branch SHA is compared to the remote. If they differ, a targeted
+     warning tells the human their local view is stale (the worktree is still cut from
+     `origin/<default>` — the base is safe; only the local clone is behind).
+
+  24 new test cases covering the three new pure functions and the updated `Format-AutoBrief`
+  signature.
 
 ### Added
 - **A closing summary every flow can end with — four blocks, always the same four** (#492, epic #491).
