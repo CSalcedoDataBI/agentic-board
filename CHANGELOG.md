@@ -1,6 +1,71 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+- **`/expert auto` two remaining gaps from #440: no self-inspection and two launch-time footguns.**
+  After PR #468 armed the irreversible brake in the launch briefing, three problems were still
+  open:
+
+  1. **No post-run compliance report (problem 2).** When the run ended — cleanly, in violation, or
+     over budget — nothing checked whether the brake had held and nothing told the human. The brief
+     now embeds the default-branch SHA recorded at launch and instructs the session to compare the
+     current SHA against it before recording Fleet-Findings. `Assert-BrakeCompliance` (pure,
+     testable) decides compliant / violated; `Format-ComplianceReport` writes the verdict as an
+     `[abios-evidence]` comment that surfaces to the human immediately.
+
+  2. **Token scope footgun (problem 3a).** `Expert-Auto.ps1` unconditionally overwrote
+     `GH_TOKEN` with the registry PAT even when the ambient `gh` login was better-scoped. If the
+     PAT lacked `project` scope while the ambient session had it, every board operation inside the
+     launched run failed with `INSUFFICIENT_SCOPES`. Now: `Test-GhScope` (pure, injectable
+     `$StatusText`) checks the ambient login first; the registry PAT is used only as a fallback
+     when the ambient login lacks `project` scope; if neither has it, a warning with a recovery
+     command (`gh auth refresh -s project`) is emitted before launch.
+
+  3. **Stale HEAD footgun (problem 3b).** Before launching, `git fetch origin` runs explicitly
+     and the local default-branch SHA is compared to the remote. If they differ, a targeted
+     warning tells the human their local view is stale (the worktree is still cut from
+     `origin/<default>` — the base is safe; only the local clone is behind).
+
+  24 new test cases covering the three new pure functions and the updated `Format-AutoBrief`
+  signature.
+
+### Fixed
+- **Board-Triage now works correctly on multi-repo boards — cross-repo items visible, number collisions refused** (#506).
+  Two silent defects on boards that hold issues from several repositories: (1) `-Pending` sorted and
+  displayed items by bare `#number` with no repo context, making cross-repo items indistinguishable
+  and colliding numbers invisible; (2) a bare `-Issue <n>` matched against the first item with that
+  number — which was always the linked repo's — so triage writes landed on the wrong issue with a
+  success message naming a completely different title. Three new pure functions fix this: `Resolve-IssueRef`
+  parses `-Issue` as a bare number OR a qualified `owner/repo#n`; `Find-TriageItems` matches by
+  repo+number when qualified, or returns ALL same-number candidates when bare; `Format-ItemRef`
+  renders the canonical `owner/repo#number` reference. The `-Pending` display now groups items by
+  repo and shows the full reference for every item. When a bare `-Issue <n>` would write to more
+  than one board item, the script refuses and lists the candidates — silent writes to the wrong issue
+  are structurally impossible. A new `-Repo` parameter lets callers qualify a bare number without
+  rewriting existing scripts that already pass plain integers. 11 new Pester tests cover
+  `Resolve-IssueRef` (bare, qualified, -Repo, conflict detection), `Find-TriageItems` (single-repo,
+  multi-repo, collision, not-found), and `Format-ItemRef` (with and without repo).
+
+### Fixed
+- **`/board expert auto` role selection is now score-based, not first-keyword-wins** (#474).
+  `Get-DomainFromPlan` previously returned on the first keyword hit, scanning roles in catalog order.
+  `powerbi-report` is the first factory role and owns `visual`, `chart`, `dashboard`, `report` —
+  four ordinary English words — so one generic word anywhere in a plan text handed the entire task
+  to the Power BI toolset. A VS Code debugging task that mentioned the word "visual" drew 40 Power
+  BI authoring skills and zero debugging skills; the mislabel was silent because a large hook count
+  looks healthy from the outside. Fix: all roles are now scored (sum of matched keyword lengths;
+  longer, more specific keywords outweigh short ones), and the highest-scoring role wins. Ties
+  preserve catalog order (local-before-factory). A vscode+extension+plugin+CLI plan now correctly
+  resolves to `extension` even when it also mentions `dashboard` or `chart`. The four regression
+  sentences from the issue all resolve correctly, and a genuine Deneb visual plan still resolves
+  to `powerbi-report`. Second defect fixed in the same pass: `Get-HookedSkills` used substring
+  matching for skill patterns, so the bare `skill` pattern in `extension.skills` hooked
+  `marketplaces:example-skill` (suffix match — wrong). Skill patterns now use prefix matching
+  (the leaf must start with the pattern), and the `extension` role's pattern was tightened from
+  `"skill"` to `"skills"` so it hooks `skills-audit` and similar but not `example-skill` or
+  `skill-development`. `roles why` now reports runner-up roles and their scores alongside the
+  winner, making a wrong pick visible without reading the catalog. 11 new Pester tests cover all
+  four acceptance sentences, the regression guard, suffix prevention, and runner-up output.
 
 ### Added
 - **Claims verification gate for expert deliverables — the evidence contract now covers external facts, not just tests** (#479).

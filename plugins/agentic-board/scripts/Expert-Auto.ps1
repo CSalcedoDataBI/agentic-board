@@ -8,13 +8,24 @@
     launches a dedicated session in an isolated worktree — reusing the existing fleet/-Launch +
     worktree machinery. The user is freed and monitors with `/board work -Sessions -Watch`.
 
-    Pure cores (Format-AutoBrief, Get-ContractBudgetMinutes) behind $env:ABIOS_EXPERTAUTO_DOTSOURCE
-    for unit tests; the CLI half reads gh + the contract and drives the launch. The contract's
-    time budget is ENFORCED (#564): it travels in the brake marker and the PreToolUse hook refuses
-    non-wrap-up commands once it is spent.
+    Pure cores (Format-AutoBrief, Get-ContractBudgetMinutes, Test-GhScope, Assert-BrakeCompliance,
+    Format-ComplianceReport) behind $env:ABIOS_EXPERTAUTO_DOTSOURCE for unit tests; the CLI half
+    reads gh + the contract and drives the launch. The contract's time budget is ENFORCED (#564):
+    it travels in the brake marker and the PreToolUse hook refuses non-wrap-up commands once it
+    is spent.
 
     Autonomy brakes only on the irreversible (Expert-Autonomy): the run reaches "PR ready" and
     stops there for the human to merge.
+
+    Launch-time guards (#440):
+    - Token scope: only overrides the ambient gh login with the registry PAT when the ambient
+      login lacks 'project' scope; if neither has it, warns with a recovery command.
+    - Stale HEAD: after fetching, warns when the local default branch is behind origin so the
+      human knows their local view is stale (the worktree is still cut from origin/<default>).
+
+    Post-run compliance (#440): the brief embeds the main SHA at launch time and instructs the
+    session to compare it before recording Fleet-Findings, writing a PASS/VIOLATION verdict as
+    an [abios-evidence] comment.
 
 .PARAMETER Issue
     The issue/epic number to execute.
@@ -57,6 +68,9 @@ function Format-AutoBrief {
         [Parameter(Mandatory)][hashtable]$Contract,
         [string]$PlanBody = "",
         [string]$RoleObjective = "",
+        [string]$MainShaAtLaunch = "",  # embed compliance checkpoint when provided (#440)
+        [string]$Repo = "",             # owner/name used in the compliance check command
+        [int]$IssueNum = 0,             # target issue for the [abios-evidence] verdict
         # The owner ORDERED this run to finish (#530). The brief now EXPLAINS that order rather than
         # granting it: the mechanism that would honour it was found to have two holes it could not
         # defend (#541), so the run is told plainly that the order is recorded, cannot yet be acted
@@ -78,6 +92,27 @@ function Format-AutoBrief {
     # and naming it here lets the launched run adopt it as its agent type too.
     $agentLine = if ($Contract.roleAgent) {
         "`nAdopt the agent type ``$($Contract.roleAgent)`` for this run — its definition is your persona.`n"
+    } else { '' }
+
+    # Compliance checkpoint embeds the main SHA recorded at launch (#440 problem 2).
+    # The session compares the current SHA against it to detect any unauthorized merge.
+    $complianceSection = if ($MainShaAtLaunch) {
+        $repoClause   = if ($Repo)     { " in $Repo" } else { "" }
+        $issueClause  = if ($IssueNum) { " #$IssueNum" } else { "" }
+        $checkCmd     = if ($Repo)     { "``gh api repos/$Repo/branches/main -q '.commit.sha'``" } else { "``git rev-parse origin/HEAD``" }
+        @"
+
+
+## Compliance check (do this BEFORE Fleet-Findings — non-negotiable)
+The main branch SHA at launch was: ``$MainShaAtLaunch``
+Before recording your findings, verify the irreversible brake held:
+1. Fetch the current default-branch SHA: $checkCmd
+2. Compare to the launch SHA above.
+3. If they differ, the brake was violated (main was merged to). Post an [abios-evidence] VIOLATION
+   comment to issue$issueClause$repoClause.
+4. If they match, post an [abios-evidence] PASS comment to the same issue.
+Either way, the verdict comment must appear before you record Fleet-Findings.
+"@
     } else { '' }
 
     # Say what is TRUE about the budget (round 7): a contract with maxMinutes 0 has enforcement
@@ -214,7 +249,76 @@ DoD goes green. Unverified claims are visible in the evidence block but do not b
 run explicitly acknowledged the gap. Runs producing no deliverables with external claims record
 ``not-applicable`` and incur no added friction — the common case must not get slower or noisier.
 
+$complianceSection
 $closingSection
+"@
+}
+
+# ── Pure core: token scope check (#440 footgun 1) ───────────────────────────────
+
+# Returns $true when the output of 'gh auth status' lists the given scope.
+# $StatusText is injected in tests so no real gh call is needed.
+function Test-GhScope {
+    param(
+        [Parameter(Mandatory)][string]$Scope,
+        [string]$StatusText = ""
+    )
+    if ($StatusText -match "(?i)Token scopes:\s*(.+)") {
+        $scopes = $Matches[1] -split ',\s*' | ForEach-Object { $_.Trim().Trim("'") }
+        return [bool]($scopes -contains $Scope)
+    }
+    return $false
+}
+
+# ── Pure core: post-run compliance check (#440 problem 2) ───────────────────────
+
+# Compare the main SHA recorded at launch to the current SHA.
+# Returns @{ compliant=$bool; mainMoved=$bool; detail='' }.
+# $mergeIsIrreversible is derived from the contract inside the function so the
+# logic stays testable without wiring a full contract every time.
+function Assert-BrakeCompliance {
+    param(
+        [Parameter(Mandatory)][hashtable]$Contract,
+        [Parameter(Mandatory)][string]$CurrentMainSha,
+        [Parameter(Mandatory)][string]$MainShaAtLaunch
+    )
+    $mergeIsIrreversible = $false
+    if ($Contract.autonomy -and $Contract.autonomy.irreversible) {
+        $irr = @($Contract.autonomy.irreversible | ForEach-Object { "$_".ToLowerInvariant() })
+        $mergeIsIrreversible = $irr -contains 'merge'
+    }
+    $mainMoved = ($CurrentMainSha -ne $MainShaAtLaunch) -and
+                 ($CurrentMainSha -ne '') -and ($MainShaAtLaunch -ne '')
+    $violated  = $mainMoved -and $mergeIsIrreversible
+    $shortLaunch  = if ($MainShaAtLaunch.Length  -ge 7) { $MainShaAtLaunch.Substring(0,7)  } else { $MainShaAtLaunch }
+    $shortCurrent = if ($CurrentMainSha.Length -ge 7) { $CurrentMainSha.Substring(0,7) } else { $CurrentMainSha }
+    $detail = if ($mainMoved) { "main moved: $shortLaunch -> $shortCurrent" } else { "main SHA unchanged ($shortLaunch)" }
+    return @{
+        compliant = -not $violated
+        mainMoved = $mainMoved
+        detail    = $detail
+    }
+}
+
+# Format the compliance result as an [abios-evidence] block.
+function Format-ComplianceReport {
+    param(
+        [Parameter(Mandatory)][hashtable]$Compliance,
+        [int]$Issue = 0
+    )
+    $verdict = if ($Compliance.compliant) { 'PASS' } else { 'FAIL (BRAKE VIOLATED)' }
+    $icon    = if ($Compliance.compliant) { '[OK]' } else { '[VIOLATION]' }
+    $issueTag = if ($Issue -gt 0) { " #$Issue" } else { "" }
+    @"
+<!-- [abios-evidence] -->
+## Compliance report — /board expert auto$issueTag
+
+**Verdict:** $icon $verdict
+
+| Check | Result |
+| --- | --- |
+| main moved? | $($Compliance.mainMoved) |
+| detail | $($Compliance.detail) |
 "@
 }
 
@@ -285,7 +389,28 @@ if ($env:ABIOS_EXPERTAUTO_DOTSOURCE) { return }
 if ($Issue -le 0 -and $Epic -le 0) { throw "Expert-Auto: -Issue <n> or -Epic <n> is required." }
 if ($Issue -gt 0 -and $Epic -gt 0) { throw "Expert-Auto: -Issue and -Epic are mutually exclusive - pick one." }
 
-if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
+# ── Token scope guard (#440 footgun 1) ──────────────────────────────────────────
+. (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# Prefer the ambient gh login when it has 'project' scope; only fall back to the
+# registry PAT when the ambient login is unscoped or unauthenticated. Setting
+# GH_TOKEN overrides gh's own session — if the registry PAT has fewer scopes, every
+# board operation inside the launched run fails with INSUFFICIENT_SCOPES.
+if (-not $env:GH_TOKEN) {
+    # Routed through Invoke-Gh for the raw-gh ratchet (#571); an unauthenticated login makes
+    # it THROW, which this guard tolerates on purpose - the catch text simply carries no
+    # 'project' scope, so the check falls through to the registry PAT exactly as before.
+    $ghStatus         = try { (Invoke-Gh -GhArgs @('auth', 'status') -What 'leer los scopes del login gh ambiente') | Out-String } catch { "$_" }
+    $ambientOk        = Test-GhScope -Scope 'project' -StatusText $ghStatus
+    $registryToken    = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
+    if ($ambientOk) {
+        Write-Host "  Token: ambient gh login has 'project' scope — leaving GH_TOKEN unset." -ForegroundColor DarkGray
+    } elseif ($registryToken) {
+        $env:GH_TOKEN = $registryToken
+        Write-Host "  Token: set from registry ($TokenVar) — ambient gh login lacks 'project' scope." -ForegroundColor DarkGray
+    } else {
+        Write-Warning "No GH_TOKEN set and ambient gh login lacks 'project' scope. Board operations may fail with INSUFFICIENT_SCOPES. Run 'gh auth refresh -s project' or set $TokenVar with 'project' scope."
+    }
+}
 
 # Resolve the contract (defaults if none configured yet).
 $prevC = $env:ABIOS_EXPERTCONTRACT_DOTSOURCE
@@ -305,7 +430,27 @@ if ($repo -and $Issue -gt 0) {
     }
 }
 
-$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role -EndToEnd:$EndToEnd
+# ── Stale HEAD guard (#440 footgun 2) ───────────────────────────────────────────
+# Fetch so the worktree is cut from a fresh origin/<default>.  Also warn when the
+# local default branch is behind its remote — the worktree base is safe (it comes
+# from origin/<default>), but a stale local clone hides recent context from the human.
+git fetch origin --quiet 2>$null | Out-Null
+$mainShaAtLaunch = ""
+$localDefaultSha = $remoteSha = ""
+$originHead = git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null
+if ($LASTEXITCODE -eq 0 -and $originHead) {
+    $localBranch     = $originHead -replace '^origin/', ''
+    $localDefaultSha = git rev-parse --quiet $localBranch 2>$null
+    $remoteSha       = git rev-parse --quiet $originHead  2>$null
+    $mainShaAtLaunch = if ($LASTEXITCODE -eq 0 -and $remoteSha) { $remoteSha } else { "" }
+    if ($localDefaultSha -and $remoteSha -and $localDefaultSha -ne $remoteSha) {
+        $short = if ($remoteSha.Length -ge 7) { $remoteSha.Substring(0,7) } else { $remoteSha }
+        Write-Warning "Local '$localBranch' is behind '$originHead' ($short). The worktree will be cut from '$originHead' (safe), but sync with 'git pull' when convenient."
+    }
+}
+
+$brief = Format-AutoBrief -Contract $contract -PlanBody $planBody -RoleObjective $contract.role `
+    -MainShaAtLaunch $mainShaAtLaunch -Repo $repo -IssueNum $Issue -EndToEnd:$EndToEnd
 
 # The brake, as a CONTROL rather than prose (#440). The generic launch briefing used to order
 # the merge outright and make it the completion condition, so a session that merged to main was
@@ -452,7 +597,8 @@ query($o:String!,$r:String!,$n:Int!){
             continue
         }
         $wavePlan = "$($epicObj.title)`n`n$($epicObj.body)`n`n## Your sub-issue (deliver THIS, the epic above is context)`n#$($s.number) $($s.title)`n`n$subBody"
-        $brief = Format-AutoBrief -Contract $contract -PlanBody $wavePlan -RoleObjective $contract.role -EndToEnd:$EndToEnd
+        $brief = Format-AutoBrief -Contract $contract -PlanBody $wavePlan -RoleObjective $contract.role `
+            -MainShaAtLaunch $mainShaAtLaunch -Repo $repo -IssueNum $s.number -EndToEnd:$EndToEnd
         $briefPath = if ($stateDirEpic) { Join-Path $stateDirEpic "expert-brief-$($s.number).md" } else { "expert-brief-$($s.number).md" }
         $brief | Set-Content -Path $briefPath -Encoding utf8
         if ($DryRun) {
