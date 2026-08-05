@@ -201,3 +201,64 @@ Describe 'Format-ClosingSummaryPrompt (#493)' {
         { Format-ClosingSummaryPrompt -Blocks @() } | Should -Throw
     }
 }
+
+Describe 'Get-CommandRegionPlan (#493)' {
+    BeforeAll {
+        $script:Prompt = "LINE ONE`nLINE TWO"
+        $script:Region = '<!-- BEGIN:closing-summary --><!-- END:closing-summary -->'
+    }
+    It 'plans a write for a file whose region is empty' {
+        $plan = Get-CommandRegionPlan -Files @(@{ Name = 'a.md'; Text = "head`n$script:Region`ntail" }) -Prompt $script:Prompt
+        $plan.Writes.Count  | Should -Be 1
+        $plan.Missing.Count | Should -Be 0
+        $plan.Writes[0].Name | Should -Be 'a.md'
+        $plan.Writes[0].Text | Should -BeLike '*LINE ONE*'
+        $plan.Writes[0].Text | Should -BeLike '*head*'   # everything outside the markers survives
+        $plan.Writes[0].Text | Should -BeLike '*tail*'
+    }
+    It 'reports a file with NO markers as missing instead of silently skipping it' {
+        # The whole point: a newly added command with no region must fail loudly, or it ships
+        # with no closing contract and nothing notices.
+        $plan = Get-CommandRegionPlan -Files @(@{ Name = 'new.md'; Text = 'a command with no region' }) -Prompt $script:Prompt
+        $plan.Missing | Should -Be @('new.md')
+        $plan.Writes.Count | Should -Be 0
+    }
+    It 'plans nothing for a file already carrying the current content (idempotent)' {
+        $first = (Get-CommandRegionPlan -Files @(@{ Name = 'a.md'; Text = "x`n$script:Region`ny" }) -Prompt $script:Prompt).Writes[0].Text
+        $again = Get-CommandRegionPlan -Files @(@{ Name = 'a.md'; Text = $first }) -Prompt $script:Prompt
+        $again.Writes.Count  | Should -Be 0
+        $again.Missing.Count | Should -Be 0
+    }
+    It 'plans a rewrite when the prompt changed (renderer drift reaches the command files)' {
+        $first = (Get-CommandRegionPlan -Files @(@{ Name = 'a.md'; Text = "x`n$script:Region`ny" }) -Prompt $script:Prompt).Writes[0].Text
+        $drift = Get-CommandRegionPlan -Files @(@{ Name = 'a.md'; Text = $first }) -Prompt 'A DIFFERENT CONTRACT'
+        $drift.Writes.Count | Should -Be 1
+        $drift.Writes[0].Text | Should -BeLike '*A DIFFERENT CONTRACT*'
+        $drift.Writes[0].Text | Should -Not -BeLike '*LINE ONE*'
+    }
+    It 'emits the region in the file''s own newline, so a CRLF working copy is not always stale' {
+        $crlf = (Get-CommandRegionPlan -Files @(@{ Name = 'a.md'; Text = "x`r`n$script:Region`r`ny" }) -Prompt $script:Prompt).Writes[0].Text
+        $crlf | Should -BeLike "*LINE ONE`r`nLINE TWO*"
+        $lf   = (Get-CommandRegionPlan -Files @(@{ Name = 'a.md'; Text = "x`n$script:Region`ny" }) -Prompt $script:Prompt).Writes[0].Text
+        $lf   | Should -BeLike "*LINE ONE`nLINE TWO*"
+        $lf   | Should -Not -BeLike "*LINE ONE`r`n*"
+    }
+    It 'separates the two verdicts across a mixed batch' {
+        $plan = Get-CommandRegionPlan -Prompt $script:Prompt -Files @(
+            @{ Name = 'ok.md';      Text = "a`n$script:Region`nb" }
+            @{ Name = 'missing.md'; Text = 'no region here' }
+        )
+        @($plan.Writes.Name)  | Should -Be @('ok.md')
+        @($plan.Missing)      | Should -Be @('missing.md')
+    }
+    It 'returns two empty lists for an empty batch instead of throwing' {
+        $plan = Get-CommandRegionPlan -Files @() -Prompt $script:Prompt
+        $plan.Writes.Count  | Should -Be 0
+        $plan.Missing.Count | Should -Be 0
+    }
+    It 'treats a malformed region (two BEGINs) as missing rather than mangling the file' {
+        $bad  = "<!-- BEGIN:closing-summary --><!-- BEGIN:closing-summary --><!-- END:closing-summary -->"
+        $plan = Get-CommandRegionPlan -Files @(@{ Name = 'bad.md'; Text = $bad }) -Prompt $script:Prompt
+        $plan.Missing | Should -Be @('bad.md')
+    }
+}

@@ -154,6 +154,36 @@ function Get-PluginVersion {
     $m.Groups[1].Value
 }
 
+# Decide what the closing-summary pass must do to a set of command files already read into
+# memory: which need their region rewritten, and which are missing the markers altogether.
+# Kept pure (no disk) so the decision itself is unit-tested rather than verified by hand —
+# the epic's own Definition of Done is "asserted, not eyeballed", and that has to apply to
+# the generator too, not only to what it generates.
+#
+# Each file is @{ Name = '<file>.md'; Text = '<raw contents>' }. Returns
+# @{ Writes = @({Name, Text}); Missing = @('<file>.md') }.
+function Get-CommandRegionPlan {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][hashtable[]]$Files,
+        [Parameter(Mandatory)][string]$Prompt
+    )
+    $writes  = @()
+    $missing = @()
+    foreach ($f in $Files) {
+        $nl      = Get-DominantNewline -Text $f.Text
+        # Match each file's own newline, or a CRLF working copy reads back as stale forever.
+        $content = "$nl" + ($Prompt -replace "`r?`n", $nl) + "$nl"
+        try {
+            $new = Set-MarkedRegion -Text $f.Text -Name 'closing-summary' -Content $content
+        } catch {
+            $missing += $f.Name
+            continue
+        }
+        if ($new -ne $f.Text) { $writes += [pscustomobject]@{ Name = $f.Name; Text = $new } }
+    }
+    [pscustomobject]@{ Writes = @($writes); Missing = @($missing) }
+}
+
 # Replace the text between a named marker pair with $Content, preserving the
 # markers themselves and everything outside them. The BEGIN marker may carry a
 # trailing note before `-->` (e.g. "do not edit"). Requires EXACTLY ONE region
@@ -236,22 +266,14 @@ if ((Set-MarkedRegion -Text $readme -Name 'version'  -Content $versionContent)  
 # Every command file carries the closing-summary contract (#493). A file MISSING the region is
 # an error, not a skip: a new command that never got the markers would otherwise ship with no
 # closing contract at all, which is exactly the gap this replaces.
-$commandWrites  = @()   # { Path, Name, Content } pending write
-$commandMissing = @()
-foreach ($cmdFile in (Get-ChildItem -Path $commandsDir -Filter '*.md' -File | Sort-Object Name)) {
-    $raw = [System.IO.File]::ReadAllText($cmdFile.FullName)
-    $cnl = Get-DominantNewline -Text $raw
-    $content = "$cnl" + (($summaryPrompt -replace "`r?`n", $cnl)) + "$cnl"
-    try {
-        $newRaw = Set-MarkedRegion -Text $raw -Name 'closing-summary' -Content $content
-    } catch {
-        $commandMissing += $cmdFile.Name
-        continue
-    }
-    if ($newRaw -ne $raw) {
-        $commandWrites += [pscustomobject]@{ Path = $cmdFile.FullName; Name = $cmdFile.Name; Content = $newRaw }
-    }
+$commandPaths = @{}
+$commandFiles = foreach ($cmdFile in (Get-ChildItem -Path $commandsDir -Filter '*.md' -File | Sort-Object Name)) {
+    $commandPaths[$cmdFile.Name] = $cmdFile.FullName
+    @{ Name = $cmdFile.Name; Text = [System.IO.File]::ReadAllText($cmdFile.FullName) }
 }
+$plan           = Get-CommandRegionPlan -Files @($commandFiles) -Prompt $summaryPrompt
+$commandWrites  = @($plan.Writes)
+$commandMissing = @($plan.Missing)
 if ($commandMissing.Count) { $stale += "closing-summary markers missing in: $($commandMissing -join ', ')" }
 if ($commandWrites.Count)  { $stale += "closing summary in $($commandWrites.Count) command file(s)" }
 
@@ -296,11 +318,10 @@ if ($DryRun) {
     exit 0
 }
 
-if ((Set-MarkedRegion -Text $readme -Name 'commands' -Content $commandsContent) -ne $readme -or
-    (Set-MarkedRegion -Text $readme -Name 'version'  -Content $versionContent)  -ne $readme) {
-    [System.IO.File]::WriteAllText($ReadmePath, $updated, $Utf8NoBom)
-}
-foreach ($w in $commandWrites) { [System.IO.File]::WriteAllText($w.Path, $w.Content, $Utf8NoBom) }
+# $updated already carries both README regions spliced; if it is byte-identical the README is
+# current and must not be rewritten just because a command file drifted.
+if ($updated -ne $readme) { [System.IO.File]::WriteAllText($ReadmePath, $updated, $Utf8NoBom) }
+foreach ($w in $commandWrites) { [System.IO.File]::WriteAllText($commandPaths[$w.Name], $w.Text, $Utf8NoBom) }
 
 Write-Host "OK  regenerated: $($stale -join ', ')" -ForegroundColor Green
 Write-Host "    ($($catalog.Count) commands from frontmatter; version v$version from plugin.json)" -ForegroundColor DarkGray
