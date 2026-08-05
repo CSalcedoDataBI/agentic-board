@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`/board expert auto` role selection is now score-based, not first-keyword-wins** (#474).
+  `Get-DomainFromPlan` previously returned on the first keyword hit, scanning roles in catalog order.
+  `powerbi-report` is the first factory role and owns `visual`, `chart`, `dashboard`, `report` —
+  four ordinary English words — so one generic word anywhere in a plan text handed the entire task
+  to the Power BI toolset. A VS Code debugging task that mentioned the word "visual" drew 40 Power
+  BI authoring skills and zero debugging skills; the mislabel was silent because a large hook count
+  looks healthy from the outside. Fix: all roles are now scored (sum of matched keyword lengths;
+  longer, more specific keywords outweigh short ones), and the highest-scoring role wins. Ties
+  preserve catalog order (local-before-factory). A vscode+extension+plugin+CLI plan now correctly
+  resolves to `extension` even when it also mentions `dashboard` or `chart`. The four regression
+  sentences from the issue all resolve correctly, and a genuine Deneb visual plan still resolves
+  to `powerbi-report`. Second defect fixed in the same pass: `Get-HookedSkills` used substring
+  matching for skill patterns, so the bare `skill` pattern in `extension.skills` hooked
+  `marketplaces:example-skill` (suffix match — wrong). Skill patterns now use prefix matching
+  (the leaf must start with the pattern), and the `extension` role's pattern was tightened from
+  `"skill"` to `"skills"` so it hooks `skills-audit` and similar but not `example-skill` or
+  `skill-development`. `roles why` now reports runner-up roles and their scores alongside the
+  winner, making a wrong pick visible without reading the catalog. 11 new Pester tests cover all
+  four acceptance sentences, the regression guard, suffix prevention, and runner-up output.
+
 ### Added
 - **A closing summary every flow can end with — four blocks, always the same four** (#492, epic #491).
   Reported first-hand by the product owner, a BI professional and not a programmer: every command

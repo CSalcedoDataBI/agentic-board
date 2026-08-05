@@ -33,16 +33,24 @@ $env:ABIOS_EXPERTROLES_DOTSOURCE = $prevRoles
 # ── Pure core ───────────────────────────────────────────────────────────────────
 
 function Get-DomainFromPlan {
-    # Order is precedence: local roles first, then factory, most specific first within each.
+    # Score-based: evaluate every role, sum the lengths of all matched keywords, and return the
+    # highest-scoring role. Longer keywords are more specific and outweigh multiple short matches.
+    # Ties are broken by catalog order (local-before-factory precedence is preserved).
     [CmdletBinding()]
     param([string]$Text, [hashtable]$Catalog)
     if (-not $Catalog) { $Catalog = Get-ExpertRoles }
     $t = ($Text ?? '').ToLowerInvariant()
+    $best = $null; $bestScore = 0
     foreach ($role in @($Catalog.roles)) {
+        $score = 0
         foreach ($kw in @($role.keywords)) {
-            if ($kw -and $t.Contains(([string]$kw).ToLowerInvariant())) { return $role.name }
+            if ($kw -and $t.Contains(([string]$kw).ToLowerInvariant())) {
+                $score += ([string]$kw).Length
+            }
         }
+        if ($score -gt $bestScore) { $bestScore = $score; $best = $role.name }
     }
+    if ($best) { return $best }
     'generic'
 }
 
@@ -58,9 +66,12 @@ function Get-HookedSkills {
     foreach ($s in $inv) {
         # Match the skill NAME, never the plugin namespace that ships it — otherwise a broad
         # pattern like 'skill' hooks every skill of a plugin merely named "skills-for-*".
+        # Prefix-only: the leaf must start with the pattern so 'skill' matches 'skill-creator' and
+        # 'skills-audit' but NOT 'example-skill' (where "skill" appears as a suffix).
         $leaf = ($s -split ':')[-1].ToLowerInvariant()
         foreach ($p in $patterns) {
-            if ($p -and $leaf.Contains(([string]$p).ToLowerInvariant())) { $hooked.Add($s); break }
+            $pl = ([string]$p).ToLowerInvariant()
+            if ($pl -and $leaf -match "^$([regex]::Escape($pl))") { $hooked.Add($s); break }
         }
     }
     # Always engage the quality profile where it is installed.

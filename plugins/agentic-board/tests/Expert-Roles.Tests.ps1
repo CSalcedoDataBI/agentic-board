@@ -29,7 +29,7 @@ Describe 'Get-RoleSource' {
 }
 
 Describe 'Get-RoleMatchTrace' {
-    It 'names the role and the exact keyword that decided the match' {
+    It 'names the role and the highest-scoring keyword that decided the match' {
         $t = Get-RoleMatchTrace -Text 'Build a Deneb chart' -Catalog $script:Factory
         $t.role    | Should -Be 'powerbi-report'
         $t.keyword | Should -Be 'deneb'
@@ -39,12 +39,39 @@ Describe 'Get-RoleMatchTrace' {
         $t.role    | Should -Be 'generic'
         $t.keyword | Should -BeNullOrEmpty
     }
-    It 'lists the roles it evaluated, in precedence order' {
+    It 'lists all roles evaluated in precedence order' {
         $t = Get-RoleMatchTrace -Text 'Write a haiku' -Catalog $script:Factory
         $t.evaluated | Should -Be @('powerbi-report','generic')
     }
-    It 'stops evaluating at the first hit' {
+    It 'evaluates all roles to find the best score' {
+        # The new algorithm scores all roles — it does not stop at the first hit.
+        # For a plan that matches only powerbi-report, both roles still appear in evaluated.
         $t = Get-RoleMatchTrace -Text 'Build a Deneb chart' -Catalog $script:Factory
-        $t.evaluated | Should -Be @('powerbi-report')
+        $t.evaluated | Should -Contain 'powerbi-report'
+        $t.evaluated | Should -Contain 'generic'
+    }
+    It 'returns runner-up roles and their scores alongside the winner' {
+        # Factory: powerbi-report (deneb keyword) scores >0; generic scores 0.
+        # runnerUps must list every non-winning role with its score.
+        $t = Get-RoleMatchTrace -Text 'Build a Deneb chart' -Catalog $script:Factory
+        $t.role     | Should -Be 'powerbi-report'
+        $t.score    | Should -BeGreaterThan 0
+        $t.runnerUps | Should -Not -BeNullOrEmpty
+        $runner = @($t.runnerUps) | Where-Object { $_.role -eq 'generic' }
+        $runner | Should -Not -BeNullOrEmpty
+        $runner.score | Should -Be 0
+    }
+    It 'runner-up includes roles that partially match but score lower than the winner' {
+        # Two-role catalog where the second role has some keyword hits but fewer/shorter than the first.
+        $cat = @{ qualityProfile=@(); roles=@(
+            @{ name='first';  keywords=@('alpha','beta','gamma'); skills=@() },
+            @{ name='second'; keywords=@('alpha'); skills=@() }
+        )}
+        $t = Get-RoleMatchTrace -Text 'alpha beta gamma' -Catalog $cat
+        $t.role  | Should -Be 'first'
+        $runner  = @($t.runnerUps) | Where-Object { $_.role -eq 'second' }
+        $runner  | Should -Not -BeNullOrEmpty
+        $runner.score | Should -BeGreaterThan 0
+        $runner.score | Should -BeLessThan $t.score
     }
 }

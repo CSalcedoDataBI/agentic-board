@@ -49,19 +49,34 @@ function Get-RoleSource {
 }
 
 function Get-RoleMatchTrace {
+    # Score-based: evaluate all roles (same algorithm as Get-DomainFromPlan) and return the winner
+    # plus every runner-up with its score so `roles why` can surface near-misses.
     [CmdletBinding()]
     param([string]$Text, [hashtable]$Catalog)
     $t = ($Text ?? '').ToLowerInvariant()
-    $evaluated = [System.Collections.Generic.List[string]]::new()
+    $evaluated  = [System.Collections.Generic.List[string]]::new()
+    $scoreMap   = [System.Collections.Generic.List[hashtable]]::new()
     foreach ($role in @($Catalog.roles)) {
         $evaluated.Add($role.name) | Out-Null
+        $score = 0; $firstKw = $null
         foreach ($kw in @($role.keywords)) {
             if ($kw -and $t.Contains(([string]$kw).ToLowerInvariant())) {
-                return @{ role = $role.name; keyword = [string]$kw; evaluated = $evaluated.ToArray() }
+                $score += ([string]$kw).Length
+                if (-not $firstKw) { $firstKw = [string]$kw }
             }
         }
+        $scoreMap.Add(@{ role = $role.name; score = $score; keyword = $firstKw }) | Out-Null
     }
-    @{ role = 'generic'; keyword = $null; evaluated = $evaluated.ToArray() }
+    $winner = $scoreMap | Where-Object { $_.score -gt 0 } | Sort-Object score -Descending | Select-Object -First 1
+    if (-not $winner) { $winner = @{ role = 'generic'; score = 0; keyword = $null } }
+    $runnerUps = @($scoreMap | Where-Object { $_.role -ne $winner.role })
+    @{
+        role      = $winner.role
+        keyword   = $winner.keyword
+        score     = $winner.score
+        evaluated = $evaluated.ToArray()
+        runnerUps = $runnerUps
+    }
 }
 
 # Dot-source guard: tests set $env:ABIOS_EXPERTROLESCMD_DOTSOURCE to load the pure core only.
@@ -74,13 +89,22 @@ if ($myWhy) {
     $trace = Get-RoleMatchTrace -Text $myWhy -Catalog $catalog
     Write-Host "=== /board expert roles why ===" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  Evaluated (in precedence order): $($trace.evaluated -join ' -> ')" -ForegroundColor DarkGray
     if ($trace.keyword) {
-        Write-Host "  MATCH  '$($trace.role)' on keyword '$($trace.keyword)'" -ForegroundColor Green
+        Write-Host "  MATCH  '$($trace.role)' (score $($trace.score)) on first keyword '$($trace.keyword)'" -ForegroundColor Green
     } else {
         Write-Host "  NO MATCH - falling back to 'generic'." -ForegroundColor Yellow
         Write-Host "  Add a role in .agentic-board/roles.json, or run /board expert config to synthesize one." -ForegroundColor DarkGray
     }
+    $runners = @($trace.runnerUps | Where-Object { $_.score -gt 0 } | Sort-Object score -Descending)
+    if ($runners.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Runner-ups (also matched):" -ForegroundColor DarkGray
+        foreach ($r in $runners) {
+            Write-Host ("    {0,-22} score {1}" -f $r.role, $r.score) -ForegroundColor DarkGray
+        }
+    }
+    Write-Host ""
+    Write-Host "  Evaluated (in precedence order): $($trace.evaluated -join ' -> ')" -ForegroundColor DarkGray
     return
 }
 
