@@ -256,6 +256,14 @@ Describe 'Get-CommandRegionPlan (#493)' {
         $plan.Writes.Count  | Should -Be 0
         $plan.Missing.Count | Should -Be 0
     }
+    It 'treats an unterminated region (BEGIN with no END) as unusable' {
+        $plan = Get-CommandRegionPlan -Prompt $script:Prompt -Files @(
+            @{ Name = 'open.md'; Text = "head`n<!-- BEGIN:closing-summary -->`ntail" }
+        )
+        @($plan.Missing.Name) | Should -Be @('open.md')
+        $plan.Missing[0].Reason | Should -Match 'Malformed'
+        $plan.Writes.Count | Should -Be 0
+    }
     It 'treats a malformed region (two BEGINs) as missing rather than mangling the file' {
         $bad  = "<!-- BEGIN:closing-summary --><!-- BEGIN:closing-summary --><!-- END:closing-summary -->"
         $plan = Get-CommandRegionPlan -Files @(@{ Name = 'bad.md'; Text = $bad }) -Prompt $script:Prompt
