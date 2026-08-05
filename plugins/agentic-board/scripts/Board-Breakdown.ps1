@@ -46,6 +46,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# ── Top-level error boundary (#485): any unhandled exception becomes a clean
+# one-line message on stdout so the caller always sees what failed — never a
+# silent exit 1 or a raw PowerShell stack dump going to stderr only.
+trap {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 # The single resolver for owner/name from this clone's origin (#281). Do NOT inline the regex
 # again: the copy-pasted version ate any dot in the repo name (midominio.com -> midominio).
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')

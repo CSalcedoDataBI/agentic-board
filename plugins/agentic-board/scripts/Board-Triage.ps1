@@ -168,6 +168,14 @@ function Format-ItemRef {
 # Dot-source guard: tests set $env:ABIOS_TRIAGE_DOTSOURCE to load the pure helpers only.
 if ($env:ABIOS_TRIAGE_DOTSOURCE) { return }
 
+# ── Top-level error boundary (#485): any unhandled exception becomes a clean
+# one-line message on stdout so the caller always sees what failed — never a
+# silent exit 1 or a raw PowerShell stack dump going to stderr only.
+trap {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 # ── Side-effecting from here ──────────────────────────────────────────────────
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 # Board reads that report their own truncation (#484).
