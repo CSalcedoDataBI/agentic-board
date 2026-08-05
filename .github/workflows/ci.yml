@@ -3,8 +3,9 @@ name: CI
 # Two blocking checks on every pull request:
 #   * `test` — the Pester suite (a failure blocks the merge; Board-ReviewGate
 #     waits on it, and it can be marked "Required" in the branch ruleset, see #201).
-#   * `docs` — the docs-freshness gate (#203 + #406): regenerate the derived README
-#     regions from source and fail if they drift from what was committed; also
+#   * `docs` — the docs-freshness gate (#203 + #406 + #493): check every derived
+#     region against its source and fail if it drifted — the README's command
+#     catalog and version, and the closing-summary block in each command file; also
 #     runs Publish-DocsWiki.ps1 -PagesOnly to verify that the wiki pages can still
 #     be generated from the current README + commands/ without error.
 
@@ -67,21 +68,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Regenerate the marked README regions (command catalog from frontmatter +
-      # version from plugin.json) from their sources, rewriting in place.
-      - name: Regenerate derived README regions
+      # Compare every derived region against its source WITHOUT writing: the README's
+      # command catalog and version, plus the closing-summary block in each command file
+      # (#493). This used to regenerate in place and then `git diff -- README.md`, which
+      # silently missed command-file drift — the regeneration rewrote those files and the
+      # diff never looked at them. `-Check` writes nothing and names the region that moved.
+      - name: Fail if any derived region drifted from its sources
         shell: pwsh
-        run: plugins/agentic-board/scripts/Update-Docs.ps1
-
-      # If regeneration changed anything, the committed README was stale: a command
-      # description or the version moved without the README being regenerated.
-      - name: Fail if the README drifted from its sources
         run: |
-          if ! git diff --exit-code -- README.md; then
-            echo "::error::README is stale — a command description or the version changed without regenerating."
-            echo "Fix it locally: run 'plugins/agentic-board/scripts/Update-Docs.ps1' and commit README.md."
+          plugins/agentic-board/scripts/Update-Docs.ps1 -Check
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::A derived region is stale - regenerate and commit."
+            Write-Host "Fix it locally: run 'plugins/agentic-board/scripts/Update-Docs.ps1' and commit the result."
             exit 1
-          fi
+          }
 
       # Wiki docs freshness (#406, updated #418): verify that the wiki pages can still be
       # generated from the current README without error, and that every generated page

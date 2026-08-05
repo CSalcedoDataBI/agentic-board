@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Added
+- **Every typed command now carries the four-block closing summary (#493).** v0.35.0 shipped the
+  renderer (#492) and nothing consumed it: not one command file or script referenced it, so in
+  practice each flow still ended however its author felt like ending it. The contract is now
+  attached to all seven command surfaces (`/board`, `/docs`, `/expert`, `/knowledge`, `/scan`,
+  `/skills`, `/tools`) as a generated region, and the generator reads the four headings — and each
+  block's when-empty sentence — from the renderer itself, so the text an agent is told to write and
+  the text a script prints cannot drift apart.
+
+  Hand-copying the same paragraph into seven prompts would have re-created the drift #200/#202
+  already fixed for the README, so this reuses that machinery instead: `Update-Docs.ps1` owns a
+  third derived region, `<!-- BEGIN:closing-summary -->`, and the docs-freshness CI gate now fails
+  when a command file drifts from the renderer (see Fixed below — it did not, until this PR). A
+  command file **missing** the region is a failure rather than a skip, and one whose region is
+  malformed says so specifically instead of reporting an absent marker — otherwise a newly added
+  command would ship with no closing contract and nothing would notice.
+
+  Asserted rather than eyeballed, per the epic's Definition of Done: `CommandSurface.Tests.ps1`
+  checks every command file for the region, all four headings and all four when-empty sentences,
+  reading the expected values from the renderer so the test can never become a stale second copy,
+  and `Get-CommandRegionPlan` unit-tests the generator's own decision (missing, malformed, stale,
+  idempotent, per-file newline). Verified by breaking it three ways — deleting one file's region
+  fails 3 tests and the gate; renaming one label in the renderer fails 7 tests and marks all seven
+  files stale; dropping the missing-file bookkeeping lets a region-less command pass silently and
+  turns 3 tests red.
+
+### Fixed
+- **The docs-freshness CI gate only ever looked at the README (#493).** It regenerated the derived
+  regions in place and then ran `git diff --exit-code -- README.md`. Scoped to that one file, the
+  step rewrote a drifted `commands/*.md` and then never compared it — so command-file drift passed
+  green. It now runs `Update-Docs.ps1 -Check`, which writes nothing and names whichever region
+  moved. Measured on a one-word drift in a command file: the new step exits 1, the old one exited 0.
+
+  Found while reviewing this PR, against a changelog line of its own claiming the gate already
+  covered it. It did not.
+
 ## [0.35.0] - 2026-08-05
 
 **The trust release: what a run says now has to be what happened.** Two days of dogfooding — the
