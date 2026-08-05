@@ -60,6 +60,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# ── Top-level error boundary (#485): any unhandled exception becomes a clean
+# one-line message on stdout so the caller always sees what failed — never a
+# silent exit 1 or a raw PowerShell stack dump going to stderr only.
+trap {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 # ── Brake check (#516) ──────────────────────────────────────────────────────────
 # Defense in depth. The PreToolUse guard already refuses `Board-Merge.ps1` inside a brake-armed
 # worktree, but that guard only exists where the plugin's hooks are installed. This check lives in

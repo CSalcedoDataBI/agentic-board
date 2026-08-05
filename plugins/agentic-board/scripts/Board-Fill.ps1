@@ -265,6 +265,14 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
 # the token check or any gh call (same contract as Board-Work.ps1).
 if ($env:ABIOS_BOARDFILL_DOTSOURCE) { return }
 
+# ── Top-level error boundary (#485): any unhandled exception becomes a clean
+# one-line message on stdout so the caller always sees what failed — never a
+# silent exit 1 or a raw PowerShell stack dump going to stderr only.
+trap {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 # ── 0. Token ──────────────────────────────────────────────────────────────────
 # Respect a pre-set $env:GH_TOKEN (a business board is reached by exporting
 # GITHUB_TOKEN_BUSINESS first) instead of clobbering it with the personal PAT.

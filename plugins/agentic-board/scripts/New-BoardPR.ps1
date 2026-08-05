@@ -86,6 +86,14 @@ function Get-ExistingPr {
 # Dot-source guard: tests set $env:ABIOS_NEWBOARDPR_DOTSOURCE to load the pure helper only.
 if ($env:ABIOS_NEWBOARDPR_DOTSOURCE) { return }
 
+# ── Top-level error boundary (#485): any unhandled exception becomes a clean
+# one-line message on stdout so the caller always sees what failed — never a
+# silent exit 1 or a raw PowerShell stack dump going to stderr only.
+trap {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 # gh must fail closed on the "is there already an open PR?" read (#336/#303): a swallowed failure
 # used to be indistinguishable from "no PR" and took the silent-skip path above.
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')

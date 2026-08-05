@@ -2185,6 +2185,14 @@ function Invoke-BatchIssueStart {
 # ==============================================================================
 if ($env:ABIOS_BOARDWORK_DOTSOURCE) { return }
 
+# ── Top-level error boundary (#485): any unhandled exception becomes a clean
+# one-line message on stdout so the caller always sees what failed — never a
+# silent exit 1 or a raw PowerShell stack dump going to stderr only.
+trap {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 # ==============================================================================
 # KILL-LAYER MODES (Phase 2, local-only - no GH_TOKEN needed). Every kill goes
 # through the fail-safe Stop-ProcessTree (self + ancestors always excluded) and
