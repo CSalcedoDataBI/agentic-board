@@ -1,6 +1,17 @@
 # Changelog
 
 ## [Unreleased]
+
+## [0.35.0] - 2026-08-05
+
+**The trust release: what a run says now has to be what happened.** Two days of dogfooding — the
+expert fleet clearing its own board — converged on one theme: closing every gap between what the
+tool reports and what it did. Deliverable claims now pass a verification gate (#479), a braked run
+proves post-run that it never touched `main` (#440), role selection stops guessing from one keyword
+(#474), triage can no longer write to the wrong issue on multi-repo boards (#506), the 85
+field-measured silent failures get real messages (#485), and every flow can close with the same
+four-block summary a non-programmer reads at a glance (#492).
+
 ### Fixed
 - **`/expert auto` two remaining gaps from #440: no self-inspection and two launch-time footguns.**
   After PR #468 armed the irreversible brake in the launch briefing, three problems were still
