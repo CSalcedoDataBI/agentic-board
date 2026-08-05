@@ -20,17 +20,26 @@
       ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Pending
 
       # 2. Write the evidence fields the agent inferred for ONE issue:
+      #    Single-repo board: bare number is unambiguous
       ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 42 -Type Bug -Area scripts -Estimate 3
+      #    Multi-repo board: qualify with owner/repo#n or -Repo to avoid number collision (#506)
+      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Type Bug -Area scripts -Estimate 3
+      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 42 -Repo owner/repo -Type Bug -Area scripts -Estimate 3
 
       # 3. Priority — proposal only (prints, writes nothing) unless -ConfirmPriority:
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 42 -Priority P1 -Rationale 'blocks the release'
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 42 -Priority P1 -Rationale '...' -ConfirmPriority
+      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Priority P1 -Rationale 'blocks the release'
+      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Priority P1 -Rationale '...' -ConfirmPriority
 #>
 [CmdletBinding()]
 param(
   [int]   $Number     = 13,
   [string]$Owner      = 'CSalcedoDataBI',
-  [int]   $Issue      = 0,
+  # Accept bare number ("42") or qualified "owner/repo#42"; use -Repo to disambiguate bare numbers
+  # on multi-repo boards (#506). Empty string = -Pending / batch-view mode.
+  [string]$Issue      = '',
+  # Explicit repo qualifier. Combined with a bare -Issue number it produces a qualified ref that
+  # targets exactly one item even when the same number exists in several repos (#506).
+  [string]$Repo       = '',
   [switch]$Pending,
   [string]$Type,
   [string]$Area,
@@ -100,6 +109,62 @@ function Get-TriageBoardPlan {
     return [pscustomobject]@{ ResolveFromOrigin = $false; Owner = $DefaultOwner; Number = 0; Reason = 'no-origin' }
 }
 
+# Parse an issue reference (bare number OR "owner/repo#n") and an optional -Repo qualifier.
+# Returns { Repo; Number; Qualified } or throws on invalid/conflicting input.
+# Qualified = $true  -> exact match by repo+number (safe on multi-repo boards).
+# Qualified = $false -> bare number; caller must detect and refuse ambiguous collisions.
+# Pure (#506).
+function Resolve-IssueRef {
+    param([string]$IssueArg, [string]$ExplicitRepo)
+
+    # Qualified form: "owner/repo#number"
+    if ($IssueArg -match '^([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+)#(\d+)$') {
+        $repo   = $Matches[1]
+        $number = [int]$Matches[2]
+        if ($ExplicitRepo -and $ExplicitRepo -ne $repo) {
+            throw "-Issue qualifies '$repo' but -Repo says '$ExplicitRepo': use one, not both."
+        }
+        return [pscustomobject]@{ Repo = $repo; Number = $number; Qualified = $true }
+    }
+
+    # Bare number form
+    if ($IssueArg -match '^\d+$') {
+        $number = [int]$IssueArg
+        $r      = "$ExplicitRepo".Trim()
+        return [pscustomobject]@{ Repo = $r; Number = $number; Qualified = ($r -ne '') }
+    }
+
+    throw "-Issue '$IssueArg' is not a valid issue reference. Use a bare number (42) or 'owner/repo#42'."
+}
+
+# Find board items matching an issue ref. Returns ALL candidates.
+# Qualified ref -> filter by repo+number (unambiguous).
+# Bare ref      -> filter by number only; may return >1 if repos collide — caller must refuse.
+# Pure (#506).
+function Find-TriageItems {
+    param(
+        [Parameter(Mandatory)][object]  $Ref,
+        [Parameter(Mandatory)][object[]]$Items
+    )
+    if ($Ref.Qualified) {
+        return @($Items | Where-Object {
+            [int]$_.content.number -eq $Ref.Number -and
+            "$($_.content.repository)" -eq $Ref.Repo
+        })
+    }
+    return @($Items | Where-Object { [int]$_.content.number -eq $Ref.Number })
+}
+
+# Format an item's canonical reference including its repo for display.
+# Without a repo (e.g. DraftIssues) falls back to bare #number. Pure (#506).
+function Format-ItemRef {
+    param([Parameter(Mandatory)][object]$Item)
+    $repo = "$($Item.content.repository)".Trim()
+    $num  = [int]$Item.content.number
+    if ($repo) { return "$repo#$num" }
+    return "#$num"
+}
+
 # Dot-source guard: tests set $env:ABIOS_TRIAGE_DOTSOURCE to load the pure helpers only.
 if ($env:ABIOS_TRIAGE_DOTSOURCE) { return }
 
@@ -162,7 +227,7 @@ function Get-ItemTriageValues($item) {
 }
 
 # ── Mode 1: batch view of the pending items and their triage gaps ─────────────
-if ($Issue -le 0) {
+if (-not $Issue.Trim()) {
     $pendingStatuses = @('Backlog', 'In Progress', 'Todo', 'To Do')   # legacy names included
     $pend = @($items | Where-Object { $pendingStatuses -contains "$($_.status)" -and $_.content.number })
     Write-Host "=== Triage: pendientes del board #$Number de $Owner ===" -ForegroundColor Cyan
@@ -177,27 +242,53 @@ if ($Issue -le 0) {
     if ($itemTrunc) { Write-Host "  $itemTrunc" -ForegroundColor Yellow }
     Write-Host ("  {0}{1} item(s) pendiente(s). Faltantes marcados con []." -f $pend.Count, $(if ($itemTrunc) { '+' } else { '' })) -ForegroundColor DarkGray
     Write-Host ""
-    foreach ($it in ($pend | Sort-Object { [int]$_.content.number })) {
+    # Sort by repo then number so multi-repo boards group items by origin repository (#506).
+    foreach ($it in ($pend | Sort-Object { "$($_.content.repository)-{0:D10}" -f [int]$_.content.number })) {
         $v    = Get-ItemTriageValues $it
         $gaps = Get-TriageGaps $v
         $cell = { param($n) if ("$($v[$n])".Trim()) { "$n=$($v[$n])" } else { "[$n]" } }
         $prio = if ("$($v['Priority'])".Trim()) { "Priority=$($v['Priority'])" } else { "[Priority?]" }
-        Write-Host ("  #{0,-4} {1}" -f $it.content.number, $it.content.title)
+        # Always include repo so cross-repo items are visible and number collisions obvious (#506).
+        $ref  = Format-ItemRef $it
+        Write-Host ("  {0,-30} {1}" -f $ref, $it.content.title)
         Write-Host ("        {0}  {1}  {2}  {3}" -f (& $cell 'Type'), (& $cell 'Area'), (& $cell 'Estimate'), $prio) -ForegroundColor $(if ($gaps.Count) { 'DarkYellow' } else { 'DarkGreen' })
     }
     Write-Host ""
     Write-Host "  Evidence (Type/Area/Estimate): el agente los infiere del contenido y los escribe:" -ForegroundColor DarkGray
-    Write-Host "    Board-Triage.ps1 -Number $Number -Owner $Owner -Issue <n> -Type <t> -Area <a> -Estimate <n>" -ForegroundColor DarkGray
+    Write-Host "    Board-Triage.ps1 -Number $Number -Owner $Owner -Issue 'owner/repo#<n>' -Type <t> -Area <a> -Estimate <n>" -ForegroundColor DarkGray
+    Write-Host "    Board-Triage.ps1 -Number $Number -Owner $Owner -Issue <n> -Repo owner/repo -Type <t> ...  (alternativa)" -ForegroundColor DarkGray
+    Write-Host "    (En boards de un solo repo, -Issue <n> bare funciona si no hay colision de numero)" -ForegroundColor DarkGray
     Write-Host "  Priority: el agente PROPONE (con razon) y el usuario confirma — nunca en silencio:" -ForegroundColor DarkGray
-    Write-Host "    Board-Triage.ps1 -Number $Number -Owner $Owner -Issue <n> -Priority P2 -Rationale '...'  [-ConfirmPriority]" -ForegroundColor DarkGray
+    Write-Host "    Board-Triage.ps1 -Number $Number -Owner $Owner -Issue 'owner/repo#<n>' -Priority P2 -Rationale '...'  [-ConfirmPriority]" -ForegroundColor DarkGray
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
 }
 
 # ── Mode 2/3: one issue — write evidence fields, propose/confirm Priority ──────
-$item = $items | Where-Object { [int]$_.content.number -eq $Issue } | Select-Object -First 1
-if (-not $item) { throw "El issue #$Issue no esta en el board #$Number (agregalo con /board add, o /board fill)." }
-Write-Host ("=== Triage #{0}: {1} ===" -f $Issue, $item.content.title) -ForegroundColor Cyan
+
+# Resolve the -Issue string (bare or qualified) and find the matching board item(s) (#506).
+$issueRef    = Resolve-IssueRef -IssueArg $Issue -ExplicitRepo $Repo
+$itemMatches = Find-TriageItems -Ref $issueRef -Items $items
+
+if (-not $itemMatches) {
+    $refStr = if ($issueRef.Repo) { "$($issueRef.Repo)#$($issueRef.Number)" } else { "#$($issueRef.Number)" }
+    throw "El issue $refStr no esta en el board #$Number (agregalo con /board add, o /board fill)."
+}
+
+if ($itemMatches.Count -gt 1) {
+    # Number collision across repos — refuse and list the ambiguous candidates so the operator
+    # can qualify the target with 'owner/repo#n' or -Repo (#506 symptom 2).
+    $candidateList = ($itemMatches | ForEach-Object {
+        "    $(Format-ItemRef $_): $($_.content.title)"
+    }) -join "`n"
+    throw (
+        "Numero ambiguo: #{0} existe en {1} repos del board. Califica el target con 'owner/repo#{0}' o -Repo:`n{2}" -f
+        $issueRef.Number, $itemMatches.Count, $candidateList
+    )
+}
+
+$item = $itemMatches[0]
+Write-Host ("=== Triage {0}: {1} ===" -f (Format-ItemRef $item), $item.content.title) -ForegroundColor Cyan
 
 # Set one field on this item, picking the write flag from the field's type. Fails loud.
 function Set-ItemField([string]$name, [string]$value) {
@@ -214,7 +305,7 @@ function Set-ItemField([string]$name, [string]$value) {
     } else {
         $editArgs += @('--text', $value)
     }
-    $null = Invoke-Gh -GhArgs $editArgs -What "escribir $name en #$Issue" -Retries 3
+    $null = Invoke-Gh -GhArgs $editArgs -What "escribir $name en $(Format-ItemRef $item)" -Retries 3
     Write-Host ("  OK  {0} -> {1}" -f $name, $value) -ForegroundColor Green
     return $true
 }
@@ -230,7 +321,7 @@ if ($Estimate) { $wroteEvidence = (Set-ItemField 'Estimate' $Estimate) -or $wrot
 if ($Priority) {
     Write-Host ""
     Write-Host "  Propuesta de Priority (juicio de negocio - requiere confirmacion):" -ForegroundColor Yellow
-    Write-Host (Format-PriorityProposal -IssueNum $Issue -Priority $Priority -Rationale $Rationale)
+    Write-Host (Format-PriorityProposal -IssueNum $issueRef.Number -Priority $Priority -Rationale $Rationale)
     if ($ConfirmPriority) {
         $ok = Set-ItemField 'Priority' $Priority
         if ($ok -and -not $DryRun) { Write-Host "  OK  Priority confirmada y escrita." -ForegroundColor Green }

@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Board-Triage now works correctly on multi-repo boards — cross-repo items visible, number collisions refused** (#506).
+  Two silent defects on boards that hold issues from several repositories: (1) `-Pending` sorted and
+  displayed items by bare `#number` with no repo context, making cross-repo items indistinguishable
+  and colliding numbers invisible; (2) a bare `-Issue <n>` matched against the first item with that
+  number — which was always the linked repo's — so triage writes landed on the wrong issue with a
+  success message naming a completely different title. Three new pure functions fix this: `Resolve-IssueRef`
+  parses `-Issue` as a bare number OR a qualified `owner/repo#n`; `Find-TriageItems` matches by
+  repo+number when qualified, or returns ALL same-number candidates when bare; `Format-ItemRef`
+  renders the canonical `owner/repo#number` reference. The `-Pending` display now groups items by
+  repo and shows the full reference for every item. When a bare `-Issue <n>` would write to more
+  than one board item, the script refuses and lists the candidates — silent writes to the wrong issue
+  are structurally impossible. A new `-Repo` parameter lets callers qualify a bare number without
+  rewriting existing scripts that already pass plain integers. 11 new Pester tests cover
+  `Resolve-IssueRef` (bare, qualified, -Repo, conflict detection), `Find-TriageItems` (single-repo,
+  multi-repo, collision, not-found), and `Format-ItemRef` (with and without repo).
+
 ### Added
 - **A closing summary every flow can end with — four blocks, always the same four** (#492, epic #491).
   Reported first-hand by the product owner, a BI professional and not a programmer: every command
