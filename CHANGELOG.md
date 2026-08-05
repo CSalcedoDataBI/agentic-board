@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-08-04
+
+**Security patch: the fleet's merge brake, generalized.** Ships the #598 fix alone so it reaches
+installs immediately: no session launched by the fleet can merge its own PR unless the human
+explicitly opts in.
+
 ### Fixed
 - **Fleet sessions launched with `-Parallel -Launch` now stop at a reviewed PR by default** (#598).
   Previously, a session launched without an expert contract could merge its own PR with no review:
