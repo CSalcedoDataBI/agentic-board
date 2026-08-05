@@ -51,6 +51,32 @@ Describe 'Get-DomainFromPlan' {
         Get-DomainFromPlan -Text 'Refactor the logging helper for clarity' -Catalog $local | Should -Be 'swallow-everything'
         Get-DomainFromPlan -Text 'Refactor the logging helper for clarity' -Catalog $script:Factory | Should -Be 'generic'
     }
+
+    # Score-based matching — the four sentences from issue #474
+    It 'does not hand a VS Code plan with no PBI keywords to powerbi-report' {
+        # No PBI keywords — extension wins on extension/vs code alone
+        Get-DomainFromPlan -Text 'fix the bridge round-trip between the webview and the VS Code extension host' -Catalog $script:Factory |
+            Should -Be 'extension'
+    }
+    It 'does not hand a VS Code extension plan to powerbi-report because of the word visual' {
+        # powerbi-report matches only "visual"; extension matches "extension" + "vs code" — score wins
+        Get-DomainFromPlan -Text 'fix the bridge round-trip in the VS Code extension webview that renders a visual' -Catalog $script:Factory |
+            Should -Be 'extension'
+    }
+    It 'does not hand a vscode plugin CLI plan to powerbi-report because of the word dashboard+chart' {
+        # powerbi-report matches dashboard+chart; extension matches vscode+extension+plugin+cli — score wins
+        Get-DomainFromPlan -Text 'the dashboard chart in our vscode extension plugin CLI is broken' -Catalog $script:Factory |
+            Should -Be 'extension'
+    }
+    It 'classifies a vscode plugin CLI debug plan as extension' {
+        Get-DomainFromPlan -Text 'debug a vscode plugin CLI command that freezes the thread' -Catalog $script:Factory |
+            Should -Be 'extension'
+    }
+    It 'still resolves a genuine Power BI Deneb plan to powerbi-report (regression guard)' {
+        # powerbi-report matches deneb+visual+dashboard (score >> 0); extension matches nothing
+        Get-DomainFromPlan -Text 'build a Deneb visual for the sales dashboard' -Catalog $script:Factory |
+            Should -Be 'powerbi-report'
+    }
 }
 
 Describe 'Get-HookedSkills' {
@@ -83,6 +109,16 @@ Describe 'Get-HookedSkills' {
         $inv = @('agentic-board:skills-audit','agentic-board:skills-audit','skill-creator','skill-creator')
         $h = Get-HookedSkills -Domain 'extension' -Inventory $inv
         @($h).Count | Should -Be (@($h | Select-Object -Unique).Count)
+    }
+    It 'does not hook example-skill or skill-development via the bare skill pattern (suffix/infix match prevented)' {
+        # marketplaces:example-skill (leaf: example-skill) must not match the "skill" pattern because
+        # "skill" appears as a suffix, not a prefix. Same for skill-development in the middle.
+        $inv = @('marketplaces:example-skill','marketplaces:skill-development','agentic-board:skills-audit')
+        $h = Get-HookedSkills -Domain 'extension' -Inventory $inv -Catalog $script:Factory
+        $h | Should -Not -Contain 'marketplaces:example-skill'
+        $h | Should -Not -Contain 'marketplaces:skill-development'
+        # But skills-audit must still be hooked: its leaf starts with "skill"
+        $h | Should -Contain 'agentic-board:skills-audit'
     }
 }
 
