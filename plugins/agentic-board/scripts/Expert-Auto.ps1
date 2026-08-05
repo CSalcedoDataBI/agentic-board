@@ -234,6 +234,21 @@ Build test-first. After each verify phase, record the structured [abios-evidence
 tested, the command, the result) ONCE in evidence/<issue>.md, and put the link stub (marker +
 summary + link) in the PR body and an issue comment - one source of truth, two pointers (#570).
 
+## Claims — external facts in deliverables need a gate (#479)
+A document is a deliverable, and a deliverable needs a gate. If this run produces a knowledge
+document, a reference guide, or any deliverable asserting external facts (a package exists, a CLI
+flag is supported, an API exposes specific tools), those claims must appear in the evidence block:
+
+  verified   — the run looked it up; record the command and what it found (correct=true/false)
+  unverified — explicitly acknowledged as unchecked; the gap is visible, not hidden
+  not-applicable — the deliverable makes no external claims; record this explicitly too
+
+Use ``Expert-ClaimsGate.ps1`` (``Format-ClaimsSection`` / ``Test-ClaimsGate``) to format and gate
+the claims. A verified claim that does not resolve (``correct=false``) fails the gate before the
+DoD goes green. Unverified claims are visible in the evidence block but do not block the DoD — the
+run explicitly acknowledged the gap. Runs producing no deliverables with external claims record
+``not-applicable`` and incur no added friction — the common case must not get slower or noisier.
+
 $complianceSection
 $closingSection
 "@

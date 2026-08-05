@@ -68,6 +68,21 @@
   four acceptance sentences, the regression guard, suffix prevention, and runner-up output.
 
 ### Added
+- **Claims verification gate for expert deliverables — the evidence contract now covers external facts, not just tests** (#479).
+  An autonomous `/expert auto` run could produce fully green DoD evidence while every factual claim
+  in its deliverable was invented: five fabrications (package name, auth mechanism, CLI flag, two
+  API tools) reached `main` on `csalcedodatabi.com` because the evidence block recorded that tests
+  passed, not whether the claimed facts existed. `Expert-ClaimsGate.ps1` closes that gap: when a
+  deliverable asserts external facts, each claim is registered as *verified* (looked up; records how
+  and what was found), *unverified* (explicitly acknowledged as unchecked — visible, not hidden), or
+  *not-applicable* (the deliverable makes no external claims). `Test-ClaimsGate` fails the gate when
+  a verified claim does not resolve (`correct=$false`); `Format-ClaimsSection` renders three distinct
+  status labels (PASS / FAIL / UNVERIFIED) that never collapse. The expert brief now includes the
+  claims requirement: a document is a deliverable, and a deliverable needs a gate. The common case
+  (a code-only run, no external-claim deliverable) incurs no added friction — the gate is
+  not-applicable and costs nothing. 22 Pester tests cover all five issue tests including a
+  regression fixture from the five fabrications above: each one is caught.
+
 - **A closing summary every flow can end with — four blocks, always the same four** (#492, epic #491).
   Reported first-hand by the product owner, a BI professional and not a programmer: every command
   ends however its author felt like ending it, so there is no fixed place to look for the only four
