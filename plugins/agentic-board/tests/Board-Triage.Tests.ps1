@@ -75,3 +75,82 @@ Describe 'Get-TriageBoardPlan — never default to the tool board from a foreign
         $p.Reason            | Should -Be 'no-origin'
     }
 }
+
+Describe 'Resolve-IssueRef — parse -Issue argument into repo+number (#506)' {
+    It 'bare number returns unqualified ref with empty repo' {
+        $r = Resolve-IssueRef -IssueArg '42' -ExplicitRepo ''
+        $r.Number    | Should -Be 42
+        $r.Repo      | Should -Be ''
+        $r.Qualified | Should -BeFalse
+    }
+    It 'qualified form owner/repo#n returns exact repo+number' {
+        $r = Resolve-IssueRef -IssueArg 'owner/repoA#42' -ExplicitRepo ''
+        $r.Number    | Should -Be 42
+        $r.Repo      | Should -Be 'owner/repoA'
+        $r.Qualified | Should -BeTrue
+    }
+    It 'bare number with -ExplicitRepo returns qualified ref' {
+        $r = Resolve-IssueRef -IssueArg '42' -ExplicitRepo 'owner/repoA'
+        $r.Number    | Should -Be 42
+        $r.Repo      | Should -Be 'owner/repoA'
+        $r.Qualified | Should -BeTrue
+    }
+    It 'qualified form matching -ExplicitRepo is accepted (same repo)' {
+        $r = Resolve-IssueRef -IssueArg 'owner/repoA#42' -ExplicitRepo 'owner/repoA'
+        $r.Repo | Should -Be 'owner/repoA'
+    }
+    It 'qualified form conflicting with -ExplicitRepo throws' {
+        { Resolve-IssueRef -IssueArg 'owner/repoA#42' -ExplicitRepo 'owner/repoB' } | Should -Throw
+    }
+    It 'invalid input throws' {
+        { Resolve-IssueRef -IssueArg 'not-valid' -ExplicitRepo '' } | Should -Throw
+    }
+}
+
+Describe 'Find-TriageItems — locate board items by issue ref (#506)' {
+    BeforeAll {
+        $script:ItemA5  = [pscustomobject]@{ id = 'PVTI_aa'; content = [pscustomobject]@{ number = 5; repository = 'owner/repoA'; title = 'Bug in A' }; status = 'Backlog' }
+        $script:ItemB5  = [pscustomobject]@{ id = 'PVTI_bb'; content = [pscustomobject]@{ number = 5; repository = 'owner/repoB'; title = 'Bug in B' }; status = 'Backlog' }
+        $script:ItemA10 = [pscustomobject]@{ id = 'PVTI_cc'; content = [pscustomobject]@{ number = 10; repository = 'owner/repoA'; title = 'Feature in A' }; status = 'In Progress' }
+        $script:Items   = @($script:ItemA5, $script:ItemB5, $script:ItemA10)
+    }
+    It 'qualified ref returns only the matching repo item' {
+        $ref  = [pscustomobject]@{ Repo = 'owner/repoA'; Number = 5; Qualified = $true }
+        $hits = Find-TriageItems -Ref $ref -Items $script:Items
+        $hits.Count        | Should -Be 1
+        $hits[0].id        | Should -Be 'PVTI_aa'
+    }
+    It 'qualified ref for the other repo returns that repo item only' {
+        $ref  = [pscustomobject]@{ Repo = 'owner/repoB'; Number = 5; Qualified = $true }
+        $hits = Find-TriageItems -Ref $ref -Items $script:Items
+        $hits.Count        | Should -Be 1
+        $hits[0].id        | Should -Be 'PVTI_bb'
+    }
+    It 'bare ref matching one item returns that single item' {
+        $ref  = [pscustomobject]@{ Repo = ''; Number = 10; Qualified = $false }
+        $hits = Find-TriageItems -Ref $ref -Items $script:Items
+        $hits.Count        | Should -Be 1
+        $hits[0].id        | Should -Be 'PVTI_cc'
+    }
+    It 'bare ref with number collision returns both candidates (caller must refuse)' {
+        $ref  = [pscustomobject]@{ Repo = ''; Number = 5; Qualified = $false }
+        $hits = Find-TriageItems -Ref $ref -Items $script:Items
+        $hits.Count | Should -Be 2
+    }
+    It 'returns empty array when no item matches' {
+        $ref  = [pscustomobject]@{ Repo = 'owner/repoA'; Number = 99; Qualified = $true }
+        $hits = Find-TriageItems -Ref $ref -Items $script:Items
+        $hits.Count | Should -Be 0
+    }
+}
+
+Describe 'Format-ItemRef — display canonical owner/repo#number (#506)' {
+    It 'includes repo when content.repository is present' {
+        $item = [pscustomobject]@{ content = [pscustomobject]@{ repository = 'owner/repoA'; number = 42 } }
+        Format-ItemRef -Item $item | Should -Be 'owner/repoA#42'
+    }
+    It 'falls back to bare #number when content.repository is empty' {
+        $item = [pscustomobject]@{ content = [pscustomobject]@{ repository = ''; number = 7 } }
+        Format-ItemRef -Item $item | Should -Be '#7'
+    }
+}
