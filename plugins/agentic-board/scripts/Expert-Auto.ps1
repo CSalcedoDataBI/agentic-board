@@ -375,12 +375,16 @@ if ($Issue -le 0 -and $Epic -le 0) { throw "Expert-Auto: -Issue <n> or -Epic <n>
 if ($Issue -gt 0 -and $Epic -gt 0) { throw "Expert-Auto: -Issue and -Epic are mutually exclusive - pick one." }
 
 # ── Token scope guard (#440 footgun 1) ──────────────────────────────────────────
+. (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 # Prefer the ambient gh login when it has 'project' scope; only fall back to the
 # registry PAT when the ambient login is unscoped or unauthenticated. Setting
 # GH_TOKEN overrides gh's own session — if the registry PAT has fewer scopes, every
 # board operation inside the launched run fails with INSUFFICIENT_SCOPES.
 if (-not $env:GH_TOKEN) {
-    $ghStatus         = gh auth status 2>&1 | Out-String
+    # Routed through Invoke-Gh for the raw-gh ratchet (#571); an unauthenticated login makes
+    # it THROW, which this guard tolerates on purpose - the catch text simply carries no
+    # 'project' scope, so the check falls through to the registry PAT exactly as before.
+    $ghStatus         = try { (Invoke-Gh -GhArgs @('auth', 'status') -What 'leer los scopes del login gh ambiente') | Out-String } catch { "$_" }
     $ambientOk        = Test-GhScope -Scope 'project' -StatusText $ghStatus
     $registryToken    = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
     if ($ambientOk) {
