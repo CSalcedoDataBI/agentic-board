@@ -34,12 +34,22 @@ Run `scripts/Show-ToolsCatalog.ps1 -Id <id>` — it surfaces ONE tool's name, so
 method and note so the user reads the reference before deciding. `<id>` matches the row id or the
 tool name (case-insensitive). Never installs anything.
 
+When the tool has a `repo` field pointing to a public GitHub repository, **use the DeepWiki
+MCP as the first probe** — before any clone or web fetch:
+1. Call `ask_question` with the repo URL and the question `"What does this repository do?"` to
+   get a plain-language description directly from the generated wiki.
+2. If DeepWiki MCP is not configured or the repo is private, skip this probe and show only the
+   catalog entry.
+This gives the user an authoritative, wiki-quality description in one call, with no cloning.
+
 ### install <id>  (confirm each; never duplicate)
 Run `scripts/Install-ToolFromCatalog.ps1 -Id <id>` — it resolves the item and installs by KIND:
 - `skill-clone` → delegates to `Install-SkillFromRepo.ps1` (clean `--depth 1` clone, copy only the
   skill folder, **preserve LICENSE**). Skipped with a note when it already shows as installed.
 - `plugin` (e.g. `microsoft/skills-for-fabric`) → all-or-nothing: it SURFACES the install command for
   the user to run, never cherry-picking a single skill out of it.
+- `mcp` (e.g. `deepwiki-mcp`) → it SURFACES the `claude mcp add` command for the user to run.
+  Detection uses `claude mcp list` so already-installed servers are skipped.
 - a bare `reference` (not installable) → reports the URL to open instead.
 Confirm before running; `-DryRun` previews. `<id>` matches the row id or the tool name.
 

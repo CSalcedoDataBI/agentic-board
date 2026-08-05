@@ -26,8 +26,1025 @@
      warning tells the human their local view is stale (the worktree is still cut from
      `origin/<default>` — the base is safe; only the local clone is behind).
 
-  24 new test cases (28 total in `Expert-Auto.Tests.ps1`, green) covering the three new pure
-  functions and the updated `Format-AutoBrief` signature.
+  24 new test cases covering the three new pure functions and the updated `Format-AutoBrief`
+  signature.
+
+### Added
+- **A closing summary every flow can end with — four blocks, always the same four** (#492, epic #491).
+  Reported first-hand by the product owner, a BI professional and not a programmer: every command
+  ends however its author felt like ending it, so there is no fixed place to look for the only four
+  things a user wants to know — *what I found · what I did · what is left · what I need from you*.
+  `Board-Summary.ps1` renders exactly those, in that order, whatever order the caller passes them
+  in. Two rules make it readable rather than merely present: an **empty block says so out loud**
+  (a blank "what I need from you" is indistinguishable from a summary that was cut off, so it
+  renders *"Nada — esto quedo listo."*), and the **order never changes**, because the point of a
+  fixed shape is that the eye stops reading and starts scanning. Two renderings from one source:
+  plain text for the terminal, and markdown carrying an `[abios-summary]` marker for PR bodies and
+  issue comments. 14 tests pin the contract; threading it through the command surfaces is #493.
+
+## [0.34.1] - 2026-08-04
+
+**Security patch: the fleet's merge brake, generalized.** Ships the #598 fix alone so it reaches
+installs immediately: no session launched by the fleet can merge its own PR unless the human
+explicitly opts in.
+
+### Fixed
+- **Fleet sessions launched with `-Parallel -Launch` now stop at a reviewed PR by default** (#598).
+  Previously, a session launched without an expert contract could merge its own PR with no review:
+  it was running with `--permission-mode bypassPermissions`, was briefed to call `Board-Merge.ps1`,
+  and nothing in the tool layer refused it. On 2026-08-03, two such sessions merged their own PRs
+  with `reviews: []` and no `[abios-review]` record; post-merge review found that one PR had not
+  built the central item of its issue's DoD. Fix: all `-Launch` and `-Fleet` sessions now arm the
+  brake by default — `Resolve-LaunchBrake` returns `$true` (stop at PR) unless `-AllowMerge` is
+  explicitly passed or the caller explicitly passes `-StopAtPR:$false` (an expert contract that
+  allows merging). This aligns the plain fleet path with the expert path, where the brake was
+  already mechanical. The `-Relaunch` path receives the same default. Three new Pester tests
+  cover: default brakes, `-AllowMerge` opt-out, explicit `-StopAtPR:$false` honored.
+
+## [0.34.0] - 2026-08-04
+
+**The pending queue, cleared by the tool's own expert mode.** All seven triaged issues on the
+board (#413–#419) were worked in one day by autonomous `/board expert auto` sessions — one
+isolated worktree and one persona-briefed agent per issue, launched in dependency-safe waves,
+each finishing at a reviewed PR with recorded evidence and the merge held for the supervising
+session. The batch fixes the fleet's two operational leaks (teardown handles, watch re-polling),
+hardens `/board plan` with a prior-art gate, keeps large prose off the command line, and pivots
+documentation from generated wiki pages to DeepWiki routing plus its MCP integration.
+
+### Fixed
+- **`-Sessions -Watch` no longer re-polls every registered session on every 30-second cycle** (#414).
+  Three related defects: (1) sessions already reported `LISTO` in a prior cycle were re-polled on
+  every subsequent cycle — 31 zombie entries from 2026-07-13 drove ~33 API calls per cycle,
+  exhausting the 5 000/hr GraphQL quota within four watch runs. Fix: a `$doneSet` tracks issues
+  already known to be done; at the start of each cycle `ReadSessions` output is filtered through
+  it, so a done session is never polled again. (2) zombie sessions (dead PID + `workPath` gone from
+  disk) were never pruned and kept accumulating in `sessions.json`. Fix: injectable `$IsStale`
+  scriptblock detects these; when stale, the session is removed from the registry via
+  `Remove-SessionRegistryEntry -Outcome stale-prune` — zero API calls, no `GetStatus` probe at all.
+  (3) when `gh` failed due to a rate-limit error, `Get-SessionLiveStatus` silently fell back to
+  process-liveness and printed `LISTO: proceso terminado` — indistinguishable in the output from a
+  verified `LISTO: PR merged`. Fix: `Get-SessionLiveStatus` captures stderr with `2>&1`, checks
+  `$LASTEXITCODE`, and returns `{ done=$false; reason='UNKNOWN (rate limit)'; rateLimited=$true }`
+  on any rate-limit hit — never degrading to a PID signal that looks verified. The watch loop
+  prints rate-limited sessions in `DarkYellow` so the degraded state is visible. Four new Pester
+  tests cover: no re-poll after LISTO, stale-prune skips GetStatus, stale-prune writes
+  `stale-prune` outcome, rate-limited session never reported done.
+- **Large inline text payloads no longer abort Board-Plan / Board-Handoff** (#419). The tool-layer
+  path guard pattern-matches the full command string: prose containing slash-commands (`/board`,
+  `/scan`, `/knowledge`, `/expert`) passed as inline parameters was misread as a filesystem path
+  and caused the whole command to abort before the script ran — accounting for 65 field failures
+  across 945 sessions (Board-Plan.ps1 at 30.3% failure rate, Board-Handoff.ps1 at 22%). The fix
+  is to keep large payloads off the command line entirely. `Board-Plan.ps1` now accepts
+  `-DescriptionFile`, `-ResearchFile`, and `-PriorArtFile` (each a path to a plain-text file);
+  `Board-Handoff.ps1` now accepts `-BodyFile` (path to a JSON file with `NextStep`, `Done`,
+  `OpenThreads`, `Traps`, `KeyFiles` keys). Inline parameters remain supported unchanged for short
+  text. The new `Resolve-TextParam` and `Read-HandoffBodyFile` pure helpers are covered by 14 new
+  Pester tests (file reads content, slashes treated as data, destructive text never executed,
+  missing-file and directory-path throw, file wins over inline — a field present in the JSON
+  overrides even when explicitly empty, while an absent field falls back to the inline default).
+- **`-AutoClean` teardown now kills the Windows Terminal tab shell and deletes the worktree folder** (#413). `Board-Work.ps1 -Sessions -Watch -AutoClean` previously left the `pwsh -NoExit` tab shell alive (its handle blocked `git worktree remove` from deleting the directory) and printed a manual-cleanup note. The fix: before running `git worktree remove`, teardown finds the tab's shell by its launch-script command line (`launch-<n>.ps1` — exact match on the issue number, so sibling sessions are never touched), kills it via `Stop-ProcessTree`, waits 500 ms for the OS to release the handle, then runs `Remove-Item` after `git` de-registers the worktree. When no shell is found (session already closed, or non-`wt` launch), teardown falls back to the same attempt. Two helper additions: `Find-WtTabShellCore` (pure, testable) + `Find-WtTabShell` (thin CIM wrapper, mockable) in `BoardWork.Processes.ps1`; 6 new Pester tests including the "do not kill a different issue's shell" guard.
+- **`Publish-DocsWiki.ps1` no longer generates `Docs-Command-*` wiki pages** (#418).
+  `commands/*.md` files are agent instruction files (system prompts addressed to an AI),
+  not documentation. Publishing them verbatim produced a 31 KB `Docs-Command-Board` page
+  full of internal recipes, script paths and conditional branches — instructions readable
+  only by the agent that would execute them. The `_Sidebar` no longer links to command
+  pages. `Docs-Home` is now purely the README with HTML stripped. Stale `Docs-Command-*`
+  pages left in the wiki are automatically removed on the next publish (the clone-write-
+  `git add -A` cycle stages their deletion). The CI freshness step is annotated to explain
+  why "it generates" was never evidence that "it reads" — a check that cannot ask that
+  question will report green on garbage forever. For code and architecture reference, route
+  to DeepWiki instead of generating. 15 Pester tests updated; the `Docs-Command-<X>`
+  describe block (7 tests) was removed; 2 new tests (`does NOT generate any Docs-Command-*
+  pages`, `does NOT link to any Docs-Command-* page`) enforce the invariant.
+
+### Added
+- **`/docs` is now a router, not a generator** (#417). `commands/docs.md` documents the split
+  between what is generated and what is routed: `/docs wiki` generates pages from repo content
+  (README + knowledge registry) and pushes them to the GitHub Wiki; `/docs deepwiki` resolves the
+  repo, checks visibility, and reports (or navigates to) the AI-authored wiki on DeepWiki without
+  generating anything. `commands/*.md` agent instruction files are explicitly excluded from
+  generation — publishing them verbatim produces AI system prompts dressed as documentation.
+  Three new Pester tests enforce the contract: `commands/docs.md` must not reference
+  `Docs-Command-*` pages (regression guard for #418), must document both subcommands, and must
+  declare the public-repos-only limit for DeepWiki at the point of use.
+- **DeepWiki MCP integration** (#416). Three connected pieces: (1) `mcp.json` toolkit catalog
+  entry registers the DeepWiki MCP server (`cognitionai/deepwiki`, three tools:
+  `read_wiki_structure` / `read_wiki_contents` / `ask_question`) so `/tools` can install it via
+  `claude mcp add` like any other referenced tool. (2) `/docs deepwiki` verb — runs
+  `Get-DeepWikiStatus.ps1` to resolve the current repo from `origin`, check GitHub visibility,
+  probe `deepwiki.com`, and report `indexed`, `not-indexed`, `private`, or `unknown`. The
+  public-repos-only limit (private repos require paid Devin) is documented at the point of use,
+  never buried. (3) `tools-catalog` skill's `research <id>` action now calls `ask_question` as
+  the first probe when the MCP is configured, before any clone. Machinery: new `mcp` toolkit
+  kind (next to `skill-clone` and `plugin`), detected via `claude mcp list` through new
+  `Get-InstalledMcpServers.ps1`; `Get-ToolsCatalog` and `Install-ToolFromCatalog` extended to
+  handle the new kind; 17 new Pester tests across Get-DeepWikiStatus, Get-ToolsCatalog (mcp
+  kind), and Install-ToolFromCatalog (mcp kind).
+- **`/board plan` prior-art gate** (#415). `Board-Plan.ps1` now refuses to create an epic
+  unless the caller provides either `-PriorArt "<block>"` (queries run, candidates found with
+  stars/license/adoption, and the explicit build-vs-reference-vs-extend decision) or `-NoPriorArt`
+  (for genuinely novel work). In both cases the outcome lands in a `## Prior-art gate` section of
+  the epic body, making the decision auditable later. A silent skip — the failure mode that cost
+  five PRs on the wiki epic (#401) — is no longer possible: the script throws before creating
+  anything. Same enforcement shape as the `-Rationale` requirement in `/board triage`. Verified by
+  9 new Pester tests covering both paths (gate and skip).
+
+## [0.33.0] - 2026-08-04
+
+**The performance & autonomy overhaul — the tool stops feeling slow and stalled.** A cold
+engineering review (three parallel deep-dives over the work loop, the plan→expert flow and the
+architecture) found the stalls were structural: an unbounded CI wait, a 6-minute reviewer poll
+paid on every PR, a dead-code run budget, no automatic epic progression, zero visible signal
+when a run stopped, ~50–140 uncached GitHub calls per issue, a ~1.3 s interpreter spawn on every
+tool call, ~72 KB of always-loaded instructions, and a telemetry subsystem blind to time. Epic
+#561 fixed all fifteen findings: #562–#576, PRs #577–#591, every behavioral change with tests
+verified by breaking the code, and every PR through the review gate (Codex external review in
+rounds while quota lasted — 40+ findings fixed across the batch — then the sanctioned
+self-review fallback, stated on each record).
+
+### Added
+- **The product agenda policy is written down** (#576, closing epic #561's list). `CONTRIBUTING.md`
+  now states the rebalance rule the architecture review argued for: releases should carry
+  user-facing value (the last measured week ran 8:1 self-directed); before building a new
+  self-control mechanism, ask what *measurement* would make it unnecessary; and field evidence
+  (`/board telemetry`, now with durations) outranks introspection when picking the next piece
+  of work. A policy, not a gate — deliberately unenforced.
+
+### Changed
+- **`Board-Work.ps1` sheds its inline job scheduler and process killer** (#575, part of epic
+  #561; first slice of the monolith split). The 3,176-line dispatcher — 18.7% of all script
+  code — contained a machine-capacity governor and a process-tree supervisor a board tool has
+  no business holding inline. Both clusters moved **verbatim** into part files
+  (`BoardWork.Capacity.ps1`: capacity snapshot, dispatch plan, fleet slot pacing, dispatch
+  governor; `BoardWork.Processes.ps1`: pid→parent map, descendant walk, guarded tree kill,
+  orphan detection and reaping), dot-sourced before the test guard so every caller and test
+  sees the exact same surface. Behavior-preserving by construction and by evidence: 371 tests
+  across the Board-Work, Board-Doctor and lint suites stay green with zero changes to them.
+  Further slices (session registry, worktree launch) can now follow the same pattern.
+
+### Added
+- **`.agentic-board/` finally has a garbage collector** (#574, part of epic #561). The state dir
+  had accumulated 48 files across the project's entire life — briefings and launch scripts for
+  issues #123→#532, signal markers, compaction snapshots — because nothing ever cleaned it.
+  `Clear-AbiosState.ps1` reaps only **regenerable per-run debris** (briefings, launch scripts,
+  expert briefs, per-issue logs, signal markers, snapshots) under three pinned rules: a live
+  session protects its files at any age, files younger than `-MaxAgeDays` (14) stay, and durable
+  records (sessions history, run-ledger marker, contract, denial log, fleet files) plus anything
+  *unrecognized* are never touched — unknown is somebody's state, not deletable. Plan-only by
+  default, `-Force` executes, every reap entry carries its reason. This is the GC half of the
+  "one run, one record" direction; the record half was seeded by #568's `sessions-history.jsonl`
+  archive (started/ended/outcome). Verified by 9 Pester tests.
+
+### Changed
+- **The always-loaded instruction payload shrank ~60%** (#573, part of epic #561). Every
+  `/board` invocation loaded ~72 KB of instructions (≈18k tokens, ~9% of a 200k window) before
+  reading a single line of the actual issue — `commands/board.md` described all 22 verbs in full
+  and `projects-admin/SKILL.md` duplicated the three biggest. The ten heavyweight verbs (work,
+  plan, fill, field, changelog, handoff, doctor, cerrar-ciclo, telemetry, triage) now live in
+  per-verb reference files loaded **on demand** when that verb runs; the command keeps the menu,
+  one-line routing and the safety rules, and the skill keeps identity/anchoring/conventions and
+  the routing table. board.md: 34.7→9.7 KB; SKILL.md: 31.6→12.7 KB. No content was deleted —
+  every recipe moved verbatim into its reference. Contract intact: command-surface suite green
+  and README regions unchanged (docs-freshness gate). This weight was causing the very
+  auto-compactions the run-ledger machinery exists to survive — paying the disease and the cure.
+- **The brake hook stops taxing every tool call in every session** (#572, part of epic #561).
+  The PreToolUse hook fires on every Bash/Edit/Write in *every* session and paid a full pwsh
+  interpreter spawn (**measured ~1.3 s** on the reference machine) just to discover that no
+  brake marker exists — the case for every session except a launched autonomous run. At 100
+  tool calls per session that was ~2 minutes of pure interpreter startup, paid by every user in
+  every repo, and the tool had no way to see it (#568's blindness, costing #572's tax).
+  `Brake-PreCheck.cmd` now answers the common case in **~0.25 s** (5× cheaper): no marker in
+  the working directory or three ancestors → exit 0 without ever starting pwsh. Fail direction
+  unchanged: an armed worktree always reaches the real PowerShell guard with its fail-closed
+  behavior intact, and stdin passes through untouched. Verified by 4 new tests, including an
+  end-to-end deny through the shim over real stdin and a no-pwsh timing bound.
+- **GitHub reads gain a cache, and the fail-closed wrapper gains a lint that stops the
+  bleeding** (#571, part of epic #561). Every gh invocation is a fresh process + TLS round trip
+  and nothing was cached — a clean work cycle made ~50–65 calls, many re-reading facts that had
+  not changed. `Invoke-GhCached` is a small cross-process **file cache** (in-memory caches die
+  with each script's pwsh process) for read-only queries with an explicit TTL; failures are
+  never cached, `-Force` busts, TTL 0 always fetches. The board's Status-schema read — the
+  *exact* anti-pattern quoted in the wrapper's own header, still live — now goes through it
+  (5-min TTL), and four more of the worst raw sites migrated to `Invoke-Gh` (issue blockers,
+  claims, linked PRs, commit search: a 401 no longer reads as "no blockers/no claim/no PRs").
+  A new **lint test freezes the per-file raw-gh baseline (59 sites)**: counts may only go down,
+  a new raw call names its file and fails, and stale allowances are themselves flagged.
+  Verified by 7 new Pester tests (cache semantics + lint).
+- **Evidence is written once, linked twice** (#570, part of epic #561). The same evidence block
+  used to be copied to three destinations (PR body, issue comment, `evidence/<issue>.md`) —
+  three copies of one content, drifting independently, and the "INCOMPLETE → record → re-run"
+  loop mostly existed to keep them in sync. Now `evidence/<issue>.md` is the **single source of
+  truth** and the PR body and issue comment carry a **link stub**
+  (`Format-EvidenceLinkStub`: marker + pass/fail summary + link to the file). The completion
+  check tightened accordingly: a surface satisfies its requirement with the marker **plus
+  substance** (the file reference or a full block — pre-#570 runs stay valid); a bare marker is
+  a stamp anyone can leave, and now reads as missing. Verified by 7 new Pester tests.
+
+### Added
+- **The definition of done scales to the diff** (#569, part of epic #561). The contract's six
+  gates all defaulted to `true` and the brief listed them flat, so a 10-line docs fix owed the
+  same verify pass as a model migration. `Get-ApplicableDodGates` derives the owed gates from
+  the changed paths — `bpa`/`tmdlBreaking` only when a semantic-model file changed,
+  `build`/`lint`/`tests` only when something executable changed, `ci` always — and the
+  work-class CLI prints which gates the current diff owes and which it does not. Fail direction:
+  an unreadable diff owes **every** enabled gate, the derivation can only *disable* gates the
+  contract enabled (never re-enable one it turned off), and an unrecognized custom gate is
+  always owed. The autonomous brief now points the run at this instead of the flat list.
+  Verified by 6 new Pester tests.
+- **The tool can finally measure its own time** (#568, part of epic #561). The telemetry
+  subsystem measured everything except time: the transcript parser *discarded* the timestamp
+  every line carries, the correlation window was "6 events" (4 seconds or 40 minutes,
+  unknowable), the ledger's columns were events and bytes, `started` had minute granularity, and
+  completed session rows were deleted — every run's wall-clock cost vanished at the moment it
+  finished. Now: events keep their ISO timestamp; episodes carry `ts` + `durationMs` (unknown
+  stays `null`, never a fabricated zero); per-session records and the field ledger gain
+  `durationMin`; `started` is stamped to the second (the supervisor reads both formats); and a
+  completed session row is **archived to `sessions-history.jsonl` with `ended` and its outcome**
+  (pr-merged / cleaned / close-loop) before removal. Verified by 8 new Pester tests.
+- **The visual work-class gate scopes to what the owner actually judges by looking** (#567, part
+  of epic #561). In a web app (a FabricApp) every change touches html/css/assets, so the
+  classifier marked the whole project "visual" and the classification stopped carrying
+  information — when the end-to-end gate reopens (#541), that would have routed 100% of web work
+  to the human. The policy gains **`workClass.codeExceptions`** — globs subtracted from
+  `visualPatterns`, declared per project in the contract (e.g. `src/components/**/*.css` for
+  utility styles nobody screenshots), never guessed: the default list is empty and the
+  fail-visual direction is unchanged out of the box. And the verdict now carries
+  **`visualGroups`** — visual paths grouped by top-level section — so the owner approves *"the
+  pages section"* once instead of 47 file rows. Verified by 6 new Pester tests.
+- **The epic walker: `/board expert auto -Epic <n>` dispatches sub-issues wave by wave** (#566,
+  part of epic #561). Nothing advanced an epic before — Expert-Auto took one `-Issue`, so a plan
+  with N sub-issues cost N human launches (Board-Plan even fetched the sub-issue list and threw
+  it away). `-Epic` reads the epic's native sub-issues, classifies them (done / in-flight /
+  blocked / **ready**) and launches one autonomous session per ready sub-issue with the
+  contract's brake and budget, each briefed with the epic's enriched plan plus its own issue
+  text. **Idempotent by design**: merge a wave's PRs and re-run the same command for the next
+  wave; done and in-flight sub-issues are never re-dispatched, and a sub-issue whose PR state
+  could not be read counts as in-flight — dispatching a possible duplicate session is the worse
+  error, so the unknown fails closed. Verified by 7 new Pester tests on the wave classifier.
+- **A stopped run now signals instead of sitting silent** (#565, part of epic #561). A braked,
+  out-of-budget, or stalled run was invisible from outside — the deny payload reached only the
+  model, the supervisor's verdict existed only on a terminal nobody was required to watch, and
+  the human learned about a stall by noticing the PR never appeared. Three surfaces fix that:
+  every hook denial appends to a local `denials.jsonl` **and posts one `[abios-signal]` issue
+  comment per (kind, issue)** — deduped by a marker file so a retrying agent cannot flood the
+  issue (the brake marker now records the repo to make posting possible); the fleet supervisor
+  gained **`-Post`**, publishing an `[abios-stall]` comment for each session past the threshold
+  with no PR; and the session watch **runs the supervisor automatically every 10 poll cycles**,
+  so stalls surface without a separate human command. All signaling is best-effort and can never
+  change a verdict. Verified by 14 new Pester tests across the guard, supervisor and watch.
+- **The expert run's time budget is now enforced, not advisory** (#564, part of epic #561).
+  `Get-BudgetVerdict` computed a handoff verdict that *nothing ever called* — the contract's
+  120-minute budget existed only as a sentence in the brief, so a runaway run had no wall-clock
+  limit at all. The budget now travels in the brake marker (`budgetMinutes` + `armedAt`) and the
+  PreToolUse hook enforces it: past the budget, work commands are refused with an instructive
+  message while the **wrap-up stays open** — `/board handoff -Save`, committing and pushing WIP,
+  closing the run ledger, and leaving a PR/issue comment. The brake always wins over the
+  exemption (a push to `main` over budget is still a refused merge), and the budget **fails
+  open** on a corrupt timestamp — it is a liveness limit, not a safety control, and must never
+  brick ordinary work. Iteration counts stay advisory: a hook that sees single tool calls cannot
+  count verify-loop iterations honestly. Verified by 24 new Pester tests (pure + hook end-to-end
+  over real stdin); mutation-checked (enforcement disconnected → 3 tests red → restored).
+
+### Fixed
+- **The review wait learns from silence, and any reviewer's answer counts** (#563, part of epic
+  #561). Two defects made every PR pay the full review timeout forever: the wait loop broke only
+  on a review whose *author* was Copilot — a human or external review landing mid-poll kept it
+  spinning — and the per-account cooldown (#367) armed only on an explicit "cannot review"
+  answer, so a Copilot that was simply *silent* taught the gate nothing. Now the wait's arrival
+  test is the **same evidence rule as the verdict** — any GitHub review *or recorded external
+  review* (`[abios-review]` comment) bound to the current head commit ends it (stale evidence of
+  earlier commits keeps waiting), the PR comments arrive in the same authoritative GraphQL read
+  as the reviews (one call fewer per poll), and silence past the timeout arms a
+  **1-day cooldown** (weaker evidence than an explicit refusal, which keeps its
+  `-CopilotCooldownDays` default of 7). Verified by 10 new Pester tests; mutation-checked
+  (author-only arrival and inverted silence check reintroduced → 5 tests red → restored).
+- **The review gate's CI wait now has a ceiling, and the CI and review waits run concurrently**
+  (#562, part of epic #561). `gh pr checks --watch` was the only unbounded wait in the codebase:
+  a queued or never-scheduled workflow hung the entire session indefinitely, with no signal. The
+  gate now polls a structured checks snapshot in the same loop as the review wait — worst case is
+  max(CI, review) instead of their sum — and the CI side expires at `-CiTimeoutMinutes`
+  (default 25) into an explicit **"checks still pending" BLOCK**, never a silent hang and never
+  a pass. An unreadable checks snapshot also blocks (fail closed) instead of being trusted from
+  display text. Verified by 12 new Pester tests; mutation-checked by reintroducing both defects
+  (cancel-counts-as-pass, sequential-OR exit) and watching 4 tests go red.
+
+## [0.32.0] - 2026-08-03
+
+**Expert mode carries its method.** Until now the launched session received a *capability list* —
+what agentic-board can do — while the seven-phase loop and the research-before-deciding protocol
+lived in a reference document it was never handed. This release folds the method into the brief
+itself, makes the protocol the response to an error rather than a footnote, lets a run escalate to
+an epic when the work outgrows its issue, and adds the first check that can tell whether a run
+actually recorded its evidence instead of merely saying so. Plan #526, tasks #527 · #528 · #531 ·
+#532.
+
+> **Measured while shipping it, and worth stating plainly:** all four autonomous runs in this plan
+> produced work that CI approved and external review rejected. Three silently deleted an instruction
+> while rewriting a sentence in `Format-AutoBrief`; one added a component wired to nothing. All four
+> reported their work done while owing evidence they had never recorded. The cause is structural —
+> that function's text is not documentation *about* the run, it is the whole of what the run is
+> told, so editing prose there is editing behaviour and no syntax check can see it. Autonomous work
+> in this repo is not mergeable without external review; a green gate measures syntax, not judgement.
+
+### Added
+- **`Expert-RunVerify.ps1` — a completion check that proves a run used the tool instead of
+  asserting it did** (#532, part of #526). A run is considered COMPLETE only when all three
+  evidence artifacts exist and carry the `[abios-evidence]` marker: the versioned
+  `evidence/<issue>.md` file, the PR body block, and an issue comment. A run that skipped any
+  of them is reported **INCOMPLETE**, and the check names which artifact is missing — an
+  actionable gap, not a bare verdict.
+
+  The check fails closed: null, empty, or whitespace content is treated as missing, never as
+  present. A PR body of `"Closes #532"` (the exact body the first autonomous runs left, per
+  `evidence/527.md` and `evidence/528.md`) has no marker and is therefore missing. Ordinary PR
+  chatter in the comment list does not satisfy the comment requirement.
+
+  Verified by 16 Pester tests. Each guard was confirmed by reintroducing its exact defect and
+  watching the matching tests go red, then restoring and returning to 16/16:
+
+  | Defect reintroduced | Tests that went red |
+  |---|---|
+  | Evidence-file check removed | 4 — "names the evidence file", "null is missing", "whitespace is missing", "lists all three" |
+  | PR-body check removed | 3 — "names the PR body block", "non-empty body without marker is missing", "lists all three" |
+  | Issue-comment check removed | 4 — "names the issue comment", "chatter is not evidence", "null-propagated array is no comments", "lists all three" |
+  | — restored — | 16 passed, 0 failed |
+
+  **The check is wired, and the wiring is the point.** `/board expert verify <issue> <pr>` is a verb
+  on the command surface, and phase 7 of the autonomous brief now requires the run to execute it and
+  **quote its verdict** in the final report. It is the one claim in that report the run does not get
+  to make about itself.
+
+  **Caught by external review before merging — two P1 findings, and the first is the founding defect
+  again.** The first cut wired the check to *nothing*: it was referenced only by its own file and its
+  own test, so a run could still report "evidence recorded" with no mechanical check ever running.
+  The gap #532 exists to close was left open by the change closing it — the same shape the 0.31.0
+  notes record for the identity resolver. Fixed by the command verb and the phase-7 instruction
+  above, both asserted on the rendered brief.
+
+  The second: the evidence file was resolved by walking three directories above `$PSScriptRoot`.
+  That holds only in this checkout — installed, the script lives in the plugin cache, so
+  `evidence/<issue>.md` was looked up inside the cache and never found. A check that always answers
+  INCOMPLETE is as useless as one that always answers COMPLETE. The root now comes from
+  `git rev-parse --show-toplevel`, falling back to the working directory, with tests forbidding the
+  script-relative walk.
+
+  **Proven on real runs, not only on fixtures.** Against #527 / PR #553, whose three artifacts were
+  written by hand: `COMPLETE`, exit 0. Against #531 / PR #558, where the autonomous run wrote
+  nothing: `INCOMPLETE`, exit 1, naming all three missing artifacts. Three consecutive runs in this
+  plan reported their work done having recorded no evidence at all; this is the check that makes
+  that state visible instead of invisible.
+
+### Changed
+- **The autonomous brief now carries the seven-phase loop and the decision protocol, not a
+  capability list** (#527, part of #526). `Format-AutoBrief` used to emit a bullet list of
+  agentic-board capabilities; the 7-phase method lived in `auto-loop.md`, a file the launched
+  session was never handed. The session had no phases, no sequence, and no instruction to
+  research before deciding — only "an in-scope problem: fix it in the loop and continue" as its
+  sole heuristic.
+
+  The brief now includes the full phase sequence (Ingest → Become the expert → Execute →
+  Verify + evidence → Self-heal → Loop until done → Report) and an explicit **decision protocol**:
+  when you hit an error, an unexpected state, or a fork in the path, *research before deciding —
+  do NOT act first*. Steps in order: Research (check prior-art, register via `/knowledge`),
+  Register (log findings — read-and-forget is not research), Decide (then choose the path).
+  The capability map is retained as a lookup table inside the same section, subordinate to the
+  phases rather than their replacement.
+
+  Verified by five tests that assert on the rendered brief text, not on the source documents: the
+  seven numbered phases are present, "research before deciding" appears explicitly, the
+  Research-Register-Decide ordering holds inside the protocol section, "read-and-forget" is called
+  out, and the no-improvise guard survives. Each was confirmed by reintroducing the defect and
+  watching the matching test go red.
+
+  **Caught by external review before merging, and worth recording.** The rewrite replaced the old
+  heading `total self-use of agentic-board (do NOT improvise your own tooling)` and never restated
+  it. Since this function composes the *only* text the launched session ever receives, deleting that
+  line deleted the instruction — a capability map lists options, it does not forbid inventing one.
+  The plan's own founding principle, dropped by the change meant to strengthen it. The guard is back
+  in the section heading and is now asserted.
+
+  Review also found the ordering test measuring the *first* occurrence of Research / Register /
+  Decide across the whole brief. "Research" already appears in phase 2, so the test could stay green
+  with the protocol steps scrambled — a test that reported a guarantee it did not hold. It is now
+  scoped to the decision-protocol section, and the phase test matches the numbered markers rather
+  than bare words ("verify" and "report" also occur in the capability map, so the loose match
+  survived deleting the phases).
+
+- **Autonomous brief now instructs the run to escalate to an epic + sub-issues when the work
+  outgrows its issue** (#531, part of #526). A run that discovered six tasks had one move: drop six
+  loose `discovered` issues on the board with no parent and no order. `Board-Plan.ps1` already
+  created epics + native sub-issues for humans; it was unreachable from inside an autonomous run.
+
+  `Format-AutoBrief` now includes a **Self-planning — escalating to an epic** section that:
+  - tells the run to use `/board plan` rather than filing loose issues,
+  - caps the sub-issues of the created epic by the existing `boardSelfDrive.cap` (same limit as
+    `discovered` issues, so self-planning stays bounded), and
+  - requires linking the new epic back to the originating issue for traceability.
+
+  Verified by six tests that assert on the rendered brief text, each confirmed by reintroducing its
+  defect and watching the matching test go red.
+
+  **Caught by external review before merging — two defects, both known shapes.** The first cut told
+  the run to use `Board-Plan.ps1` and pinned that with a test asserting the script name. The brief
+  travels to runs working in *any* repository, where a plugin script name resolves to nothing — the
+  defect #480 and #494 are already open on, reintroduced and then locked in by its own test. It now
+  names `/board plan`, and the test asserts the command **and forbids** the script name.
+
+  The cap was read as `if ($Contract.boardSelfDrive.cap)`. In PowerShell `0` is falsy, so a contract
+  setting `cap = 0` — *create nothing* — was read as absent and the run was told it could create
+  ten. Presence is now tested, not truthiness, with a test constructing exactly the `cap = 0`
+  contract. The same fail-open shape this project keeps finding: the safe reading of a missing
+  value is not the permissive one.
+
+- **Phase 5 self-heal now explicitly invokes the decision protocol, replacing fix-it-and-continue**
+  (#528, part of #526). After #527 added the decision protocol to the brief, Phase 5 still said
+  "fix it (after researching first)" — a parenthetical that reads as act-first with a research note,
+  not as research-first with an act-later decision. Phase 5 now reads: "when you hit an error, a
+  fork, or an unexpected state — apply the **decision protocol** (research → register → decide); do
+  NOT act first." The protocol section below it (Research → Register → Decide) is now the named
+  authority that self-heal defers to, rather than a separate section that contradicts the phase's
+  framing. Verified by five tests scoped to Phase 5 text, each confirmed by reintroducing its defect
+  and watching the matching test go red.
+
+  **Caught by external review before merging — the same defect two PRs running.** The first cut
+  reframed the phase around the protocol and, in doing so, deleted `in-scope problem -> fix it`. A
+  phase named *Self-heal* that never says to heal: the protocol ends at "decide", so a run hitting an
+  in-scope bug was left holding a decision with no instruction to act on it. #527 lost the
+  no-improvise guard the same way, in the same function, one PR earlier. Rewriting a sentence in
+  `Format-AutoBrief` deletes behaviour, because that text is not documentation *about* the run — it
+  is the whole of what the run is told. Phase 5 now orders both: protocol first, then act on what was
+  decided (in-scope → fix and continue; out-of-scope → file a `discovered` issue). Two tests hold the
+  pair: one that the fix instruction exists, one that the protocol still precedes it, so restoring
+  the action cannot quietly restore act-first ordering.
+
+## [0.31.0] - 2026-08-03
+### Added
+- **A braked run can now authenticate as a machine account instead of as the owner** (#550, part of
+  #541). The autonomy brake could never be complete as a text classifier — eleven of the nineteen
+  defects found on 2026-07-31 were that same defect in different clothes. The capability side is
+  different in kind, and it is now wired.
+
+  `main` requires a pull request, but the ruleset **exempts the repository admin role**, and a PAT
+  authenticates *as its owner* — so any token of his walks straight through. Weaker permissions do
+  not help: GitHub cannot distinguish "the human typed this" from "an agent used the human's token",
+  because they are the same principal. Only a **different identity** gets a different answer.
+
+  Measured, not argued, against the new machine account:
+
+  | Action | Result |
+  |---|---|
+  | write to `main` | `Repository rule violations found — Changes must be made through a pull request (422)` |
+  | create an ordinary branch | 200 OK |
+
+  Refused exactly where it matters, still able to do the work. New: one resolver answering *which
+  identity applies here*, **wired into `New-BoardPR`** — the script a braked run actually pushes
+  through — with `Board-Merge` and `Publish-DocsWiki` now sharing its owner→variable map instead of
+  each carrying a copy. `gh-account` teaches the same rule inline, because a run's own `git push`
+  never goes through a plugin script; that snippet stays path-independent by design and does not
+  call the resolver.
+
+  **Caught by review before merging, and worth recording:** the first cut added the resolver, claimed
+  the consolidation, and wired it to *nothing* — referenced only by its own test while four scripts
+  kept their duplicate maps. A fifth copy of the rule, shipped as a fix for having copies. That is
+  this tool's founding defect (reporting intent as fact) committed inside the change meant to cure
+  it. Four tests now assert the claim rather than assert it in prose: the resolver is referenced by
+  real scripts, the push path uses it, no duplicated owner map survives, and every consumer loads it
+  behind its dot-source guard.
+
+  **Inside an armed run there is no route back to the owner identity — including `-TokenVar`.**
+  Review round 2 found the first cut branching on an explicit `-TokenVar` and skipping the armed
+  check on that branch, under the comment *"explicit override wins"*: a bypass written as a feature,
+  and one flag was enough to undo the whole change. The branch is gone rather than guarded — an
+  override is now something the resolver **judges**, not something that routes around it — with a
+  structural test forbidding the push script from branching on `-TokenVar` again. Outside an armed
+  run an override behaves exactly as before; that is how cross-account work happens.
+
+  **A missing agent token inside an armed run FAILS; it does not fall back to the owner's PAT.** A
+  silent fallback would hand the run precisely the capability the brake exists to remove while every
+  message still read "brake armed" — the defect this repo has now found in the brake (#440), the
+  review gate (#510) and the evidence blocks (#479). Mutation-verified: introducing that fallback
+  turns 4 tests red.
+
+  **Stated limit, deliberately not dressed up.** This removes the default capability, not the
+  possibility. A run that ignores the skill and reads `GITHUB_TOKEN_PERSONAL` from the registry
+  itself is not stopped — the token is ambient in the Windows user environment and cannot be taken
+  away from a process running as that user. The deliberate case is what #517 and the review gate are
+  for. Treating a backstop as a sandbox is what produced most of yesterday's defects.
+
+## [0.30.0] - 2026-07-31
+### Fixed
+- **A braked run could push straight to the default branch** (#542). The brake watched `gh pr merge`,
+  the REST merge endpoints and `Board-Merge.ps1` — and missed the simplest route of all:
+  `git push origin HEAD:main` puts work on main with one command and matched nothing. Present in
+  every version of the brake, including shipped 0.29.0, and found only when an external review was
+  pointed at *whether the door was really shut* rather than at the change in front of it.
+
+  Not quite an oversight, which is the interesting part: the delete pattern carried a comment
+  calling `HEAD:main` "an ordinary push refspec", written while guarding against *over*-matching.
+  A test pinned that reading in place. Both were correct about the delete pattern and wrong about
+  the vocabulary — this guard defines merge as *"putting work on the default branch"*, which is
+  exactly what that refspec does. **The obsolete assertion was corrected, not worked around.**
+
+  Now refused: refspecs onto `main`/`master` (`HEAD:main`, `branch:main`, `+HEAD:main`,
+  `HEAD:refs/heads/main`) and pushing the default branch by name.
+
+  **How the branch name must end took three tries, each one a real defect — and the CI reviewer
+  caught both mistakes**, in the first two reviews it managed to publish after #543 raised its turn
+  cap. `\b` refused `HEAD:main-cleanup` and `HEAD:master.bak`: legitimate branches, blocked, on the
+  run's most common command. Replacing it with `(\s|$)` fixed that and **reopened a different
+  hole** — that only accepts a space or end-of-segment, and the segment splitter does not treat a
+  lone `&` or a redirection as a separator, so `git push origin HEAD:main&` (background the push,
+  same effect) matched nothing, a case the original `\b` had caught. It now ends at a lookahead
+  over the shell's own terminator set, which covers both directions.
+
+  **A third review round found the anchor itself was wrong — and had always been.** Every git
+  rule in this file began `\bgit\s+push\b`, which demands that `push` follow `git`
+  immediately. One ordinary global flag shook all of them off at once: `git -C . push origin
+  HEAD:main`, `git -c k=v push …`, `git --no-pager push …`. That was never about the new patterns —
+  the **pre-existing branch-delete rules had the same hole**, and `git -C . push origin --delete f`
+  went through untouched. All four git rules now share one prefix that tolerates flag-shaped tokens
+  between the program and the subcommand, so fixing it once fixed the older rules too. Only
+  flag-shaped tokens are allowed in that gap, so `git commit -m "push to main"` is still not read
+  as a push, and the repetition is bounded rather than `*` — this runs on every tool call, and an
+  unbounded nested quantifier over adversarial input is a stall waiting to happen (measured: 1 ms
+  against a command carrying 200 flag-like tokens).
+
+  **Round four found two more in that fix — and measuring the repair found a third nobody had
+  seen.** The flag allowance was capped at five, which was itself a bypass: six `-c` flags and the
+  rule stopped matching, and chaining `-c` is ordinary scripting. And `[:/]` treated `/` as a
+  refspec separator, which it is not — `release/master`, `team/main` and `HEAD:team/main` were all
+  refused for merely *ending* in the default branch's name.
+
+  Removing the cap came with an argument, made by the reviewer and accepted by me, that the
+  repetition could not blow up because its character classes are disjoint. **The argument was
+  wrong and only the stopwatch said so:** `--flag` repeated 1000 times ran the matcher past three
+  minutes, because `-{1,2}` and `[^\s;|&]+` can both consume the second dash — two readings per
+  token, 2^1000 for a thousand of them. This code runs on *every tool call*, so that is not a slow
+  path, it is a wedged session, and a wedged guard is a removed guard. The form now allows exactly
+  one reading per token: measured at 3 ms with no match and 334 ms in the absurd worst case, with
+  three timing tests to catch a return — the suite was green with the hang present.
+
+  Recorded in the source, because this file keeps teaching it: *"the classes are disjoint so it
+  cannot blow up" is an argument, not a measurement. Time it.*
+
+  **Round five found no bypass at all** — the first round on this change that did not. Its one
+  finding was about honesty rather than permission: `git push origin :main` *deletes* the remote
+  default branch, but the merge rule matched it first (its source side allowed zero characters),
+  so the refusal announced "merge is marked irreversible" for a command that removes main. Not a
+  bypass — the contract filter runs per pattern, so a delete-braking contract already refused it —
+  but a control is worth exactly as much as the account it gives of itself, which is this tool's
+  founding defect. The refspec source now requires at least one character, so an empty source falls
+  through to the delete rule where it belongs.
+
+  Recorded as a decision rather than left to chance: a contract that brakes merges but **not**
+  deletes no longer stops that command. It is a delete, and the guard follows the contract instead
+  of inventing policy — the rule this file opens with. There is a test saying so.
+
+  **Round six, also no bypass**, and the last one taken: the prefix before the refspec excluded
+  only `;`, so the matcher could step past a background `&` and read a later `something:main` in
+  the same segment as the push target — `git push origin fine & echo notes:main` was refused for
+  text belonging to a different command. A false positive, never a bypass (a looser prefix can only
+  add matches), fixed because over-blocking on the run's most common command is the argument this
+  whole entry rests on. The prefix now stops at the same operators the branch-name lookahead uses.
+  The review's second example, `> log:main.txt`, did not reproduce — checked rather than assumed.
+
+  **Stopped here deliberately.** Rounds one to four found real defects — a bypass, a false
+  positive, an anchor broken for months, and a matcher that could hang the session. Rounds five and
+  six found no bypass at all: a mislabelled verb and this over-block. The curve flattened, so the
+  loop was ended on judgement rather than run until it produced nothing.
+
+  **Known and accepted:** `git push main` is read as a push to the default branch even when `main`
+  is the name of a *remote*. A false positive, not a bypass, on a rare spelling — and this pattern
+  deliberately errs toward refusing.
+
+  The original over-block, for the record: the tests missed it because the case they checked,
+  `maintenance`, continues with `t` (a word character) and so passed **for the wrong reason** —
+  proving nothing about `-` or `.`. A green test that passes by accident is the same failure this
+  whole entry is about. The reviewer also noted
+  that `HEAD:refs/heads/main` was claimed in the description and the code comment but asserted
+  nowhere; it has a test now. Deliberately still allowed, since
+  this pattern sits on the run's most common command and over-blocking is how a control gets
+  switched off: `git push -u origin <branch>`, a bare `git push`, `--force-with-lease` on its own
+  branch, and any branch whose *name* merely contains `main` (`issue-9-domain-model`,
+  `feature/maintenance`, `HEAD:my-domain`). **Stated limit:** the pure core cannot ask the repo what
+  its default branch is, so a project whose default is neither `main` nor `master` is not covered.
+
+- **The reviewer's turn cap sat one turn above what a real review needs** (#543). Measured across
+  recent runs: reviews that actually published consumed 4 / 13 / 17 / 18 / **19** turns against a
+  cap of **20**, and three consecutive runs on a large PR died at 21. A run that hits the cap leaves
+  no review, so the verification added in #510 fails the check — correctly — and the review gate
+  ends up blocking legitimate PRs on an infrastructure limit. That is how a control gets switched
+  off: not by argument, but by being wrong often enough. Raised to 40, a little over twice the
+  observed maximum; time was never the constraint (those runs finish in 2-4 minutes against a
+  20-minute job timeout).
+- **`-EndToEnd` shipped inert in 0.29.0, and after five review findings it is staying inert — on
+  purpose** (#536, #541). Field-testing the autonomy boundary found the ordered end-to-end close
+  could refuse but never allow. Three separate blockers were fixed; then three rounds of external
+  review found five live false-permission paths in the mechanism that would have opened it, two of
+  them complete bypasses. **The boundary held throughout — nothing merged that should not — and
+  every failure failed safe.** The order is now recorded, explained, and acted on nowhere.
+
+  What was genuinely broken and is now fixed:
+
+  1. **The tests condition could never be satisfied.** `Invoke-BrakeMergeCheck` dot-sources
+     `Board-ReviewGate.ps1`, whose `param()` block runs **in the caller's scope** and declares
+     `[int]$PR = 0`. `$PR` silently became `0` immediately before `gh pr checks $PR`, which exits 1
+     with empty output, so the CI condition was *always* false. Proven against a real PR whose four
+     checks all passed: the gate refused for "missing test evidence"; the same inputs without the
+     clobber were permitted. **Stated precisely:** the bug is gone because the code that had it was
+     withdrawn with the allowance, not because a line was patched around it. What remains is the
+     trap, recorded where the gate will be rebuilt and guarded by a test that proves the review
+     gate really does clobber a caller's `$PR` — so #541 cannot walk into it again.
+  2. **The tests requirement ignored the contract**, being hardcoded `$true`; and reading it cast
+     the string `"false"` to `$true`, the trap already closed for the marker's `endToEnd`.
+  3. **The brief never mentioned the order**, so a session carrying one was briefed exactly like a
+     session without one. It now says the order was given, that it cannot yet be acted on, and that
+     a refused merge is the control working — not a failure to route around. Without that, a run
+     reads its own refusal as an error and hunts for another way.
+
+  **Why the ordered close stays shut.** Opening it — even only for the gate's own script, which
+  re-checks four conditions and refuses on its own — made two latent holes *reachable*, and neither
+  is a string-matching bug (#541):
+
+  | Bypass | Why the gate could not defend itself |
+  |---|---|
+  | `cd C:\ ; pwsh <genuine-gate> -PR 42` | The hook judges per segment and allows it; the gate then resolves its marker from its **runtime** cwd, finds none outside the worktree, and skips all four conditions. The two halves of the control disagreed about which directory the run was in, and the run picked |
+  | `[abios-review] … sha=<head>` | The review condition is a PR comment the run is able to post itself — the self-certification the design had already removed for the *test* condition |
+
+  Three earlier findings were fixed before these: the gated path matched a bare **filename** (any
+  file so named passed), then a canonical **path pattern** — which was itself wrong, since the
+  installed plugin lives at `<version>/scripts/`, so it would have refused the *genuine* gate in
+  every project except this repo — then a **substring** test that a mention-as-argument satisfied,
+  then a token match that a `<gate>-bypass.ps1` prefix satisfied while breaking any install under
+  `C:\Program Files`. Also fixed on the way: a failed `gh pr checks` read being laundered into
+  "this project has no CI", and `dod.tests: false` waiving **red** CI rather than just the
+  requirement to have a suite.
+
+  The pattern is the finding: **every round's tests passed, and the next round still found a live
+  false-permission path.** That is the argument for keeping the door shut until #541 gives the gate
+  a trustworthy armed context and evidence the subject cannot mint.
+
+### Added
+- **The brake hook is under test at last** — the piece Claude Code actually executes, and the only
+  one that can produce a refusal, had no tests. 17 now drive the real script over real stdin and
+  pin both fail directions: silence outside an armed run, denial for anything unclear inside one
+  (corrupt marker, emptied list, the string `"true"` posing as an order), plus the `cd`-out shape
+  that motivated closing the ordered path.
+- Structural regression guards (AST) asserting the merge check never reads a name a dot-source
+  destroys, and that the tests requirement is passed rather than assumed.
+- An adversarial sweep of 27 evasion classes — command substitution, backticks, env-var prefixes,
+  redirections, line continuations, quote-splitting, `bash -c` wrapping, per-segment vouching —
+  its catalogue taken from `liberzon/claude-hooks` (MIT, registered in `knowledge/`), which solves
+  the same sub-command decomposition problem. Ideas, not code.
+
+## [0.29.0] - 2026-07-30
+### Added
+- **`/board expert auto -EndToEnd` — an autonomous run can now finish what it started, under four
+  conditions** (#530, part of #526). The brake stops being all-or-nothing: a run the owner *ordered*
+  to finish may close **code** work that carries a real review and recorded tests for the current
+  commit. Everything else still stops for him.
+
+  The four conditions, all established at **merge time** — the first moment the facts exist, since
+  the brake marker is written before a line of code is:
+
+  | Condition | Why it cannot be dropped |
+  |---|---|
+  | The owner ordered it | The permission travels with the instruction, not with a setting written weeks ago |
+  | The change is code-class (#529) | What he judges by *looking* at it stays his, even when he ordered the finish |
+  | A real review exists for this commit (#510) | A green check is not a review |
+  | Automated tests ran and left evidence | "Testable and untested" is not finished work |
+
+  **Why four rather than a priority order.** Each covers a failure the others cannot see: a
+  reviewed, tested change that is a dashboard is still his to approve; an ordered, reviewed,
+  code-class change nobody ran is still unverified. Collapsing them into one flag is exactly how a
+  control ends up meaning less than it says — the defect already found in the brake (#440), the
+  review gate (#510) and the evidence blocks (#479). A refusal names **every** unmet condition, not
+  the first: one reason at a time forces a round trip per condition and misrepresents how far the
+  work actually is.
+
+  The tests requirement reads from the contract's `dod.tests`, **never** from the run's own opinion
+  that its change was untestable — a per-run "no se podía probar" is precisely the self-issued
+  excuse this removes. A project with genuinely no automated tests says so once, in writing.
+
+  Failing to *establish* the facts is not a yes: if the class, the review or the evidence cannot be
+  read, the merge is refused with that as the stated reason.
+
+  Found by its own tests while building: the decision function dot-sourced the classifier without
+  its guard, so **every call** also ran a `git diff` and printed a banner — a decision function with
+  a side effect per call, running git while deciding whether a merge is allowed.
+
+  19 decision tests + 5 marker tests, mutation-verified: removing the order condition turns 3 red,
+  the work-class condition 6, the review condition 4, and the tests condition 5.
+
+- **The autonomy boundary can finally express the owner's actual rule** (#529, part of #526).
+  Until now `autonomy.irreversible` was a flat list of *actions* — the same for every kind of work —
+  so "code the agent closes by itself; anything I can judge by looking at it waits for me" had
+  nowhere to live. The boundary is now about **what the change produces**, not which action performs
+  it: a new `workClass` policy in the contract plus a pure classifier that reads the touched paths.
+
+  Why this framing rather than a stricter action list: asking someone who does not read code to
+  approve a diff is not caution, it hands them a decision they have no way to make. Asking them to
+  approve a **dashboard** is the opposite — they are the only one who can look at it and say whether
+  it reads right. So reports, pages, themes and images route to the human; scripts, tests, workflows
+  and prose stay with the agent.
+
+  Three decisions worth stating, because each is load-bearing:
+  - **Timing.** The brake marker is written at *launch*, before a line exists, so the class cannot
+    be decided there. The contract carries the *policy*; the *classification* runs later against the
+    paths the run actually touched. Facts first, decision second.
+  - **One visual file makes the whole change visual.** The failures are wildly asymmetric — the
+    owner glancing at something routine costs a minute; an agent shipping a report he wanted to see
+    costs trust.
+  - **"I could not tell what changed" is `unknown`, never `code`,** and `unknown` goes to the human.
+    Conflating "I looked and it was all code" with "I could not look" is precisely the defect this
+    repo keeps finding in its own surfaces.
+
+  Globs are compiled to regex rather than handed to `-like`, which has no `**` and whose `*` crosses
+  `/` — under `-like`, `src/*.css` would swallow `src/deep/nested/main.css` and the classification
+  would widen with every subdirectory. A project can declare what is visual *for it* (a website
+  where the posts are the product), replacing the defaults rather than silently merging with them.
+
+  **This alone changes no behaviour yet** — it adds the vocabulary and the classifier; nothing
+  consults them. Said plainly because the alternative is a release note that implies a capability
+  the code does not have. `merge` remains in every default contract's irreversible list, so no run
+  can merge regardless of class. Wiring it into the merge decision — against the *actual* changed
+  paths, at merge time, where the facts exist — is #530, and its review requirement is recorded on
+  that issue rather than left as a hope.
+
+  36 tests, mutation-verified: classifying nothing as visual turns 8 red, letting `unknown` pass as
+  approved 1, letting a single `*` cross a directory boundary 1, and restoring the
+  `TrimStart('./')` bug 1 — that last one found by external review: `TrimStart` takes a character
+  *set*, so it ate the leading dot of `.reports/x.md`, and a project pattern like `.reports/**`
+  would silently stop matching. A visual change reclassified as code is the one direction that
+  costs trust.
+
+### Fixed
+- **A reviewer that never reviewed no longer reads as approval** (#510). On PR #508 the
+  `claude-review` check reported **success** while the PR ended with **zero** reviews and zero
+  comments — twice, on two runs. The gate then printed the same `GATE PASSED` it prints for a
+  genuinely clean review, with the self-review reminder as a footnote nobody had to act on. This
+  landed in the worst possible window: Copilot has been quota-blocked for weeks, so that workflow
+  was the *only* automated reviewer on the repo, and it was passing without reviewing.
+
+  Fixed on both sides:
+  - **The workflow now fails when it produced no review.** Publishing the review is part of the
+    task, not a side effect — the job was running, exiting clean and leaving nothing because it had
+    neither the instruction nor the tool to comment. It now gets both, and a verification step
+    turns the check **red** when no review and no `[abios-review]` comment landed.
+  - **The gate distinguishes "reviewed, found nothing" from "nobody looked."** A new exit code
+    **2 — `GATE SIN REVISAR`** — reports the second case. It is deliberately not 0: any caller
+    testing `-eq 0` now fails closed, while still telling an unreviewed PR apart from a genuinely
+    blocked one (1). Nothing in the repo branched on the gate's exit code programmatically, so this
+    changes no existing behaviour silently.
+  - **A reviewer with no GitHub identity can now be counted.** `second-opinion` (Codex) is the
+    reviewer that actually shows up here, and it submits no review object — so to the gate it was
+    indistinguishable from nobody. `-RecordReview -Reviewer <who> -Summary <what>` writes the
+    evidence onto the PR itself, where it survives the session.
+  - `-AllowUnreviewed` is the deliberate exception for changes where a review buys nothing (a typo,
+    a regenerated file). It prints that nobody read the code rather than implying someone did.
+
+  **All evidence is bound to the PR's head commit**, and external review found that this was the
+  whole ballgame. The first cut counted *any* review ever left on the PR, which reproduced the
+  original defect one level up: approve, push three more commits, and the gate would authorise a
+  diff nobody had read on the strength of a review of different code. Now a GitHub review counts
+  only for the commit it was performed on, `-RecordReview` stamps the head SHA into the record, and
+  the workflow's verification demands its own marker *for this SHA* — so a run that publishes
+  nothing can no longer coast on an earlier run's comment. When evidence exists but belongs to an
+  older commit the gate says so explicitly ("empujaste cambios después de que se revisó") instead of
+  reporting a bare zero. The cost is deliberate: a new push invalidates the evidence and someone has
+  to look again, which is the correct reading — those commits genuinely have not been reviewed.
+
+  `-RecordReview` now **requires** `-Summary`. Without it, it was a one-flag way to stamp "reviewed"
+  on a PR nobody read — the same empty assurance as the original bug, with a different author.
+  Having to state what the review found is the cheapest available proof that one happened.
+
+  **The root cause, confirmed live** while this very PR was being gated (run 30578175712):
+  `claude-code-action` **skips itself and exits `outcome=success`** on any PR that edits its own
+  workflow file — a GitHub security measure, so a PR cannot rewrite the reviewer that reviews it.
+  Correct as a measure; the problem is that the signal it emits is indistinguishable from "reviewed,
+  found nothing". This repo edits that file whenever it tunes the review engine, so it is not an
+  edge case. The verification step now names this cause in its error output, and the gate stops the
+  deadlock it would otherwise create: **a failing REVIEWER check asks "was this reviewed?", not
+  "does the code work?"** — so once a real review is on record for the commit, the reviewer's own red
+  is no longer a blocker. Narrow on purpose: one non-reviewer failure and it blocks as before, and
+  the failing-check list is read from **structured** data (`gh pr checks --json`) rather than scraped
+  from the printed table. That distinction is load-bearing — the first cut parsed the human-readable
+  output, where any failure printed in an unexpected shape would drop out of the list, leave a
+  reviewer failure as the only one seen, and wave a genuinely broken build through. If the
+  structured read fails, the allowance is simply never offered.
+
+  Found while fixing it, by the tests: the marker check used `-like`, whose wildcard syntax reads
+  the marker's own square brackets as a character class — it threw instead of matching, which would
+  have made **every** external review invisible, i.e. exactly the blindness being removed. 21 tests,
+  mutation-verified: treating everything as reviewed turns 4 red, ignoring marked comments 4,
+  unbinding reviews from the commit 2, and dropping the fail-closed-without-a-SHA branch 1.
+
+- **The irreversible brake is now a control, not a paragraph** (#516, part of #440). `/board expert
+  auto` printed `Brake ARMED` while enforcing nothing: the brake lived only as prose in the launch
+  briefing, and an observed run merged its own PR to `main` — closing its epic's sub-issues — while
+  every self-report said the brake was on. Instruction alone is what drifted, so the fix is a
+  backstop that does not depend on the agent's cooperation:
+  - `Start-WorktreeSession` **arms** the run by writing `.agentic-board/brake-armed.json` into the
+    launched worktree, carrying that run's own `autonomy.irreversible` list from the contract (so
+    the guard and the briefing can never disagree). If arming fails, the session is **not launched**
+    — an unarmed run that believes it is armed is precisely the #440 failure.
+  - A new **`PreToolUse` hook** (`Brake-PreToolUseHook.ps1`) walks up from the session's cwd, finds
+    the marker, and **denies** the tool call before it executes — `gh pr merge`, `Board-Merge.ps1`,
+    the REST merge endpoints, and the publish/deploy/refresh/delete paths the contract brakes on.
+  - `Board-Merge.ps1` **refuses on its own** inside an armed worktree, so the refusal survives a
+    session with no hooks installed or a direct call.
+
+  Two design points worth stating, because both are load-bearing:
+
+  **A git hook could not have done this.** The original suggestion was a `pre-push`/`pre-merge`
+  hook, but `gh pr merge` is a server-side API call — no local git operation occurs, so there is
+  nothing for a git hook to intercept. The refusal has to happen at the tool layer.
+
+  **The classifier's fail direction is inverted from `Expert-Autonomy`, deliberately.** That one
+  classifies an action name from a closed vocabulary, so an unknown verb fails safe (stop and ask).
+  This one classifies an arbitrary shell command, where the space of harmless commands is unbounded
+  — failing safe there would deny everything and the run could not work at all. So it recognizes
+  specific dangerous invocations and lets the rest through. Stated plainly rather than papered
+  over: this is a backstop against the known irreversible paths, **not a sandbox**. A novel route to
+  the same effect is not caught here; that is what the companion controls (#517 supervisor-side
+  detection, #518 auto-clean refusing to destroy the evidence) are for.
+
+  Inside an armed run, any error in the guard **denies** rather than allows. Outside one — an
+  ordinary human session, which has no marker — the hook is silent and never interferes.
+
+  **Four bypasses the first cut of this control still had**, found by external review and each now
+  closed with its own regression test:
+  - A `-DryRun` token **anywhere** on the command line waved through the whole thing, so
+    `echo --dry-run; gh pr merge 490` merged. The classifier now splits the command on shell
+    separators and judges each segment on its own — a harmless prefix cannot vouch for what
+    follows it.
+  - Newlines were collapsed into spaces *before* that split, welding a multi-line script into one
+    segment and reopening the same hole. A newline is now an explicit separator, which is what it
+    means in a shell.
+  - The run could **disarm itself**: deleting a local file is otherwise allowed, so
+    `rm .agentic-board/brake-armed.json` turned the entire control off in one command. Tampering
+    with the marker — deleting it, overwriting it, wiping the state directory, or editing it
+    through the file-writing tools — is now refused on its own terms, *not* gated on the
+    contract's list. An emptied `irreversible` list reads as tampering too, and falls back to the
+    full vocabulary rather than to silence.
+  - The REST merge endpoint was only recognised behind `gh api`, leaving the identical request
+    open via `curl`, `Invoke-RestMethod`, python or node — all holding the same token. It is now
+    matched by **endpoint**, independent of the client.
+
+  **Three more the second review round found**, after those four were closed:
+  - **Shell quoting hid the subcommand.** `gh pr 'merge' 490` did not match, and merged. Quote
+    characters are now removed during normalization, the way the shell removes them.
+  - **A runtime variable is invisible to any string matching** — `$verb='merge'; gh pr $verb 490`.
+    Rather than pretend otherwise, a high-risk client reaching for an unresolvable subcommand
+    (`gh pr $x`, `gh $x`) is now refused: an autonomous run has no legitimate need to call `gh`
+    through a variable, and refusing is the safe side of a call the guard genuinely cannot make.
+  - **The hook failed OPEN if its own guard failed to load.** The armed flag was set only after
+    dot-sourcing `Brake-Guard.ps1`, so a broken guard left the error handler believing the run was
+    unarmed — silently restoring the exact capability the control exists to remove. A
+    dependency-free probe now establishes armed-or-not *first*, and everything after it can fail
+    without changing which way it fails.
+
+  Arming also **disarms**: a worktree reused from an earlier braked run kept its marker, so the
+  hook went on refusing merges for a run whose contract no longer braked on them, while the
+  launcher printed `Brake OFF`. The marker now follows the contract in both directions — which is
+  what makes that message true rather than another claim the code does not honour.
+
+  **Two more from the third round:**
+  - **A line continuation is one command, not two.** `gh pr \`<newline>`merge 490` runs as a single
+    command in the shell, but the newline-as-separator rule split it into two harmless-looking
+    halves. Continuations (backslash for sh, backtick for PowerShell) are now joined *before*
+    newlines become separators.
+  - **`MultiEdit` was missing from the hook matcher**, leaving one uncovered write path to the
+    marker. Listing a tool this harness may not expose costs nothing; omitting one it does expose
+    costs the whole control.
+
+  **Three more from the fourth round:**
+  - **A preview claim is now only honoured from something that can preview.** The dry-run
+    exemption skipped a whole segment on the token alone, so
+    `curl -H "X-Test: --dry-run" -X PUT .../pulls/12/merge` was allowed — a header does not make a
+    merge stop mutating. The exemption is scoped to commands that actually have a preview mode.
+  - **`gh api` deletes were caught in one spelling only.** `--method=DELETE` and `-X DELETE` issue
+    the identical request and went through.
+  - **`git push origin :branch`** deletes a remote branch through syntax the `--delete` pattern
+    never saw. (`HEAD:main`, an ordinary push refspec, stays allowed.)
+
+  97 tests, and every protection was verified by reintroducing the exact defect it prevents rather
+  than by trusting a green suite: stubbing the classifier turns 16 red, a global dry-run exemption
+  3, an unprotected marker 6, a `gh api`-anchored REST pattern 4, no quote-stripping 3, no
+  variable-indirection pattern 2, joining no line continuations 3, an unscoped preview exemption 2,
+  one delete spelling 2, no refspec deletion 1, and deciding the armed flag after the dot-source 1.
+
+  The review ran in rounds until one came back empty. Rounds 1–4 found **12 real defects** — every
+  one of them in code whose tests were already green, and four of them in the fix for the round
+  before. That is the honest cost of a control this size, and the reason the companion issues
+  (#517 supervisor-side detection, #518 auto-clean refusing to destroy evidence) exist: this is a
+  backstop against known irreversible paths, not a sandbox.
+
+## [0.28.1] - 2026-07-29
+### Changed
+- **CI run volume cut ~60 %, and Board Sync no longer triggers itself** (#504; PR #512). The sync
+  workflow listened for `assigned` while `board-sync.sh` assigns unassigned issues itself, so its own
+  write re-triggered it — every new issue cost at least two runs, the second recomputing a state the
+  first had already reconciled. `assigned` is gone, and a burst of issue events now collapses onto one
+  run via `concurrency: cancel-in-progress` (safe precisely because the sync is a full-state
+  reconciler, not an incremental writer; the telemetry snapshot deliberately does NOT cancel, since a
+  half-written run there loses data no later run can rebuild).
+  `ci.yml` gates on the **pull request only** — a push to `main` is always a merge of something those
+  same jobs already passed, so re-running them after the merge doubled the cost of every change
+  without ever catching anything new. `pr-review` and `issue-language` are grouped per PR / per issue
+  and cancel superseded runs: addressing gate feedback with three quick commits used to start three
+  reviews of three diffs, two already obsolete — which protects the Max review quota, not just
+  Actions minutes. Every job now carries an explicit `timeout-minutes` (the default is 360, so one
+  hung job could eat 12 % of the monthly quota), and test-log artifacts drop from 90-day to 7-day
+  retention.
+
+### Fixed
+- **A mature board no longer reports itself empty** (#484). `Board-Work.ps1` read board items with
+  `gh project item-list --limit 200`. That call returns exit 0 and exactly 200 items on a bigger
+  board — **oldest-first**, so on a mature board the cap fills with Done work and the Backlog falls
+  off the end. Against the tool's own 291-item board, `/board work` printed
+  `Sin pendientes. Todo el board esta en progreso o terminado.` over **37 open Backlog items**.
+  Not a truncation warning — a confident **false all-clear**, landing precisely on the mature boards
+  where the stakes are highest, and it silently under-counted the `-ListBoards` board picker the
+  same way.
+  Board reads now go through `Get-BoardItems.ps1`, which returns `{ Items; Read; Limit; Truncated }`
+  and treats a read that reached its cap as **possibly short**. No caller may state an absence off
+  one. Every board reader was audited, not just the two in the bug report — the caps ranged from 200
+  to 1000 and **six** surfaces were asserting things a short read cannot support:
+  - `/board work` says how many items it actually saw instead of "sin pendientes"; the board picker
+    renders capped counts as `N+` with an explicit `TRUNCADO` line.
+  - `/board complete` **fails closed** — a `PASS` is exactly the absence a short read cannot
+    support, and CI would read it as ground truth.
+  - `/board triage` no longer prints "(no hay items pendientes)" over an untriaged board.
+  - **`/board field apply --merge-conflicts` no longer deletes an option on an unproven verification.**
+    The worst of the six: it moves items off a legacy option, checks that none remain, then deletes
+    it — and its own comment names the stake ("an item silently losing its Status is data loss").
+    The check read with a bare `gh ... --limit 800` and no cap test, so "0 left" could be an
+    artifact of the cap. A truncated verification now aborts on the same grounds as a found item.
+  - `Backup-Board` refuses to write a partial snapshot: it is the safety net taken *before* a
+    destructive operation, so a partial one is worse than none — it would license the delete it
+    exists to make reversible.
+  - `Export-BoardSnapshot` refuses to publish a truncated `N of M`, and `/board update` publishes
+    floors (`N+`) rather than stating a count and retracting it in a footnote.
+  - `Set-BoardField` warns *before* its sweep that the pass is partial, instead of printing a
+    `set=N` summary that reads like a complete one.
+  The shared ceiling is 2000 and costs nothing: `gh` pages the underlying GraphQL 100 at a time, so
+  request count tracks the items that exist, not the cap — the old 200 bought no savings and cost
+  the truth. Regression tests assert that no script hardcodes its own `item-list` cap and that every
+  board reader pulls in the shared one.
+  This is the same defect class `Invoke-Gh.ps1` was written for (#303): a read consumed as fact.
+  `Invoke-Gh` made a **failed** read loud; this makes a **short** one loud. Neither substitutes for
+  the other — a truncated read succeeds.
+
+## [0.28.0] - 2026-07-28
+### Added
+- **`/board telemetry` — the tool now measures how it actually behaved in real use** (#476;
+  PRs #477, #500). 945 local session transcripts on the primary machine, 162 of which really
+  invoked the tool, had never been read. Reviewing three of them by hand produced 12 distinct
+  defects, 8 previously unfiled, and **not one had been caught by the tool itself** — every one was
+  found by a human reading carefully. This verb reads those transcripts and reports where
+  agentic-board helped and where it got in the way.
+  Transcripts are a valid source because the on-disk file is append-only: compaction shrinks the
+  model's context, not the file (verified on a session carrying 30 compaction markers — all 4,125
+  events still present). Tool calls are structured records, so "where was the tool invoked and what
+  followed" is an exact query rather than an interpretation.
+  **Incremental by watermark, never a `scanned` flag** (`Get-FieldLedger.ps1`): the ledger records
+  how far each session was read (events + bytes), so "new work" means new sessions *and* grown
+  ones, and only the unread tail is parsed. A boolean would retire a session permanently on first
+  read and silently lose everything appended later. **Two stages** — a deterministic extractor with
+  no model (`Get-FieldEpisodes.ps1`) turns hundreds of megabytes into a few hundred candidate
+  episodes; only those are worth a model's attention. The sweep driver is `Invoke-FieldScan.ps1`
+  (`-WhatIf`, `-Limit`).
+  **Four signals**, all mechanical, none of which reached the board before: **repetition** (an
+  action script re-invoked — resolvers and the gh wrapper are exempt, since re-invoking those is
+  their contract), **abandonment** (a failure followed by the same job done with bare `gh`/`git` —
+  the most valuable and the most invisible: every time the user routed around the tool),
+  **correction** (the user reverses what just happened) and **silence** (a failure that went
+  nowhere at all).
+  Signals were **calibrated against the corpus, not asserted**: `silence` fell from 1,419 hits
+  (41.4 % of episodes, i.e. noise) to 99 by requiring a failure; `repetition` fell from 644 to 557
+  by exempting resolvers (`Get-GhAccount` repeated on 47.4 % of its calls — its contract, not a
+  defect); `abandonment` is deliberately unchanged at 63, which is the evidence the calibration
+  sharpened the noisy signals without breaking the one that matters most.
+  **Safety, each rule answering an observed failure:** read-only over the transcript store; the
+  local record lives at a machine-level root **outside any repo**, so it cannot be committed by
+  construction rather than by `.gitignore` config; the watermark advances only after events are
+  processed; the ledger is written atomically; and **nothing is filed automatically** — the sweep
+  produces candidates for a human to judge.
+  First full sweep: **3,425 episodes, 295 failed invocations**, which re-scoped #419 from a
+  single-script bug to a 65-failure guard misfire and produced #485.
+
+### Fixed
+- **The plugin's own test suite read the checkout's local role catalog** (#460). The classification
+  tests called the domain resolver without an explicit catalog, so they merged whatever
+  `.agentic-board/roles.json` the working directory held — meaning **any project defining a local
+  role broke the plugin's suite**, not just this one. The tests now build the factory catalog from
+  the shipped presets and pass it explicitly, with a regression guard asserting both directions: a
+  local catalog does change classification, the factory one does not.
+  The repo's own `software-engineer` role was also narrowed from 14 keywords to 8, dropping the
+  ordinary English words (`script`, `hook`, `gate`, `token`, `scope`, `refactor`) that let a
+  high-precedence local role swallow unrelated plans — the same defect filed as #474, applied to
+  our own role. Same 15 hooked skills: keywords decide *when* a role is chosen, not what it brings.
 
 ## [0.27.1] - 2026-07-28
 ### Fixed
@@ -298,7 +1315,7 @@
   would do. New pure `Get-HandoffSaveMode` helper, unit-tested.
 - **The CHANGELOG auto-fold now composes with a hand-written `[Unreleased]` block** (#324). `New-Release.ps1`
   folds by delegating to `Board-Changelog.ps1 -Write`, which used to insert the generated block ABOVE any
-  `## [Unreleased]` — stranding the maintainer's curated entries under an orphan `[Unreleased]` below the very
+  `## [0.32.0] - 2026-08-03` — stranding the maintainer's curated entries under an orphan `[Unreleased]` below the very
   version they belonged to. It now RENAMES `[Unreleased]` to `## [<version>] - <date>` and merges the
   board-derived entries into its sections (preserving hand-written sections like `### Security`, appending
   board lines after the curated ones, never duplicating an already-cited issue). A release that ships only
@@ -957,3 +1974,4 @@
 - `/board` command.
 - Plugin manifest + marketplace entry.
 - fix: exclude self-matching lines from secret guard pattern (#1)
+

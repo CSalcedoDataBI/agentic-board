@@ -17,6 +17,8 @@ $dash = [char]0x2014
 # This script is the LAST line of defence before a delete, so it must never mistake a 401
 # for an empty board and write a plausible-looking empty snapshot.
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# ...nor mistake a CAPPED read for a whole board and write a plausible-looking PARTIAL one (#484).
+. (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 if (-not $BackupDir) {
   $BackupDir = if ($env:ABIOS_BACKUP_DIR) { $env:ABIOS_BACKUP_DIR } else { Join-Path (Get-AbiosStateDir -Root $HOME) 'backups' }
 }
@@ -36,11 +38,21 @@ $meta   = Invoke-Gh -GhArgs @('project', 'view',       "$Number", '--owner', $Ow
                     -What "leer el board #$Number de $Owner" -RawJson -Retries 2
 $fields = Invoke-Gh -GhArgs @('project', 'field-list', "$Number", '--owner', $Owner, '--format', 'json') `
                     -What "leer los campos del board #$Number" -RawJson -Retries 2
-$items  = Invoke-Gh -GhArgs @('project', 'item-list',  "$Number", '--owner', $Owner, '--format', 'json', '--limit', '1000') `
+$itemLimit = Get-BoardItemReadLimit
+$items  = Invoke-Gh -GhArgs @('project', 'item-list',  "$Number", '--owner', $Owner, '--format', 'json', '--limit', "$itemLimit") `
                     -What "leer los items del board #$Number" -RawJson -Retries 2
 
 $title  = ($meta | ConvertFrom-Json).title
 if (-not $title) { throw "El board #$Number no devolvio un titulo - no hago un backup de algo que no pude leer." }
+
+# This snapshot is the safety net taken BEFORE a destructive board operation, so a partial one is
+# worse than none: it would license the delete it exists to make reversible. A read that stopped at
+# the cap cannot be called a backup, so refuse to write one (#484). Checked on the raw text rather
+# than through Get-BoardItems because the snapshot must keep gh's own bytes unreshaped.
+$itemCount = @(($items | ConvertFrom-Json).items | Where-Object { $null -ne $_ }).Count
+if ($itemCount -ge $itemLimit) {
+    throw "No escribo el backup del board #$Number - la lectura de items se corto en $itemCount (el tope de lectura), y un backup parcial no es un backup."
+}
 $safe   = ($title -replace '[^\w\-]+', '_').Trim('_')
 $base   = Join-Path $BackupDir ("{0}_{1}" -f $safe, $stamp)
 

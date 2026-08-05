@@ -60,6 +60,70 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# ── Brake check (#516) ──────────────────────────────────────────────────────────
+# Defense in depth. The PreToolUse guard already refuses `Board-Merge.ps1` inside a brake-armed
+# worktree, but that guard only exists where the plugin's hooks are installed. This check lives in
+# the merge path itself, so the refusal survives a session with no hooks, a direct pwsh call, or a
+# future launcher that forgets to wire them. -DryRun is exempt: it mutates nothing.
+#
+# DEFINED here, CALLED after the repo and token are resolved (see the call site below). Running it
+# inline at this point read `$Repo` while it was still the empty default and `$env:GH_TOKEN` before
+# it was set, so every PR fact came back blank and a legitimately ordered run was refused for
+# "conditions unmet" that were never actually read.
+function Invoke-BrakeMergeCheck {
+# A TRAP FOR WHOEVER RESTORES THE GATE HERE (#536 -> #541), recorded because it cost real
+# debugging and is invisible in a normal reading: this function dot-sources other scripts, and
+# dot-sourcing runs THEIR param() block IN THIS SCOPE. `Board-ReviewGate.ps1` declares
+# `[int]$PR = 0`, so the moment it is sourced, `$PR` here becomes 0. The end-to-end gate that used
+# to live below read `gh pr checks $PR` afterwards, asked CI about PR number 0, got nothing, and
+# concluded "no tests ran" for every run alive. Capture the parameters into local names BEFORE the
+# first dot-source; do not rely on remembering which script clobbers which name.
+if (-not $DryRun) {
+    $brakeGuard = Join-Path $PSScriptRoot 'Brake-Guard.ps1'
+    if (Test-Path $brakeGuard) {
+        $prevB = $env:ABIOS_BRAKEGUARD_DOTSOURCE
+        $env:ABIOS_BRAKEGUARD_DOTSOURCE = '1'
+        . $brakeGuard
+        $env:ABIOS_BRAKEGUARD_DOTSOURCE = $prevB
+        $brakeMarker = Read-BrakeMarker -StartDir (Get-Location).Path
+        if ($brakeMarker -and (@($brakeMarker.irreversible) -contains 'merge')) {
+            $forWhat = if ($brakeMarker.issue -gt 0) { " para el issue #$($brakeMarker.issue)" } else { "" }
+
+            # THE ARMED RUN DOES NOT MERGE, ordered or not (#541).
+            #
+            # This block used to weigh four conditions and, when all held, let a run the owner had
+            # ORDERED to finish close its own PR. That allowance is withdrawn: review found the
+            # gate could not defend itself once it was reachable. `cd` out of the worktree and the
+            # marker lookup above finds nothing, so this whole check is skipped -- the two halves
+            # of the control disagreed about which directory the run was in. And the review
+            # condition was satisfied by a PR comment the run can post itself.
+            #
+            # Leaving the allowance here "as defense in depth" would be the same self-deception:
+            # the hook is not a guarantee, so a command string it misses would arrive at a script
+            # that still says yes. The decision function and its tests live on in
+            # Expert-EndToEnd.ps1, ready for #541 to give them an armed context they can trust and
+            # evidence the subject cannot mint.
+            #
+            # A HUMAN who wants this merge deletes the marker first, deliberately. That is the
+            # documented path and the message below says so.
+            Write-Host ""
+            Write-Host "FRENO ACTIVO: este worktree pertenece a un run autonomo con freno armado$forWhat." -ForegroundColor Red
+            if ($brakeMarker.endToEnd) {
+                Write-Host "PUNTA A PUNTA: la orden esta REGISTRADA pero todavia no se ejecuta." -ForegroundColor Yellow
+                Write-Host "  El mecanismo que la honraba tenia dos agujeros que no podia defender (#541)," -ForegroundColor Yellow
+                Write-Host "  asi que ninguna ruta de merge esta abierta para ningun run." -ForegroundColor Yellow
+            } else {
+                Write-Host "Deja el PR listo y con el gate en verde; el cierre lo hace una persona." -ForegroundColor Yellow
+            }
+            Write-Host "  Marcador: $($brakeMarker.path)" -ForegroundColor DarkGray
+            Write-Host "  (Si de verdad quieres mergear a mano, borra ese archivo primero - a conciencia.)" -ForegroundColor DarkGray
+            Write-Host ""
+            exit 1
+        }
+    }
+}
+}
+
 # The single resolver for owner/name from this clone's origin (#281, #392). Do NOT inline the regex
 # again: the copy-pasted version ate any dot in the repo name (midominio.com -> midominio).
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
@@ -85,22 +149,21 @@ if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi 
 $owner = ($Repo -split '/')[0]
 
 # -- 2. Account FROM THE OWNER (same mapping as New-BoardPR.ps1) ----------------
-$ownerVarMap = @{
-    'CSalcedoDataBI' = 'GITHUB_TOKEN_PERSONAL'
-    'PAL-Devs'       = 'GITHUB_TOKEN_BUSINESS'
-}
-if (-not $TokenVar) {
-    if ($ownerVarMap.ContainsKey($owner)) {
-        $TokenVar = $ownerVarMap[$owner]
-    } else {
-        $TokenVar = 'GITHUB_TOKEN_PERSONAL'
-        Write-Host "AVISO: owner '$owner' no esta mapeado a una cuenta - uso la personal por defecto (-TokenVar para forzar otra)." -ForegroundColor Yellow
-    }
-}
+# One map, not four copies (#550): Resolve-GhTokenVar owns owner -> variable.
+$prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
+$env:ABIOS_TOKENVAR_DOTSOURCE = '1'
+. (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
+$env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
+if (-not $TokenVar) { $TokenVar = Get-OwnerTokenVar -Owner $owner }
 $token = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
 if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar no esta en el entorno USER de Windows." }
 # On purpose: identity must match the repo owner, not whatever ran last.
 $env:GH_TOKEN = $token
+
+# NOW the brake check can read the PR: $Repo is resolved and the token is in place. Defined far
+# above, called here on purpose - it refuses (exit 1) before anything is merged, and every fact it
+# weighs is one it could actually read.
+Invoke-BrakeMergeCheck
 
 # -- 3. Identity + admin (bypass candidate) ------------------------------------
 $login = "$(gh api user --jq .login 2>$null)".Trim()

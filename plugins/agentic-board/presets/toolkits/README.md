@@ -10,6 +10,7 @@ installed copy still matches upstream.
 |---------|----------|--------------------|
 | `quality.json` | `quality` | Skill-authoring/review toolkit (skill-creator, writing-skills, …) |
 | `bi.json` | `semantic-model-review`, `fabric-app`, `data-agent` | Microsoft Fabric / Power BI ecosystem tools |
+| `mcp.json` | `documentation` | MCP servers installable via `claude mcp add` (e.g. DeepWiki) |
 
 ## Entry schema
 
@@ -20,8 +21,8 @@ Every catalog is a JSON array of entries with these keys (all required):
 | `name` | string | Canonical skill/tool name — matched (case-insensitive) against the live inventory so nothing is installed twice. |
 | `owner` | string | Who publishes it. Surfaced at list/install time — the attribution ("who owns each tool"). |
 | `repo` | string | GitHub `owner/name`. |
-| `kind` | `"skill-clone"` \| `"plugin"` | How it installs (see below). |
-| `detect` | string \| null | *(plugin only)* the id to match against `claude plugin list` — usually the **marketplace** name, since one marketplace publishes several plugins. Falls back to `name` when absent. Omit / `null` for `skill-clone` (detected by `name`). |
+| `kind` | `"skill-clone"` \| `"plugin"` \| `"mcp"` | How it installs (see below). |
+| `detect` | string \| null | *(plugin/mcp)* **Required and non-empty** — the id matched against `claude plugin list` / `claude mcp list` to decide if the tool is already installed. `null` for `skill-clone`. |
 | `path` | string \| null | Subpath to the skill folder for `skill-clone`; `null` for `plugin`. |
 | `license` | string | SPDX id or short label — copied next to the installed skill (mandatory for CC BY-SA). |
 | `homepage` | string | URL to the tool's home. |
@@ -38,6 +39,9 @@ Every catalog is a JSON array of entries with these keys (all required):
 - **`plugin`** — a whole Claude Code plugin/marketplace (has a `.claude-plugin/marketplace.json`).
   Not folder-cloned: the installer **emits the exact `install` command** for the user to run
   (installing third-party plugins is deliberately not automated). `path` is `null`.
+- **`mcp`** — a Claude Code MCP server, installed with `claude mcp add`. Like `plugin`, the
+  installer **emits the exact `install` command** for the user to run. Detection uses
+  `claude mcp list` (via `Get-InstalledMcpServers.ps1`). `path` is `null`.
 
 ## Adding an entry
 
@@ -49,6 +53,7 @@ User-owned BI repos are added as `skill-clone` entries in `bi.json` once named a
 
 `Get-SkillGaps.ps1 -Profile <name>` reads `presets/toolkits/<name>.json` and reports installed
 vs gaps. Detection is by kind: `skill-clone` entries match `name` against the installed skill
-inventory; `plugin` entries match `detect` (marketplace/plugin id from `claude plugin list`).
+inventory; `plugin` entries match `detect` (marketplace/plugin id from `claude plugin list`);
+`mcp` entries match `detect` (server name from `claude mcp list`).
 `skills-bootstrap` then installs only the gaps — cloning `skill-clone` folders and emitting the
-`install` command for `plugin` entries.
+`install` command for `plugin` and `mcp` entries.

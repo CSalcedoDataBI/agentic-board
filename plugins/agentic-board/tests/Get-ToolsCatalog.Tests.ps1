@@ -130,3 +130,49 @@ Describe 'Get-ToolsCatalog — resilience' {
         ($cat.items.id | Sort-Object) | Should -Be @('second-opinion','skill-improver')
     }
 }
+
+Describe 'Get-ToolsCatalog — mcp kind (#416)' {
+    BeforeAll {
+        $script:McpDir = Join-Path $TestDrive 'mcp-toolkits'
+        New-Item -ItemType Directory -Force -Path $script:McpDir | Out-Null
+        ,@(
+            @{ name='deepwiki-mcp'; owner='Cognition'; repo='cognitionai/deepwiki'; kind='mcp'; detect='deepwiki'; path=$null; homepage='https://deepwiki.com'; license='see repo'; install='claude mcp add --transport sse deepwiki https://mcp.deepwiki.com/sse'; purpose='AI wiki for public GitHub repos.' }
+        ) | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $script:McpDir 'mcp.json') -Encoding utf8
+
+        $script:McpRoot = Join-Path $TestDrive 'mcp-proj'
+        New-Item -ItemType Directory -Force -Path (Join-Path $script:McpRoot 'knowledge') | Out-Null
+        @{ version=1; project='test'; domains=@(); references=@() } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $script:McpRoot 'knowledge' 'registry.json') -Encoding utf8
+    }
+
+    It 'includes mcp entries in the catalog as installable' {
+        $cat = & $script:Resolver -Root $script:McpRoot -CatalogDir $script:McpDir `
+            -InstalledNames @() -InstalledPlugins @() -InstalledMcpServers @()
+        $entry = $cat.items | Where-Object { $_.id -eq 'deepwiki-mcp' }
+        $entry            | Should -Not -BeNullOrEmpty
+        $entry.kind       | Should -Be 'mcp'
+        $entry.installable| Should -BeTrue
+        $entry.installed  | Should -BeFalse
+        $entry.installMethod | Should -Match 'claude mcp add'
+    }
+
+    It 'detects a mcp server as installed when its detect name is in InstalledMcpServers' {
+        $cat = & $script:Resolver -Root $script:McpRoot -CatalogDir $script:McpDir `
+            -InstalledNames @() -InstalledPlugins @() -InstalledMcpServers @('deepwiki')
+        $entry = $cat.items | Where-Object { $_.id -eq 'deepwiki-mcp' }
+        $entry.installed | Should -BeTrue
+    }
+
+    It 'excludes a detected mcp server from MissingOnly results' {
+        $missing = & $script:Resolver -Root $script:McpRoot -CatalogDir $script:McpDir `
+            -InstalledNames @() -InstalledPlugins @() -InstalledMcpServers @('deepwiki') -MissingOnly
+        $missing.items | Where-Object { $_.id -eq 'deepwiki-mcp' } | Should -BeNullOrEmpty
+    }
+
+    It 'mcp detection is case-insensitive' {
+        $cat = & $script:Resolver -Root $script:McpRoot -CatalogDir $script:McpDir `
+            -InstalledNames @() -InstalledPlugins @() -InstalledMcpServers @('DEEPWIKI')
+        $entry = $cat.items | Where-Object { $_.id -eq 'deepwiki-mcp' }
+        $entry.installed | Should -BeTrue
+    }
+}

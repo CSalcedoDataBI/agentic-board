@@ -16,6 +16,54 @@ BeforeAll {
     $script:Placeholder = '_TBD'
 }
 
+Describe 'Format-PriorArtGateBlock' {
+    It 'renders the ## Prior-art gate heading when PriorArt is provided' {
+        $b = Format-PriorArtGateBlock -PriorArt 'Searched: gh search repos wiki; Decision: build'
+        $b | Should -Match '## Prior-art gate'
+    }
+
+    It 'renders the PriorArt content under the heading' {
+        $b = Format-PriorArtGateBlock -PriorArt 'Decision: reference DeepWiki (zero setup)'
+        $b | Should -Match 'Decision: reference DeepWiki'
+        $b.IndexOf('## Prior-art gate') | Should -BeLessThan ($b.IndexOf('Decision: reference DeepWiki'))
+    }
+
+    It 'renders the heading and a skip notice when -NoPriorArt is set' {
+        $b = Format-PriorArtGateBlock -NoPriorArt
+        $b | Should -Match '## Prior-art gate'
+        $b | Should -Match 'Skipped with -NoPriorArt'
+    }
+
+    It 'does NOT include a caller-supplied PriorArt string when -NoPriorArt is set' {
+        $b = Format-PriorArtGateBlock -PriorArt 'should not appear' -NoPriorArt
+        $b | Should -Not -Match 'should not appear'
+    }
+
+    It 'trims leading/trailing whitespace from the PriorArt content' {
+        $b = Format-PriorArtGateBlock -PriorArt '  trimmed content  '
+        $b | Should -Match 'trimmed content'
+        $b | Should -Not -Match '  trimmed content  '
+    }
+}
+
+Describe 'Assert-PriorArtPresent' {
+    It 'throws when PriorArt is empty and -NoPriorArt is not set' {
+        { Assert-PriorArtPresent -PriorArt '' } | Should -Throw '*prior-art search is required*'
+    }
+
+    It 'throws when PriorArt is whitespace and -NoPriorArt is not set' {
+        { Assert-PriorArtPresent -PriorArt '   ' } | Should -Throw '*prior-art search is required*'
+    }
+
+    It 'does NOT throw when PriorArt has content' {
+        { Assert-PriorArtPresent -PriorArt 'Decision: build — no existing tool does X' } | Should -Not -Throw
+    }
+
+    It 'does NOT throw when -NoPriorArt is set even if PriorArt is empty' {
+        { Assert-PriorArtPresent -PriorArt '' -NoPriorArt } | Should -Not -Throw
+    }
+}
+
 Describe 'Format-EnrichedEpicBody' {
     It 'renders all five standard headings' {
         $b = Format-EnrichedEpicBody -Goal 'Build X' -Research 'Prior art: Ralph' `
@@ -54,5 +102,52 @@ Describe 'Format-EnrichedEpicBody' {
         $b | Should -Match '## Goal'
         $b | Should -Match '## Test plan \(Definition of Done\)'
         ([regex]::Matches($b, [regex]::Escape($script:Placeholder))).Count | Should -BeGreaterOrEqual 5
+    }
+}
+
+Describe 'Resolve-TextParam (#419 - file-backed parameters)' {
+    BeforeAll {
+        $script:TmpDir = Join-Path $TestDrive 'resolve-text'
+        New-Item -ItemType Directory -Force $script:TmpDir | Out-Null
+    }
+
+    It 'returns the inline value when filePath is empty' {
+        Resolve-TextParam '' 'inline text' | Should -BeExactly 'inline text'
+    }
+
+    It 'returns the inline value when filePath is whitespace-only' {
+        Resolve-TextParam '   ' 'inline text' | Should -BeExactly 'inline text'
+    }
+
+    It 'reads and returns file content when a valid file is provided' {
+        $f = Join-Path $script:TmpDir 'desc.txt'
+        Set-Content -Path $f -Value 'content from file' -NoNewline
+        Resolve-TextParam $f '' | Should -Match 'content from file'
+    }
+
+    It 'treats text containing slash-commands as data (not executed) when loaded from a file' {
+        $f = Join-Path $script:TmpDir 'slashes.txt'
+        $payload = "/board plan - use /scan and /knowledge to research; see /expert auto"
+        Set-Content -Path $f -Value $payload -NoNewline
+        $result = Resolve-TextParam $f ''
+        $result | Should -Match '/board'
+        $result | Should -Match '/scan'
+        $result | Should -Match '/knowledge'
+    }
+
+    It 'a file with a destructive-looking command is returned as plain text, never executed' {
+        $f = Join-Path $script:TmpDir 'destructive.txt'
+        Set-Content -Path $f -Value 'Remove-Item /etc/passwd -Force' -NoNewline
+        Resolve-TextParam $f '' | Should -BeExactly 'Remove-Item /etc/passwd -Force'
+    }
+
+    It 'throws when the file path is set but the file does not exist' {
+        { Resolve-TextParam (Join-Path $script:TmpDir 'nonexistent.txt') '' } | Should -Throw "*does not exist*"
+    }
+
+    It 'prefers the file when both a file and an inline value are supplied (file wins)' {
+        $f = Join-Path $script:TmpDir 'wins.txt'
+        Set-Content -Path $f -Value 'from file' -NoNewline
+        Resolve-TextParam $f 'inline should be ignored' | Should -BeExactly 'from file'
     }
 }

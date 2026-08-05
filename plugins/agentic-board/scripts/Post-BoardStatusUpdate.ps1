@@ -48,6 +48,9 @@ if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (
 # its exit code - either way an unchecked read here would post a status update off a misread board
 # (a wrong "0 Done" body, or the mutation's own silent failure). -Graphql fails closed on both (#303).
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# ...and a CAPPED read is the other half (#484): this body is PUBLISHED, so "0 Backlog" computed
+# from a short list is a false public statement about the project's progress.
+. (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 
 $boardUrl = "https://github.com/users/$Owner/projects/$ProjectNum"
 
@@ -63,8 +66,9 @@ if (-not $projectId) { throw "Board #$ProjectNum no encontrado para $Owner." }
 
 # Auto-generate the body from live board data when not given
 if (-not $Body) {
-    $items = (Invoke-Gh -GhArgs @('project','item-list',"$ProjectNum",'--owner',$Owner,'--format','json','--limit','200') `
-                        -What "listar los items del board #$ProjectNum" -Json).items
+    $read  = Get-BoardItems -Number $ProjectNum -Owner $Owner `
+                            -What "listar los items del board #$ProjectNum"
+    $items = $read.Items
     $done    = @($items | Where-Object { $_.status -eq "Done" }).Count
     $inProg  = @($items | Where-Object { $_.status -eq "In Progress" }).Count
     $pending = @($items | Where-Object { (-not $_.status) -or ($_.status -eq "Backlog") })
@@ -75,8 +79,16 @@ if (-not $Body) {
                  if ($_.content.number) { "#$($_.content.number) $($_.title)" } else { $_.title }
              }) -join "; "
 
-    $Body = "**Progreso:** $done Done / $inProg In Progress / $($pending.Count) Backlog ($total items)."
+    # Render the counts as FLOORS when the read hit its cap, rather than stating them and
+    # retracting afterwards: "0 Backlog" followed by a footnote has already made the claim. The
+    # "+" carries the caveat inside every number it applies to, and the note explains it (#484).
+    $sfx  = if ($read.Truncated) { "+" } else { "" }
+    $Body = "**Progreso:** $done$sfx Done / $inProg$sfx In Progress / $($pending.Count)$sfx Backlog ($total$sfx items)."
     if ($next) { $Body += "`n**Siguiente:** $next" }
+    if ($read.Truncated) {
+        $Body += "`n_Nota: solo pude leer $($read.Read) items del board, que es el tope de la lectura; " +
+                 "las cuentas de arriba son un minimo (de ahi el '+'), no un total._"
+    }
 }
 
 $updQuery = '

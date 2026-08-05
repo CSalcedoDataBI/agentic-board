@@ -16,20 +16,40 @@ BeforeAll {
         'fabric-cli:fabric-cli',
         'skill-creator','writing-skills','second-opinion'   # quality profile
     )
+
+    # The FACTORY catalog, explicitly. Without this these tests call Get-ExpertRoles, which merges
+    # whatever `.agentic-board/roles.json` the working directory happens to hold — so adding a
+    # local role to any project broke the plugin's own suite. A unit test of the classification
+    # logic must not depend on the checkout it runs in.
+    $presets = Join-Path $PSScriptRoot '..' 'presets' 'roles.json' | Resolve-Path
+    $pj = Get-Content -Raw -LiteralPath $presets | ConvertFrom-Json
+    $script:Factory = @{
+        qualityProfile = @($pj.qualityProfile)
+        roles = @($pj.roles | ForEach-Object {
+            @{ name = $_.name; keywords = @($_.keywords); skills = @($_.skills) }
+        })
+    }
 }
 
 Describe 'Get-DomainFromPlan' {
     It 'classifies a Power BI visual plan as powerbi-report' {
-        Get-DomainFromPlan -Text 'Build a Power BI visual extension using Deneb' | Should -Be 'powerbi-report'
+        Get-DomainFromPlan -Text 'Build a Power BI visual extension using Deneb' -Catalog $script:Factory | Should -Be 'powerbi-report'
     }
     It 'classifies a DAX/measure plan as semantic-model' {
-        Get-DomainFromPlan -Text 'Add a DAX measure to the semantic model and validate TMDL' | Should -Be 'semantic-model'
+        Get-DomainFromPlan -Text 'Add a DAX measure to the semantic model and validate TMDL' -Catalog $script:Factory | Should -Be 'semantic-model'
     }
     It 'classifies a Fabric lakehouse plan as fabric' {
-        Get-DomainFromPlan -Text 'Create a Fabric lakehouse ingestion pipeline' | Should -Be 'fabric'
+        Get-DomainFromPlan -Text 'Create a Fabric lakehouse ingestion pipeline' -Catalog $script:Factory | Should -Be 'fabric'
     }
     It 'falls back to generic for unrelated text' {
-        Get-DomainFromPlan -Text 'Refactor the logging helper for clarity' | Should -Be 'generic'
+        Get-DomainFromPlan -Text 'Refactor the logging helper for clarity' -Catalog $script:Factory | Should -Be 'generic'
+    }
+    It 'is unaffected by whatever local catalog the checkout holds' {
+        # The regression guard for the defect this fix answers: a local role must not be able to
+        # change the factory classification these tests assert.
+        $local = @{ roles = @(@{ name='swallow-everything'; keywords=@('refactor','the','a'); skills=@() }) }
+        Get-DomainFromPlan -Text 'Refactor the logging helper for clarity' -Catalog $local | Should -Be 'swallow-everything'
+        Get-DomainFromPlan -Text 'Refactor the logging helper for clarity' -Catalog $script:Factory | Should -Be 'generic'
     }
 }
 

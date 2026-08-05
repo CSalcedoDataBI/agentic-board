@@ -325,6 +325,33 @@ Describe 'New-IssueWorkspace picks the base itself (the #294 wiring)' {
         $wp = New-IssueWorkspace -repo $script:Repo4 -issueNum 65 -branchName 'issue-65-fix'
         @($wp).Count | Should -Be 1
     }
+
+    It 'forces a worktree when another live session is registered at the same workPath (#225)' {
+        # Plant a fake sessions.json in the repo state dir. The entry uses $PID (the Pester
+        # runner itself) as sessionPid - it is a live process, and it differs from myPid
+        # (parent of the script's own $PID), so the code classifies it as a foreign session.
+        $stateDir = Get-AbiosStateDir
+        New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+        $fakeEntry = [pscustomobject]@{
+            issue        = 99
+            repo         = $script:Repo4
+            branch       = 'issue-99-other'
+            workPath     = $script:Clone4
+            sessionPid   = $PID
+            via          = ''
+            cli          = 'claude'
+            fleetSession = ''
+            host         = $env:COMPUTERNAME
+            started      = '2026-01-01 00:00'
+        }
+        @($fakeEntry) | ConvertTo-Json -Depth 4 -AsArray |
+            Set-Content (Join-Path $stateDir 'sessions.json')
+        # Clean tree on feature-z -> would normally go in-place (no dirty files, not an
+        # issue-* branch). The live session entry must override that and force a worktree.
+        $wp = New-IssueWorkspace -repo $script:Repo4 -issueNum 66 -branchName 'issue-66-collision'
+        $wp | Should -Not -Be $script:Clone4   # must NOT have stayed in the main clone
+        $wp | Should -Not -BeNullOrEmpty       # must have returned a valid worktree path
+    }
 }
 
 Describe 'New-IssueWorktree honours a base ref it is given' {
@@ -538,6 +565,26 @@ Describe 'Resolve-ClaudeAuthVar' {
     }
     It 'falls back to the default when not explicit and no OAuth token' {
         Resolve-ClaudeAuthVar $false 'ANTHROPIC_API_KEY' $false | Should -Be 'ANTHROPIC_API_KEY'
+    }
+}
+
+Describe 'Resolve-LaunchBrake — all fleet sessions brake on merge by default (#598)' {
+    It 'brakes when no flags are given (the new safe default for plain -Parallel -Launch)' {
+        Resolve-LaunchBrake -AllowMerge $false -StopAtPRBound $false -StopAtPR $false | Should -BeTrue
+    }
+    It '-AllowMerge $true opts out of the brake explicitly' {
+        Resolve-LaunchBrake -AllowMerge $true -StopAtPRBound $false -StopAtPR $false | Should -BeFalse
+    }
+    It 'honours an explicit -StopAtPR:$true even without -AllowMerge' {
+        Resolve-LaunchBrake -AllowMerge $false -StopAtPRBound $true -StopAtPR $true | Should -BeTrue
+    }
+    It 'honours an explicit -StopAtPR:$false (an expert contract that allows merging)' {
+        # Expert-Auto.ps1 passes -StopAtPR:$false when the contract does not mark merge irreversible.
+        # That explicit opt-out must be respected; the default brake must not override it.
+        Resolve-LaunchBrake -AllowMerge $false -StopAtPRBound $true -StopAtPR $false | Should -BeFalse
+    }
+    It '-AllowMerge wins over an explicit -StopAtPR:$true' {
+        Resolve-LaunchBrake -AllowMerge $true -StopAtPRBound $true -StopAtPR $true | Should -BeFalse
     }
 }
 
@@ -1681,12 +1728,21 @@ Describe 'Invoke-SessionCleanup (teardown plan, #135)' {
         $acts[2] | Should -CMatch 'branch -d issue-9-x'   # safe delete, never -D (#273)
         $acts[3] | Should -Match 'prune #9'
     }
-    It 'does NOT kill a wt session PID (it is the host/launcher, not the tab) - Codex #269' {
+    It 'does NOT kill the wt host PID - instead finds the tab shell by launch script (#413)' {
         $s = [pscustomobject]@{ issue = 8; branch = 'issue-8-w'; workPath = 'C:\wt\issue-8'; sessionPid = 4321; via = 'wt' }
+        Mock Find-WtTabShell { return $null }   # no shell running; deterministic
         $acts = @(Invoke-SessionCleanup -Session $s -DryRun)
-        ($acts -join ' ') | Should -Not -Match 'kill PID 4321'
-        ($acts -join ' ') | Should -Match 'NO mato PID'
+        ($acts -join ' ') | Should -Not -Match 'kill PID 4321'   # host PID is never killed
+        ($acts -join ' ') | Should -Match 'no encontrado'        # tab shell not running
         ($acts -join ' ') | Should -Match 'prune #8'
+    }
+    It 'kills the pwsh tab shell for a wt session when found by launch script name - #413' {
+        $s = [pscustomobject]@{ issue = 8; branch = 'issue-8-w'; workPath = 'C:\wt\issue-8'; sessionPid = 4321; via = 'wt' }
+        Mock Find-WtTabShell { return [pscustomobject]@{ ProcessId = 9999; CommandLine = 'pwsh -NoExit -File launch-8.ps1' } }
+        $acts = @(Invoke-SessionCleanup -Session $s -DryRun)
+        ($acts -join ' ') | Should -Not -Match 'kill PID 4321'   # host PID is never killed
+        ($acts -join ' ') | Should -Match 'kill PID 9999'        # kills the actual tab shell
+        ($acts -join ' ') | Should -Match 'launch-8'
     }
     It 'skips the PID-kill step when the session has no sessionPid' {
         $s = [pscustomobject]@{ issue = 5; branch = 'issue-5-y'; workPath = 'C:\wt\issue-5'; sessionPid = 0; via = 'pwsh' }
@@ -1715,8 +1771,7 @@ Describe 'Invoke-SessionCleanup (teardown plan, #135)' {
 Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
     # Real repo + real worktree + a REAL held handle: the whole bug is what the OS and git do to
     # each other here, so a mock would only re-assert my own assumption. The handle stands in for
-    # the untracked `wt` tab shell that Invoke-SessionCleanup deliberately never kills (PR #269),
-    # which makes this the DESIGNED case for -Launch sessions, not a rare one.
+    # a shell cwd'd inside the worktree, making this the designed case for -Launch sessions.
     BeforeEach {
         $script:Repo2 = Join-Path $TestDrive ('h' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $script:Work2 = "$($script:Repo2)-wt"
@@ -1728,6 +1783,9 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
         git -c user.email=t@t -c user.name=t commit -q -m base
         git worktree add -q -b issue-21-h $script:Work2 2>&1 | Out-Null
         Mock Remove-SessionRegistryEntry { }
+        # Mock Find-WtTabShell so no real Get-CimInstance is called: the FileStream below is
+        # the handle stand-in, not a real pwsh process (#413).
+        Mock Find-WtTabShell { return $null }
         # Deny-share handle on a file INSIDE the worktree - what a shell cwd'd in there does.
         $script:Handle = [System.IO.File]::Open((Join-Path $script:Work2 'a.txt'), 'Open', 'Read', 'None')
         function script:New-HSession {
@@ -1815,6 +1873,35 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
             (git branch --list 'issue-21-h') | Should -Not -BeNullOrEmpty
             Should -Invoke Remove-SessionRegistryEntry -Times 0 -Exactly
         } finally { git worktree unlock $script:Work2 2>&1 | Out-Null }
+    }
+}
+
+Describe 'Find-WtTabShellCore (pure: tab shell lookup by launch script - #413)' {
+    It 'returns null when no process carries the expected launch script' {
+        $procs = @(
+            [pscustomobject]@{ ProcessId = 1111; CommandLine = 'pwsh -NoExit -File C:\tmp\launch-42.ps1' }
+        )
+        $result = Find-WtTabShellCore -Processes $procs -IssueNum 8
+        $result | Should -BeNullOrEmpty
+    }
+    It 'returns the process matching the exact issue number' {
+        $procs = @(
+            [pscustomobject]@{ ProcessId = 1111; CommandLine = 'pwsh -NoExit -File C:\tmp\launch-42.ps1' }
+            [pscustomobject]@{ ProcessId = 2222; CommandLine = 'pwsh -NoExit -File C:\tmp\launch-8.ps1' }
+        )
+        $result = Find-WtTabShellCore -Processes $procs -IssueNum 8
+        $result.ProcessId | Should -Be 2222
+    }
+    It 'does NOT match a different issue that shares digits (e.g. issue 8 vs 82)' {
+        $procs = @(
+            [pscustomobject]@{ ProcessId = 3333; CommandLine = 'pwsh -NoExit -File C:\tmp\launch-82.ps1' }
+        )
+        $result = Find-WtTabShellCore -Processes $procs -IssueNum 8
+        $result | Should -BeNullOrEmpty
+    }
+    It 'returns null for an empty process list' {
+        $result = Find-WtTabShellCore -Processes @() -IssueNum 42
+        $result | Should -BeNullOrEmpty
     }
 }
 
@@ -2080,6 +2167,29 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
         $r.timedOut | Should -BeTrue
         $r.allDone  | Should -BeFalse
     }
+    It 'runs the supervisor every -SuperviseEvery cycles so stalls get posted without a human command (#565)' {
+        $script:t2 = 0
+        $script:supervised = 0
+        Invoke-SessionWatch -TimeoutSec 100 -SuperviseEvery 2 `
+            -ReadSessions { @([pscustomobject]@{ issue = 1 }) } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'en progreso' } } `
+            -Now  { $script:t2 += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t2) } `
+            -Sleep { param($sec) } `
+            -Supervise { $script:supervised++ } | Out-Null
+        # 10 polls before the 100s timeout, one supervision every 2 -> at least 3 calls.
+        $script:supervised | Should -BeGreaterThan 2
+    }
+    It 'SuperviseEvery 0 disables supervision entirely' {
+        $script:t3 = 0
+        $script:supervised2 = 0
+        Invoke-SessionWatch -TimeoutSec 50 -SuperviseEvery 0 `
+            -ReadSessions { @([pscustomobject]@{ issue = 1 }) } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'en progreso' } } `
+            -Now  { $script:t3 += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t3) } `
+            -Sleep { param($sec) } `
+            -Supervise { $script:supervised2++ } | Out-Null
+        $script:supervised2 | Should -Be 0
+    }
     It 'auto-cleans each finished session exactly once' {
         Mock Invoke-SessionCleanup { @('mock teardown') }
         $r = Invoke-SessionWatch -AutoClean `
@@ -2123,6 +2233,81 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
             -GetStatus    { param($s) [pscustomobject]@{ done = $true; reason = 'x' } } `
             -Now { Get-Date } -Sleep { param($sec) } | Out-Null
         Should -Invoke Invoke-SessionCleanup -Times 0 -Exactly
+    }
+
+    # --- #414: skip re-polling, stale prune, rate-limit protection ---
+
+    It 'does not re-poll a session that was already reported LISTO in a prior cycle (#414)' {
+        # GetStatus cycles: first call done, second call should not happen for the same issue.
+        $script:callCount = @{}
+        $script:cycle414 = 0
+        # Two sessions: A finishes in cycle 1, B stays pending then finishes in cycle 2.
+        # GetStatus should only be called ONCE for A (in cycle 1).
+        $r = Invoke-SessionWatch `
+            -ReadSessions {
+                @(
+                    [pscustomobject]@{ issue = 42; sessionPid = $null; workPath = $null },
+                    [pscustomobject]@{ issue = 43; sessionPid = $null; workPath = $null }
+                )
+            } `
+            -GetStatus {
+                param($s)
+                $script:callCount["$($s.issue)"] = ($script:callCount["$($s.issue)"] + 1)
+                # Session 42 is always done; session 43 is done after 2nd call.
+                if ($s.issue -eq 42) { [pscustomobject]@{ done = $true; reason = 'PR merged'; merged = $true } }
+                else {
+                    $n = $script:callCount['43']
+                    if ($n -ge 2) { [pscustomobject]@{ done = $true; reason = 'PR merged'; merged = $true } }
+                    else          { [pscustomobject]@{ done = $false; reason = 'en progreso'; merged = $false } }
+                }
+            } `
+            -Now { [datetime]::new(2026,1,1) } `
+            -Sleep { param($sec) } `
+            -IsStale { $false } `
+            -SuperviseEvery 0
+        # Session 42 should have been polled exactly once (cycle 1 only).
+        $script:callCount['42'] | Should -Be 1
+        $r.allDone | Should -BeTrue
+    }
+
+    It 'prunes zombie sessions (dead PID + missing workPath) without calling GetStatus (#414)' {
+        Mock Remove-SessionRegistryEntry { }
+        $script:getStatusCalled = $false
+        $r = Invoke-SessionWatch `
+            -ReadSessions { @([pscustomobject]@{ issue = 99; sessionPid = 12345; workPath = 'C:\gone' }) } `
+            -GetStatus    { param($s) $script:getStatusCalled = $true; [pscustomobject]@{ done = $false; reason = 'x' } } `
+            -IsStale      { param($s) $true } `
+            -Now { Get-Date } -Sleep { param($sec) } `
+            -SuperviseEvery 0
+        $script:getStatusCalled  | Should -BeFalse
+        Should -Invoke Remove-SessionRegistryEntry -Times 1 -Exactly -ParameterFilter { $IssueNum -eq 99 }
+        $r.allDone | Should -BeTrue
+    }
+
+    It 'removes zombie from sessions.json with outcome stale-prune (#414)' {
+        $script:outcome414 = $null
+        Mock Remove-SessionRegistryEntry { $script:outcome414 = $Outcome }
+        Invoke-SessionWatch `
+            -ReadSessions { @([pscustomobject]@{ issue = 99; sessionPid = 12345; workPath = 'C:\gone' }) } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'x' } } `
+            -IsStale      { param($s) $true } `
+            -Now { Get-Date } -Sleep { param($sec) } `
+            -SuperviseEvery 0 | Out-Null
+        $script:outcome414 | Should -Be 'stale-prune'
+    }
+
+    It 'does not report a rate-limited session as done (#414)' {
+        # A GetStatus returning rateLimited=true must NOT be counted as LISTO.
+        $script:t414 = 0
+        $r = Invoke-SessionWatch -TimeoutSec 5 `
+            -ReadSessions { @([pscustomobject]@{ issue = 55; sessionPid = $null; workPath = $null }) } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'UNKNOWN (rate limit)'; rateLimited = $true; merged = $false } } `
+            -IsStale      { $false } `
+            -Now  { $script:t414 += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t414) } `
+            -Sleep { param($sec) } `
+            -SuperviseEvery 0
+        $r.timedOut | Should -BeTrue
+        $r.allDone  | Should -BeFalse
     }
 }
 

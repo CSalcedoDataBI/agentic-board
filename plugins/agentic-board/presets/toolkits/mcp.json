@@ -1,0 +1,15 @@
+[
+  {
+    "name": "deepwiki-mcp",
+    "owner": "Cognition",
+    "repo": "cognitionai/deepwiki",
+    "kind": "mcp",
+    "detect": "deepwiki",
+    "path": null,
+    "license": "see repo",
+    "homepage": "https://deepwiki.com",
+    "profiles": ["documentation"],
+    "install": "claude mcp add --transport sse deepwiki https://mcp.deepwiki.com/sse",
+    "purpose": "AI wiki for public GitHub repos: read_wiki_structure / read_wiki_contents / ask_question — zero setup, no account needed to read an already-indexed repo. Public repos only; private repos require paid Devin."
+  }
+]

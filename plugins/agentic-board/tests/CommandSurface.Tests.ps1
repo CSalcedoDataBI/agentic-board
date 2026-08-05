@@ -92,3 +92,26 @@ Describe 'Command surface — /tools referenced-tools catalog (#384)' {
         $board | Should -Match '(?m)^\s*/tools\b' -Because 'the whole tool must be discoverable from the /board entry point, alongside /scan /skills /knowledge'
     }
 }
+
+Describe 'Command surface — /docs routing contract (#417)' {
+    It 'commands/docs.md does not reference Docs-Command-* pages (dropped in #418)' {
+        $docsFile = Join-Path $script:CommandsDir 'docs.md'
+        Get-Content -LiteralPath $docsFile -Raw |
+            Should -Not -Match 'Docs-Command-' `
+            -Because 'commands/*.md are agent prompts not documentation; Docs-Command-* pages were dropped in #418 — the /docs prompt must not promise them'
+    }
+
+    It 'commands/docs.md documents both /docs wiki (generates) and /docs deepwiki (routes)' {
+        $docsFile = Join-Path $script:CommandsDir 'docs.md'
+        $raw = Get-Content -LiteralPath $docsFile -Raw
+        $raw | Should -Match '(?i)/docs wiki'     -Because '/docs wiki is the generation subcommand'
+        $raw | Should -Match '(?i)/docs deepwiki' -Because '/docs deepwiki is the routing subcommand'
+    }
+
+    It 'commands/docs.md declares the public-repos-only limit for deepwiki' {
+        $docsFile = Join-Path $script:CommandsDir 'docs.md'
+        Get-Content -LiteralPath $docsFile -Raw |
+            Should -Match '(?i)public.repos.only' `
+            -Because 'the docs prompt must warn about the DeepWiki public-repos-only limit at the point of use'
+    }
+}
