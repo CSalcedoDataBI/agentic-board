@@ -220,7 +220,7 @@ Describe 'Get-CommandRegionPlan (#493)' {
         # The whole point: a newly added command with no region must fail loudly, or it ships
         # with no closing contract and nothing notices.
         $plan = Get-CommandRegionPlan -Files @(@{ Name = 'new.md'; Text = 'a command with no region' }) -Prompt $script:Prompt
-        $plan.Missing | Should -Be @('new.md')
+        @($plan.Missing.Name) | Should -Be @('new.md')
         $plan.Writes.Count | Should -Be 0
     }
     It 'plans nothing for a file already carrying the current content (idempotent)' {
@@ -249,7 +249,7 @@ Describe 'Get-CommandRegionPlan (#493)' {
             @{ Name = 'missing.md'; Text = 'no region here' }
         )
         @($plan.Writes.Name)  | Should -Be @('ok.md')
-        @($plan.Missing)      | Should -Be @('missing.md')
+        @($plan.Missing.Name) | Should -Be @('missing.md')
     }
     It 'returns two empty lists for an empty batch instead of throwing' {
         $plan = Get-CommandRegionPlan -Files @() -Prompt $script:Prompt
@@ -259,6 +259,7 @@ Describe 'Get-CommandRegionPlan (#493)' {
     It 'treats a malformed region (two BEGINs) as missing rather than mangling the file' {
         $bad  = "<!-- BEGIN:closing-summary --><!-- BEGIN:closing-summary --><!-- END:closing-summary -->"
         $plan = Get-CommandRegionPlan -Files @(@{ Name = 'bad.md'; Text = $bad }) -Prompt $script:Prompt
-        $plan.Missing | Should -Be @('bad.md')
+        @($plan.Missing.Name) | Should -Be @('bad.md')
+        $plan.Missing[0].Reason | Should -Match 'Malformed' -Because 'reporting a duplicated marker as ''missing'' sends the reader hunting for an absent one'
     }
 }

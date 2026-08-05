@@ -176,7 +176,11 @@ function Get-CommandRegionPlan {
         try {
             $new = Set-MarkedRegion -Text $f.Text -Name 'closing-summary' -Content $content
         } catch {
-            $missing += $f.Name
+            # Both "no region at all" and "region is malformed" land here, and they need
+            # different repairs — so carry the real reason instead of reporting every case as
+            # "markers missing", which sends the reader looking for an absent marker when the
+            # actual problem is a duplicated one.
+            $missing += [pscustomobject]@{ Name = $f.Name; Reason = $_.Exception.Message }
             continue
         }
         if ($new -ne $f.Text) { $writes += [pscustomobject]@{ Name = $f.Name; Text = $new } }
@@ -274,7 +278,7 @@ $commandFiles = foreach ($cmdFile in (Get-ChildItem -Path $commandsDir -Filter '
 $plan           = Get-CommandRegionPlan -Files @($commandFiles) -Prompt $summaryPrompt
 $commandWrites  = @($plan.Writes)
 $commandMissing = @($plan.Missing)
-if ($commandMissing.Count) { $stale += "closing-summary markers missing in: $($commandMissing -join ', ')" }
+if ($commandMissing.Count) { $stale += "closing-summary region unusable in: $(($commandMissing.Name) -join ', ')" }
 if ($commandWrites.Count)  { $stale += "closing summary in $($commandWrites.Count) command file(s)" }
 
 if ($Check) {
@@ -284,18 +288,22 @@ if ($Check) {
         exit 0
     }
     Write-Host "  FAIL  stale in: $($stale -join ', ')" -ForegroundColor Red
+    foreach ($m in $commandMissing) { Write-Host "        $($m.Name): $($m.Reason)" -ForegroundColor DarkGray }
     if ($commandMissing.Count) {
-        Write-Host "        Add the region to each file listed above:" -ForegroundColor DarkGray
+        Write-Host "        A file with no region needs one added by hand:" -ForegroundColor DarkGray
         Write-Host "          <!-- BEGIN:closing-summary --><!-- END:closing-summary -->" -ForegroundColor DarkGray
     }
     Write-Host "        Then run Update-Docs.ps1 (no args) and commit the result." -ForegroundColor DarkGray
     exit 1
 }
 
-# A missing region cannot be repaired by regenerating - the markers are authored, not derived.
+# The markers are authored, not derived, so regenerating cannot repair them. Stop before writing
+# ANYTHING: a half-applied run (README rewritten, command files not) is harder to reason about
+# than one that changed nothing and said why.
 if ($commandMissing.Count) {
-    Write-Host "FAIL  closing-summary markers missing in: $($commandMissing -join ', ')" -ForegroundColor Red
-    Write-Host "      Add <!-- BEGIN:closing-summary --><!-- END:closing-summary --> to each, then re-run." -ForegroundColor DarkGray
+    Write-Host "FAIL  closing-summary region unusable - nothing was written:" -ForegroundColor Red
+    foreach ($m in $commandMissing) { Write-Host "        $($m.Name): $($m.Reason)" -ForegroundColor DarkGray }
+    Write-Host "      A file with no region needs <!-- BEGIN:closing-summary --><!-- END:closing-summary --> added, then re-run." -ForegroundColor DarkGray
     exit 1
 }
 
