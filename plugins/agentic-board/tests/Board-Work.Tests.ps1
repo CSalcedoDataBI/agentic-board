@@ -549,7 +549,7 @@ Describe 'Get-SessionBriefing adapter-aware' {
         (Get-SessionBriefing 5 'o/r' 'issue-5-x' 'C:\wt' -Cli 'claude') | Should -Match 'issue #5'
     }
     It 'still references the same PR + review-gate steps for any repl CLI' {
-        (Get-SessionBriefing 5 'o/r' 'issue-5-x' 'C:\wt' -Cli 'gemini') | Should -Match 'New-BoardPR.ps1'
+        (Get-SessionBriefing 5 'o/r' 'issue-5-x' 'C:\wt' -Cli 'antigravity') | Should -Match 'New-BoardPR.ps1'
     }
     It 'defaults to claude behavior when -Cli is omitted' {
         (Get-SessionBriefing 5 'o/r' 'issue-5-x' 'C:\wt') | Should -Match 'AUTONOMOUSLY'
@@ -754,9 +754,9 @@ Describe 'Build-WorktreeLaunch fleet marker (ABIOS_FLEET_SESSION)' {
         $p.fleetSession | Should -Be '42-abc123'
     }
     It 'stamps every adapter, not just claude (adapter-agnostic prefix)' {
-        $p = Build-WorktreeLaunch 42 'C:\wt' 'C:\brief.txt' 'abios-parallel' 'ANTHROPIC_API_KEY' 'gemini' '42-abc123'
+        $p = Build-WorktreeLaunch 42 'C:\wt' 'C:\brief.txt' 'abios-parallel' 'ANTHROPIC_API_KEY' 'antigravity' '42-abc123'
         $p.launchScript | Should -Match "ABIOS_FLEET_SESSION='42-abc123'"
-        $p.launchScript | Should -Match 'gemini -p '
+        $p.launchScript | Should -Match 'agy -p '
     }
     It 'adds NOTHING when -FleetSession is omitted (golden parity preserved)' {
         $p = Build-WorktreeLaunch 42 'C:\wt' 'C:\brief.txt' 'abios-parallel' 'ANTHROPIC_API_KEY' 'claude'
@@ -978,7 +978,7 @@ Describe 'Get-CliAdapters' {
         $claude.Probe        | Should -BeOfType ([scriptblock])
     }
     It "includes all five CLIs by name" {
-        (Get-CliAdapters).Name | Should -Contain 'gemini'
+        (Get-CliAdapters).Name | Should -Contain 'antigravity'
         (Get-CliAdapters).Name | Should -Contain 'jules'
         (Get-CliAdapters).Name | Should -Contain 'codex'
         (Get-CliAdapters).Name | Should -Contain 'copilot'
@@ -1026,19 +1026,35 @@ Describe 'Test-CliAvailability' {
         $r.Status | Should -Be 'not-installed'
     }
     It 'runs the probe when installed and returns its status' {
-        Mock Get-Command { [PSCustomObject]@{ Source='C:\x\gemini.exe' } } -ParameterFilter { $Name -eq 'gemini' }
-        $r = Test-CliAvailability -Adapter ([PSCustomObject]@{ Name='gemini'; Command='gemini'; Probe={ param($ctx) 'no-quota' } })
+        Mock Get-Command { [PSCustomObject]@{ Source='C:\x\agy.exe' } } -ParameterFilter { $Name -eq 'antigravity' }
+        $r = Test-CliAvailability -Adapter ([PSCustomObject]@{ Name='antigravity'; Command='antigravity'; Probe={ param($ctx) 'no-quota' } })
         $r.Status | Should -Be 'no-quota'
-        $r.Cli    | Should -Be 'gemini'
+        $r.Cli    | Should -Be 'antigravity'
+    }
+    It 'looks the real antigravity adapter up by its COMMAND (agy), not its Name (#615)' {
+        # Every earlier adapter had Name -eq Command, so nothing pinned the distinction.
+        # antigravity is the first where they differ: re-aligning Command to Name would make
+        # Get-Command search for a binary that does not exist and the CLI would silently
+        # report not-installed. Name/Command come from the REAL registry; only the probe is
+        # stubbed, so this cannot shell out to agy.
+        $adapter = Get-CliAdapters | Where-Object Name -eq 'antigravity'
+        $adapter.Command | Should -Be 'agy'
+        $script:probedName = $null
+        Mock Get-Command -MockWith { $script:probedName = $Name; [PSCustomObject]@{ Source='C:\x\agy.exe' } }
+        $r = Test-CliAvailability -Adapter ([PSCustomObject]@{
+            Name = $adapter.Name; Command = $adapter.Command; Probe = { param($ctx) 'ok' } })
+        $script:probedName | Should -Be 'agy'
+        $r.Cli    | Should -Be 'antigravity'
+        $r.Status | Should -Be 'ok'
     }
 }
 
 Describe 'Resolve-LaunchCli' {
     It 'returns the chosen CLI when it is available' {
-        Resolve-LaunchCli -Chosen 'gemini' -Availability @{ gemini='ok'; claude='ok' } | Should -Be 'gemini'
+        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity='ok'; claude='ok' } | Should -Be 'antigravity'
     }
     It 'falls back to claude when the chosen CLI is unavailable' {
-        Resolve-LaunchCli -Chosen 'gemini' -Availability @{ gemini='no-quota'; claude='ok' } | Should -Be 'claude'
+        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity='no-quota'; claude='ok' } | Should -Be 'claude'
     }
     It 'falls back to claude when the chosen CLI is missing from the map' {
         Resolve-LaunchCli -Chosen 'codex' -Availability @{ claude='ok' } | Should -Be 'claude'
@@ -1047,8 +1063,8 @@ Describe 'Resolve-LaunchCli' {
 
 Describe 'Resolve-IssueCliMap' {
     It 'keeps a valid available choice' {
-        $map = Resolve-IssueCliMap -Issues @(12,14) -Choices @{ 12='gemini'; 14='claude' } -Availability @{ gemini='ok'; claude='ok' }
-        $map[12] | Should -Be 'gemini'
+        $map = Resolve-IssueCliMap -Issues @(12,14) -Choices @{ 12='antigravity'; 14='claude' } -Availability @{ antigravity='ok'; claude='ok' }
+        $map[12] | Should -Be 'antigravity'
         $map[14] | Should -Be 'claude'
     }
     It 'coerces an unavailable choice to claude' {
@@ -1062,7 +1078,7 @@ Describe 'Resolve-IssueCliMap' {
 }
 Describe 'Show-CliAvailability' {
     It 'renders one line per CLI with its status' {
-        $out = Show-CliAvailability -Availability @{ claude='ok'; gemini='no-quota' } | Out-String
+        $out = Show-CliAvailability -Availability @{ claude='ok'; antigravity='no-quota' } | Out-String
         $out | Should -Match 'claude'
         $out | Should -Match 'no-quota'
     }
@@ -1074,9 +1090,9 @@ Describe 'Build-FleetPlan' {
             [PSCustomObject]@{ issue=12; repo='o/r'; branch='issue-12-x'; workPath='C:\wt\12' }
             [PSCustomObject]@{ issue=14; repo='o/r'; branch='issue-14-y'; workPath='C:\wt\14' }
         )
-        $map = @{ 12='gemini'; 14='claude' }
+        $map = @{ 12='antigravity'; 14='claude' }
         $plan = Build-FleetPlan -Started $started -CliMap $map
-        ($plan | Where-Object issue -eq 12).cli | Should -Be 'gemini'
+        ($plan | Where-Object issue -eq 12).cli | Should -Be 'antigravity'
         ($plan | Where-Object issue -eq 14).cli | Should -Be 'claude'
     }
     It 'defaults to claude when an issue is absent from the map' {
@@ -1197,22 +1213,22 @@ Describe 'Invoke-FleetDispatch (governor loop)' {
         ($r | Group-Object wave | ForEach-Object Count) | Should -Be @(2,2,1)
     }
     It 'reroutes a known no-quota CLI to the claude fallback (runtime backoff)' {
-        $r = Invoke-FleetDispatch -Queue @([pscustomobject]@{ issue=9; cli='gemini' }) `
-               -NoQuotaClis @{ gemini = $true } -LaunchSession { param($item, $cli) $cli } `
+        $r = Invoke-FleetDispatch -Queue @([pscustomobject]@{ issue=9; cli='antigravity' }) `
+               -NoQuotaClis @{ antigravity = $true } -LaunchSession { param($item, $cli) $cli } `
                -GetCapacity  { [pscustomobject]@{ FreeRamGB=100; Cores=16 } } `
                -CountRunning { 0 } -WaitForSlot { }
         $r[0].cli | Should -Be 'claude'
     }
     It 'passes an available CLI through unchanged' {
-        $r = Invoke-FleetDispatch -Queue @([pscustomobject]@{ issue=9; cli='gemini' }) `
+        $r = Invoke-FleetDispatch -Queue @([pscustomobject]@{ issue=9; cli='antigravity' }) `
                -LaunchSession { param($item,$cli) $cli } `
                -GetCapacity  { [pscustomobject]@{ FreeRamGB=100; Cores=16 } } `
                -CountRunning { 0 } -WaitForSlot { }
-        $r[0].cli | Should -Be 'gemini'
+        $r[0].cli | Should -Be 'antigravity'
     }
     It 'records the CLI the hook actually launched, not the pre-launch guess' {
         # The hook re-resolves availability and returns the CLI it really used.
-        $r = Invoke-FleetDispatch -Queue @([pscustomobject]@{ issue=9; cli='gemini' }) `
+        $r = Invoke-FleetDispatch -Queue @([pscustomobject]@{ issue=9; cli='antigravity' }) `
                -LaunchSession { param($item,$cli) 'claude' } `
                -GetCapacity  { [pscustomobject]@{ FreeRamGB=100; Cores=16 } } `
                -CountRunning { 0 } -WaitForSlot { }
@@ -1369,6 +1385,26 @@ Describe 'Find-FleetOrphansCore (escaped, cross-checked by PID AND issue)' {
     It 'ignores non-fleet processes entirely' {
         (Find-FleetOrphansCore $script:Procs @() @()).ProcessId | Should -Not -Contain 900
     }
+    It 'treats an escaped agy.exe like any other fleet process (#615)' {
+        $procs = @([pscustomobject]@{ ProcessId=910; CommandLine='agy -p ... C:\wt\--worktrees\issue-7\brief.md' })
+        @(Find-FleetOrphansCore $procs @() @()).ProcessId | Should -Contain 910
+    }
+}
+
+Describe 'Find-FleetOrphans (the CIM filter must cover every launchable CLI)' {
+    BeforeEach { Mock Read-SessionRegistry -MockWith { @() } }
+    It 'queries agy.exe as well as pwsh/node - Antigravity is a Go binary, not node (#615)' {
+        # Without agy.exe in the filter the sweep cannot SEE an escaped Antigravity session,
+        # so it would be reported clean while the process kept running.
+        $script:seenFilter = $null
+        Mock Get-CimInstance -ParameterFilter { $ClassName -eq 'Win32_Process' } -MockWith {
+            $script:seenFilter = $Filter; @()
+        }
+        Find-FleetOrphans | Out-Null
+        $script:seenFilter | Should -Match "Name='pwsh\.exe'"
+        $script:seenFilter | Should -Match "Name='node\.exe'"
+        $script:seenFilter | Should -Match "Name='agy\.exe'"
+    }
 }
 
 Describe 'Invoke-FleetReap (guard-safe orphan/fleet kill)' {
@@ -1501,18 +1537,36 @@ Describe 'Get-SessionLogPath (fleet log convention)' {
 }
 
 Describe 'non-claude adapters' {
-    It 'gemini BuildLaunch uses -p and --approval-mode yolo --skip-trust' {
+    It 'antigravity BuildLaunch runs agy headless and points it at the briefing FILE' {
         $ctx = @{ BriefingFile = 'C:\b\brief.txt' }
-        $s = & ((Get-CliAdapters | Where-Object Name -eq 'gemini').BuildLaunch) $ctx
-        $s | Should -Match 'gemini -p'
-        $s | Should -Match '--approval-mode yolo'
-        $s | Should -Match '--skip-trust'
+        $s = & ((Get-CliAdapters | Where-Object Name -eq 'antigravity').BuildLaunch) $ctx
+        $s | Should -Match 'agy -p'
+        # The briefing is READ by agy, never spliced in as argument content: PowerShell drops
+        # embedded quotes when passing an argument to a native .exe (#615).
+        $s | Should -Match ([regex]::Escape('C:\b\brief.txt'))
+        $s | Should -Not -Match 'Get-Content'
+        # Without this flag agy soft-denies its own file read in headless mode.
+        $s | Should -Match '--dangerously-skip-permissions'
+    }
+    It 'no adapter invokes the retired gemini CLI (#615)' {
+        foreach ($a in (Get-CliAdapters)) {
+            (& $a.BuildLaunch @{ BriefingFile = 'C:\b\brief.txt' }) | Should -Not -Match '\bgemini\b'
+        }
     }
     It 'codex BuildLaunch uses exec + --dangerously-bypass-approvals-and-sandbox with an stdin EOF guard' {
         $ctx = @{ BriefingFile = 'C:\b\brief.txt' }
         $s = & ((Get-CliAdapters | Where-Object Name -eq 'codex').BuildLaunch) $ctx
         $s | Should -Match '\$null \|.*codex exec .*--dangerously-bypass-approvals-and-sandbox'
         $s | Should -Match 'Get-Content'
+    }
+    It 'antigravity Probe carries the same headless flags as its own BuildLaunch (#615)' {
+        # A probe that exercises a different flag set than the launch can green-light a launch
+        # that then fails. Pin the parity: both must carry --dangerously-skip-permissions.
+        $a = Get-CliAdapters | Where-Object Name -eq 'antigravity'
+        $probe = $a.Probe.ToString()
+        $probe | Should -Match "'agy'"
+        $probe | Should -Match '--dangerously-skip-permissions'
+        (& $a.BuildLaunch @{ BriefingFile = 'C:\b\brief.txt' }) | Should -Match '--dangerously-skip-permissions'
     }
     It 'codex Probe uses login status (not exec, which hangs on stdin)' {
         ((Get-CliAdapters | Where-Object Name -eq 'codex').Probe).ToString() | Should -Match 'login.*status'
@@ -1533,7 +1587,7 @@ Describe 'non-claude adapters' {
     }
     It 'briefing path with a single quote is escaped in a non-claude adapter' {
         $ctx = @{ BriefingFile = "C:\Users\O'Brien\b.txt" }
-        (& ((Get-CliAdapters | Where-Object Name -eq 'gemini').BuildLaunch) $ctx) | Should -Match "O''Brien"
+        (& ((Get-CliAdapters | Where-Object Name -eq 'antigravity').BuildLaunch) $ctx) | Should -Match "O''Brien"
     }
 }
 

@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Fixed
+- **The fleet was routing work to a Gemini CLI that can no longer authenticate (#615).** Google
+  shut the "Sign in with Google" path for individual accounts on 2026-06-18: `gemini -p` now
+  answers `IneligibleTierError: UNSUPPORTED_CLIENT` and points at Antigravity. `Get-CliProbeStatus`
+  read that as `auth` and `Resolve-LaunchCli` degraded the issue to claude, so nothing crashed —
+  which is exactly why it went unnoticed. Meanwhile `Fleet-Plan.ps1` advertised `gemini` as the
+  FIRST choice for Docs and the second for Chore / size S–XS work: the two most common buckets on
+  the board were being planned around a CLI that could never run.
+
+  The `gemini` adapter is replaced by an `antigravity` one (`agy`), Google's official successor,
+  which authenticates with the same personal account — no API key, no billing. Its probe was
+  measured at ~7s, well inside the 30s `Invoke-CliProbe` timeout. Unlike the other adapters it is
+  pointed at the briefing **file** instead of receiving its content as an argument, because
+  PowerShell drops embedded quotes when passing an argument to a native `.exe` and a briefing is
+  full of backticks and quotes; `--dangerously-skip-permissions` is mandatory, since without it
+  `agy` soft-denies its own file read in headless mode and the session would start blind.
+
+  Two things the rename alone would have missed. `Find-FleetOrphans` queried `pwsh.exe` and
+  `node.exe` only — true while every CLI ran under node, but `agy.exe` is a Go binary, so an
+  escaped Antigravity session would have been invisible to the sweep and reported clean while it
+  kept running; the filter now includes it (no false-positive risk: the pure core only ever
+  considers a process whose command line names a fleet issue artifact). And `agy` drops an
+  `.antigravitycli/` working directory into whatever repo it runs in, including a fleet worktree,
+  so that path is now gitignored.
+
+  Each new test was verified by reintroducing the defect and watching it go red: dropping
+  `agy.exe` from the filter, dropping the headless flag, and putting `gemini` back in the routing
+  table each fail their assertion.
+
 ### Added
 - **Every typed command now carries the four-block closing summary (#493).** v0.35.0 shipped the
   renderer (#492) and nothing consumed it: not one command file or script referenced it, so in

@@ -14,8 +14,8 @@
     Routing (first available wins, else claude, else first CLI):
       security/architecture label, size L/XL, or Spike -> claude
       Refactor                                         -> codex  -> claude
-      Docs                                             -> gemini -> copilot -> claude
-      Chore / size S/XS                                -> copilot -> gemini -> claude
+      Docs                                             -> antigravity -> copilot -> claude
+      Chore / size S/XS                                -> copilot -> antigravity -> claude
       otherwise                                        -> claude
 
     Pure planner core (routing + waves) sits behind a dot-source guard
@@ -34,7 +34,7 @@
     Emit the raw plan JSON instead of the formatted view.
 
 .EXAMPLE
-    .\Fleet-Plan.ps1 -ProjectNum 13 -Clis claude,codex,gemini
+    .\Fleet-Plan.ps1 -ProjectNum 13 -Clis claude,codex,antigravity
     .\Fleet-Plan.ps1 -ProjectNum 13 -Json
 #>
 [CmdletBinding()]
@@ -82,9 +82,10 @@ function Select-CliForIssue {
     } elseif ($type -eq 'refactor' -or ($labels -contains 'refactor')) {
         $pref = @('codex','claude')
     } elseif ($type -eq 'docs' -or ($labels -contains 'docs') -or ($labels -contains 'documentation')) {
-        $pref = @('gemini','copilot','claude')
+        # 'antigravity' (agy), not the retired 'gemini' CLI - see Get-CliAdapters (#615).
+        $pref = @('antigravity','copilot','claude')
     } elseif ($type -eq 'chore' -or ($size -in @('S','XS'))) {
-        $pref = @('copilot','gemini','claude')
+        $pref = @('copilot','antigravity','claude')
     } else {
         $pref = @('claude')
     }

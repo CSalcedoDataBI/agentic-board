@@ -45,6 +45,6 @@
     "homepage": "https://github.com/trailofbits/skills",
     "profiles": ["quality"],
     "install": null,
-    "purpose": "External LLM review (Codex/Gemini) of uncommitted changes — an extra reviewer."
+    "purpose": "External LLM review (Codex/Antigravity) of uncommitted changes — an extra reviewer."
   }
 ]

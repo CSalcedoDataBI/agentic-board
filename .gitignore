@@ -28,3 +28,7 @@ Thumbs.db
 
 # Pester artifact (Invoke-Pester -CI). Embeds ABSOLUTE local paths — the guard blocks it as private.
 testResults.xml
+
+# Antigravity CLI (agy) drops this per-repo working dir wherever it runs — including a fleet
+# worktree. Never ours to commit (#615).
+.antigravitycli/
