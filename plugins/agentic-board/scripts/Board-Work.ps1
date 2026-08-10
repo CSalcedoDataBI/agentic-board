@@ -1102,7 +1102,7 @@ function Get-SessionBriefing {
 
 # -- Fleet session marker (reaper fingerprint) ---------------------------------
 # Every fleet-spawned session is stamped at launch with ABIOS_FLEET_SESSION=<issue>-<runId>
-# in its generated launch-<n>.ps1, so the child (claude/gemini/...) and its CLI grandchild
+# in its generated launch-<n>.ps1, so the child (claude/antigravity/...) and its CLI grandchild
 # carry it in their environment. The task reaper (Find-FleetOrphans) keys on this marker -
 # a far stronger discriminator than a bare binary name, since the operator runs many
 # unrelated claude/node processes.
@@ -1455,21 +1455,32 @@ function Get-CliAdapters {
             }
         }
         [PSCustomObject]@{
-            Name         = 'gemini'
-            Command      = 'gemini'
+            # Replaces the former 'gemini' adapter (#615): Gemini CLI stopped authenticating
+            # individual Google accounts on 2026-06-18 - its probe now always returns
+            # IneligibleTierError/UNSUPPORTED_CLIENT and Google redirects to Antigravity, so
+            # the fleet was routing Docs/Chore work to a CLI that could never come back.
+            Name         = 'antigravity'
+            Command      = 'agy'
             Kind         = 'repl'
             IsDefault    = $false
-            InstallCmd   = 'npm i -g @google/gemini-cli'
-            # One-token probe prompt with the SAME autonomous flags as the real launch, so
-            # an auth/quota failure classifies correctly (see Get-CliProbeStatus).
-            Probe        = { param($ctx) Invoke-CliProbe @('gemini', '-p', 'reply OK', '--approval-mode', 'yolo', '--skip-trust') }
+            # No npm package - Google ships an install script; the binary lands in
+            # %LOCALAPPDATA%\agy\bin. See https://antigravity.google/docs/cli/install
+            InstallCmd   = 'irm https://antigravity.google/cli/install.ps1 | iex'
+            # One-token probe with the same headless flag set as the real launch, so an
+            # auth/quota failure classifies correctly (see Get-CliProbeStatus). Measured at
+            # ~7s, well inside the 30s Invoke-CliProbe timeout.
+            Probe        = { param($ctx) Invoke-CliProbe @('agy', '-p', 'reply OK') }
             BuildLaunch  = {
                 param($ctx)
-                # Same single-quote doubling as the claude adapter (see its BuildLaunch
-                # comment) so a briefing path containing ' (e.g. an O'Brien user folder)
-                # can't break out of the generated script's single-quoted literal.
+                # agy is told to READ the briefing rather than receiving its content as an
+                # argument (what the other adapters do): a briefing carries backticks and
+                # quotes, and PowerShell drops embedded quotes when handing an argument to a
+                # native .exe. The path still gets the same single-quote doubling as the
+                # claude adapter so an O'Brien-style folder can't break out of the literal.
+                # --dangerously-skip-permissions is REQUIRED: without it agy soft-denies its
+                # own file-read tool call in headless mode and the session starts blind.
                 $b = $ctx.BriefingFile -replace "'", "''"
-                'gemini -p (Get-Content -Raw -LiteralPath ''{0}'') --approval-mode yolo --skip-trust' -f $b
+                'agy -p ''Read the file {0} and follow its instructions to the letter.'' --dangerously-skip-permissions' -f $b
             }
         }
         [PSCustomObject]@{

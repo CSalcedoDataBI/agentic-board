@@ -129,13 +129,16 @@ function Find-FleetOrphansCore([object[]]$Processes, [int[]]$LivePids, [int[]]$L
     return @($orphans)
 }
 
-# Live: escaped fleet processes. Queries ONLY pwsh.exe (every session's launch-<n>.ps1
-# launcher) and node.exe (the CLIs - claude/gemini/codex/copilot all run under node).
+# Live: escaped fleet processes. Queries pwsh.exe (every session's launch-<n>.ps1 launcher),
+# node.exe (claude/codex/copilot all run under node) and agy.exe (Antigravity is a Go binary,
+# so a node-only filter would leave an escaped agy session invisible to the sweep - #615).
 # Deliberately NOT 'claude.exe': that is the Claude Desktop host app, whose renderers would
-# be false-positive kill targets (and are NOT in the guard set). Thin -> the pure core is
-# Find-FleetOrphansCore, cross-checking BOTH live PIDs and live issues.
+# be false-positive kill targets (and are NOT in the guard set). agy.exe carries no such risk:
+# Find-FleetOrphansCore only ever considers a process whose command line names a fleet issue
+# artifact, so an interactive agy the human is using is never a candidate.
+# Thin -> the pure core is Find-FleetOrphansCore, cross-checking BOTH live PIDs and live issues.
 function Find-FleetOrphans {
-    $filter = "Name='pwsh.exe' OR Name='node.exe'"
+    $filter = "Name='pwsh.exe' OR Name='node.exe' OR Name='agy.exe'"
     $procs = @(Get-CimInstance -ClassName Win32_Process -Filter $filter -ErrorAction SilentlyContinue |
                Select-Object ProcessId, CommandLine)
     $live       = @(Read-SessionRegistry)

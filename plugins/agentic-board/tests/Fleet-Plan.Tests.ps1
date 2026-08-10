@@ -14,7 +14,7 @@ BeforeAll {
         param([int]$Number, [string]$Title = 't', [string[]]$Labels = @(), [string]$Size = 'M', [string]$Type = 'Feature', [int[]]$BlockedBy = @())
         [pscustomobject]@{ number = $Number; title = $Title; labels = $Labels; size = $Size; type = $Type; blockedBy = $BlockedBy }
     }
-    $all = @('claude','codex','gemini','copilot')
+    $all = @('claude','codex','antigravity','copilot')
 }
 
 Describe 'Get-PendingBoardIssues fails closed on the board read (#316, part of #303)' {
@@ -70,13 +70,20 @@ Describe 'Select-CliForIssue (capability routing with availability fallback)' {
         Select-CliForIssue (New-Iss 3 -Type 'Refactor') $all | Should -Be 'codex'
     }
     It 'falls back to claude when the preferred CLI is not available' {
-        Select-CliForIssue (New-Iss 4 -Type 'Refactor') @('claude','gemini') | Should -Be 'claude'
+        Select-CliForIssue (New-Iss 4 -Type 'Refactor') @('claude','antigravity') | Should -Be 'claude'
     }
-    It 'routes docs to gemini' {
-        Select-CliForIssue (New-Iss 5 -Type 'Docs') @('gemini','claude') | Should -Be 'gemini'
+    It 'routes docs to antigravity' {
+        Select-CliForIssue (New-Iss 5 -Type 'Docs') @('antigravity','claude') | Should -Be 'antigravity'
     }
-    It 'routes small chores to copilot' {
+    It 'routes small chores to copilot, then antigravity' {
         Select-CliForIssue (New-Iss 6 -Type 'Chore' -Size 'S') @('copilot','claude') | Should -Be 'copilot'
+        Select-CliForIssue (New-Iss 6 -Type 'Chore' -Size 'S') @('antigravity','claude') | Should -Be 'antigravity'
+    }
+    It 'never routes to the retired gemini CLI, even when offered (#615)' {
+        # The whole point of #615: gemini can no longer authenticate, so it must not be a
+        # preference any more - offering it must not beat claude.
+        Select-CliForIssue (New-Iss 9 -Type 'Docs')  @('gemini','claude') | Should -Be 'claude'
+        Select-CliForIssue (New-Iss 10 -Type 'Chore' -Size 'XS') @('gemini','claude') | Should -Be 'claude'
     }
     It 'defaults a plain feature to claude' {
         Select-CliForIssue (New-Iss 7) $all | Should -Be 'claude'
