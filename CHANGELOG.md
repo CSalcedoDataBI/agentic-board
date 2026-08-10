@@ -46,6 +46,7 @@ two cannot drift, with the docs-freshness gate finally checking more than the RE
 
   Found while reviewing this PR, against a changelog line of its own claiming the gate already
   covered it. It did not.
+
 ### Added
 - **Every typed command now carries the four-block closing summary (#493).** v0.35.0 shipped the
   renderer (#492) and nothing consumed it: not one command file or script referenced it, so in
