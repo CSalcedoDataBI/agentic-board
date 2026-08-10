@@ -10,7 +10,7 @@ get the repo launch-ready first, then share — a good landing page converts a c
 - **Proof, not claims:** it **governs its own roadmap board** (see `SHOWCASE.md`) — every fix was
   found while using it and shipped through its own PR + review gate. Dogfooding is the story.
 - **Differentiators to name:** your real board (not a throwaway Kanban), a quota-aware multi-CLI
-  fleet (Claude/Gemini/Codex/…), and review-gated merges.
+  fleet (Claude/Antigravity/Codex/…), and review-gated merges.
 
 ## Pre-launch readiness
 

@@ -30,7 +30,7 @@ the whole issue → branch → PR → gate → merge loop.
   through the `gh` CLI — the same board your team already uses, not a throwaway Kanban in a tab.
 - **A quota-aware multi-CLI fleet.** `/board work` can start several independent issues at once,
   each in its own git worktree, and optionally launch one agent session per issue — probing each
-  CLI (Claude, Gemini, Codex, Jules, Copilot) for quota and availability before handing it work.
+  CLI (Claude, Antigravity, Codex, Jules, Copilot) for quota and availability before handing it work.
 - **Review-gated by default.** Every issue finishes through a PR and a review gate (Copilot
   review + CI checks + unresolved-thread checks) before it can merge. Good GitHub hygiene is
   driven by the flow, not left to willpower.

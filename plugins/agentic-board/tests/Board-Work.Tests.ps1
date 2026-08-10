@@ -1031,6 +1031,22 @@ Describe 'Test-CliAvailability' {
         $r.Status | Should -Be 'no-quota'
         $r.Cli    | Should -Be 'antigravity'
     }
+    It 'looks the real antigravity adapter up by its COMMAND (agy), not its Name (#615)' {
+        # Every earlier adapter had Name -eq Command, so nothing pinned the distinction.
+        # antigravity is the first where they differ: re-aligning Command to Name would make
+        # Get-Command search for a binary that does not exist and the CLI would silently
+        # report not-installed. Name/Command come from the REAL registry; only the probe is
+        # stubbed, so this cannot shell out to agy.
+        $adapter = Get-CliAdapters | Where-Object Name -eq 'antigravity'
+        $adapter.Command | Should -Be 'agy'
+        $script:probedName = $null
+        Mock Get-Command -MockWith { $script:probedName = $Name; [PSCustomObject]@{ Source='C:\x\agy.exe' } }
+        $r = Test-CliAvailability -Adapter ([PSCustomObject]@{
+            Name = $adapter.Name; Command = $adapter.Command; Probe = { param($ctx) 'ok' } })
+        $script:probedName | Should -Be 'agy'
+        $r.Cli    | Should -Be 'antigravity'
+        $r.Status | Should -Be 'ok'
+    }
 }
 
 Describe 'Resolve-LaunchCli' {
