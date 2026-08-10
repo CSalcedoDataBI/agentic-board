@@ -1559,6 +1559,15 @@ Describe 'non-claude adapters' {
         $s | Should -Match '\$null \|.*codex exec .*--dangerously-bypass-approvals-and-sandbox'
         $s | Should -Match 'Get-Content'
     }
+    It 'antigravity Probe carries the same headless flags as its own BuildLaunch (#615)' {
+        # A probe that exercises a different flag set than the launch can green-light a launch
+        # that then fails. Pin the parity: both must carry --dangerously-skip-permissions.
+        $a = Get-CliAdapters | Where-Object Name -eq 'antigravity'
+        $probe = $a.Probe.ToString()
+        $probe | Should -Match "'agy'"
+        $probe | Should -Match '--dangerously-skip-permissions'
+        (& $a.BuildLaunch @{ BriefingFile = 'C:\b\brief.txt' }) | Should -Match '--dangerously-skip-permissions'
+    }
     It 'codex Probe uses login status (not exec, which hangs on stdin)' {
         ((Get-CliAdapters | Where-Object Name -eq 'codex').Probe).ToString() | Should -Match 'login.*status'
     }

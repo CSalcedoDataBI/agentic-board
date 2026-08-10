@@ -1466,10 +1466,13 @@ function Get-CliAdapters {
             # No npm package - Google ships an install script; the binary lands in
             # %LOCALAPPDATA%\agy\bin. See https://antigravity.google/docs/cli/install
             InstallCmd   = 'irm https://antigravity.google/cli/install.ps1 | iex'
-            # One-token probe with the same headless flag set as the real launch, so an
-            # auth/quota failure classifies correctly (see Get-CliProbeStatus). Measured at
-            # ~7s, well inside the 30s Invoke-CliProbe timeout.
-            Probe        = { param($ctx) Invoke-CliProbe @('agy', '-p', 'reply OK') }
+            # One-token probe carrying the SAME headless flag set as BuildLaunch below, so the
+            # probe's verdict transfers to the real launch and an auth/quota failure classifies
+            # correctly (see Get-CliProbeStatus). The flag makes no difference to THIS prompt -
+            # measured 10s without it and 8s with it, exit 0 and 'OK' both ways, because a
+            # one-token reply calls no tool - but parity is the point: a probe that exercises a
+            # different flag set than the launch can green-light a launch that then fails.
+            Probe        = { param($ctx) Invoke-CliProbe @('agy', '-p', 'reply OK', '--dangerously-skip-permissions') }
             BuildLaunch  = {
                 param($ctx)
                 # agy is told to READ the briefing rather than receiving its content as an
