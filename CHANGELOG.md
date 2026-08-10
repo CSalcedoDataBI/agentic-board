@@ -1,6 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [0.36.0] - 2026-08-10
+
+**Say the same thing everywhere, and stop pointing at a CLI that died.** Two halves. The fleet had
+been quietly planning work around Gemini CLI since Google closed it to individual accounts on
+2026-06-18 — the probe failed, the fallback swallowed it, and nothing ever looked broken; it now
+runs on Antigravity (#615). And the four-block closing summary that v0.35.0 shipped as a renderer
+nobody consumed is now attached to all seven typed commands, generated from that renderer so the
+two cannot drift, with the docs-freshness gate finally checking more than the README (#493).
 
 ### Fixed
 - **The fleet was routing work to a Gemini CLI that can no longer authenticate (#615).** Google
@@ -31,6 +38,14 @@
   `agy.exe` from the filter, dropping the headless flag, and putting `gemini` back in the routing
   table each fail their assertion.
 
+- **The docs-freshness CI gate only ever looked at the README (#493).** It regenerated the derived
+  regions in place and then ran `git diff --exit-code -- README.md`. Scoped to that one file, the
+  step rewrote a drifted `commands/*.md` and then never compared it — so command-file drift passed
+  green. It now runs `Update-Docs.ps1 -Check`, which writes nothing and names whichever region
+  moved. Measured on a one-word drift in a command file: the new step exits 1, the old one exited 0.
+
+  Found while reviewing this PR, against a changelog line of its own claiming the gate already
+  covered it. It did not.
 ### Added
 - **Every typed command now carries the four-block closing summary (#493).** v0.35.0 shipped the
   renderer (#492) and nothing consumed it: not one command file or script referenced it, so in
@@ -56,16 +71,6 @@
   fails 3 tests and the gate; renaming one label in the renderer fails 7 tests and marks all seven
   files stale; dropping the missing-file bookkeeping lets a region-less command pass silently and
   turns 3 tests red.
-
-### Fixed
-- **The docs-freshness CI gate only ever looked at the README (#493).** It regenerated the derived
-  regions in place and then ran `git diff --exit-code -- README.md`. Scoped to that one file, the
-  step rewrote a drifted `commands/*.md` and then never compared it — so command-file drift passed
-  green. It now runs `Update-Docs.ps1 -Check`, which writes nothing and names whichever region
-  moved. Measured on a one-word drift in a command file: the new step exits 1, the old one exited 0.
-
-  Found while reviewing this PR, against a changelog line of its own claiming the gate already
-  covered it. It did not.
 
 ## [0.35.0] - 2026-08-05
 
