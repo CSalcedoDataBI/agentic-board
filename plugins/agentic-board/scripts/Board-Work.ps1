@@ -136,6 +136,12 @@ param(
     # thousands separator -> 129130), NOT a 2-element array. Get-ParallelQueue
     # splits each token on ',' so both `-File` and native-array calls work.
     [string[]] $Parallel = @(),
+    # Batch start (#633): several small, sequential sub-issues of the same epic share ONE
+    # branch/worktree instead of each getting its own -Start cycle, so they close through ONE
+    # PR/gate/merge. Same tolerant parsing as -Parallel (Get-ParallelQueue), for the same
+    # `pwsh -File` flattening reason. Mutually exclusive with -Start and -Parallel: those are
+    # two other, different ways of starting issues.
+    [string[]] $StartGroup = @(),
     [switch]$Launch,
     [switch]$Fleet,
     [switch]$Sessions,
@@ -2299,6 +2305,13 @@ if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (
 # branch on a base the caller did not ask for - the exact class of bug #294 was.
 if ($Base -and $BaseCurrent) { throw "-Base and -BaseCurrent are mutually exclusive: pick the ref, or the current HEAD." }
 
+# -StartGroup is a third, distinct way to start issues (#633) - combining it with -Start or
+# -Parallel would leave it ambiguous which mode actually ran.
+$groupQueue = @(Get-ParallelQueue $StartGroup)
+if ($groupQueue.Count -gt 0 -and ($Start -gt 0 -or $Parallel.Count -gt 0)) {
+    throw "-StartGroup es mutuamente exclusivo con -Start y -Parallel: son tres modos distintos de arrancar issues."
+}
+
 # ==============================================================================
 # LOCK MODE: -Lock <n> / -Unlock <n>  -> in ONE step mark an issue owned-elsewhere
 # (post the [abios-claim] fingerprint, move Status, AND assign the owner) WITHOUT
@@ -2590,7 +2603,7 @@ $boardUrl = Get-BoardUrl $ProjectNum
 # ==============================================================================
 # MODE 2: -ProjectNum  -> pending items of one board
 # ==============================================================================
-if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0) {
+if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueue.Count -eq 0) {
     Write-Host "=== Pendientes del board #$ProjectNum de $Owner ===" -ForegroundColor Cyan
     Write-Host ""
 
@@ -2966,6 +2979,65 @@ if ($Parallel.Count -gt 0) {
         Invoke-SessionWatch -PollSec $WatchPollSec -TimeoutSec $WatchTimeoutSec -AutoClean:$AutoClean -ForceDeleteBranch:$ForceDeleteBranch -ForceRemoveWorktree:$ForceRemoveWorktree | Out-Null
     }
 
+    Write-Host ""
+    Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+    exit 0
+}
+
+# ==============================================================================
+# MODE 3b: -ProjectNum -StartGroup <n1,n2,...>  -> ONE shared branch for several small,
+# sequential sub-issues of the same epic (#633), so they close through ONE PR/gate/merge
+# instead of a full start->PR->gate->merge cycle per issue.
+#
+# The FIRST issue in the group is the leader: it gets the branch/worktree exactly like a
+# normal -Start (board mechanics + New-IssueWorkspace). The rest only get the board mechanics
+# (Status -> In Progress, assignee, [abios-claim] comment) via the same Invoke-IssueStart,
+# just without -MakeBranch - then a session-registry row is added for each, pointing at the
+# leader's branch/workPath, so /board watch and cleanup see the whole group as one session.
+# ==============================================================================
+if ($groupQueue.Count -gt 0) {
+    Write-Host "=== Empezando lote de issues $($groupQueue -join ', ') (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
+    Write-Host ""
+
+    $ctx = Resolve-BoardStatus $Owner $ProjectNum
+    $lead = Invoke-IssueStart -IssueNum $groupQueue[0] -Ctx $ctx -Owner $Owner -MakeBranch:$Branch `
+                              -Base $Base -BaseCurrent:$BaseCurrent `
+                              -DryRunStart:$DryRun -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver
+    if ($lead.skipped) {
+        Write-Host ""
+        Write-Host "Lote ABORTADO: el issue lider #$($groupQueue[0]) no pudo empezar - ningun issue del lote fue tocado." -ForegroundColor Red
+        Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+        exit 1
+    }
+
+    $started = @($lead)
+    foreach ($n in ($groupQueue | Select-Object -Skip 1)) {
+        $r = Invoke-IssueStart -IssueNum $n -Ctx $ctx -Owner $Owner `
+                               -Base $Base -BaseCurrent:$BaseCurrent `
+                               -DryRunStart:$DryRun -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver
+        if ($r.skipped) {
+            Write-Host "  (#$n queda fuera del lote - la rama compartida sigue siendo valida para el resto)" -ForegroundColor DarkYellow
+            continue
+        }
+        if (-not $DryRun -and $lead.workPath) {
+            Write-SessionRegistryEntry -IssueNum $n -Branch $lead.branch -WorkPath $lead.workPath -Repo $lead.repo
+        }
+        $started += $r
+    }
+
+    if ($DryRun) {
+        Write-Host ""
+        Write-Host "Modo DRY-RUN - ningun cambio ejecutado." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+        exit 0
+    }
+
+    $startedNums = ($started | ForEach-Object { $_.issue }) -join ','
+    Write-Host ""
+    Write-Host ("Lote listo: {0} de {1} issue(s) en UNA sola rama ({2})." -f $started.Count, $groupQueue.Count, $lead.branch) -ForegroundColor Green
+    Write-Host "AL TERMINAR (un solo PR para todo el lote): New-BoardPR.ps1 -Issue $startedNums" -ForegroundColor Yellow
+    Write-Host "(un solo Board-ReviewGate.ps1 + un solo Board-Merge.ps1 cierran los $($started.Count) issues a la vez)" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0

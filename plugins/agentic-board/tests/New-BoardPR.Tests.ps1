@@ -39,3 +39,39 @@ Describe 'Get-ExistingPr — a phantom row is not an existing PR (#336)' {
         $r.number | Should -Be 7
     }
 }
+
+Describe 'Get-IssueNumbers — batch -Issue parsing (#633)' {
+    It 'passes through a native int array' {
+        (Get-IssueNumbers @(631, 632)) | Should -Be @(631, 632)
+    }
+    It 'splits a single comma-separated string (the pwsh -File flattening case)' {
+        (Get-IssueNumbers '631,632') | Should -Be @(631, 632)
+    }
+    It 'trims whitespace around commas' {
+        (Get-IssueNumbers '631, 632 ,633') | Should -Be @(631, 632, 633)
+    }
+    It 'dedupes while preserving first-seen order' {
+        (Get-IssueNumbers @('631,632,631')) | Should -Be @(631, 632)
+    }
+    It 'drops non-positive and non-numeric tokens' {
+        (Get-IssueNumbers @('0,-3,abc,632')) | Should -Be @(632)
+    }
+    It 'returns an empty array for no valid tokens' {
+        @(Get-IssueNumbers @('abc,0')).Count | Should -Be 0
+    }
+}
+
+Describe 'Format-ClosesBody — one Closes line per issue, extra body appended (#633)' {
+    It 'formats a single issue exactly like the pre-#633 behavior' {
+        Format-ClosesBody -Issues @(13) | Should -Be "Closes #13"
+    }
+    It 'formats one Closes line per issue in the given order' {
+        Format-ClosesBody -Issues @(631, 632) | Should -Be "Closes #631`nCloses #632"
+    }
+    It 'appends extra body text after a blank line' {
+        Format-ClosesBody -Issues @(13) -Extra 'Some context.' | Should -Be "Closes #13`n`nSome context."
+    }
+    It 'omits the blank-line separator when there is no extra body' {
+        Format-ClosesBody -Issues @(13) -Extra '' | Should -Be "Closes #13"
+    }
+}
