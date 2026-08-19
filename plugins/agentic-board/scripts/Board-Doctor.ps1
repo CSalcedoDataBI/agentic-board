@@ -305,6 +305,29 @@ $wtByBranch = @{}
 foreach ($w in $wtRecords) { if ($w.Branch) { $wtByBranch[$w.Branch] = $w } }
 # Ghost worktrees: git itself flags a registered worktree whose directory is gone.
 $ghosts = @($wtRecords | Where-Object { $_.Prunable })
+# The INVERSE case git cannot flag, because it no longer knows the worktree exists: the
+# directory survives under .claude/worktrees/ with a broken .git link, so it never appears in
+# the porcelain above and never becomes a record to mark prunable (#618). Reported, not fixed
+# here - the empty ones are swept by the SessionStart hook, and the ones with content need a
+# human. Best-effort: a failure to inventory orphans must never sink the branch audit.
+$orphans = @()
+$staleRegistry = @()
+try {
+    $env:ABIOS_WORKTREE_GHOSTS_DOTSOURCE = '1'
+    . (Join-Path $PSScriptRoot 'Worktree-Ghosts.ps1')
+    $env:ABIOS_WORKTREE_GHOSTS_DOTSOURCE = ''
+
+    $orphans = @(Get-WorktreeGhosts -RepoRoot '.' -Porcelain $wtPorcelain)
+
+    # The retry loop these orphans feed is driven by a MACHINE-WIDE registry, so an orphan in
+    # another repo keeps it running where no single invocation of this command would ever look.
+    $regEntries = @(Get-RegistryWorktrees)
+    $existsMap = @{}
+    foreach ($e in $regEntries) {
+        if ($e.Path) { $existsMap[(ConvertTo-ComparablePath $e.Path)] = (Test-Path -LiteralPath $e.Path) }
+    }
+    $staleRegistry = @(Select-StaleRegistryEntries -Entries $regEntries -ExistsMap $existsMap)
+} catch { }
 # Never offer to tear down the worktree we are standing in.
 $here = ""
 try { $here = (Resolve-Path (git rev-parse --show-toplevel 2>$null) -ErrorAction SilentlyContinue).Path } catch { }
@@ -382,6 +405,8 @@ if ($Json) {
     [pscustomobject]@{
         repo = $Repo; generatedAt = $now.ToString('o'); staleDays = $StaleDays
         branches = @($rows); ghostWorktrees = @($ghosts | Select-Object Path, Prunable)
+        orphanWorktrees = @($orphans | Select-Object Name, Path, Class, AutoRemovable)
+        staleRegistryEntries = @($staleRegistry | Select-Object Name, Path)
     } | ConvertTo-Json -Depth 6
     exit 0
 }
@@ -414,14 +439,48 @@ if ($ghosts.Count -gt 0) {
     Write-Host ""
 }
 
+# The inverse ghosts (#618). Split by class, because the two demand opposite responses: the
+# empty ones are already handled automatically, the ones with content are a question for you.
+$orphanContent = @($orphans | Where-Object { $_.Class -eq 'orphan-content' })
+$orphanEmpty   = @($orphans | Where-Object { $_.Class -eq 'orphan-empty' })
+
+if ($orphanContent.Count -gt 0) {
+    Write-Host "--- Worktrees huerfanos CON CONTENIDO (carpeta presente, git no los conoce) ($($orphanContent.Count)) ---" -ForegroundColor Red
+    foreach ($o in $orphanContent) { Write-Host ("   {0,-52} {1}" -f $o.Name, $o.Path) }
+    Write-Host "    Git ya podo su metadata, asi que 'git worktree prune' no los ve." -ForegroundColor DarkGray
+    Write-Host "    Tienen archivos: revisalos a mano antes de borrar nada." -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+if ($orphanEmpty.Count -gt 0) {
+    Write-Host "--- Worktrees huerfanos vacios ($($orphanEmpty.Count)) ---" -ForegroundColor Yellow
+    foreach ($o in $orphanEmpty) { Write-Host ("   {0,-52} {1}" -f $o.Name, $o.Path) }
+    Write-Host "    El hook de SessionStart los barre solo en el proximo arranque." -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+if ($staleRegistry.Count -gt 0) {
+    Write-Host "--- Entradas muertas en el registro global ($($staleRegistry.Count)) ---" -ForegroundColor Yellow
+    Write-Host "    Su ruta ya no existe. Alimentan el ciclo de reintentos desde CUALQUIER repo," -ForegroundColor DarkGray
+    Write-Host "    no solo este, por eso aparecen aunque no sean de aqui." -ForegroundColor DarkGray
+    foreach ($s in $staleRegistry) { Write-Host ("   {0,-36} {1}" -f $s.Name, $s.Path) }
+    Write-Host ""
+}
+
 $deletable = @($rows | Where-Object { $_.Deletable })
 $decide    = @($rows | Where-Object { $_.Class -in @('closed-unmerged','stale') -and -not $_.HasLiveSession })
 
 if (-not $Fix) {
     Write-Host "Read-only: no se cambio nada." -ForegroundColor DarkGray
-    if ($deletable.Count -gt 0 -or $ghosts.Count -gt 0 -or $decide.Count -gt 0) {
+    if ($deletable.Count -gt 0 -or $ghosts.Count -gt 0 -or $decide.Count -gt 0 -or $orphans.Count -gt 0 -or $staleRegistry.Count -gt 0) {
         Write-Host "  $($deletable.Count) rama(s) mergeadas borrables, $($decide.Count) por decidir, $($ghosts.Count) worktree(s) fantasma." -ForegroundColor DarkGray
+        if ($orphans.Count -gt 0 -or $staleRegistry.Count -gt 0) {
+            Write-Host "  $($orphanContent.Count) huerfano(s) con contenido, $($orphanEmpty.Count) vacio(s), $($staleRegistry.Count) entrada(s) muerta(s) en el registro global." -ForegroundColor DarkGray
+        }
         Write-Host "  Ejecuta con -Fix para limpiarlas (confirma rama por rama; -Fix -DryRun para ver el plan)." -ForegroundColor DarkGray
+        if ($orphanContent.Count -gt 0) {
+            Write-Host "  -Fix NO toca los huerfanos con contenido: revisalos tu." -ForegroundColor DarkGray
+        }
     } else {
         Write-Host "  Nada que limpiar." -ForegroundColor Green
     }

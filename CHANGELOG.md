@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **A worktree the doctor could not see was quietly costing a git process every 30 minutes
+  (#618).** The ghost check trusted git's own `prunable` marker, which only ever means "metadata
+  present, directory gone". The inverse never had a name: the directory survives under
+  `.claude/worktrees/` with a broken `.git` link, git has already pruned its metadata, and the
+  worktree therefore never appears in `git worktree list` at all. Never listed → never a record →
+  never `prunable` → invisible.
+
+  Invisible but not inert. The agent host keeps those entries in a machine-wide registry and
+  retries pruning them on a timer, so a handful of them can accumulate hundreds of failed git
+  invocations over a week. Where the repos live on a mechanical disk, that is felt.
+
+  `Worktree-Ghosts.ps1` gives the four states names — `ok`, `prunable`, `orphan-empty`,
+  `orphan-content` — and only `orphan-empty` is ever removed without asking. A new SessionStart
+  hook sweeps those (startup and resume, never compact, where the worktrees are still in use);
+  the doctor reports the rest, including registry entries pointing at other repos, since the
+  retry loop is machine-wide and no single per-repo invocation would ever have seen them.
+
+  The removal is a **non-recursive** delete: .NET refuses to delete a directory that is not
+  empty, so the filesystem — not a check this code performs and then trusts — is what guarantees
+  no work is lost. A file appearing between the check and the delete costs nothing; the delete
+  simply fails.
+
+  Two bugs shipped past a fully green pure test suite and were caught only by running it against
+  a real repo, which is why `Worktree-Ghosts.Integration.Tests.ps1` now exists alongside the pure
+  one. Comparing absolute paths looked obvious and was wrong — git prints the path it recorded
+  while the filesystem returns whatever alias you walked in through (8.3 short name, junction,
+  subst drive), so a **live** worktree was classified as an orphan; matching by name within the
+  managed directory sidesteps the aliased prefix entirely. And `[string]$Porcelain` left unbound
+  arrives as `''`, never `$null`, so the "should I call git?" guard never fired and the known-set
+  stayed empty — which orphaned every worktree in the repo.
 
 ## [0.37.0] - 2026-08-19
 
@@ -45,6 +78,7 @@ role) can be declared once instead of copy-pasted into each project (#640).
 - **Routing the independent-review requirement through the official Codex plugin
   (`codex-rescue`) as a cross-vendor reviewer is not yet invokable in this harness** (#621, spike;
   tracked as #637). The CI review bot (`claude-review` / Copilot) satisfies the gate today.
+
 
 ## [0.36.0] - 2026-08-10
 
