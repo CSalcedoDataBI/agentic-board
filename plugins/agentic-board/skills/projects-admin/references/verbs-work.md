@@ -161,11 +161,19 @@ and wait for; never assume the account or the scope:
 | 2. Pick a board | `Board-Work.ps1 -ListBoards [-Repo <owner/name>]` | With `-Repo`: only boards LINKED to that repo (`repository.projectsV2`) — exactly one result skips this pick. Without: every board of the owner (backups excluded). Both show pending count (Backlog or no Status) + URL, most pending first |
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
-| 5. Finish it | push branch → PR with `Closes #<num>` → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → merge-confirmation summary → user confirms → `Board-Merge.ps1 -PR <n>` only on exit 0 AND confirmation | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. On exit 0, present the mandatory merge-confirmation summary (#630/#631, four parts, above) and WAIT for the user's answer before merging — gate green is a precondition for asking, never a reason to skip asking. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself |
+| 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, but for several SMALL, SEQUENTIAL sub-issues of the same epic (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch. Use this instead of running step 4 once per sub-issue when they're too small/related to justify a PR each — mirrors what #631+#632 did by hand in PR #634 |
+| 5. Finish it | push branch → PR with `Closes #<num>` (or `New-BoardPR.ps1 -Issue <n1,n2,...>` for a batch — one `Closes #<n>` line per issue) → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → merge-confirmation summary → user confirms → `Board-Merge.ps1 -PR <n>` only on exit 0 AND confirmation | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. On exit 0, present the mandatory merge-confirmation summary (#630/#631, four parts, above) and WAIT for the user's answer before merging — gate green is a precondition for asking, never a reason to skip asking. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself for every closed issue |
 
 Notes:
 - Step 4 supports `-DryRun` (preview, no mutation). A CLOSED issue is refused with a reopen hint.
   It retries once (4s) if the issue was added to the board seconds ago (eventual consistency).
+- **Step 4b / batch (#633)**: `-StartGroup` is mutually exclusive with `-Start` and `-Parallel` —
+  three different ways to start issues, never combined. If the FIRST (leader) issue can't start
+  (blocked, already claimed, etc.) the whole batch aborts untouched; a later issue in the group
+  that can't start is just dropped from it with a warning — the rest still share the branch. Judge
+  "small and sequential" the way #631+#632 were: same epic, no PR-worthy risk on its own, nobody
+  else likely to want to review them separately. Don't batch issues that are independently risky
+  or that different people should be able to approve/reject on their own.
 - After step 4, the agent continues working the issue in-session — the printed context is the briefing.
 - **Gate exit 2 — "GATE SIN REVISAR" (#510).** Checks are green but *nobody looked at the code*: no
   GitHub review, no registered external review. This used to print `GATE PASSED` with a reminder

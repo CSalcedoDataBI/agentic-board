@@ -25,7 +25,12 @@
     through Board-ReviewGate.ps1.
 
 .PARAMETER Issue
-    Issue number the PR closes. Mandatory - board PRs always track an issue.
+    One or more issue numbers the PR closes. Mandatory - board PRs always track at least
+    one issue. Pass several (`-Issue 631,632`) to close a batch of small, related sub-issues
+    with a SINGLE PR instead of one PR per issue (#633) - the body gets one 'Closes #<n>' line
+    per issue. Accepts comma-separated strings too (`-Issue '631,632'`), the same tolerant
+    parsing `-Parallel` uses in Board-Work.ps1, so a cross-process `pwsh -File` call that would
+    otherwise flatten a PowerShell array into one string still works.
 
 .PARAMETER Repo
     owner/name. Default: derived from the origin remote of the cwd.
@@ -37,10 +42,11 @@
     Base branch for the PR. Default: the repo's default branch.
 
 .PARAMETER Title
-    PR title. Default: the issue's title.
+    PR title. Default: the first issue's title - pass this explicitly for a batch PR closing
+    more than one issue, since no single issue's title describes the whole batch.
 
 .PARAMETER Body
-    Extra body text appended after the mandatory 'Closes #<n>' line.
+    Extra body text appended after the mandatory 'Closes #<n>' line(s).
 
 .PARAMETER Draft
     Open the PR as a draft.
@@ -57,10 +63,11 @@
     .\New-BoardPR.ps1 -Issue 13
     .\New-BoardPR.ps1 -Issue 42 -Repo PAL-Devs/fabric-reports -Draft
     .\New-BoardPR.ps1 -Issue 13 -DryRun
+    .\New-BoardPR.ps1 -Issue 631,632 -Title "Group small sequential sub-issues into one PR"
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][int]$Issue,
+    [Parameter(Mandatory)][string[]]$Issue,
     [string]$Repo     = "",
     [string]$Branch   = "",
     [string]$Base     = "",
@@ -73,7 +80,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ── Pure helper (unit-testable; no gh/network) ────────────────────────────────
+# ── Pure helpers (unit-testable; no gh/network) ───────────────────────────────
 # A PR "already exists" ONLY when the read returned a row with a positive-integer number (#336). The
 # old guard was `@($existing).Count -gt 0`, which counted a phantom element with a null `.number` as
 # "exists" and SKIPPED `gh pr create` — the run then reported success with a blank PR number and no PR
@@ -81,6 +88,32 @@ $ErrorActionPreference = "Stop"
 function Get-ExistingPr {
     param($PrList)
     @($PrList) | Where-Object { $_ -and (($_.number -as [int]) -gt 0) } | Select-Object -First 1
+}
+
+# Parses -Issue the same tolerant way Board-Work.ps1's Get-ParallelQueue parses -Parallel:
+# comma-split each token, keep positive integers only, dedupe, preserve first-seen order (#633).
+# Order matters here - the FIRST issue drives the default -Title when none is given.
+function Get-IssueNumbers {
+    param($Raw)
+    $seen = New-Object System.Collections.Generic.HashSet[int]
+    $out  = @()
+    foreach ($tok in @($Raw)) {
+        foreach ($piece in ("$tok" -split ',')) {
+            $n = 0
+            if ([int]::TryParse($piece.Trim(), [ref]$n) -and $n -gt 0 -and $seen.Add($n)) {
+                $out += $n
+            }
+        }
+    }
+    return $out
+}
+
+# Builds the mandatory 'Closes #<n>' block - one line per issue - plus any extra -Body text (#633).
+function Format-ClosesBody {
+    param([int[]]$Issues, [string]$Extra = "")
+    $closes = ($Issues | ForEach-Object { "Closes #$_" }) -join "`n"
+    if ($Extra) { return "$closes`n`n$Extra" }
+    return $closes
 }
 
 # Dot-source guard: tests set $env:ABIOS_NEWBOARDPR_DOTSOURCE to load the pure helper only.
@@ -145,13 +178,19 @@ if (-not $Branch) { $Branch = (git rev-parse --abbrev-ref HEAD 2>$null).Trim() }
 if (-not $Branch -or $Branch -eq 'HEAD') { throw "No pude resolver la rama actual - usa -Branch." }
 if ($Branch -eq $Base) { throw "Estas en '$Base' (la base). Trabaja el issue en su rama issue-<num>-<slug> - nunca PR desde la base a si misma." }
 
-# -- 5. Issue -> title / body ----------------------------------------------------
-$iss = gh api "repos/$Repo/issues/$Issue" 2>$null | ConvertFrom-Json
-if (-not $iss) { throw "Issue #$Issue no existe en $Repo." }
-if ($iss.state -ne 'open') { Write-Host "AVISO: issue #$Issue esta '$($iss.state)' - el PR igual lo referencia." -ForegroundColor Yellow }
-if (-not $Title) { $Title = $iss.title }
-$prBody = "Closes #$Issue"
-if ($Body) { $prBody = "$prBody`n`n$Body" }
+# -- 5. Issue(s) -> title / body -------------------------------------------------
+$issueNums = @(Get-IssueNumbers $Issue)
+if ($issueNums.Count -eq 0) { throw "-Issue no trajo ningun numero de issue valido (recibi '$($Issue -join ',')')." }
+
+$issues = @()
+foreach ($n in $issueNums) {
+    $one = gh api "repos/$Repo/issues/$n" 2>$null | ConvertFrom-Json
+    if (-not $one) { throw "Issue #$n no existe en $Repo." }
+    if ($one.state -ne 'open') { Write-Host "AVISO: issue #$n esta '$($one.state)' - el PR igual lo referencia." -ForegroundColor Yellow }
+    $issues += $one
+}
+if (-not $Title) { $Title = $issues[0].title }
+$prBody = Format-ClosesBody -Issues $issueNums -Extra $Body
 
 # -- Existing open PR for this branch? (re-run = iterate on it) ------------------
 # Fail closed (Invoke-Gh -Json) then require a positive-integer number: a phantom/null-number row is
@@ -164,7 +203,7 @@ Write-Host "=== Cross-account PR  $Repo ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Identidad : $login  (via $TokenVar)"
 Write-Host "  Rama      : $Branch -> $Base"
-Write-Host "  Issue     : #$Issue $($iss.title)"
+foreach ($one in $issues) { Write-Host ("  Issue     : #{0} {1}" -f $one.number, $one.title) }
 if ($existingPr) {
     Write-Host "  PR        : #$($existingPr.number) ya abierto - solo push (iteracion)" -ForegroundColor Yellow
 } else {
