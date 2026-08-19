@@ -1,7 +1,7 @@
 # Spike: the official Codex plugin as an independent reviewer (#621)
 
-Part of #620. Findings from installing and probing `openai/codex-plugin-cc` (32K stars,
-Apache-2.0, actively maintained) — evaluated as the independent, cross-vendor reviewer
+Part of #620. Findings from installing and probing `openai/codex-plugin-cc` (popular,
+actively maintained, Apache-2.0) — evaluated as the independent, cross-vendor reviewer
 that could close the self-certification gap tracked in #622.
 
 ## What it is
@@ -11,10 +11,10 @@ A genuine Claude Code plugin (not a hand-rolled CLI wrapper), installed with:
 - `claude plugin marketplace add openai/codex-plugin-cc`
 - `claude plugin install codex@openai-codex`
 
-It delegates through the local Codex CLI (`codex-cli`), reusing whatever ChatGPT/API auth is
-already configured —
-on this machine `codex` was already installed and logged in via ChatGPT (the same binary the
-`second-opinion` skill already shells out to).
+It delegates through the local Codex CLI (the `codex` binary, package name `codex-cli`),
+reusing whatever ChatGPT/API auth is already configured — on this machine it was already
+installed and logged in via ChatGPT (the same binary the `second-opinion` skill already
+shells out to).
 
 ## Component inventory (from `claude plugin details codex@openai-codex`)
 
@@ -39,8 +39,8 @@ on this machine `codex` was already installed and logged in via ChatGPT (the sam
    **precondition of the launch environment** (installed once, ahead of time), not something
    `Expert-Auto.ps1` can install-and-use in the same pass.
 2. **Output is prose, not structured data.** `/codex:adversarial-review` returns a readable
-   review — questions about tradeoffs, assumptions, failure modes — with no documented JSON/
-   schema mode. #622's marker convention (what `Board-ReviewGate.ps1` parses as "a real,
+   review — questions about tradeoffs, assumptions, failure modes — with no documented
+   JSON/schema mode. #622's marker convention (what `Board-ReviewGate.ps1` parses as "a real,
    independent review happened") needs to key off the *fact that the skill/agent ran and
    returned a non-empty verdict*, not off parsing structured fields out of its prose.
 
