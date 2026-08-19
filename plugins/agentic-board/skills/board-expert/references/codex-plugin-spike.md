@@ -6,9 +6,13 @@ that could close the self-certification gap tracked in #622.
 
 ## What it is
 
-A genuine Claude Code plugin (not a hand-rolled CLI wrapper): `claude plugin marketplace add
-openai/codex-plugin-cc` then `claude plugin install codex@openai-codex`. It delegates through
-the local Codex CLI (`codex-cli`), reusing whatever ChatGPT/API auth is already configured —
+A genuine Claude Code plugin (not a hand-rolled CLI wrapper), installed with:
+
+- `claude plugin marketplace add openai/codex-plugin-cc`
+- `claude plugin install codex@openai-codex`
+
+It delegates through the local Codex CLI (`codex-cli`), reusing whatever ChatGPT/API auth is
+already configured —
 on this machine `codex` was already installed and logged in via ChatGPT (the same binary the
 `second-opinion` skill already shells out to).
 
