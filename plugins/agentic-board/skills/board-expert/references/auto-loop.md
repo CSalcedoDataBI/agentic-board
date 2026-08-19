@@ -15,7 +15,12 @@ guiding principle: **total self-use of agentic-board — never improvise your ow
 4. **Verify + evidence** — run the definition-of-done gates. Write a structured `[abios-evidence]`
    block (`Expert-Evidence.Format-EvidenceBlock`) to **three places**: the PR body, a durable
    issue comment, and a versioned `evidence/<issue>.md`. If green → open the PR + run the review
-   gate.
+   gate **with `-RequireIndependentReviewer`** (#623) — this run is unsupervised, and that flag is
+   what stops it from certifying its own work (#541). Evidence posted under its own identity does
+   not count and `-RecordReview` refuses outright; it waits for a review from a genuinely
+   different identity (the repo's CI review workflow — `claude-review`/Copilot post as a bot
+   account) instead of inventing one. See `independent-reviewer-guard.md` for the full mechanism
+   and why `codex-rescue` isn't wired in yet.
 5. **Self-heal + auto-drive the board**:
    - in-scope problem → fix it in the loop and continue;
    - out-of-scope finding → file a sanitized `discovered` issue on the board (`/board`, the

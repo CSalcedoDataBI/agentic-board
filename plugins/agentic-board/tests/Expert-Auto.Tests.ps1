@@ -101,6 +101,27 @@ Describe 'Agent type in the autonomous brief' {
     }
 }
 
+Describe 'Format-AutoBrief — independent review is mandatory for an unsupervised run (#623)' {
+    It 'tells the run to pass -RequireIndependentReviewer to the gate' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match 'RequireIndependentReviewer'
+    }
+    It 'forbids the run from self-certifying via its own identity' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)does not count'
+        $b | Should -Match '(?i)refuses'
+    }
+    It 'points at the CI bot review as the identity that actually satisfies the guard' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match 'claude-review'
+    }
+    It 'tells the run NOT to attempt codex-rescue (unverified headless viability, #621)' {
+        $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match 'codex-rescue'
+        $b | Should -Match '(?i)do not attempt'
+    }
+}
+
 Describe 'Format-AutoBrief — compliance checkpoint (#440 problem 2)' {
     It 'embeds the launch SHA and compliance instructions when MainShaAtLaunch is provided' {
         $sha = 'abc1234def5678abc1234def5678abc1234def56'
