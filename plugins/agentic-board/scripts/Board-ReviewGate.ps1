@@ -102,6 +102,14 @@
 .PARAMETER Summary
     What the external review found. Used with -RecordReview.
 
+.PARAMETER RequireIndependentReviewer
+    Self-certification guard (#541/#622), OPT-IN. Evidence (a GitHub review or an -RecordReview
+    comment) authored by the SAME account that opened the PR does not count, however convincing
+    its text - closing the hole where an autonomous run vouches for its own work. Off by default:
+    the human /board work flow, including its own -RecordReview fallback on the SAME account when
+    Copilot/claude-review are unavailable, is supervised and must keep working unchanged. Pass
+    this only from a context that KNOWS it is an unsupervised autonomous run (board-expert).
+
 .PARAMETER TokenVar
     Windows USER env var holding the PAT. Defaults to GITHUB_TOKEN_PERSONAL.
 
@@ -111,6 +119,7 @@
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -EnableCopilot
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RecordReview -Reviewer 'codex/gpt-5.5' -Summary '4 rondas, 12 hallazgos, todos corregidos'
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -AllowUnreviewed
+    .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RequireIndependentReviewer
 #>
 [CmdletBinding()]
 param(
@@ -135,6 +144,16 @@ param(
     [switch]$RecordReview,
     [string]$Reviewer = "external",
     [string]$Summary  = "",
+    # Self-certification guard (#541/#622), OPT-IN only. A human running -RecordReview after
+    # genuinely reading the diff (the documented /board work fallback when Copilot/claude-review
+    # are unavailable) posts that record under their OWN account - the same account that opened
+    # the PR on a solo repo. That is supervised and legitimate; blanket-rejecting it would break
+    # the gate's main fallback path for exactly the reviewer-scarce situations it exists for.
+    # The hole this closes is different: an AUTONOMOUS board-expert run posting its own
+    # [abios-review] with nobody watching. Only a caller that KNOWS it is that context (the
+    # autonomous launcher) should pass this - it makes evidence authored by the PR's own account
+    # not count, so the run cannot certify its own work no matter what text it posts.
+    [switch]$RequireIndependentReviewer,
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL"
 )
 
@@ -189,23 +208,45 @@ $script:ExternalReviewMarker = '[abios-review]'
       - a submitted GitHub review whose commit is the current head
       - a PR comment carrying `[abios-review] <who> sha=<head>`
 
+    SELF-CERTIFICATION GUARD (#541/#622): evidence authored by the PR's own author does not
+    count. Marker text alone was forgeable by whoever pushed the PR - the run that opened it
+    could post its own `[abios-review] codex/gpt-5.5 sha=...` comment claiming an independent
+    review that never happened, and this function had no way to tell that apart from a real one.
+    -PrAuthorLogin makes the check identity-based, not text-based: a comment or review from that
+    SAME login is excluded before the marker is even looked at, however convincing its text.
+    Empty -PrAuthorLogin (the default) skips the check - existing callers that never pass it keep
+    today's behaviour exactly, which is what every pre-#622 test below still relies on.
+
     Returns @{ reviewed; github; external; reviewers; stale }. `stale` counts evidence that exists
     but belongs to an older commit, so the caller can say WHY it does not count. Pure.
 #>
 function Get-ReviewEvidence {
     param(
         $Reviews = @(),              # nodes with .state, .author.login, .commit.oid
-        [string[]]$CommentBodies = @(),
-        [string]$HeadSha = ''
+        # Each item is either a plain body string (legacy shape, no identity to check) or an
+        # object with .body and .author.login (the GraphQL comment node shape) - accepting both
+        # keeps every pre-#622 test passing unchanged while production call sites move to objects.
+        [object[]]$CommentBodies = @(),
+        [string]$HeadSha = '',
+        [string]$PrAuthorLogin = ''
     )
     $head = "$HeadSha".Trim()
+    $prAuthor = "$PrAuthorLogin".Trim()
 
     # Literal containment, NOT -like: the marker's own square brackets are a wildcard character
     # class to -like, which threw "wildcard pattern is not valid" and would have made every
     # external review invisible - the exact blindness this function exists to remove.
     $marker    = $script:ExternalReviewMarker
-    $allExt    = @(@($CommentBodies) | Where-Object { "$_".Contains($marker) })
-    $allGh     = @(@($Reviews) | Where-Object { $_ -and "$($_.state)".Trim() })
+    $extNodes  = @(@($CommentBodies) | Where-Object { $_ } | ForEach-Object {
+        if ($_ -is [string]) { [PSCustomObject]@{ body = $_; author = $null } } else { $_ }
+    })
+    $extNodes  = @($extNodes | Where-Object {
+        -not ($prAuthor -and $_.author -and "$($_.author.login)".Trim() -eq $prAuthor)
+    })
+    $allExt    = @($extNodes | Where-Object { "$($_.body)".Contains($marker) } | ForEach-Object { "$($_.body)" })
+    $allGh     = @(@($Reviews) | Where-Object {
+        $_ -and "$($_.state)".Trim() -and -not ($prAuthor -and "$($_.author.login)".Trim() -eq $prAuthor)
+    })
 
     # With no head SHA to compare against we cannot prove ANY evidence belongs to this diff. Fail
     # closed: report nothing reviewed rather than accept evidence we cannot place.
@@ -422,10 +463,31 @@ if ($RecordReview) {
     if (-not "$Summary".Trim()) {
         throw "-RecordReview exige -Summary: escribe QUE encontro la revision. Registrar una revision vacia es exactamente el problema que este gate arregla (#510)."
     }
-    $headJson = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','headRefOid') `
-                          -What "leer el head del PR #$PR"
-    $headSha  = "$(($headJson | ConvertFrom-Json).headRefOid)".Trim()
+    # One read for both the head (always needed) and the author (only under
+    # -RequireIndependentReviewer) - review round 1 on #629 flagged the two separate `gh pr view`
+    # calls this used to be as a needless round-trip.
+    $prMeta  = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','author,headRefOid') `
+                        -What "leer metadata del PR #$PR" -Json
+    $headSha = "$($prMeta.headRefOid)".Trim()
     if (-not $headSha) { throw "No pude leer el head del PR #$PR - sin el, la revision no queda atada a este diff." }
+
+    # Self-certification guard (#541/#622): fail LOUD and immediately, not by silently leaving the
+    # gate blocked later. Only checked under -RequireIndependentReviewer - the human solo fallback
+    # (this same account, after actually reading the diff) is legitimate and must keep working.
+    if ($RequireIndependentReviewer) {
+        # Review round 1 on #629: without -Json, `gh api user` exiting 0 with unexpectedly empty
+        # output left $whoAmI blank, and the guard below reads blank as "cannot compare" and skips
+        # itself SILENTLY - fail-open in the one function whose entire job is not being fooled.
+        # Every other read in this file fails closed on empty; this one now matches.
+        $whoAmI = "$((Invoke-Gh -GhArgs @('api','user') -What 'leer la identidad activa' -Json).login)".Trim()
+        if (-not $whoAmI) {
+            throw "No pude leer la identidad activa (gh api user) - sin ella no puedo verificar independencia (#541), y seguir en silencio dejaria pasar exactamente lo que este guard existe para bloquear."
+        }
+        $prAuthor = "$($prMeta.author.login)".Trim()
+        if ($prAuthor -and $whoAmI -eq $prAuthor) {
+            throw "RequireIndependentReviewer: '$whoAmI' abrio este PR y no puede certificar su propia revision (#541). Se necesita una identidad genuinamente distinta - por ejemplo el agente codex-rescue, no otra invocacion de esta misma sesion."
+        }
+    }
 
     # The SHA is what makes the record mean something: it attests to THIS diff, not to the PR in
     # general. A later push leaves it behind as stale evidence instead of vouching for code the
@@ -513,9 +575,15 @@ if (-not $copilotSkipped) {
 # ── 1.5. Small-PR guard (GitHub PR BP: small, focused pull requests) ──────────
 # -Json fails closed: a read failure must not yield null additions (-> 0 lines) that silently
 # skips the small-PR guard for a PR that could be huge (#316).
-$size = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','additions,deletions,changedFiles') `
+$size = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','additions,deletions,changedFiles,author') `
                   -What "leer el tamano del PR #$PR" -Json
 $totalLines = $size.additions + $size.deletions
+# The identity a self-certified review would have to impersonate (#541/#622): the account that
+# opened THIS PR. Read once, up front, from the same authoritative call as the size guard - never
+# re-derived from GH_TOKEN, which would trust the caller's own claim about who it is. Threaded
+# into Get-ReviewEvidence ONLY under -RequireIndependentReviewer; empty otherwise so the default
+# gate (human /board work, including its own -RecordReview fallback) is unaffected.
+$prAuthorLogin = if ($RequireIndependentReviewer) { "$($size.author.login)" } else { '' }
 Write-Host ""
 Write-Host ("  Tamano del PR: {0} archivo(s), +{1}/-{2} ({3} lineas)" -f $size.changedFiles, $size.additions, $size.deletions, $totalLines) -ForegroundColor Cyan
 if ($totalLines -gt $MaxLines -or $size.changedFiles -gt $MaxFiles) {
@@ -609,7 +677,7 @@ query($o:String!, $r:String!, $n:Int!) {
       reviewDecision
       reviews(last:20) { nodes { author { login } state body submittedAt commit { oid } } }
       reviewThreads(first:50) { nodes { isResolved } }
-      comments(last:100) { nodes { body } }
+      comments(last:100) { nodes { body author { login } } }
     }
   }
 }'
@@ -658,8 +726,8 @@ while ($true) {
     if (-not $prState -or ($copilotRequested -and -not $reviewArrived)) {
         $prState = Get-ReviewState
         $reviewArrived = (Get-ReviewEvidence -Reviews @($prState.reviews.nodes) `
-                             -CommentBodies @(@($prState.comments.nodes) | ForEach-Object { "$($_.body)" }) `
-                             -HeadSha "$($prState.headRefOid)").reviewed
+                             -CommentBodies @($prState.comments.nodes) `
+                             -HeadSha "$($prState.headRefOid)" -PrAuthorLogin $prAuthorLogin).reviewed
     }
 
     if (Test-GateWaitDone -ChecksSettled ([bool]$verdictCi.Settled) `
@@ -730,8 +798,8 @@ if ($copilotRequested -and (Test-CopilotUnavailableReview -Reviews $reviews -Hea
 # Evidence that someone ACTUALLY reviewed (#510). Comments arrive in the same authoritative
 # GraphQL read as the reviews (#563) — one source, one failure mode: an unreadable state already
 # failed the gate inside Get-ReviewState, so evidence can never be computed from half a picture.
-$commentBodies = @(@($prState.comments.nodes) | ForEach-Object { "$($_.body)" })
-$evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies $commentBodies -HeadSha "$($prState.headRefOid)"
+$evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies @($prState.comments.nodes) `
+                                -HeadSha "$($prState.headRefOid)" -PrAuthorLogin $prAuthorLogin
 
 Write-Host ""
 Write-Host "----- RESULTADO DEL REVIEW -----" -ForegroundColor Cyan
