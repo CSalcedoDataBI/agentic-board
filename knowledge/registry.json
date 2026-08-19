@@ -257,6 +257,24 @@
       "ref": "https://github.com/microsoft/skill-recorder",
       "note": "Desktop app: records an on-screen session and reconstructs it into a SKILL.md or Automation via the GitHub Copilot CLI — authoring a skill from a demonstration instead of from prose. MIT. Needs a Copilot seat + screen-recording permission; install by hand from the pinned release command.",
       "added": "2026-08-04"
+    },
+    {
+      "id": "kn_028",
+      "domain": "Multi-Agent-Orchestration",
+      "type": "repo",
+      "title": "OpenAI Codex plugin for Claude Code",
+      "ref": "https://github.com/openai/codex-plugin-cc",
+      "note": "32K stars, Apache-2.0, activo (push 2026-07-08). Primer plugin oficial de OpenAI que corre DENTRO de Claude Code: /codex:review, /codex:adversarial-review (challenge mode, cuestiona decisiones/tradeoffs), /codex:rescue (subagente delegable), codex-rescue invocable PROACTIVAMENTE por Claude. Revisor de OTRO vendor (GPT/Codex) = separacion estructural real vs autocertificacion, no solo otro prompt del mismo modelo. Candidato para cerrar el hueco de #541 (self-certification en board-expert) y para simplificar second-opinion (hoy orquesta Codex CLI a mano via subprocess).",
+      "added": "2026-08-19"
+    },
+    {
+      "id": "kn_029",
+      "domain": "Multi-Agent-Orchestration",
+      "type": "repo",
+      "title": "Ejemplo de harness Leader-Implementer-Reviewer",
+      "ref": "https://github.com/betta-tech/ejemplo-harness-subagentes",
+      "note": "Demo del patron: 3 roles con limites explicitos (el reviewer nunca aprueba su propio trabajo), estado persistido en disco (progress/*.md) en vez de circular por chat (anti telefono-descompuesto), verificacion por tests reales. board-expert (skills/board-expert) ya aplica el estado-en-disco y la divulgacion progresiva, pero es UNA sola persona autonoma sin reviewer separado dentro de la sesion -- brecha real, ver issue de cierre.",
+      "added": "2026-08-19"
     }
   ]
 }
