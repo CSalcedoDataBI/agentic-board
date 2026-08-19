@@ -39,8 +39,8 @@ See sources at the bottom.
 6. **Visibility matches exposure:** boards are Private by default; a board linked from a **public**
    repo's docs/showcase must be set **Public** (`gh project edit --visibility PUBLIC`) so the links
    work for everyone. Never silently make a private repo's board public.
-7. **Scope local test runs to what changed — the full suite is the exception, not the default
-   (#630/#632).** Before running Pester, identify the test file(s) matching the changed script(s)
+7. **Scope local test runs to what changed — the full suite is the exception, not the default.**
+   (#630/#632) Before running Pester, identify the test file(s) matching the changed script(s)
    (e.g. touching `Board-ReviewGate.ps1` → run `Board-ReviewGate.Tests.ps1`) and run only those,
    saying out loud which ones and why. Escalate to the FULL suite only when: the changed file is
    shared/foundational (imported across many scripts — `Invoke-Gh.ps1` is the canonical example),
