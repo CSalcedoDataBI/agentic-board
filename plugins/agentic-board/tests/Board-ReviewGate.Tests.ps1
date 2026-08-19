@@ -142,6 +142,55 @@ Describe 'Get-ReviewEvidence - "found nothing" vs "nobody looked" (#510)' {
             $e.stale    | Should -Be 2
         }
     }
+
+    Context 'self-certification guard (#541/#622) - opt-in via -PrAuthorLogin' {
+        # The hole: the account that opened the PR posts its own [abios-review] comment (or,
+        # less plausibly, its own review object) claiming an independent review that never
+        # happened. Convincing text does not matter - only identity does.
+        BeforeAll {
+            function script:GhComment([string]$body, [string]$who) {
+                [pscustomobject]@{ body = $body; author = @{ login = $who } }
+            }
+        }
+
+        It 'is a no-op when -PrAuthorLogin is not passed - every pre-#622 caller is unaffected' {
+            $e = Get-ReviewEvidence -CommentBodies @((script:GhComment "<!-- [abios-review] codex sha=$script:Head -->" 'the-pr-author')) -HeadSha $script:Head
+            $e.reviewed | Should -BeTrue
+        }
+        It 'rejects a marked comment authored by the PR''s own account' {
+            $e = Get-ReviewEvidence -CommentBodies @((script:GhComment "<!-- [abios-review] codex sha=$script:Head -->" 'the-pr-author')) `
+                                    -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
+            $e.reviewed | Should -BeFalse
+            $e.external | Should -Be 0
+        }
+        It 'still accepts a marked comment from a DIFFERENT account (the actual fix target)' {
+            $e = Get-ReviewEvidence -CommentBodies @((script:GhComment "<!-- [abios-review] codex-rescue sha=$script:Head -->" 'github-actions[bot]')) `
+                                    -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
+            $e.reviewed | Should -BeTrue
+        }
+        It 'rejects a self-authored GitHub review object the same way' {
+            $e = Get-ReviewEvidence -Reviews @((script:GhReview 'APPROVED' 'the-pr-author' $script:Head)) `
+                                    -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
+            $e.reviewed | Should -BeFalse
+        }
+        It 'a plain string CommentBodies entry (no author to check) is unaffected by -PrAuthorLogin' {
+            # Legacy shape support: callers that still pass bare strings have no identity to filter
+            # on, so the marker match runs exactly as before even when -PrAuthorLogin is supplied.
+            $e = Get-ReviewEvidence -CommentBodies @("<!-- [abios-review] codex sha=$script:Head -->") `
+                                    -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
+            $e.reviewed | Should -BeTrue
+        }
+        It 'one self-authored and one independent comment: only the independent one counts' {
+            $e = Get-ReviewEvidence -CommentBodies @(
+                (script:GhComment "<!-- [abios-review] self sha=$script:Head -->" 'the-pr-author'),
+                (script:GhComment "<!-- [abios-review] codex-rescue sha=$script:Head -->" 'github-actions[bot]')
+            ) -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
+            $e.reviewed | Should -BeTrue
+            $e.external | Should -Be 1
+            $e.reviewers | Should -Contain 'codex-rescue'
+            $e.reviewers | Should -Not -Contain 'self'
+        }
+    }
 }
 
 Describe 'Test-OnlyReviewerChecksFailed - the reviewer-red allowance (#510, review round 4)' {
