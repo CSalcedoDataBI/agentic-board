@@ -32,21 +32,31 @@ launcher, not the interactive human flow.
 (`gh api user`) matches the PR author, it throws immediately with a pointer to #541, instead
 of silently posting a comment that later evidence-checking would just ignore.
 
-## What #623 still has to do
+## What #623 did (and what it deliberately did NOT do)
 
-This issue only changed the GATE's verification rule. It does not:
-- Pass `-RequireIndependentReviewer` from `Expert-Auto.ps1` / the auto-loop — the autonomous
-  launcher has to opt in explicitly for the guard to apply to its own runs.
-- Invoke `codex-rescue` (or any reviewer) at all. Today, an autonomous run that is required to
-  be independently reviewed and has no independent reviewer available simply cannot pass the
-  gate — which is correct (fail closed), but useless without #623 wiring an actual reviewer
-  call into the loop before evidence is marked green. See `codex-plugin-spike.md` (#621) for
-  what that reviewer call needs to look like (the `codex-rescue` agent, restart-before-use,
-  prose not structured output).
-- Decide what identity the `codex-rescue` call's own evidence should be posted under so it is
-  itself something OTHER than the implementing session's account — a GitHub Action posting as
-  `github-actions[bot]` (the same shape `pr-review.yml`/claude-review already uses) satisfies
-  `-RequireIndependentReviewer` today with zero further gate changes; a local `codex-rescue`
-  subagent call whose result the SAME session then posts via `-RecordReview` would not, because
-  the posting account is still the PR author. That distinction is #623's design decision, not
-  this one's.
+#623 wired `Expert-Auto.ps1`'s brief (`Format-AutoBrief`) to instruct every autonomous run to
+call the gate with `-RequireIndependentReviewer`, to refuse self-recording, and to wait for a
+CI-bot review (`claude-review`/Copilot — already a distinct identity from the run, satisfies the
+guard with zero further gate changes) instead of inventing its own review. `auto-loop.md` phase 4
+carries the same instruction for anyone reading the skill directly.
+
+It did **not** wire `codex-rescue` as the reviewer, despite that being the epic's (#620) original
+intent. Two attempts to verify it before designing around it both failed, and the failure was
+infrastructure, not a design dead-end:
+- `codex-rescue` is not invokable via an Agent-tool call from this harness (tried, got "Agent
+  type not found" even though `claude plugin list` shows the plugin installed and enabled) — the
+  same is true of `/codex:adversarial-review` via the Skill tool ("Unknown skill").
+- A real headless test — spawning `claude -p` the same way `Expert-Auto.ps1`'s launcher does —
+  could not run at all: `401 OAuth access token has been revoked`. That is an environment/
+  credential problem, unrelated to whether the plugin itself would work headless.
+
+Given both paths were blocked and the epic's own spike (`codex-plugin-spike.md`) already flagged
+"whether `codex-rescue` can run fully headless... needs a real end-to-end test" as unevaluated,
+wiring a specific, unverified call into every autonomous run's mandatory gate would have made the
+gate untestable and potentially unshippable (every run failing on a reviewer nobody can reach).
+The human owner chose the CI-bot fallback explicitly over guessing at the wiring or blocking on an
+unrelated OAuth fix.
+
+**Still open, tracked separately** (not #623, not this epic — file a fresh issue when the OAuth
+token is renewed): verify `codex-rescue` headless invocability for real, then decide whether to
+route the mandatory reviewer through it instead of the CI bot.

@@ -184,7 +184,8 @@ are the method.
    the evidence ONCE (#570): the full structured ``[abios-evidence]`` block goes to
    ``evidence/<issue>.md`` — the single source of truth — and the PR body and a durable issue
    comment each get the LINK STUB (marker + summary + link to the file), not a copy. If green ->
-   open the PR + run the review gate.
+   open the PR + run the review gate — with ``-RequireIndependentReviewer`` (see "Independent
+   review" below; it is mandatory for this unsupervised run, not optional).
 5. **Self-heal + auto-drive the board**: when you hit an error, a fork, or an unexpected state —
    apply the **decision protocol** (research → register → decide); do NOT act first.
    Then act on what you decided: an in-scope problem → fix it in the loop and continue;
@@ -233,6 +234,27 @@ e.g. ``Grew out of #<n>``, in the epic body) so the trail is followable.
 Build test-first. After each verify phase, record the structured [abios-evidence] block (what was
 tested, the command, the result) ONCE in evidence/<issue>.md, and put the link stub (marker +
 summary + link) in the PR body and an issue comment - one source of truth, two pointers (#570).
+
+## Independent review (#623) — non-negotiable for an unsupervised run
+Nobody is watching this session decide "yes, this was reviewed" — that is exactly the
+self-certification shape #541 exists to close. So the review gate step is not the generic call a
+supervised human run makes; it is:
+
+    Board-ReviewGate.ps1 -Repo <owner/name> -PR <n> -RequireIndependentReviewer
+
+Under that flag, evidence authored by YOUR OWN identity does not count no matter how genuine the
+review was, and ``-RecordReview`` refuses outright if the acting identity matches the PR author
+(#622). Do not try to route around this by switching identity yourself. Wait instead for a review
+that already comes from a genuinely different identity — the repo's CI review workflow
+(``claude-review`` / Copilot, which post as a bot account, never yours) is what satisfies this
+today. If the gate is not green because nobody independent has reviewed yet, that is not a bug to
+solve in the loop — ``/board handoff -Save`` rather than invent a way to certify your own work.
+
+Aspirational, not yet available: routing this through the ``codex-rescue`` subagent as a
+cross-vendor reviewer was the original design (see ``codex-plugin-spike.md``), but it is not
+invokable via an Agent-tool call in this environment and its headless viability from a launched
+`claude -p` session is unverified (blocked on an unrelated OAuth failure, not a design question).
+Do not attempt to call it — the CI-bot path above is the one that actually works today.
 
 ## Claims — external facts in deliverables need a gate (#479)
 A document is a deliverable, and a deliverable needs a gate. If this run produces a knowledge
