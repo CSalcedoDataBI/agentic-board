@@ -95,7 +95,26 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         is stamped with the head commit — so record LAST: anything you push afterwards invalidates
         it, correctly, because nobody reviewed those lines. Only when a review genuinely buys
         nothing (a typo, a regenerated file) use `-AllowUnreviewed`, and say so in your report.
-     d. Only after the gate passes: `scripts/Board-Merge.ps1 -PR <n>` — merges the PR (squash +
+     d. **Before asking to merge, present a merge-confirmation summary — MANDATORY (#630/#631).**
+        Merging is the one step in this flow you still confirm with the user each time (it is
+        `git push`'s harder-to-undo cousin), and "gate passed, ¿mergeo?" on its own forces them to
+        either trust blindly or go re-read the diff themselves — the two outcomes this summary
+        exists to avoid. Post it in the user's language, in plain terms (no script/file names, no
+        commands to paste), with exactly these four parts:
+        - **Qué hice para aprobarlo** — the problem in one sentence, the fix in plain terms, and
+          why any deliberate design choice (an opt-in flag, a scope limit) is shaped that way.
+        - **Qué verifiqué antes de darlo por bueno** — the concrete checks that ran (tests, and
+          which reviewers actually left a review — name them) and what, if anything, they found
+          and how it was resolved. Do not just say "tests pass" — say which ones and why those.
+        - **Qué debes esperar después de mergear** — what changes for the user today (often
+          "nothing yet — this lands the mechanism, the next issue wires it in") and what does not.
+        - **¿Mergeo?** — the explicit question. Wait for the answer; do not merge on a
+          non-answer or a topic change.
+        This is not the four-block closing summary from `#491` (that one is a generic end-of-turn
+        report, always present, format fixed by a shared renderer) — this is specific to the
+        moment right before an irreversible action, and its content is about THIS PR, not the
+        whole session.
+     e. Only after the gate passes AND the user confirms: `scripts/Board-Merge.ps1 -PR <n>` — merges the PR (squash +
         delete-branch by default) and, if the repo's own `pr-before-merge` ruleset marks the PR
         `blocked`, retries with the `--admin` bypass the ruleset grants admins (announced honestly);
         a non-admin gets a clear blocked message instead of a raw error. The merge closes the issue,
