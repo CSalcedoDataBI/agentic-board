@@ -463,20 +463,31 @@ if ($RecordReview) {
     if (-not "$Summary".Trim()) {
         throw "-RecordReview exige -Summary: escribe QUE encontro la revision. Registrar una revision vacia es exactamente el problema que este gate arregla (#510)."
     }
+    # One read for both the head (always needed) and the author (only under
+    # -RequireIndependentReviewer) - review round 1 on #629 flagged the two separate `gh pr view`
+    # calls this used to be as a needless round-trip.
+    $prMeta  = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','author,headRefOid') `
+                        -What "leer metadata del PR #$PR" -Json
+    $headSha = "$($prMeta.headRefOid)".Trim()
+    if (-not $headSha) { throw "No pude leer el head del PR #$PR - sin el, la revision no queda atada a este diff." }
+
     # Self-certification guard (#541/#622): fail LOUD and immediately, not by silently leaving the
     # gate blocked later. Only checked under -RequireIndependentReviewer - the human solo fallback
     # (this same account, after actually reading the diff) is legitimate and must keep working.
     if ($RequireIndependentReviewer) {
-        $whoAmI   = "$(Invoke-Gh -GhArgs @('api','user','--jq','.login') -What 'leer la identidad activa')".Trim()
-        $prAuthor = "$((Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','author') -What "leer el autor del PR #$PR" -Json).author.login)".Trim()
-        if ($whoAmI -and $prAuthor -and $whoAmI -eq $prAuthor) {
+        # Review round 1 on #629: without -Json, `gh api user` exiting 0 with unexpectedly empty
+        # output left $whoAmI blank, and the guard below reads blank as "cannot compare" and skips
+        # itself SILENTLY - fail-open in the one function whose entire job is not being fooled.
+        # Every other read in this file fails closed on empty; this one now matches.
+        $whoAmI = "$((Invoke-Gh -GhArgs @('api','user') -What 'leer la identidad activa' -Json).login)".Trim()
+        if (-not $whoAmI) {
+            throw "No pude leer la identidad activa (gh api user) - sin ella no puedo verificar independencia (#541), y seguir en silencio dejaria pasar exactamente lo que este guard existe para bloquear."
+        }
+        $prAuthor = "$($prMeta.author.login)".Trim()
+        if ($prAuthor -and $whoAmI -eq $prAuthor) {
             throw "RequireIndependentReviewer: '$whoAmI' abrio este PR y no puede certificar su propia revision (#541). Se necesita una identidad genuinamente distinta - por ejemplo el agente codex-rescue, no otra invocacion de esta misma sesion."
         }
     }
-    $headJson = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','headRefOid') `
-                          -What "leer el head del PR #$PR"
-    $headSha  = "$(($headJson | ConvertFrom-Json).headRefOid)".Trim()
-    if (-not $headSha) { throw "No pude leer el head del PR #$PR - sin el, la revision no queda atada a este diff." }
 
     # The SHA is what makes the record mean something: it attests to THIS diff, not to the PR in
     # general. A later push leaves it behind as stale evidence instead of vouching for code the
