@@ -1,5 +1,51 @@
 # Changelog
 
+
+## [0.37.0] - 2026-08-19
+
+**An unsupervised run can no longer certify its own review, and small sub-issues stop paying for
+a full cycle each.** Three threads. The board-expert auto-loop's review gate now requires
+`-RequireIndependentReviewer` (#623): evidence authored by the run's own identity does not count,
+`Board-ReviewGate.ps1 -RecordReview` refuses outright if the acting identity matches the PR author
+(#622), and a spike into the official Codex plugin as a cross-vendor reviewer (#621) found it not
+yet invokable in this harness — documented as a known gap (#637) rather than silently declared
+done. `/board work` gained a batch-start mode (#633): `-StartGroup` / `New-BoardPR.ps1 -Issue
+n1,n2` lets several small, sequential sub-issues of one epic share a single branch/PR/gate/merge
+instead of a full cycle each, and the merge-confirmation contract (what was done, what was
+verified, what to expect after) is now part of `/board work`'s documented step 5 (#631) alongside
+a default test-scope rule — scoped to the touched area, escalating to the full suite only for
+shared/foundational files or an epic close, stated out loud (#632). Separately, the expert role
+catalog gained a third tier: `~/.agentic-board/roles.json` merges between the factory preset and
+a project's local file, so a role useful across several of one's own repos (e.g. a PowerBI/DAX
+role) can be declared once instead of copy-pasted into each project (#640).
+
+### Added
+- **A user-level global roles tier for the expert role catalog** (#640). Precedence: local
+  overrides global (`~/.agentic-board/roles.json`) overrides factory, reusing the existing
+  union/replace merge applied twice rather than a bespoke three-way merge. Resolved via the same
+  `Get-AbiosStateDir -Root $HOME` convention already used for machine-wide state.
+- **`/board work` batch-start mode** (#633): `-StartGroup <n1,n2,...>` and `New-BoardPR.ps1
+  -Issue <n1,n2,...>` let small, sequential sub-issues of the same epic close through one
+  branch/PR/gate/merge instead of a full cycle per issue.
+- **The merge-confirmation contract is now documented in `/board work` step 5** (#631): what was
+  done to approve it, what was verified, what to expect after merging.
+- **A default test-scope rule, documented and applied**: scope local test runs to the touched
+  area by default; escalate to the full suite only for shared/foundational files or when closing
+  out an epic, stating the reason out loud (#632).
+
+### Changed
+- **The board-expert auto-loop's review gate now requires an independent reviewer** (#623):
+  `Expert-Auto.ps1` instructs the run to pass `-RequireIndependentReviewer` to
+  `Board-ReviewGate.ps1`, so review evidence authored by the run's own identity is excluded.
+- **`Board-ReviewGate.ps1 -RecordReview` refuses when the acting identity matches the PR author**
+  under `-RequireIndependentReviewer` (#622), closing #541 at the design level: self-certified
+  review can no longer pass silently.
+
+### Known gap
+- **Routing the independent-review requirement through the official Codex plugin
+  (`codex-rescue`) as a cross-vendor reviewer is not yet invokable in this harness** (#621, spike;
+  tracked as #637). The CI review bot (`claude-review` / Copilot) satisfies the gate today.
+
 ## [0.36.0] - 2026-08-10
 
 **Say the same thing everywhere, and stop pointing at a CLI that died.** Two halves. The fleet had
