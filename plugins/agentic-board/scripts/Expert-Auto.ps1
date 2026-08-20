@@ -151,6 +151,48 @@ Reach "PR ready + review gate green" and STOP there. Do NOT merge, deploy, refre
 delete on your own.
 "@ }
 
+    # (#646) The contract now RECORDS the human's choice at config time instead of leaving it to
+    # the run's judgment — two distinct branches, not one paragraph that mentions codex-rescue as
+    # a footnote regardless of what was actually configured.
+    $preferCodex = [bool]($Contract.review -and $Contract.review.preferCodexRescue)
+    $reviewSection = if ($preferCodex) { @"
+## Independent review (#623/#644) — non-negotiable for an unsupervised run, via codex-rescue
+Nobody is watching this session decide "yes, this was reviewed" — that is exactly the
+self-certification shape #541 exists to close. This run's contract opted into the stricter
+codex-rescue path (``/board expert config`` recorded it) — the review gate step is:
+
+1. Invoke the Agent tool with ``subagent_type: 'codex:codex-rescue'`` (the qualified name is
+   required — the unqualified ``codex-rescue`` is rejected) against this PR's diff.
+2. Record its rollout file path and thread id: ``Board-ReviewGate.ps1 -RecordReview
+   -Reviewer 'codex-rescue' -Summary '<what it found>' -RolloutPath <path> -ThreadId <id>``.
+3. Gate with both flags together: ``Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>
+   -RequireIndependentReviewer -PreferCodexRescue`` — it re-verifies the marker against disk, so a
+   claim it cannot check does not count.
+
+Do not fall back to the CI-bot path unless codex-rescue is genuinely unreachable this run — say so
+plainly in your final report if that happens. The contract's choice is what you were configured to
+do, not a suggestion to weigh against the alternative.
+"@ } else { @"
+## Independent review (#623) — non-negotiable for an unsupervised run
+Nobody is watching this session decide "yes, this was reviewed" — that is exactly the
+self-certification shape #541 exists to close. So the review gate step is not the generic call a
+supervised human run makes; it is:
+
+    Board-ReviewGate.ps1 -Repo <owner/name> -PR <n> -RequireIndependentReviewer
+
+Under that flag, evidence authored by YOUR OWN identity does not count no matter how genuine the
+review was, and ``-RecordReview`` refuses outright if the acting identity matches the PR author
+(#622). Do not try to route around this by switching identity yourself. Wait instead for a review
+that already comes from a genuinely different identity — the repo's CI review workflow
+(``claude-review`` / Copilot, which post as a bot account, never yours) is what satisfies this
+today. If the gate is not green because nobody independent has reviewed yet, that is not a bug to
+solve in the loop — ``/board handoff -Save`` rather than invent a way to certify your own work.
+
+A stricter, disk-verified path exists (``codex-rescue``, #637/#644), but this run's contract did
+not opt into it — that is a human decision made in ``/board expert config``, not yours to make
+mid-run. Do not switch to it on your own judgment.
+"@ }
+
     @"
 # Autonomous brief — /board expert auto
 
@@ -235,30 +277,7 @@ Build test-first. After each verify phase, record the structured [abios-evidence
 tested, the command, the result) ONCE in evidence/<issue>.md, and put the link stub (marker +
 summary + link) in the PR body and an issue comment - one source of truth, two pointers (#570).
 
-## Independent review (#623) — non-negotiable for an unsupervised run
-Nobody is watching this session decide "yes, this was reviewed" — that is exactly the
-self-certification shape #541 exists to close. So the review gate step is not the generic call a
-supervised human run makes; it is:
-
-    Board-ReviewGate.ps1 -Repo <owner/name> -PR <n> -RequireIndependentReviewer
-
-Under that flag, evidence authored by YOUR OWN identity does not count no matter how genuine the
-review was, and ``-RecordReview`` refuses outright if the acting identity matches the PR author
-(#622). Do not try to route around this by switching identity yourself. Wait instead for a review
-that already comes from a genuinely different identity — the repo's CI review workflow
-(``claude-review`` / Copilot, which post as a bot account, never yours) is what satisfies this
-today. If the gate is not green because nobody independent has reviewed yet, that is not a bug to
-solve in the loop — ``/board handoff -Save`` rather than invent a way to certify your own work.
-
-Optional, stricter path (#637/#644): the ``codex-rescue`` subagent — the original cross-vendor
-design (see ``codex-plugin-spike.md``) — IS invokable headless via the Agent tool with the
-qualified name ``codex:codex-rescue`` (the unqualified ``codex-rescue`` is rejected; this was the
-actual cause of the earlier "not invokable" finding, not an infrastructure limit). If this run
-chooses to use it: invoke ``codex:codex-rescue``, then record its rollout file path and thread id
-with ``Board-ReviewGate.ps1 -RecordReview -RolloutPath <path> -ThreadId <id> ...`` and gate with
-``-PreferCodexRescue`` added to the ``-RequireIndependentReviewer`` call above — the gate then
-re-verifies the marker against disk instead of trusting the claim. This is OPT-IN: the CI-bot path
-above remains the default and keeps working unchanged when you do not reach for this.
+$reviewSection
 
 ## Claims — external facts in deliverables need a gate (#479)
 A document is a deliverable, and a deliverable needs a gate. If this run produces a knowledge

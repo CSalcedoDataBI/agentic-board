@@ -53,6 +53,46 @@ Describe 'New-ExpertConfig role selection' {
     }
 }
 
+Describe 'Test-CodexRescueAvailable (#646)' {
+    It 'is available when the plugin list contains "codex"' {
+        Test-CodexRescueAvailable -InstalledPlugins @('board', 'codex', 'other') | Should -BeTrue
+    }
+    It 'is unavailable when the plugin list does not contain it' {
+        Test-CodexRescueAvailable -InstalledPlugins @('board', 'other') | Should -BeFalse
+    }
+    It 'is unavailable on an empty list' {
+        Test-CodexRescueAvailable -InstalledPlugins @() | Should -BeFalse
+    }
+    It 'matches case-insensitively' {
+        Test-CodexRescueAvailable -InstalledPlugins @('CODEX') | Should -BeTrue
+    }
+}
+
+Describe 'New-ExpertConfig - the codex-rescue opt-in never writes a silent lie (#646)' {
+    It 'defaults preferCodexRescue to false when not requested' {
+        $c = New-ExpertConfig -PlanText 'x' -PlanGoal 'g' -Inventory $script:Inv -InstalledPlugins @('codex')
+        $c.review.preferCodexRescue | Should -BeFalse
+    }
+    It 'honours the opt-in when requested AND the plugin is available' {
+        $c = New-ExpertConfig -PlanText 'x' -PlanGoal 'g' -Inventory $script:Inv `
+                              -PreferCodexRescue $true -InstalledPlugins @('codex')
+        $c.review.preferCodexRescue | Should -BeTrue
+        $c.codexRescueAvailable     | Should -BeTrue
+        $c.codexRescueRequestedButUnavailable | Should -BeFalse
+    }
+    It 'refuses to write true when requested but the plugin is NOT installed - reports why instead' {
+        $c = New-ExpertConfig -PlanText 'x' -PlanGoal 'g' -Inventory $script:Inv `
+                              -PreferCodexRescue $true -InstalledPlugins @()
+        $c.review.preferCodexRescue | Should -BeFalse
+        $c.codexRescueAvailable     | Should -BeFalse
+        $c.codexRescueRequestedButUnavailable | Should -BeTrue
+    }
+    It 'not requesting it is never reported as "requested but unavailable", even when the plugin is absent' {
+        $c = New-ExpertConfig -PlanText 'x' -PlanGoal 'g' -Inventory $script:Inv -InstalledPlugins @()
+        $c.codexRescueRequestedButUnavailable | Should -BeFalse
+    }
+}
+
 Describe 'Expert-Config.ps1 (CLI wiring)' {
     # The unit tests above call New-ExpertConfig directly, so they never exercise the script's own
     # argument handling or inventory resolution — where both #441 and #442 lived.
@@ -82,5 +122,45 @@ Describe 'Expert-Config.ps1 (CLI wiring)' {
     It 'does not leak the inventory object into stdout' {
         $script:Stdout | Should -Not -Match 'byScope'
         $script:Stdout | Should -Not -Match 'is not recognized as a name of a cmdlet'
+    }
+    It 'defaults the review path to the CI-bot fallback when -PreferCodexRescue is never passed' {
+        $script:Cli.review.preferCodexRescue | Should -BeFalse
+    }
+}
+
+Describe 'Expert-Config.ps1 (CLI wiring) - codex-rescue opt-in surfaced, not silent (#646)' {
+    # Single-element arrays only: passing a MULTI-element array as CLI args through a nested
+    # `pwsh -File` invocation collapses unreliably (a Windows/PowerShell native-argv quirk, proven
+    # by hand while writing this test - a real array variable came through as a single joined
+    # string, or lost elements, depending on quoting). One element is all this needs to prove the
+    # CLI wiring: does a truthy -InstalledPlugins value reach Test-CodexRescueAvailable intact.
+    BeforeAll {
+        $script:OutAvail = Join-Path ([System.IO.Path]::GetTempPath()) ("expcli-avail-" + [guid]::NewGuid().ToString('N') + ".json")
+        $script:StdoutAvail = & pwsh -NoProfile -File $script:Script `
+            -PlanText 'x' -PlanGoal 'g' -Path $script:OutAvail -PreferCodexRescue -InstalledPlugins codex 2>&1 | Out-String
+        $script:CliAvail = if (Test-Path $script:OutAvail) { Get-Content -Raw $script:OutAvail | ConvertFrom-Json } else { $null }
+
+        $script:OutMissing = Join-Path ([System.IO.Path]::GetTempPath()) ("expcli-missing-" + [guid]::NewGuid().ToString('N') + ".json")
+        $script:StdoutMissing = & pwsh -NoProfile -File $script:Script `
+            -PlanText 'x' -PlanGoal 'g' -Path $script:OutMissing -PreferCodexRescue -InstalledPlugins none 2>&1 | Out-String
+        $script:CliMissing = if (Test-Path $script:OutMissing) { Get-Content -Raw $script:OutMissing | ConvertFrom-Json } else { $null }
+    }
+    AfterAll {
+        if (Test-Path $script:OutAvail)   { Remove-Item $script:OutAvail -Force }
+        if (Test-Path $script:OutMissing) { Remove-Item $script:OutMissing -Force }
+    }
+
+    It 'writes the opt-in to the contract when the plugin is available' {
+        $script:CliAvail.review.preferCodexRescue | Should -BeTrue
+    }
+    It 'says so in the printed summary, not only in the file' {
+        $script:StdoutAvail | Should -Match '(?i)codex-rescue'
+    }
+    It 'does NOT write the opt-in when requested but the plugin is unavailable - refuses the silent lie' {
+        $script:CliMissing.review.preferCodexRescue | Should -BeFalse
+    }
+    It 'tells the human WHY it was not enabled, instead of quietly falling back' {
+        $script:StdoutMissing | Should -Match '(?i)REQUESTED but'
+        $script:StdoutMissing | Should -Match '(?i)not installed'
     }
 }
