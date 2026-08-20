@@ -1,11 +1,18 @@
 # The expert role catalog
 
-Two files, one effective catalog:
+Three files, one effective catalog:
 
-| File | Ships with | Edited by | In git |
-|---|---|---|---|
-| `presets/roles.json` | the plugin | nobody (upgrades replace it) | plugin repo |
-| `.agentic-board/roles.json` | the project | you | **yes** — roles are team knowledge |
+| File | Ships with | Edited by | In git | Scope |
+|---|---|---|---|---|
+| `presets/roles.json` | the plugin | nobody (upgrades replace it) | plugin repo | every user, every project |
+| `~/.agentic-board/roles.json` | nothing — you create it | you | **no** — per machine/user | every one of *your* projects |
+| `.agentic-board/roles.json` | nothing — you create it | you | **yes** — roles are team knowledge | this project only |
+
+The global file is for a role you use across several of your own repos and don't want to
+redeclare in each one — e.g. a `powerbi` role that hooks DAX/PowerBI tooling, useful in every
+PBI-related repo you touch. It lives at the same machine-wide state dir `Backup-Board.ps1` and
+the welcome banner already use (`Get-AbiosStateDir -Root $HOME`), so it is never accidentally
+committed into a project — it is not under any repo's `.git` at all.
 
 > If your project's `.gitignore` excludes `.agentic-board/`, `roles.json` cannot be versioned:
 > git **cannot re-include** a file whose parent directory is excluded, so a plain
@@ -15,6 +22,8 @@ Two files, one effective catalog:
 > .agentic-board/*
 > !.agentic-board/roles.json
 > ```
+> This only applies to the **project-local** file — the global one is outside any repo, so it is
+> never subject to a project's `.gitignore` in the first place.
 
 ## Schema
 
@@ -56,12 +65,22 @@ with `/tools` — for instance `wshobson/agents` or `VoltAgent/awesome-claude-co
 
 ## Merge rules
 
-- Local roles are evaluated **before** factory roles; within each group, file order wins. A merged
-  role takes the **local** position — declaring it locally is what places it.
-- `keywords` and `skills` **union** with the factory role of the same name, so "we also call it
-  `metabase`" does not require redeclaring the role.
+Precedence, highest first: **local overrides global overrides factory**. Mechanically this is
+the same union/replace merge applied twice — factory+global first, then that result+local —
+never a bespoke three-way merge, so the rules below apply identically at both steps (read
+"local" as "the more specific of the two files being merged" and "factory" as "the less
+specific one"):
+
+- The more specific file's roles are evaluated **before** the less specific one's; within each
+  group, file order wins. A merged role takes the **more specific** position — declaring it
+  there is what places it.
+- `keywords` and `skills` **union** with the less specific role of the same name, so "we also
+  call it `metabase`" does not require redeclaring the whole role.
 - `agent`, `standards`, `knowledgeDomain` and `qualityProfile` **replace** wholesale. Setting
-  `agent` locally clears any inherited `standards`, so the two never both apply.
+  `agent` clears any inherited `standards`, so the two never both apply.
+- A project-local role always wins over a global one of the same name, and a global role always
+  wins over a factory one — there is no way for the global tier to lock a project out of
+  overriding it.
 
 ## When it goes wrong
 
@@ -69,10 +88,10 @@ A broken local file never leaves the expert worse off than the factory catalog:
 
 | Condition | Behavior |
 |---|---|
-| No local file | Factory catalog. Normal, not a warning. |
-| Invalid JSON, or an unknown `version` | Warn; continue with the factory catalog. |
+| No global or local file | Factory catalog. Normal, not a warning. |
+| Invalid JSON, or an unknown `version`, in either overlay file | Warn; continue as if that file were absent. |
 | A role missing `name`, `keywords` or `skills` | Warn; skip **that role only**. |
-| Duplicate `name` in the local file | Warn; the last declaration wins. |
+| Duplicate `name` within one file | Warn; the last declaration wins. |
 | `agent` names something not installed | Warn; the role survives and falls back to `standards`, then to the generic paragraph. |
 | `knowledgeDomain` names a missing domain | Warn; the role survives without the knowledge line. |
 | The shipped preset is missing | Hard error — that is a broken install, not a misconfiguration. |

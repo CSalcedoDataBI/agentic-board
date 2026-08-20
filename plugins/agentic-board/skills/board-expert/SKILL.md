@@ -32,9 +32,10 @@ a role changes how every future plan is classified, so it is never a silent side
 `config`.
 
 ### roles — see and debug the catalog
-`scripts/Expert-Roles.ps1 -List` prints the effective catalog (factory + local, with each role's
-source and how many installed skills it really hooks); `-Why "<plan text>"` explains which keyword
-in which role decided a match. Schema and merge rules: `references/roles.md`.
+`scripts/Expert-Roles.ps1 -List` prints the effective catalog (factory + global `~/.agentic-board/`
++ local, with each role's source and how many installed skills it really hooks); `-Why "<plan
+text>"` explains which keyword in which role decided a match. Schema and merge rules:
+`references/roles.md`.
 
 ### auto — run it
 `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`:
