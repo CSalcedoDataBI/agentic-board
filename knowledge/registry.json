@@ -264,7 +264,7 @@
       "type": "repo",
       "title": "OpenAI Codex plugin for Claude Code",
       "ref": "https://github.com/openai/codex-plugin-cc",
-      "note": "32K stars, Apache-2.0, activo (push 2026-07-08). Primer plugin oficial de OpenAI que corre DENTRO de Claude Code: /codex:review, /codex:adversarial-review (challenge mode, cuestiona decisiones/tradeoffs), /codex:rescue (subagente delegable), codex-rescue invocable PROACTIVAMENTE por Claude. Revisor de OTRO vendor (GPT/Codex) = separacion estructural real vs autocertificacion, no solo otro prompt del mismo modelo. Candidato para cerrar el hueco de #541 (self-certification en board-expert) y para simplificar second-opinion (hoy orquesta Codex CLI a mano via subprocess).",
+      "note": "32K stars, Apache-2.0, activo (push 2026-07-08). Primer plugin oficial de OpenAI que corre DENTRO de Claude Code: /codex:review, /codex:adversarial-review (challenge mode, cuestiona decisiones/tradeoffs), /codex:rescue (subagente delegable). Revisor de OTRO vendor (GPT/Codex) = separacion estructural real vs autocertificacion, no solo otro prompt del mismo modelo. Confirmado invocable headless via el Agent tool con el nombre CALIFICADO codex:codex-rescue (#637 -- el hallazgo previo de 'no invocable' era un bug de nombre, no una limitacion de infraestructura). Cablado como revisor OPT-IN del gate de PRs (Board-ReviewGate.ps1 -PreferCodexRescue, #644): verifica en disco el rollout file que Codex CLI escribe por invocacion, no confia en texto. El fallback de CI-bot sigue siendo el default; esto no reemplaza second-opinion (uso interactivo supervisado) sino que cierra #541 (self-certification) para runs autonomos que lo eligen.",
       "added": "2026-08-19"
     },
     {
