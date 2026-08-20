@@ -399,3 +399,88 @@ Describe 'Test-CopilotSilentTimeout - silence past the deadline is evidence too 
         Test-CopilotSilentTimeout -Requested $false -Answered $false -Now $script:Deadline.AddMinutes(1) -Deadline $script:Deadline | Should -BeFalse
     }
 }
+
+Describe 'Get-CodexRescueMarker - parses a codex-rescue marker out of a comment body (#644)' {
+    It 'extracts rollout path and thread id from a well-formed marker' {
+        $m = Get-CodexRescueMarker -Body '<!-- [abios-review] codex-rescue sha=abc rollout="C:\Users\me\.codex\sessions\r.jsonl" thread=01a02004 -->'
+        $m.Found       | Should -BeTrue
+        $m.RolloutPath | Should -Be 'C:\Users\me\.codex\sessions\r.jsonl'
+        $m.ThreadId    | Should -Be '01a02004'
+    }
+    It 'tolerates a thread id glued to the closing comment marker (no space before -->)' {
+        $m = Get-CodexRescueMarker -Body 'rollout="C:\r.jsonl" thread=01a02004-->'
+        $m.ThreadId | Should -Be '01a02004'
+    }
+    It 'reports not-found on a plain -RecordReview comment with no codex fields' {
+        $m = Get-CodexRescueMarker -Body '<!-- [abios-review] cristobal sha=abc -->'
+        $m.Found | Should -BeFalse
+    }
+    It 'reports not-found when only one of the two fields is present (malformed, not partial)' {
+        (Get-CodexRescueMarker -Body 'rollout="C:\r.jsonl"').Found | Should -BeFalse
+        (Get-CodexRescueMarker -Body 'thread=01a02004').Found      | Should -BeFalse
+    }
+}
+
+Describe 'Test-CodexRescueMarkerOnDisk - the claim must survive contact with the filesystem (#644)' {
+    BeforeAll {
+        $script:RealFile = Join-Path $TestDrive 'rollout-2026-08-20T11-32-48-01a02004-888b-7b21-86f8-3fe618370b11.jsonl'
+        Set-Content -LiteralPath $script:RealFile -Value '{}'
+    }
+    It 'passes when the file exists and its name contains the claimed thread id' {
+        Test-CodexRescueMarkerOnDisk -RolloutPath $script:RealFile -ThreadId '01a02004-888b-7b21-86f8-3fe618370b11' | Should -BeTrue
+    }
+    It 'fails when the file does not exist (a fabricated path)' {
+        $missing = Join-Path $TestDrive 'rollout-does-not-exist-01a02004.jsonl'
+        Test-CodexRescueMarkerOnDisk -RolloutPath $missing -ThreadId '01a02004' | Should -BeFalse
+    }
+    It 'fails when the file exists but the thread id does not match the filename (a real file, wrong session)' {
+        Test-CodexRescueMarkerOnDisk -RolloutPath $script:RealFile -ThreadId 'totally-different-thread' | Should -BeFalse
+    }
+    It 'fails closed on an empty path or thread id' {
+        Test-CodexRescueMarkerOnDisk -RolloutPath '' -ThreadId 'x' | Should -BeFalse
+        Test-CodexRescueMarkerOnDisk -RolloutPath $script:RealFile -ThreadId '' | Should -BeFalse
+    }
+}
+
+Describe 'Get-CodexVerifiedComments - a bogus codex marker is treated as if never posted, under -PreferCodexRescue (#644)' {
+    BeforeAll {
+        $script:RealFile = Join-Path $TestDrive 'rollout-real-01a02004.jsonl'
+        Set-Content -LiteralPath $script:RealFile -Value '{}'
+        $script:GoodMarker = "<!-- [abios-review] codex-rescue sha=abc rollout=`"$script:RealFile`" thread=01a02004 -->"
+        $script:BadMarker  = '<!-- [abios-review] codex-rescue sha=abc rollout="C:\does\not\exist.jsonl" thread=01a02004 -->'
+        $script:PlainReview = '<!-- [abios-review] cristobal sha=abc -->'
+    }
+
+    It 'passes every comment through unchanged when -PreferCodexRescue is off (default gate behavior unchanged)' {
+        $out = Get-CodexVerifiedComments -CommentBodies @($script:BadMarker, $script:PlainReview) -PreferCodexRescue $false
+        @($out).Count | Should -Be 2
+    }
+    It 'keeps a marker that verifies on disk' {
+        $out = Get-CodexVerifiedComments -CommentBodies @($script:GoodMarker) -PreferCodexRescue $true
+        @($out).Count | Should -Be 1
+    }
+    It 'drops a marker whose rollout file does not exist - rejected, not silently accepted' {
+        $out = Get-CodexVerifiedComments -CommentBodies @($script:BadMarker) -PreferCodexRescue $true
+        @($out).Count | Should -Be 0
+    }
+    It 'never touches a comment with no codex marker at all (the human -RecordReview fallback is unaffected)' {
+        $out = Get-CodexVerifiedComments -CommentBodies @($script:PlainReview) -PreferCodexRescue $true
+        @($out).Count | Should -Be 1
+    }
+    It 'a bogus marker does not poison OTHER evidence - the good one still counts' {
+        $out = @(Get-CodexVerifiedComments -CommentBodies @($script:BadMarker, $script:PlainReview) -PreferCodexRescue $true)
+        $out.Count  | Should -Be 1
+        $out[0]     | Should -Be $script:PlainReview
+    }
+    It 'end to end: a bogus marker as the ONLY evidence means Get-ReviewEvidence reports not-reviewed' {
+        $head = 'abc'
+        $filtered = Get-CodexVerifiedComments -CommentBodies @("<!-- [abios-review] codex-rescue sha=$head rollout=`"C:\nope.jsonl`" thread=01a02004 -->") -PreferCodexRescue $true
+        (Get-ReviewEvidence -CommentBodies $filtered -HeadSha $head).reviewed | Should -BeFalse
+    }
+    It 'end to end: a verified marker as the ONLY evidence means Get-ReviewEvidence reports reviewed' {
+        $head = 'abc'
+        $marker = "<!-- [abios-review] codex-rescue sha=$head rollout=`"$script:RealFile`" thread=01a02004 -->"
+        $filtered = Get-CodexVerifiedComments -CommentBodies @($marker) -PreferCodexRescue $true
+        (Get-ReviewEvidence -CommentBodies $filtered -HeadSha $head).reviewed | Should -BeTrue
+    }
+}

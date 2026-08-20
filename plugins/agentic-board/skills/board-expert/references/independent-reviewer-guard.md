@@ -79,11 +79,25 @@ thread ID, `Board-ReviewGate.ps1` verifies the file exists and its filename's th
 matches the cited one (and, ideally, that the file's mtime is at/after the PR's head commit
 time) — a claim with no matching file, or a stale one, does not count.
 
-### Still open — a decision for the repo owner, not made here
+## What #644 wired (opt-in, alongside the CI-bot fallback — not replacing it)
 
-Whether to actually **route** the autonomous loop's mandatory reviewer through `codex-rescue`
-(replacing or supplementing the CI-bot fallback #623 shipped) is a design/wiring decision, not a
-verification one — implementing it means teaching `Board-ReviewGate.ps1` to parse and validate
-the rollout-file marker, teaching `Expert-Auto.ps1`'s brief to invoke `codex:codex-rescue`
-(qualified name) and post the marker, and deciding how a solo-repo autonomous run pays for Codex
-usage on every PR. Left as a follow-up, same as #623 left it.
+The repo owner's call on the open question above: land the marker as something a run can
+*choose*, not something every autonomous PR is forced to pay Codex quota for, since that cost was
+never quantified.
+
+- `Board-ReviewGate.ps1 -RecordReview -RolloutPath <path> -ThreadId <id> ...` embeds the marker
+  (`rollout="..." thread=...`) in the `[abios-review]` comment — and refuses to post it if the
+  file does not exist or the thread id does not match the filename (fail fast, never record a
+  claim that cannot later be checked).
+- `-PreferCodexRescue` (new gate switch) re-verifies any rollout/thread marker against disk at
+  gate time. A marker that does not verify is dropped from evidence as though it were never
+  posted — so a fabricated session cannot earn credit, and if it was the only evidence the gate
+  correctly reports unreviewed rather than trusting the text. Plain `-RecordReview` comments
+  (no marker) and GitHub reviews (Copilot/claude-review) are untouched by this — the flag only
+  tightens the codex-rescue path, and only when passed.
+- `Expert-Auto.ps1`'s brief documents this as an optional path for a run that chooses it; the
+  CI-bot fallback (`-RequireIndependentReviewer` alone) stays the default for everyone else.
+
+Genuinely still open: whether to ever make this the *default* rather than opt-in, and the real
+Codex/ChatGPT usage-limit cost of doing so — left unmeasured on purpose, revisit once there is
+usage data from runs that opted in.

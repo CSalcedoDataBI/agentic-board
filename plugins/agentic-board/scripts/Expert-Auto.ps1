@@ -250,11 +250,15 @@ that already comes from a genuinely different identity — the repo's CI review 
 today. If the gate is not green because nobody independent has reviewed yet, that is not a bug to
 solve in the loop — ``/board handoff -Save`` rather than invent a way to certify your own work.
 
-Aspirational, not yet available: routing this through the ``codex-rescue`` subagent as a
-cross-vendor reviewer was the original design (see ``codex-plugin-spike.md``), but it is not
-invokable via an Agent-tool call in this environment and its headless viability from a launched
-`claude -p` session is unverified (blocked on an unrelated OAuth failure, not a design question).
-Do not attempt to call it — the CI-bot path above is the one that actually works today.
+Optional, stricter path (#637/#644): the ``codex-rescue`` subagent — the original cross-vendor
+design (see ``codex-plugin-spike.md``) — IS invokable headless via the Agent tool with the
+qualified name ``codex:codex-rescue`` (the unqualified ``codex-rescue`` is rejected; this was the
+actual cause of the earlier "not invokable" finding, not an infrastructure limit). If this run
+chooses to use it: invoke ``codex:codex-rescue``, then record its rollout file path and thread id
+with ``Board-ReviewGate.ps1 -RecordReview -RolloutPath <path> -ThreadId <id> ...`` and gate with
+``-PreferCodexRescue`` added to the ``-RequireIndependentReviewer`` call above — the gate then
+re-verifies the marker against disk instead of trusting the claim. This is OPT-IN: the CI-bot path
+above remains the default and keeps working unchanged when you do not reach for this.
 
 ## Claims — external facts in deliverables need a gate (#479)
 A document is a deliverable, and a deliverable needs a gate. If this run produces a knowledge
