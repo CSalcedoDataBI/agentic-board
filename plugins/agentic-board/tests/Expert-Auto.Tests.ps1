@@ -115,13 +115,35 @@ Describe 'Format-AutoBrief — independent review is mandatory for an unsupervis
         $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
         $b | Should -Match 'claude-review'
     }
-    It 'documents codex-rescue as an optional, verified-headless path - not a forbidden one (#637/#644)' {
+    It 'mentions codex-rescue exists but tells the run NOT to switch to it on its own judgment, when the contract did not opt in (#646)' {
+        # $script:Contract carries no `review` key at all - the same as a contract written before
+        # #646, or one where config never enabled it. Both must resolve to the CI-bot path.
         $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match '(?i)codex-rescue'
+        $b | Should -Match '(?is)did\s+not opt into it'   # here-string wraps mid-phrase; tolerate the line break
+        $b | Should -Not -Match '(?i)do not attempt'          # #637 corrected the old "not invokable" finding
+        $b | Should -Not -Match 'subagent_type'                # the concrete invocation steps are NOT prescribed here
+    }
+}
+
+Describe 'Format-AutoBrief — the contract''s codex-rescue choice is INSTRUCTED, not left to the run (#646)' {
+    BeforeAll {
+        $script:ContractCodex = $script:Contract.Clone()
+        $script:ContractCodex.review = @{ preferCodexRescue = $true }
+    }
+    It 'gives concrete, mandatory steps to invoke codex:codex-rescue when the contract opted in' {
+        $b = Format-AutoBrief -Contract $script:ContractCodex -PlanBody 'x' -RoleObjective 'r'
         $b | Should -Match 'codex:codex-rescue'
         $b | Should -Match 'PreferCodexRescue'
-        # #637 corrected the earlier "not invokable" finding - the brief must not tell the run to
-        # avoid it any more, only that using it is optional (the CI-bot path stays the default).
-        $b | Should -Not -Match '(?i)do not attempt'
+        $b | Should -Match '(?i)RolloutPath'
+    }
+    It 'still requires -RequireIndependentReviewer alongside the codex-rescue flag' {
+        $b = Format-AutoBrief -Contract $script:ContractCodex -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Match 'RequireIndependentReviewer'
+    }
+    It 'does NOT print the CI-bot-only branch text when the contract opted into codex-rescue' {
+        $b = Format-AutoBrief -Contract $script:ContractCodex -PlanBody 'x' -RoleObjective 'r'
+        $b | Should -Not -Match '(?i)did not opt into it'
     }
 }
 

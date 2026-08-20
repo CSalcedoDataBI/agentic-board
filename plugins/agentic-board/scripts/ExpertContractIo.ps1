@@ -36,6 +36,11 @@ function New-ExpertContract {
         workClass = @{ visualPatterns = @(); humanApproves = @('visual') }
         dod      = @{ ci = $true; build = $true; lint = $true; tests = $true; bpa = $true; tmdlBreaking = $true }
         evidence = @{ pr = $true; issueComment = $true; file = $true }
+        # (#646) Off by default: an unsupervised run uses the CI-bot fallback unless the human
+        # opted into the stricter codex-rescue path in `config` (see Board-ReviewGate.ps1's
+        # -PreferCodexRescue, #637/#644). Keyed under its own object so a future review setting
+        # has somewhere to live without another top-level contract key.
+        review   = @{ preferCodexRescue = $false }
         boardSelfDrive = @{ createIssues = $true; label = 'discovered'; cap = 10 }
         budget   = @{ maxIterations = 8; maxMinutes = 120 }
         capabilities = @{ knowledge = $true; skillsBootstrap = $true; toolsInstall = $false; scan = $true }

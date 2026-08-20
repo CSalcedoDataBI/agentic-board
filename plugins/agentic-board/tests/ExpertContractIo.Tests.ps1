@@ -35,6 +35,9 @@ Describe 'New-ExpertContract (defaults)' {
         $b.label | Should -Be 'discovered'
         $b.cap | Should -BeGreaterThan 0
     }
+    It 'defaults the codex-rescue review path to OFF (#646) - opt-in, never silent' {
+        (New-ExpertContract).review.preferCodexRescue | Should -BeFalse
+    }
 }
 
 Describe 'Write/Read round-trip' {
@@ -57,6 +60,11 @@ Describe 'Read-ExpertContract default-merge' {
         $r.role | Should -Be 'partial only'
         $r.evidence.pr | Should -BeTrue          # filled from defaults
         $r.autonomy.irreversible | Should -Contain 'merge'
+        $r.review.preferCodexRescue | Should -BeFalse   # (#646) a contract older than this key still resolves off, not missing
+    }
+    It 'preserves an explicit opt-in written by an older or hand-edited contract (#646)' {
+        '{ "review": { "preferCodexRescue": true } }' | Set-Content -Path $script:Tmp -Encoding utf8
+        (Read-ExpertContract -Path $script:Tmp).review.preferCodexRescue | Should -BeTrue
     }
     It 'returns full defaults when the file does not exist' {
         $missing = Join-Path ([System.IO.Path]::GetTempPath()) ("nope-" + [guid]::NewGuid().ToString('N') + ".json")

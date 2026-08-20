@@ -24,6 +24,15 @@ typed with a slash.
 Show the role preview and let the user edit before running `auto`. See `references/contract.md`
 for every contract field and its default.
 
+**Independent-review path (#646).** Before writing the contract, check whether the
+`codex@openai-codex` plugin is installed (`Get-InstalledPlugins.ps1` — reused, do not re-detect by
+hand) and ASK the user whether this run should opt into the stricter `codex:codex-rescue` review
+path (`references/independent-reviewer-guard.md`) instead of the CI-bot fallback that is the
+default. If the plugin is not installed, say so plainly instead of silently skipping the question
+— offer the one-line install (`claude plugin marketplace add openai/codex-plugin-cc` +
+`claude plugin install codex@openai-codex`) as the alternative to asking. Pass the user's answer
+as `Expert-Config.ps1 -PreferCodexRescue`; never pass it without having asked.
+
 If `config` reports **NO ROLE MATCHED**, research the plan's domain (via `/knowledge`, and
 `/tools` for ready-made agent definitions such as `wshobson/agents`), then propose a complete
 role — `name`, `keywords`, `skills`, and an `agent` pointer when a fitting definition exists.
