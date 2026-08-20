@@ -102,6 +102,24 @@
 .PARAMETER Summary
     What the external review found. Used with -RecordReview.
 
+.PARAMETER RolloutPath
+    (#644) The Codex CLI rollout file a genuine `codex:codex-rescue` invocation writes to disk
+    (`~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<timestamp>-<thread-id>.jsonl`). Used with
+    -RecordReview and -ThreadId together to embed a verifiable marker instead of a plain text
+    claim. -RecordReview refuses to post it if the file does not exist or the thread id does not
+    match the filename - never record a marker that cannot later be checked.
+
+.PARAMETER ThreadId
+    (#644) The `CODEX_THREAD_ID` of the same invocation. Used with -RecordReview and -RolloutPath.
+
+.PARAMETER PreferCodexRescue
+    (#644) OPT-IN, stricter than the default -RecordReview trust. When set, any recorded evidence
+    that carries a rollout/thread marker is re-verified against disk at gate time (file exists,
+    filename embeds the thread id) - a marker that does not verify is treated as if it were never
+    posted, so a run cannot get credit for a fabricated Codex session. Evidence with no marker at
+    all (a plain -RecordReview, or a GitHub review from Copilot/claude-review) is unaffected -
+    this only tightens the codex-rescue path, never the existing ones.
+
 .PARAMETER RequireIndependentReviewer
     Self-certification guard (#541/#622), OPT-IN. Evidence (a GitHub review or an -RecordReview
     comment) authored by the SAME account that opened the PR does not count, however convincing
@@ -120,6 +138,8 @@
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RecordReview -Reviewer 'codex/gpt-5.5' -Summary '4 rondas, 12 hallazgos, todos corregidos'
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -AllowUnreviewed
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RequireIndependentReviewer
+    .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RecordReview -Reviewer 'codex-rescue' -Summary '...' -RolloutPath 'C:\Users\me\.codex\sessions\2026\08\20\rollout-...-01a02004….jsonl' -ThreadId '01a02004…'
+    .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RequireIndependentReviewer -PreferCodexRescue
 #>
 [CmdletBinding()]
 param(
@@ -144,6 +164,10 @@ param(
     [switch]$RecordReview,
     [string]$Reviewer = "external",
     [string]$Summary  = "",
+    # (#644) Paired with -ThreadId: embeds a disk-checkable Codex CLI marker in the recorded
+    # review instead of a plain text claim. Both or neither - one without the other is refused.
+    [string]$RolloutPath = "",
+    [string]$ThreadId    = "",
     # Self-certification guard (#541/#622), OPT-IN only. A human running -RecordReview after
     # genuinely reading the diff (the documented /board work fallback when Copilot/claude-review
     # are unavailable) posts that record under their OWN account - the same account that opened
@@ -154,6 +178,9 @@ param(
     # autonomous launcher) should pass this - it makes evidence authored by the PR's own account
     # not count, so the run cannot certify its own work no matter what text it posts.
     [switch]$RequireIndependentReviewer,
+    # (#644) OPT-IN. Re-verifies any rollout/thread marker against disk at gate time instead of
+    # trusting the text - see the doc comment above for exactly what this does and does not change.
+    [switch]$PreferCodexRescue,
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL"
 )
 
@@ -274,6 +301,64 @@ function Get-ReviewEvidence {
         reviewers = @($names | Where-Object { $_ } | Select-Object -Unique)
         stale     = (($allGh.Count - $gh.Count) + ($allExt.Count - $ext.Count))
     }
+}
+
+# (#644) Extract a codex-rescue marker's rollout path + thread id from a comment body, if present.
+# A genuine `codex:codex-rescue` invocation writes a rollout file Claude cannot fabricate without
+# actually calling Codex; the marker cites it so the gate can check the claim instead of trusting
+# it. Quoted path (`rollout="..."`) so a Windows path containing spaces still parses. Pure.
+function Get-CodexRescueMarker {
+    param([string]$Body = '')
+    $notFound = [pscustomobject]@{ Found = $false; RolloutPath = $null; ThreadId = $null }
+    # Scoped to the machine-generated marker COMMENT itself, never the free-text Summary below it
+    # (review round 1, Copilot on #645): a human -RecordReview summary that happens to say, in
+    # prose, "checked thread=3, rollout=stable" would otherwise be misread as a codex-rescue claim
+    # and dropped as unverifiable — a real review getting punished for an unlucky choice of words.
+    if ("$Body" -notmatch '(?is)<!--\s*\[abios-review\](.*?)-->') { return $notFound }
+    $markerLine = $Matches[1]
+    $rollout = $null; $thread = $null
+    if ($markerLine -match '(?i)rollout\s*=\s*"([^"]+)"') { $rollout = $Matches[1].Trim() }
+    if ($markerLine -match '(?i)thread\s*=\s*(\S+)')       { $thread  = $Matches[1].Trim().TrimEnd('-','>').Trim() }
+    return [pscustomobject]@{ Found = [bool]($rollout -and $thread); RolloutPath = $rollout; ThreadId = $thread }
+}
+
+# (#644) Does the claimed rollout file actually exist, and does its filename embed the claimed
+# thread id? Both checks are needed: a real-but-unrelated file would pass a bare existence check.
+# NOT pure (touches disk) - kept separate from Get-CodexRescueMarker so that function stays pure
+# and unit-testable without a filesystem.
+function Test-CodexRescueMarkerOnDisk {
+    param([string]$RolloutPath = '', [string]$ThreadId = '')
+    if (-not "$RolloutPath".Trim() -or -not "$ThreadId".Trim()) { return $false }
+    if (-not (Test-Path -LiteralPath $RolloutPath)) { return $false }
+    $leaf = Split-Path -Leaf $RolloutPath
+    # Anchored to the real filename shape (`rollout-<timestamp>-<thread-id>.jsonl`), not a bare
+    # substring (review round 1, Copilot on #645): an unanchored `-match` let a partial/ambiguous
+    # thread id (or an accidental hit inside the timestamp) verify against the wrong session.
+    return [bool]($leaf -match ('-' + [regex]::Escape($ThreadId) + '\.jsonl$'))
+}
+
+# (#644) Drop comments carrying a codex-rescue marker that fails on-disk verification, when
+# -PreferCodexRescue is set — everything else (plain -RecordReview comments, comments with no
+# marker at all) passes through untouched. Feeding the result into Get-ReviewEvidence instead of
+# the raw comment list means a bogus marker is treated as though it were never posted: if it was
+# the only evidence, "reviewed" correctly flips back to false rather than trusting the claim.
+# NOT pure (delegates to Test-CodexRescueMarkerOnDisk) - a thin filter, not gate logic.
+function Get-CodexVerifiedComments {
+    param([object[]]$CommentBodies = @(), [bool]$PreferCodexRescue = $false)
+    if (-not $PreferCodexRescue) { return @($CommentBodies) }
+    return @(@($CommentBodies) | Where-Object {
+        $body = if ($_ -is [string]) { $_ } else { "$($_.body)" }
+        $m = Get-CodexRescueMarker -Body $body
+        if (-not $m.Found) { return $true }
+        $ok = Test-CodexRescueMarkerOnDisk -RolloutPath $m.RolloutPath -ThreadId $m.ThreadId
+        if (-not $ok) {
+            # Leaf filename only (review round 1, Copilot on #645): the full path can carry a
+            # username / home-directory structure that a shared CI log should not echo.
+            $leafForLog = try { Split-Path -Leaf $m.RolloutPath } catch { '(unparseable path)' }
+            Write-Host ("  WARN marcador de codex-rescue no verifica en disco (rollout='{0}' thread='{1}') - se ignora como evidencia (#644)." -f $leafForLog, $m.ThreadId) -ForegroundColor DarkYellow
+        }
+        return $ok
+    })
 }
 
 # Names that identify the automated REVIEWER job rather than a build/test job. Matched loosely
@@ -489,11 +574,29 @@ if ($RecordReview) {
         }
     }
 
+    # (#644) -RolloutPath/-ThreadId are a pair: one without the other is a typo, not a partial
+    # marker, and posting it half-formed would be worse than not posting it (Get-CodexRescueMarker
+    # would silently ignore it later, which reads as "no marker" rather than "malformed marker").
+    $haveRollout = "$RolloutPath".Trim(); $haveThread = "$ThreadId".Trim()
+    if (($haveRollout -and -not $haveThread) -or ($haveThread -and -not $haveRollout)) {
+        throw "-RolloutPath y -ThreadId van juntos - falta uno de los dos."
+    }
+    $codexFields = ""
+    if ($haveRollout -and $haveThread) {
+        # Fail fast: never post a marker the gate would later reject. A caller that just ran
+        # codex-rescue and got a bogus path back should find out NOW, not when the gate blocks.
+        if (-not (Test-CodexRescueMarkerOnDisk -RolloutPath $haveRollout -ThreadId $haveThread)) {
+            throw "El rollout '$haveRollout' no existe o su nombre no contiene el thread id '$haveThread' - no se registra un marcador que no verifica (#644)."
+        }
+        $codexFields = " rollout=`"$haveRollout`" thread=$haveThread"
+        Write-Host "  OK marcador de codex-rescue verificado en disco (rollout + thread id coinciden)." -ForegroundColor Green
+    }
+
     # The SHA is what makes the record mean something: it attests to THIS diff, not to the PR in
     # general. A later push leaves it behind as stale evidence instead of vouching for code the
     # reviewer never saw.
     $body = @"
-<!-- $script:ExternalReviewMarker $Reviewer sha=$headSha -->
+<!-- $script:ExternalReviewMarker $Reviewer sha=$headSha$codexFields -->
 ## Revision externa - $Reviewer
 
 **Commit revisado:** ``$headSha``
@@ -726,7 +829,7 @@ while ($true) {
     if (-not $prState -or ($copilotRequested -and -not $reviewArrived)) {
         $prState = Get-ReviewState
         $reviewArrived = (Get-ReviewEvidence -Reviews @($prState.reviews.nodes) `
-                             -CommentBodies @($prState.comments.nodes) `
+                             -CommentBodies (Get-CodexVerifiedComments -CommentBodies @($prState.comments.nodes) -PreferCodexRescue $PreferCodexRescue) `
                              -HeadSha "$($prState.headRefOid)" -PrAuthorLogin $prAuthorLogin).reviewed
     }
 
@@ -798,7 +901,8 @@ if ($copilotRequested -and (Test-CopilotUnavailableReview -Reviews $reviews -Hea
 # Evidence that someone ACTUALLY reviewed (#510). Comments arrive in the same authoritative
 # GraphQL read as the reviews (#563) — one source, one failure mode: an unreadable state already
 # failed the gate inside Get-ReviewState, so evidence can never be computed from half a picture.
-$evidence = Get-ReviewEvidence -Reviews $reviews -CommentBodies @($prState.comments.nodes) `
+$evidence = Get-ReviewEvidence -Reviews $reviews `
+                                -CommentBodies (Get-CodexVerifiedComments -CommentBodies @($prState.comments.nodes) -PreferCodexRescue $PreferCodexRescue) `
                                 -HeadSha "$($prState.headRefOid)" -PrAuthorLogin $prAuthorLogin
 
 Write-Host ""

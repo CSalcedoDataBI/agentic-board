@@ -115,10 +115,13 @@ Describe 'Format-AutoBrief — independent review is mandatory for an unsupervis
         $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
         $b | Should -Match 'claude-review'
     }
-    It 'tells the run NOT to attempt codex-rescue (unverified headless viability, #621)' {
+    It 'documents codex-rescue as an optional, verified-headless path - not a forbidden one (#637/#644)' {
         $b = Format-AutoBrief -Contract $script:Contract -PlanBody 'x' -RoleObjective 'r'
-        $b | Should -Match 'codex-rescue'
-        $b | Should -Match '(?i)do not attempt'
+        $b | Should -Match 'codex:codex-rescue'
+        $b | Should -Match 'PreferCodexRescue'
+        # #637 corrected the earlier "not invokable" finding - the brief must not tell the run to
+        # avoid it any more, only that using it is optional (the CI-bot path stays the default).
+        $b | Should -Not -Match '(?i)do not attempt'
     }
 }
 
