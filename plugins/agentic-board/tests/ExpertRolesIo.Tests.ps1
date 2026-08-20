@@ -18,9 +18,13 @@ Describe 'Get-ExpertRolePresetPath' {
 
 Describe 'Get-ExpertRoles (factory only)' {
     BeforeEach { Clear-ExpertRolesCache }
+    # Both overlay tiers pinned to a nonexistent path: without this, these assertions would
+    # silently read whatever happens to exist at ~/.agentic-board/roles.json on the machine
+    # running them (#640) - the same hermeticity trap the LocalPath pin already existed to avoid.
+    $noSuchGlobal = 'C:\does\not\exist\global-roles.json'
 
     It 'returns the five factory roles' {
-        $c = Get-ExpertRoles -LocalPath 'C:\does\not\exist\roles.json'
+        $c = Get-ExpertRoles -GlobalPath $noSuchGlobal -LocalPath 'C:\does\not\exist\roles.json'
         @($c.roles).Count | Should -Be 5
         @($c.roles.name) | Should -Contain 'powerbi-report'
         @($c.roles.name) | Should -Contain 'semantic-model'
@@ -29,19 +33,76 @@ Describe 'Get-ExpertRoles (factory only)' {
         @($c.roles.name) | Should -Contain 'generic'
     }
     It 'preserves the declared order, most specific first' {
-        $c = Get-ExpertRoles -LocalPath 'C:\does\not\exist\roles.json'
+        $c = Get-ExpertRoles -GlobalPath $noSuchGlobal -LocalPath 'C:\does\not\exist\roles.json'
         @($c.roles.name)[0] | Should -Be 'powerbi-report'
         @($c.roles.name)[-1] | Should -Be 'generic'
     }
     It 'carries the quality profile out of the preset, not out of code' {
-        $c = Get-ExpertRoles -LocalPath 'C:\does\not\exist\roles.json'
+        $c = Get-ExpertRoles -GlobalPath $noSuchGlobal -LocalPath 'C:\does\not\exist\roles.json'
         $c.qualityProfile | Should -Contain 'skill-creator'
         $c.qualityProfile | Should -Contain 'second-opinion'
     }
     It 'keeps the factory keywords byte-for-byte' {
-        $c = Get-ExpertRoles -LocalPath 'C:\does\not\exist\roles.json'
+        $c = Get-ExpertRoles -GlobalPath $noSuchGlobal -LocalPath 'C:\does\not\exist\roles.json'
         $pbi = $c.roles | Where-Object { $_.name -eq 'powerbi-report' }
         $pbi.keywords | Should -Be @('deneb','visual','chart','dashboard','report','pbir','svg')
+    }
+}
+
+Describe 'Get-ExpertRoles (global tier, #640)' {
+    BeforeEach {
+        Clear-ExpertRolesCache
+        $script:NoSuchLocal = 'C:\does\not\exist\roles.json'
+        $script:Global = Join-Path ([System.IO.Path]::GetTempPath()) ("roles-global-" + [guid]::NewGuid().ToString('N') + ".json")
+    }
+    AfterEach { if (Test-Path $script:Global) { Remove-Item $script:Global -Force } }
+
+    It 'adds a role the factory does not know' {
+        Set-Content -Path $script:Global -Encoding utf8 -Value (
+            @{ version=1; roles=@(@{ name='powerbi'; keywords=@('dax','power bi'); skills=@('dax:dax-reference') }) } | ConvertTo-Json -Depth 8
+        )
+        $c = Get-ExpertRoles -GlobalPath $script:Global -LocalPath $script:NoSuchLocal -NoCache
+        @($c.roles.name) | Should -Contain 'powerbi'
+    }
+    It 'unions keywords/skills into a factory role of the same name' {
+        Set-Content -Path $script:Global -Encoding utf8 -Value (
+            @{ version=1; roles=@(@{ name='semantic-model'; keywords=@('daxlib'); skills=@('dax:dax-lib') }) } | ConvertTo-Json -Depth 8
+        )
+        $c = Get-ExpertRoles -GlobalPath $script:Global -LocalPath $script:NoSuchLocal -NoCache
+        $r = $c.roles | Where-Object { $_.name -eq 'semantic-model' }
+        $r.keywords | Should -Contain 'dax'        # factory kept
+        $r.keywords | Should -Contain 'daxlib'      # global added
+        $r.skills   | Should -Contain 'dax:dax-lib'
+    }
+    It 'a project-local role of the same name overrides the global one, not the other way round' {
+        Set-Content -Path $script:Global -Encoding utf8 -Value (
+            @{ version=1; roles=@(@{ name='infra'; keywords=@('global-kw'); skills=@() }) } | ConvertTo-Json -Depth 8
+        )
+        $local = Join-Path ([System.IO.Path]::GetTempPath()) ("roles-local-" + [guid]::NewGuid().ToString('N') + ".json")
+        try {
+            Set-Content -Path $local -Encoding utf8 -Value (
+                @{ version=1; roles=@(@{ name='infra'; keywords=@('local-kw'); skills=@(); replace=$true }) } | ConvertTo-Json -Depth 8
+            )
+            $c = Get-ExpertRoles -GlobalPath $script:Global -LocalPath $local -NoCache
+            $r = $c.roles | Where-Object { $_.name -eq 'infra' }
+            $r.keywords | Should -Be @('local-kw')
+        } finally { if (Test-Path $local) { Remove-Item $local -Force } }
+    }
+    It 'ignores a global file with an unknown schema version, falling back to factory only' {
+        Set-Content -Path $script:Global -Encoding utf8 -Value '{ "version": 99, "roles": [ { "name": "x", "keywords": ["x"], "skills": [] } ] }'
+        $c = Get-ExpertRoles -GlobalPath $script:Global -LocalPath $script:NoSuchLocal -NoCache 3>$null
+        @($c.roles.name) | Should -Not -Contain 'x'
+        @($c.roles).Count | Should -Be 5
+    }
+    It 'no global file behaves exactly like the two-tier catalog' {
+        $withGlobal = Get-ExpertRoles -GlobalPath 'C:\does\not\exist\global.json' -LocalPath $script:NoSuchLocal -NoCache
+        @($withGlobal.roles).Count | Should -Be 5
+    }
+}
+
+Describe 'Get-ExpertRoleGlobalPath' {
+    It 'resolves under the machine-wide state dir, not a per-project one' {
+        Get-ExpertRoleGlobalPath | Should -Match '\.agentic-board[\\/]roles\.json$'
     }
 }
 
@@ -151,7 +212,7 @@ Describe 'Add-ExpertRole' {
     }
     It 'round-trips: what it writes, the loader reads back identically' {
         Add-ExpertRole -Role @{ name='infra'; keywords=@('terraform','helm'); skills=@('iac') } -Path $script:New | Out-Null
-        $c = Get-ExpertRoles -LocalPath $script:New -NoCache
+        $c = Get-ExpertRoles -GlobalPath 'C:\does\not\exist\global-roles.json' -LocalPath $script:New -NoCache
         $r = $c.roles | Where-Object { $_.name -eq 'infra' }
         $r.keywords | Should -Be @('terraform','helm')
         $r.skills   | Should -Be @('iac')
@@ -159,7 +220,7 @@ Describe 'Add-ExpertRole' {
     It 'appends to an existing file without losing the roles already there' {
         Add-ExpertRole -Role @{ name='one'; keywords=@('a'); skills=@() } -Path $script:New | Out-Null
         Add-ExpertRole -Role @{ name='two'; keywords=@('b'); skills=@() } -Path $script:New | Out-Null
-        $c = Get-ExpertRoles -LocalPath $script:New -NoCache
+        $c = Get-ExpertRoles -GlobalPath 'C:\does\not\exist\global-roles.json' -LocalPath $script:New -NoCache
         @($c.roles.name) | Should -Contain 'one'
         @($c.roles.name) | Should -Contain 'two'
     }
@@ -176,28 +237,29 @@ Describe 'Get-ExpertRoles (degraded local file)' {
     BeforeEach {
         Clear-ExpertRolesCache
         $script:Bad = Join-Path ([System.IO.Path]::GetTempPath()) ("roles-bad-" + [guid]::NewGuid().ToString('N') + ".json")
+        $script:NoSuchGlobal = 'C:\does\not\exist\global-roles.json'
     }
     AfterEach { if (Test-Path $script:Bad) { Remove-Item $script:Bad -Force } }
 
     It 'falls back to the factory catalog when the local file is invalid JSON' {
         Set-Content -Path $script:Bad -Value '{ this is not json' -Encoding utf8
-        $c = Get-ExpertRoles -LocalPath $script:Bad -NoCache 3>$null
+        $c = Get-ExpertRoles -GlobalPath $script:NoSuchGlobal -LocalPath $script:Bad -NoCache 3>$null
         @($c.roles).Count | Should -Be 5
     }
     It 'falls back to the factory catalog on an unknown schema version' {
         Set-Content -Path $script:Bad -Encoding utf8 -Value '{ "version": 99, "roles": [ { "name": "x", "keywords": ["x"], "skills": [] } ] }'
-        $c = Get-ExpertRoles -LocalPath $script:Bad -NoCache 3>$null
+        $c = Get-ExpertRoles -GlobalPath $script:NoSuchGlobal -LocalPath $script:Bad -NoCache 3>$null
         @($c.roles.name) | Should -Not -Contain 'x'
         @($c.roles).Count | Should -Be 5
     }
     It 'keeps the valid roles of a file that also contains a broken one' {
         Set-Content -Path $script:Bad -Encoding utf8 -Value '{ "version": 1, "roles": [ { "name": "broken" }, { "name": "ok", "keywords": ["k"], "skills": [] } ] }'
-        $c = Get-ExpertRoles -LocalPath $script:Bad -NoCache 3>$null
+        $c = Get-ExpertRoles -GlobalPath $script:NoSuchGlobal -LocalPath $script:Bad -NoCache 3>$null
         @($c.roles.name) | Should -Contain 'ok'
         @($c.roles.name) | Should -Not -Contain 'broken'
     }
     It 'throws when the shipped preset itself is missing' {
-        { Get-ExpertRoles -PresetPath 'C:\no\such\preset.json' -LocalPath 'C:\no\such\local.json' -NoCache } |
+        { Get-ExpertRoles -PresetPath 'C:\no\such\preset.json' -GlobalPath 'C:\no\such\global.json' -LocalPath 'C:\no\such\local.json' -NoCache } |
             Should -Throw '*broken install*'
     }
 }

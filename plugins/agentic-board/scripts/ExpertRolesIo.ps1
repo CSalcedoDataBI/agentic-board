@@ -1,11 +1,16 @@
 <#
 .SYNOPSIS
-    Load and merge the /board expert role catalog — shipped preset + optional project-local file.
+    Load and merge the /board expert role catalog — shipped preset + optional global + project-local file.
 
 .DESCRIPTION
-    Roles are data, not code. presets/roles.json ships the factory catalog; a project may add
-    .agentic-board/roles.json (versioned in git) to add, extend or override roles. This script is
-    the single place that knows roles live in files.
+    Roles are data, not code. presets/roles.json ships the factory catalog; ~/.agentic-board/roles.json
+    (NOT versioned - it is per machine/user) adds roles across every one of your projects; a project may
+    additionally add .agentic-board/roles.json (versioned in git) to add, extend or override roles for
+    just that repo. This script is the single place that knows roles live in files.
+
+    Precedence: local overrides global overrides factory. It is the same union/replace merge
+    (Merge-ExpertRoles) applied twice - factory+global first, then that result+local - rather than a
+    bespoke three-way merge.
 
     Pure filesystem IO (no gh) behind a dot-source guard ($env:ABIOS_EXPERTROLES_DOTSOURCE).
 
@@ -126,9 +131,34 @@ function Get-ExpertRoleLocalPath {
     Join-Path $dir 'roles.json'
 }
 
+function Get-ExpertRoleGlobalPath {
+    # Same state-dir convention Backup-Board.ps1 and the welcome-banner marker already use for
+    # machine-wide state: Get-AbiosStateDir -Root $HOME -> ~/.agentic-board. Roles placed there
+    # apply across every one of this user's projects, not just the current repo.
+    . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
+    $dir = Get-AbiosStateDir -Root $HOME
+    if (-not $dir) { return $null }
+    Join-Path $dir 'roles.json'
+}
+
+function Import-ValidatedExpertRoleFile {
+    # An overlay file (global or local) must declare the schema version it was written against;
+    # a mismatch means an old or future build wrote it, so ignoring it is safer than misreading it.
+    param([string]$Path)
+    $doc = Read-ExpertRoleFile -Path $Path
+    if (-not $doc) { return $null }
+    $v = if ($doc.ContainsKey('version')) { [int]$doc.version } else { 0 }
+    if ($v -ne $script:ExpertRolesSchemaVersion) {
+        Write-Warning "roles: '$Path' declares version '$v'; this build understands version $($script:ExpertRolesSchemaVersion) - ignoring the file."
+        return $null
+    }
+    $doc.roles = Select-ValidExpertRoles -Roles @($doc.roles)
+    $doc
+}
+
 function Get-ExpertRoles {
-    param([string]$PresetPath, [string]$LocalPath, [switch]$NoCache)
-    $usingDefaults = -not $PresetPath -and -not $PSBoundParameters.ContainsKey('LocalPath')
+    param([string]$PresetPath, [string]$GlobalPath, [string]$LocalPath, [switch]$NoCache)
+    $usingDefaults = -not $PresetPath -and -not $PSBoundParameters.ContainsKey('GlobalPath') -and -not $PSBoundParameters.ContainsKey('LocalPath')
     if ($script:ExpertRolesCache -and -not $NoCache -and $usingDefaults) {
         return $script:ExpertRolesCache
     }
@@ -137,18 +167,14 @@ function Get-ExpertRoles {
     $factory = Read-ExpertRoleFile -Path $PresetPath
     if (-not $factory) { throw "roles: the shipped preset is missing or unreadable at '$PresetPath' - this is a broken install." }
 
+    if (-not $PSBoundParameters.ContainsKey('GlobalPath')) { $GlobalPath = Get-ExpertRoleGlobalPath }
+    $global = Import-ValidatedExpertRoleFile -Path $GlobalPath
+    $base   = Merge-ExpertRoles -Factory $factory -Local $global
+
     if (-not $PSBoundParameters.ContainsKey('LocalPath')) { $LocalPath = Get-ExpertRoleLocalPath }
-    $local = Read-ExpertRoleFile -Path $LocalPath
-    if ($local) {
-        $v = if ($local.ContainsKey('version')) { [int]$local.version } else { 0 }
-        if ($v -ne $script:ExpertRolesSchemaVersion) {
-            Write-Warning "roles: '$LocalPath' declares version '$v'; this build understands version $($script:ExpertRolesSchemaVersion) - ignoring the file."
-            $local = $null
-        } else {
-            $local.roles = Select-ValidExpertRoles -Roles @($local.roles)
-        }
-    }
-    $catalog = Merge-ExpertRoles -Factory $factory -Local $local
+    $local = Import-ValidatedExpertRoleFile -Path $LocalPath
+
+    $catalog = Merge-ExpertRoles -Factory $base -Local $local
     if ($usingDefaults) { $script:ExpertRolesCache = $catalog }
     $catalog
 }

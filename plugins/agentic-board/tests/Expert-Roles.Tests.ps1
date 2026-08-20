@@ -26,6 +26,28 @@ Describe 'Get-RoleSource' {
         Get-RoleSource -Role @{name='powerbi-report'} -Factory $script:Factory -Local $local |
             Should -Be 'local (overrides factory)'
     }
+    It 'labels a role only the global (~/.agentic-board) file declares' {
+        $global = @{ roles=@(@{ name='powerbi'; keywords=@('dax'); skills=@() }) }
+        Get-RoleSource -Role @{name='powerbi'} -Factory $script:Factory -Global $global -Local @{ roles=@() } |
+            Should -Be 'global'
+    }
+    It 'labels a role the global file overrides in the factory' {
+        $global = @{ roles=@(@{ name='powerbi-report'; keywords=@('pbi'); skills=@() }) }
+        Get-RoleSource -Role @{name='powerbi-report'} -Factory $script:Factory -Global $global -Local @{ roles=@() } |
+            Should -Be 'global (overrides factory)'
+    }
+    It 'labels a role the project overrides that only the global file also declares' {
+        $global = @{ roles=@(@{ name='infra'; keywords=@('terraform'); skills=@() }) }
+        $local  = @{ roles=@(@{ name='infra'; keywords=@('helm'); skills=@() }) }
+        Get-RoleSource -Role @{name='infra'} -Factory $script:Factory -Global $global -Local $local |
+            Should -Be 'local (overrides global)'
+    }
+    It 'labels a role the project overrides that both global and factory also declare' {
+        $global = @{ roles=@(@{ name='powerbi-report'; keywords=@('pbi'); skills=@() }) }
+        $local  = @{ roles=@(@{ name='powerbi-report'; keywords=@('metabase'); skills=@() }) }
+        Get-RoleSource -Role @{name='powerbi-report'} -Factory $script:Factory -Global $global -Local $local |
+            Should -Be 'local (overrides global, factory)'
+    }
 }
 
 Describe 'Get-RoleMatchTrace' {

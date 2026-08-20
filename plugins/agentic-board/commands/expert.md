@@ -26,10 +26,10 @@ for the user to pick (they can answer with just the number):
                      todo run. La sesión deja el PR listo y el cierre lo haces tú, igual que
                      sin la orden. Se te avisa al lanzar; no falla en silencio.
 3. roles [why "<texto>"]
-                   → ver el CATÁLOGO de roles efectivo (los de fábrica + los locales del
-                     proyecto, marcando cuál sobreescribe a cuál y cuántas skills engancha de
-                     verdad). Con `why` explica qué rol ganó para un texto de plan y por qué
-                     keyword.
+                   → ver el CATÁLOGO de roles efectivo (fábrica + tu global `~/.agentic-board/` +
+                     el local de este proyecto, marcando cuál sobreescribe a cuál y cuántas
+                     skills engancha de verdad). Con `why` explica qué rol ganó para un texto de
+                     plan y por qué keyword.
 4. verify <issue> <pr>
                    → COMPROBAR que el run dejó su evidencia de verdad, en vez de decir que la
                      dejó: lee los tres artefactos (archivo versionado, bloque en el PR,
@@ -71,9 +71,10 @@ directory) — never relative to the script, which lives in the plugin cache onc
 ## roles
 Run `scripts/Expert-Roles.ps1 -List`, or `scripts/Expert-Roles.ps1 -Why "<plan text>"`.
 
-The catalog is `presets/roles.json` (factory) merged with `.agentic-board/roles.json` (this
-project, versioned in git). Local roles are evaluated first, so a project can always outrank a
-factory role. A role hooking **0 skills** is printed in yellow: it will give the expert no
+The catalog is `presets/roles.json` (factory) merged with `~/.agentic-board/roles.json` (this
+user, every project, not versioned) merged with `.agentic-board/roles.json` (this project,
+versioned in git). Precedence: local overrides global overrides factory, so a project can always
+outrank both. A role hooking **0 skills** is printed in yellow: it will give the expert no
 toolset. See `references/roles.md` for the schema and the merge rules.
 
 ## auto
