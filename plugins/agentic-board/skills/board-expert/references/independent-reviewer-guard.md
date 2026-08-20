@@ -57,6 +57,33 @@ gate untestable and potentially unshippable (every run failing on a reviewer nob
 The human owner chose the CI-bot fallback explicitly over guessing at the wiring or blocking on an
 unrelated OAuth fix.
 
-**Still open, tracked separately** (not #623, not this epic — file a fresh issue when the OAuth
-token is renewed): verify `codex-rescue` headless invocability for real, then decide whether to
-route the mandatory reviewer through it instead of the CI bot.
+## Update (#637, 2026-08-20): headless invocability confirmed
+
+Both blockers above are resolved:
+
+- The OAuth token was renewed (`claude setup-token`), so headless `claude -p` auth no longer
+  fails with `401 OAuth access token has been revoked`.
+- **The "Agent type not found" result was a naming bug, not an infrastructure limitation.**
+  `subagent_type: 'codex-rescue'` (unqualified) is rejected by the harness; the fully-qualified
+  `subagent_type: 'codex:codex-rescue'` launches correctly, headless, and ran a real Codex CLI
+  review (see `codex-plugin-spike.md` for the verification detail).
+
+### Marker design (the open question #622/#623 deferred)
+
+A genuine `codex:codex-rescue` invocation produces a **rollout file** the Codex CLI writes to
+`~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<timestamp>-<thread-id>.jsonl`, plus a
+`CODEX_THREAD_ID`. This is the marker the spike recommended: something only the agent's own
+tool-call trace could produce, not a claim the implementing Claude session could post about
+having asked Codex. A trustworthy gate check would be: the PR evidence cites a rollout path +
+thread ID, `Board-ReviewGate.ps1` verifies the file exists and its filename's thread-id segment
+matches the cited one (and, ideally, that the file's mtime is at/after the PR's head commit
+time) — a claim with no matching file, or a stale one, does not count.
+
+### Still open — a decision for the repo owner, not made here
+
+Whether to actually **route** the autonomous loop's mandatory reviewer through `codex-rescue`
+(replacing or supplementing the CI-bot fallback #623 shipped) is a design/wiring decision, not a
+verification one — implementing it means teaching `Board-ReviewGate.ps1` to parse and validate
+the rollout-file marker, teaching `Expert-Auto.ps1`'s brief to invoke `codex:codex-rescue`
+(qualified name) and post the marker, and deciding how a solo-repo autonomous run pays for Codex
+usage on every PR. Left as a follow-up, same as #623 left it.

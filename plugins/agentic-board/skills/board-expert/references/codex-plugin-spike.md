@@ -54,9 +54,30 @@ itself, verified against the Codex session id `/codex:result` exposes) — never
 implementing Claude session posts *about* having asked Codex, which is exactly the same
 self-certification shape as the #541 hole this plan exists to close.
 
+## Headless invocability — verified (#637, 2026-08-20)
+
+Confirmed with a real `claude -p` launch (no interactive session), after renewing the OAuth
+token used for headless auth:
+
+- **The earlier "Agent type 'codex-rescue' not found" result (#623) was a naming bug in that
+  investigation, not an infrastructure limitation.** The Agent tool requires the fully-qualified
+  `namespace:name` form. `subagent_type: 'codex-rescue'` (unqualified) is rejected;
+  `subagent_type: 'codex:codex-rescue'` (qualified) launches successfully, headless, with no
+  interactive session involved.
+- Once launched, the subagent's own Bash tool ran real commands (`codex --version`, and a real
+  one-paragraph adversarial review of this repo's README) and returned genuine output — this is
+  the actual Codex CLI, authenticated, not a stub.
+- One transient EPERM (`lstat` on the user's home directory) was observed on a single Bash call
+  inside the subagent and did not reproduce on retry — noted as a possible flake, not treated as
+  a blocker since three subsequent invocations succeeded cleanly.
+- A genuine invocation produces machine-checkable identifiers that only a real Codex CLI call
+  writes: `CODEX_COMPANION_SESSION_ID`, `CODEX_THREAD_ID`, and — most useful as a marker — a
+  **rollout file** on disk at `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<timestamp>-<thread-id>.jsonl`.
+  That file is written by the Codex CLI process itself; a Claude session cannot fabricate one
+  without actually invoking Codex. See `independent-reviewer-guard.md` for the marker design this
+  enables.
+
 ## Not evaluated in this spike
 
-- Whether `codex-rescue` can run fully headless (no interactive Claude Code session) for a
-  launched autonomous worktree session — needs a real end-to-end test in #623.
 - Codex usage-limit/quota impact of using it as a mandatory gate on every PR (contribution to
   the account's Codex usage limits was documented but not quantified).
