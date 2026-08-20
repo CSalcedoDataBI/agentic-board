@@ -293,7 +293,7 @@ if ($Check) {
         Write-Host "        A file with no region needs one added by hand:" -ForegroundColor DarkGray
         Write-Host "          <!-- BEGIN:closing-summary --><!-- END:closing-summary -->" -ForegroundColor DarkGray
     }
-    Write-Host "        Then run Update-Docs.ps1 (no args) and commit the result." -ForegroundColor DarkGray
+    Write-Host "        Then regenerate the docs and commit the result." -ForegroundColor DarkGray
     exit 1
 }
 

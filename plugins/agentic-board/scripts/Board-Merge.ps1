@@ -147,7 +147,7 @@ function Show-LocalBranchCleanupHint {
     git rev-parse --verify --quiet "refs/heads/$Branch" 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Host ("  NOTA: la rama local '{0}' sigue aqui - --delete-branch no la borra si esta checkouteada." -f $Branch) -ForegroundColor DarkYellow
-        Write-Host  "        Cierrala con:  Board-Work.ps1 -CloseLoop   (o /board cerrar-ciclo)" -ForegroundColor DarkGray
+        Write-Host  "        Cierrala con:  /board cerrar-ciclo" -ForegroundColor DarkGray
     }
 }
 

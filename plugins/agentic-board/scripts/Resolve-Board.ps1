@@ -61,7 +61,7 @@ if (-not $SkipPreset) {
     Write-Host ("  preset '{0}' applied - board born on the canonical vocabulary (no legacy 'Todo')." -f $Lang) -ForegroundColor DarkGreen
   } catch {
     Write-Host ("  WARN could not apply the '{0}' preset to the new board #{1}: {2}" -f $Lang, $num, $_.Exception.Message) -ForegroundColor DarkYellow
-    Write-Host ("        apply it by hand: Apply-FieldPreset.ps1 -Number {0} -Owner {1} -Lang {2}" -f $num, $Owner, $Lang) -ForegroundColor DarkGray
+    Write-Host ("        apply it by hand: /board field apply -Number {0} -Owner {1} -Lang {2}" -f $num, $Owner, $Lang) -ForegroundColor DarkGray
   }
 }
 return $num

@@ -333,7 +333,7 @@ if ($DryRun -or ($Migrate -and ($renames.Count -gt 0 -or $merges.Count -gt 0))) 
       }
       if ($merges.Count -gt 0) {
         Write-Host "          Se resuelve solo: corre con -MergeConflicts para mover los items a la opcion canonica y borrar la legacy." -ForegroundColor DarkGray
-        Write-Host ("          -> ./Apply-FieldPreset.ps1 -Number {0} -Owner {1} -MergeConflicts -DryRun" -f $Number, $Owner) -ForegroundColor DarkGray
+        Write-Host ("          -> /board field -Number {0} -Owner {1} -MergeConflicts -DryRun" -f $Number, $Owner) -ForegroundColor DarkGray
       }
     }
   }

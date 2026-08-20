@@ -274,7 +274,7 @@ if ($Claim) {
 }
 
 Write-Host "Uso:" -ForegroundColor DarkGray
-Write-Host "  Fleet-Ownership.ps1 -Claim  -Issue <n> -Paths <a,b> [-Branch <x>]" -ForegroundColor DarkGray
-Write-Host "  Fleet-Ownership.ps1 -Check  -Issue <n> -Paths <a,b>   (exit 1 si hay conflicto)" -ForegroundColor DarkGray
-Write-Host "  Fleet-Ownership.ps1 -List [-Json]" -ForegroundColor DarkGray
-Write-Host "  Fleet-Ownership.ps1 -Release -Issue <n>" -ForegroundColor DarkGray
+Write-Host "  ownership del fleet: -Claim  -Issue <n> -Paths <a,b> [-Branch <x>]" -ForegroundColor DarkGray
+Write-Host "  ownership del fleet: -Check  -Issue <n> -Paths <a,b>   (exit 1 si hay conflicto)" -ForegroundColor DarkGray
+Write-Host "  ownership del fleet: -List [-Json]" -ForegroundColor DarkGray
+Write-Host "  ownership del fleet: -Release -Issue <n>" -ForegroundColor DarkGray

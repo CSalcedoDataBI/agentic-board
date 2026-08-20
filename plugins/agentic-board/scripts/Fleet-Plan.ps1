@@ -286,7 +286,7 @@ if ($plan.Count -gt 0) {
     Write-Host "Sugerencia (advisory - no se lanza nada):" -ForegroundColor Cyan
     foreach ($w in (@($plan | ForEach-Object { $_.wave } | Sort-Object -Unique))) {
         $nums = @($plan | Where-Object { $_.wave -eq $w } | ForEach-Object { $_.issue })
-        Write-Host ("  Wave {0}:  Board-Work.ps1 -ProjectNum {1} -Parallel {2} -Fleet" -f $w, $ProjectNum, ($nums -join ',')) -ForegroundColor Gray
+        Write-Host ("  Wave {0}:  /board work -Parallel {1} -Fleet" -f $w, ($nums -join ',')) -ForegroundColor Gray
     }
     Write-Host "  (corre cada wave cuando la anterior haya mergeado sus PRs)" -ForegroundColor DarkGray
 }

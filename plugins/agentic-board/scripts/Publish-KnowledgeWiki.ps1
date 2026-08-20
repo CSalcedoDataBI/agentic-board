@@ -21,7 +21,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-Write-Host "NOTE: /knowledge wiki delegates to /docs wiki (Publish-DocsWiki.ps1)." -ForegroundColor DarkYellow
+Write-Host "NOTE: /knowledge wiki delegates to /docs wiki." -ForegroundColor DarkYellow
 
 $docsScript = Join-Path $PSScriptRoot 'Publish-DocsWiki.ps1'
 $splat = @{ Root = $Root; Date = $Date }

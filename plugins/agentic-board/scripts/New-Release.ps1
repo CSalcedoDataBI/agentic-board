@@ -223,7 +223,7 @@ if ($DryRun) {
     Write-Host "DRY-RUN — nothing written. Planned:" -ForegroundColor DarkGray
     if ($willSync) { Write-Host "  1. sync marketplace description from plugin.json" }
     Write-Host "  2. set plugin.json version -> $next"
-    if (-not $NoChangelog) { Write-Host "  3. fold Done issues into CHANGELOG under [$next] (Board-Changelog.ps1 -Write)" }
+    if (-not $NoChangelog) { Write-Host "  3. fold Done issues into CHANGELOG under [$next] (/board changelog -Write)" }
     Write-Host "  then: review 'git diff' and commit 'chore(release): $next' yourself."
     exit 0
 }
@@ -255,7 +255,7 @@ if (-not $NoChangelog) {
         & (Join-Path $PSScriptRoot 'Board-Changelog.ps1') -ProjectNum $ProjectNum -Version $next -Write -ChangelogPath $changelog -TokenVar $TokenVar
     } catch {
         Write-Host "  WARN  CHANGELOG fold skipped: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host "        (bump still applied; run Board-Changelog.ps1 -Write manually once online)" -ForegroundColor DarkGray
+        Write-Host "        (bump still applied; run /board changelog -Write manually once online)" -ForegroundColor DarkGray
     }
 }
 
