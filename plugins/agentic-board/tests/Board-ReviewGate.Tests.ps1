@@ -408,7 +408,7 @@ Describe 'Get-CodexRescueMarker - parses a codex-rescue marker out of a comment 
         $m.ThreadId    | Should -Be '01a02004'
     }
     It 'tolerates a thread id glued to the closing comment marker (no space before -->)' {
-        $m = Get-CodexRescueMarker -Body 'rollout="C:\r.jsonl" thread=01a02004-->'
+        $m = Get-CodexRescueMarker -Body '<!-- [abios-review] codex-rescue sha=abc rollout="C:\r.jsonl" thread=01a02004-->'
         $m.ThreadId | Should -Be '01a02004'
     }
     It 'reports not-found on a plain -RecordReview comment with no codex fields' {
@@ -416,8 +416,24 @@ Describe 'Get-CodexRescueMarker - parses a codex-rescue marker out of a comment 
         $m.Found | Should -BeFalse
     }
     It 'reports not-found when only one of the two fields is present (malformed, not partial)' {
-        (Get-CodexRescueMarker -Body 'rollout="C:\r.jsonl"').Found | Should -BeFalse
-        (Get-CodexRescueMarker -Body 'thread=01a02004').Found      | Should -BeFalse
+        (Get-CodexRescueMarker -Body '<!-- [abios-review] x sha=abc rollout="C:\r.jsonl" -->').Found | Should -BeFalse
+        (Get-CodexRescueMarker -Body '<!-- [abios-review] x sha=abc thread=01a02004 -->').Found      | Should -BeFalse
+    }
+    # Review round 1, Copilot on #645: parsing used to scan the WHOLE comment body, so a genuine
+    # human -RecordReview whose free-text Summary happened to mention "thread=" / "rollout=" as
+    # ordinary prose (not a codex-rescue claim at all) would be misread as a marker and then
+    # dropped as unverifiable under -PreferCodexRescue - a real review punished for its wording.
+    It 'ignores rollout=/thread= tokens with NO [abios-review] marker at all (ordinary PR comment)' {
+        (Get-CodexRescueMarker -Body 'I checked the thread=3 issue, rollout="stable" per QA notes.').Found | Should -BeFalse
+    }
+    It 'ignores rollout=/thread= tokens that appear in the free-text SUMMARY, outside the marker comment' {
+        $body = @"
+<!-- [abios-review] cristobal sha=abc -->
+## Revision externa - cristobal
+
+Reviewed the rollout="canary" plan; thread=3 on the forum has more context.
+"@
+        (Get-CodexRescueMarker -Body $body).Found | Should -BeFalse
     }
 }
 
@@ -439,6 +455,16 @@ Describe 'Test-CodexRescueMarkerOnDisk - the claim must survive contact with the
     It 'fails closed on an empty path or thread id' {
         Test-CodexRescueMarkerOnDisk -RolloutPath '' -ThreadId 'x' | Should -BeFalse
         Test-CodexRescueMarkerOnDisk -RolloutPath $script:RealFile -ThreadId '' | Should -BeFalse
+    }
+    # Review round 1, Copilot on #645: matching was an unanchored substring, so a SHORT PREFIX of
+    # the real thread id verified too - the exact "partial/ambiguous id" hole flagged in review.
+    It 'fails on a bare PREFIX of the real thread id - anchored to the filename SEGMENT, not a substring' {
+        Test-CodexRescueMarkerOnDisk -RolloutPath $script:RealFile -ThreadId '01a0' | Should -BeFalse
+    }
+    It 'fails on a thread id that only matches inside the TIMESTAMP portion of the filename' {
+        # $script:RealFile is rollout-2026-08-20T11-32-48-01a02004-....jsonl - "20" is a real
+        # substring (the day), but it is not the thread-id segment the marker claims it is.
+        Test-CodexRescueMarkerOnDisk -RolloutPath $script:RealFile -ThreadId '20' | Should -BeFalse
     }
 }
 

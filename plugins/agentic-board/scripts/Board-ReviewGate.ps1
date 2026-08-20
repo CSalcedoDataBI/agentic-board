@@ -309,9 +309,16 @@ function Get-ReviewEvidence {
 # it. Quoted path (`rollout="..."`) so a Windows path containing spaces still parses. Pure.
 function Get-CodexRescueMarker {
     param([string]$Body = '')
+    $notFound = [pscustomobject]@{ Found = $false; RolloutPath = $null; ThreadId = $null }
+    # Scoped to the machine-generated marker COMMENT itself, never the free-text Summary below it
+    # (review round 1, Copilot on #645): a human -RecordReview summary that happens to say, in
+    # prose, "checked thread=3, rollout=stable" would otherwise be misread as a codex-rescue claim
+    # and dropped as unverifiable — a real review getting punished for an unlucky choice of words.
+    if ("$Body" -notmatch '(?is)<!--\s*\[abios-review\](.*?)-->') { return $notFound }
+    $markerLine = $Matches[1]
     $rollout = $null; $thread = $null
-    if ("$Body" -match '(?i)rollout\s*=\s*"([^"]+)"') { $rollout = $Matches[1].Trim() }
-    if ("$Body" -match '(?i)thread\s*=\s*(\S+)')       { $thread  = $Matches[1].Trim().TrimEnd('-','>').Trim() }
+    if ($markerLine -match '(?i)rollout\s*=\s*"([^"]+)"') { $rollout = $Matches[1].Trim() }
+    if ($markerLine -match '(?i)thread\s*=\s*(\S+)')       { $thread  = $Matches[1].Trim().TrimEnd('-','>').Trim() }
     return [pscustomobject]@{ Found = [bool]($rollout -and $thread); RolloutPath = $rollout; ThreadId = $thread }
 }
 
@@ -324,7 +331,10 @@ function Test-CodexRescueMarkerOnDisk {
     if (-not "$RolloutPath".Trim() -or -not "$ThreadId".Trim()) { return $false }
     if (-not (Test-Path -LiteralPath $RolloutPath)) { return $false }
     $leaf = Split-Path -Leaf $RolloutPath
-    return [bool]($leaf -match [regex]::Escape($ThreadId))
+    # Anchored to the real filename shape (`rollout-<timestamp>-<thread-id>.jsonl`), not a bare
+    # substring (review round 1, Copilot on #645): an unanchored `-match` let a partial/ambiguous
+    # thread id (or an accidental hit inside the timestamp) verify against the wrong session.
+    return [bool]($leaf -match ('-' + [regex]::Escape($ThreadId) + '\.jsonl$'))
 }
 
 # (#644) Drop comments carrying a codex-rescue marker that fails on-disk verification, when
@@ -342,7 +352,10 @@ function Get-CodexVerifiedComments {
         if (-not $m.Found) { return $true }
         $ok = Test-CodexRescueMarkerOnDisk -RolloutPath $m.RolloutPath -ThreadId $m.ThreadId
         if (-not $ok) {
-            Write-Host ("  WARN marcador de codex-rescue no verifica en disco (rollout='{0}' thread='{1}') - se ignora como evidencia (#644)." -f $m.RolloutPath, $m.ThreadId) -ForegroundColor DarkYellow
+            # Leaf filename only (review round 1, Copilot on #645): the full path can carry a
+            # username / home-directory structure that a shared CI log should not echo.
+            $leafForLog = try { Split-Path -Leaf $m.RolloutPath } catch { '(unparseable path)' }
+            Write-Host ("  WARN marcador de codex-rescue no verifica en disco (rollout='{0}' thread='{1}') - se ignora como evidencia (#644)." -f $leafForLog, $m.ThreadId) -ForegroundColor DarkYellow
         }
         return $ok
     })
