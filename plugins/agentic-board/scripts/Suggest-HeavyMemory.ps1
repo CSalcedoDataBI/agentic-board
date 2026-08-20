@@ -174,7 +174,7 @@ Write-Host ""
 
 # -- Guarded install -----------------------------------------------------------
 if (-not $Install) {
-    Write-Host "PROPOSAL ONLY - nothing installed. To proceed:  Suggest-HeavyMemory.ps1 -Install -AcceptAgpl -Version $pin" -ForegroundColor Cyan
+    Write-Host "PROPOSAL ONLY - nothing installed. To proceed, confirm the install (AGPL, version $pin)." -ForegroundColor Cyan
     return [pscustomobject]@{ installed=$false; proposed=$true; version=$pin; provenanceOk=$provOk; agpl=$([bool]($prov -and $prov.isAgpl)) }
 }
 

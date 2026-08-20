@@ -246,6 +246,6 @@ if ($existingPr) {
 
 Write-Host ""
 Write-Host "Siguiente paso (gate obligatorio antes de mergear):" -ForegroundColor Yellow
-Write-Host "  Board-ReviewGate.ps1 -Repo $Repo -PR $prNum -TokenVar $TokenVar"
+Write-Host "  corre el review gate sobre $Repo PR #$prNum"
 Write-Host ""
 Write-Host "PR: $prUrl" -ForegroundColor Cyan

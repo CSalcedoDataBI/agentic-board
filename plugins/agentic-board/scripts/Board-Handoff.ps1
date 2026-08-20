@@ -592,7 +592,7 @@ if ($Resume) {
     }
 
     if ($Issue -gt 0) {
-        Write-Host "Continue this work with:  /board work  then start #$Issue  (Board-Work.ps1 -Start $Issue)" -ForegroundColor Cyan
+        Write-Host "Continue this work with:  /board work  then start #$Issue" -ForegroundColor Cyan
         if ($hoBranch -and $hoBranch -ne "null") {
             Write-Host "                          or resume its branch:  git checkout $hoBranch" -ForegroundColor Cyan
         }
@@ -697,7 +697,7 @@ if ($saveMode -eq 'refuse') {
     Write-Host "  A handoff is only portable + auto-surfaced when an ISSUE carries it: the durable [abios-handoff]" -ForegroundColor DarkYellow
     Write-Host "  comment that -Resume reads from any machine, plus a MEMORY.md pointer so your NEXT session finds" -ForegroundColor DarkYellow
     Write-Host "  it on its own. A local HANDOFF.md is gitignored and has NEITHER. Choose one:" -ForegroundColor DarkYellow
-    Write-Host "    - link it:            Board-Handoff.ps1 -Save -Issue <n> ...   (the next pending is shown by /board work)" -ForegroundColor Cyan
+    Write-Host "    - link it:            /board handoff -Save on issue <n>   (the next pending is shown by /board work)" -ForegroundColor Cyan
     Write-Host "    - local on purpose:   add -Local   (accepts the gitignored, non-portable, no-memo handoff)" -ForegroundColor Cyan
     exit 1
 }
@@ -773,7 +773,7 @@ _Last saved $($fm.saved)._
         }
     }
     Write-Host ""
-    Write-Host "Resume later with:  Board-Handoff.ps1 -Resume  (reads $Repo#$Issue - even on another machine)" -ForegroundColor Cyan
+    Write-Host "Resume later with:  /board handoff -Resume  (reads $Repo#$Issue - even on another machine)" -ForegroundColor Cyan
 } else {
     # Reached only under -Local now (a no-issue save without -Local is refused before any write).
     Write-Host ""

@@ -282,5 +282,5 @@ if ($List) {
 }
 
 Write-Host "Uso:" -ForegroundColor DarkGray
-Write-Host "  Fleet-Findings.ps1 -Add -Issue <n> [-Files ..] [-Decisions ..] [-Gotchas ..] [-Labels ..] [-Pr ..] [-Status done]" -ForegroundColor DarkGray
-Write-Host "  Fleet-Findings.ps1 -List [-Issue <n>] [-Label <x>] [-Text <y>] [-Json]" -ForegroundColor DarkGray
+Write-Host "  registro de findings: -Add -Issue <n> [-Files ..] [-Decisions ..] [-Gotchas ..] [-Labels ..] [-Pr ..] [-Status done]" -ForegroundColor DarkGray
+Write-Host "  registro de findings: -List [-Issue <n>] [-Label <x>] [-Text <y>] [-Json]" -ForegroundColor DarkGray

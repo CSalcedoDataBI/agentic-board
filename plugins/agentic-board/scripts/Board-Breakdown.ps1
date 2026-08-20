@@ -129,4 +129,4 @@ mutation($p:ID!, $c:ID!) {
 Write-Host ""
 Write-Host "Sub-issues creados: $($created.Count)  fallos: $fail" -ForegroundColor Cyan
 Write-Host "La columna 'Sub-issues progress' del board se llena sola al cerrarlos." -ForegroundColor DarkGray
-Write-Host "Empieza uno con: Board-Work.ps1 -ProjectNum <n> -Start <num> -Branch" -ForegroundColor Cyan
+Write-Host "Empieza uno con: /board work" -ForegroundColor Cyan

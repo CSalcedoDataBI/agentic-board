@@ -263,11 +263,11 @@ if (-not $Issue.Trim()) {
     }
     Write-Host ""
     Write-Host "  Evidence (Type/Area/Estimate): el agente los infiere del contenido y los escribe:" -ForegroundColor DarkGray
-    Write-Host "    Board-Triage.ps1 -Number $Number -Owner $Owner -Issue 'owner/repo#<n>' -Type <t> -Area <a> -Estimate <n>" -ForegroundColor DarkGray
-    Write-Host "    Board-Triage.ps1 -Number $Number -Owner $Owner -Issue <n> -Repo owner/repo -Type <t> ...  (alternativa)" -ForegroundColor DarkGray
+    Write-Host "    /board triage -Owner $Owner -Issue 'owner/repo#<n>' -Type <t> -Area <a> -Estimate <n>" -ForegroundColor DarkGray
+    Write-Host "    /board triage -Owner $Owner -Issue <n> -Repo owner/repo -Type <t> ...  (alternativa)" -ForegroundColor DarkGray
     Write-Host "    (En boards de un solo repo, -Issue <n> bare funciona si no hay colision de numero)" -ForegroundColor DarkGray
     Write-Host "  Priority: el agente PROPONE (con razon) y el usuario confirma — nunca en silencio:" -ForegroundColor DarkGray
-    Write-Host "    Board-Triage.ps1 -Number $Number -Owner $Owner -Issue 'owner/repo#<n>' -Priority P2 -Rationale '...'  [-ConfirmPriority]" -ForegroundColor DarkGray
+    Write-Host "    /board triage -Owner $Owner -Issue 'owner/repo#<n>' -Priority P2 -Rationale '...'  [-ConfirmPriority]" -ForegroundColor DarkGray
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
 }

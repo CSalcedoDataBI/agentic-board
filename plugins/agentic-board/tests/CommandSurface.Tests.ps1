@@ -16,6 +16,11 @@ $CommandCases = @(
     Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'commands') -Filter '*.md' |
         ForEach-Object { @{ Name = $_.Name; Path = $_.FullName } }
 )
+$ScriptCases = @(
+    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'scripts') -Filter '*.ps1' |
+        Where-Object { $_.Name -ne 'Find-InternalVocabularyLeak.ps1' } |
+        ForEach-Object { @{ Name = $_.Name; Path = $_.FullName } }
+)
 $SkillCases = @(
     Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'skills') -Directory | ForEach-Object {
         $md = Join-Path $_.FullName 'SKILL.md'
@@ -29,6 +34,9 @@ BeforeAll {
     $script:CommandsDir  = Join-Path $PSScriptRoot '..' 'commands'
     $script:CommandFiles = @(Get-ChildItem -Path $script:CommandsDir -Filter '*.md')
     $script:RealCommands = @($script:CommandFiles.BaseName)
+    $env:ABIOS_VOCABLEAK_DOTSOURCE = '1'
+    . (Join-Path $PSScriptRoot '..' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
+    $env:ABIOS_VOCABLEAK_DOTSOURCE = ''
     $script:InternalSkills = @(
         Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'skills') -Directory | ForEach-Object {
             $md = Join-Path $_.FullName 'SKILL.md'
@@ -154,5 +162,22 @@ Describe 'Command surface — /docs routing contract (#417)' {
         Get-Content -LiteralPath $docsFile -Raw |
             Should -Match '(?i)public.repos.only' `
             -Because 'the docs prompt must warn about the DeepWiki public-repos-only limit at the point of use'
+    }
+}
+
+Describe 'Command surface — no internal vocabulary leaks into Write-Host output (#494)' {
+    <#  Reported first-hand by the product owner, a BI professional and not a programmer:
+        "me choca ver como esto Expert-Auto.ps1; PS1 no se para que". A script's own console
+        output is the one user-facing surface a Pester test CAN read exactly as printed — every
+        `Write-Host` argument, AST-extracted so a `-ForegroundColor` value is never mistaken for
+        message text (Get-WriteHostArgumentText, scripts/Find-InternalVocabularyLeak.ps1). #>
+    It '<Name> prints no script filename, bare extension, or version-pinned cache path' -ForEach $ScriptCases {
+        $args = @(Get-WriteHostArgumentText -Path $Path)
+        $violations = foreach ($a in $args) {
+            foreach ($hit in (Find-InternalVocabularyLeak -Text $a.Text)) {
+                "line $($a.Line): [$($hit.Kind)] $($hit.Match)"
+            }
+        }
+        $violations | Should -BeNullOrEmpty -Because "$Name must speak to a BI professional, not name its own implementation (#491/#494): $($violations -join '; ')"
     }
 }

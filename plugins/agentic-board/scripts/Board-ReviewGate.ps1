@@ -692,7 +692,7 @@ Write-Host ("  Tamano del PR: {0} archivo(s), +{1}/-{2} ({3} lineas)" -f $size.c
 if ($totalLines -gt $MaxLines -or $size.changedFiles -gt $MaxFiles) {
     Write-Host "  WARN PR grande (umbral: $MaxLines lineas / $MaxFiles archivos)." -ForegroundColor DarkYellow
     Write-Host "       Un PR chico se revisa mejor y mete menos bugs. Considera dividir el issue con:" -ForegroundColor DarkYellow
-    Write-Host "       Board-Breakdown.ps1 -Parent <issueNum> -Tasks `"parte A`", `"parte B`"" -ForegroundColor DarkYellow
+    Write-Host "       divide el issue en partes mas chicas antes de seguir" -ForegroundColor DarkYellow
     Write-Host "       (advertencia, no bloqueo - los umbrales se ajustan con -MaxLines/-MaxFiles)" -ForegroundColor DarkGray
 }
 
@@ -750,7 +750,7 @@ if ($tmdlChanged) {
         & $tmdlScript -Repo $Repo -PR $PR -FailOnBreaking
         if ($LASTEXITCODE -ne 0) { $tmdlBlocked = $true }
     } else {
-        Write-Host "  WARN Tmdl-DiffReview.ps1 no encontrado junto al gate - salteando review TMDL." -ForegroundColor DarkYellow
+        Write-Host "  WARN revisor de esquema TMDL no encontrado junto al gate - salteando review TMDL." -ForegroundColor DarkYellow
     }
     # 1.8 Best Practice Analyzer - BLOCKING on error-severity violations (#16). Skips safely when the
     # repo has no BPA rules or Tabular Editor is absent (those are never a block).
@@ -759,7 +759,7 @@ if ($tmdlChanged) {
         & $bpaScript -Repo $Repo -PR $PR -FailOn error
         if ($LASTEXITCODE -ne 0) { $bpaBlocked = $true }
     } else {
-        Write-Host "  WARN Bpa-GateReview.ps1 no encontrado junto al gate - salteando BPA." -ForegroundColor DarkYellow
+        Write-Host "  WARN el analizador de mejores practicas (BPA) no encontrado junto al gate - salteando BPA." -ForegroundColor DarkYellow
     }
 }
 

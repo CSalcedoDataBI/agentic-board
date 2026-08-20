@@ -235,7 +235,7 @@ Write-Host ""
 Write-Host ("Veredicto: {0}" -f $verdict.reason) -ForegroundColor Cyan
 if (@($verdict.stalled).Count -gt 0) {
     Write-Host ("  Estancados: {0}" -f ((@($verdict.stalled).issue) -join ', ')) -ForegroundColor Red
-    Write-Host "  Sugerencia: re-planifica (Fleet-Plan.ps1) o retoma con Board-Work.ps1 -Start <n> -TakeOver." -ForegroundColor DarkYellow
+    Write-Host "  Sugerencia: re-planifica el fleet o retoma con /board work -Start <n> -TakeOver." -ForegroundColor DarkYellow
     if ($Post) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin -BoardNum $ProjectNum }
 }
 if ($verdict.shouldStop) {

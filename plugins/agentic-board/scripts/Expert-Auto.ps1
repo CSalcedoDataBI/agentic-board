@@ -673,7 +673,7 @@ query($o:String!,$r:String!,$n:Int!){
     Write-Host ""
     Write-Host "  Ola despachada. Cuando sus PRs esten mergeados, re-ejecuta:" -ForegroundColor Cyan
     Write-Host "    /board expert auto -Epic $Epic     (despacha la siguiente ola; es idempotente)" -ForegroundColor Cyan
-    Write-Host "  Monitor: scripts/Board-Work.ps1 -Sessions -Watch (el supervisor publica [abios-stall] solo)." -ForegroundColor DarkGray
+    Write-Host "  Monitor: /board work -Sessions -Watch (el supervisor publica [abios-stall] solo)." -ForegroundColor DarkGray
     exit 0
 }
 
@@ -717,7 +717,7 @@ Write-Host ""
 $launchArgs = "-ProjectNum $ProjectNum -Parallel $Issue -Launch" + $(if ($stopAtPR) { " -StopAtPR -BriefFile `"$briefPath`"" } else { "" })
 if ($DryRun) {
     Write-Host "  [DryRun] would launch a dedicated session in a worktree off origin/main and monitor it." -ForegroundColor DarkYellow
-    Write-Host "  Launch:  scripts/Board-Work.ps1 $launchArgs" -ForegroundColor DarkGray
+    Write-Host "  Launch:  /board work $launchArgs" -ForegroundColor DarkGray
 } else {
     Write-Host "  Launching the autonomous session in an isolated worktree..." -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot 'Board-Work.ps1') -ProjectNum $ProjectNum -Parallel $Issue -Launch -TokenVar $TokenVar `
@@ -728,7 +728,7 @@ if ($DryRun) {
     Write-Host "  recorded evidence, self-drive the board, and STOP at 'PR ready' before merge." -ForegroundColor DarkGray
 }
 Write-Host ""
-Write-Host "  Monitor:  scripts/Board-Work.ps1 -Sessions -Watch" -ForegroundColor Cyan
+Write-Host "  Monitor:  /board work -Sessions -Watch" -ForegroundColor Cyan
 if ($ProjectNum -gt 0) {
     $owner = if ($repo) { ($repo -split '/')[0] } else { 'CSalcedoDataBI' }
     Write-Host ""

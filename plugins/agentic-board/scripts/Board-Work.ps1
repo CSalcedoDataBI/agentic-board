@@ -2586,7 +2586,7 @@ query($o:String!, $r:String!) {
         Write-Host "TRUNCADO: los boards marcados con '+' tienen mas items de los que pude leer - sus cuentas son un minimo, no un total." -ForegroundColor Yellow
     }
     Write-Host ""
-    Write-Host "Siguiente paso: Board-Work.ps1 -ProjectNum <num> para ver los pendientes de un board." -ForegroundColor Cyan
+    Write-Host "Siguiente paso: /board work para ver los pendientes de un board." -ForegroundColor Cyan
     exit 0
 }
 
@@ -2694,7 +2694,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         }
     }
     Write-Host ""
-    Write-Host "Siguiente paso: Board-Work.ps1 -ProjectNum $ProjectNum -Start <issueNum> (o -Parallel <n1,n2,...>)." -ForegroundColor Cyan
+    Write-Host "Siguiente paso: /board work -Start <issueNum> (o -Parallel <n1,n2,...>)." -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
@@ -2813,7 +2813,7 @@ if ($Parallel.Count -gt 0) {
                 if ($r.workPath) { Write-Host ("  cd `"{0}`"   # #{1}" -f $r.workPath, $r.issue) -ForegroundColor DarkCyan }
             }
             Write-Host ""
-            Write-Host "Al terminar cada uno: PR con 'Closes #<num>' + review gate (Board-ReviewGate.ps1)." -ForegroundColor DarkGray
+            Write-Host "Al terminar cada uno: PR con 'Closes #<num>' + el gate de review obligatorio." -ForegroundColor DarkGray
             Write-Host "Agrega -Launch para abrir una sesion Claude por worktree automaticamente." -ForegroundColor DarkGray
         }
     }
@@ -3036,8 +3036,8 @@ if ($groupQueue.Count -gt 0) {
     $startedNums = ($started | ForEach-Object { $_.issue }) -join ','
     Write-Host ""
     Write-Host ("Lote listo: {0} de {1} issue(s) en UNA sola rama ({2})." -f $started.Count, $groupQueue.Count, $lead.branch) -ForegroundColor Green
-    Write-Host "AL TERMINAR (un solo PR para todo el lote): New-BoardPR.ps1 -Issue $startedNums" -ForegroundColor Yellow
-    Write-Host "(un solo Board-ReviewGate.ps1 + un solo Board-Merge.ps1 cierran los $($started.Count) issues a la vez)" -ForegroundColor DarkGray
+    Write-Host "AL TERMINAR (un solo PR para todo el lote): abre el PR citando los issues $startedNums" -ForegroundColor Yellow
+    Write-Host "(un solo review gate + un solo merge cierran los $($started.Count) issues a la vez)" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
@@ -3072,7 +3072,7 @@ Write-Host ""
 Write-IssueContext $Start $r.repo
 Write-Host ""
 Write-Host "Issue #$Start listo para trabajar (In Progress, asignado a $Owner)." -ForegroundColor Green
-Write-Host "AL TERMINAR: New-BoardPR.ps1 -Issue $Start  (push + PR 'Closes #$Start' con la cuenta correcta) - NO commit directo a main." -ForegroundColor Yellow
+Write-Host "AL TERMINAR: abre el PR citando 'Closes #$Start' con la cuenta correcta - NO commit directo a main." -ForegroundColor Yellow
 Write-Host "(asi GitHub llena solo la columna 'Linked pull requests' del board)" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Board: $boardUrl" -ForegroundColor Cyan
