@@ -130,9 +130,8 @@ Write-Host $contract.role -ForegroundColor Gray
 Write-Host ""
 if (-not $contract.roleMatched) {
     Write-Host "  NO ROLE MATCHED this plan - the expert would run as 'generic', with no domain toolset." -ForegroundColor Yellow
-    Write-Host "  Research the plan's domain and propose a role, then persist it with:" -ForegroundColor DarkGray
-    Write-Host "    Add-ExpertRole -Role @{ name='<domain>'; keywords=@(...); skills=@(...) }" -ForegroundColor DarkGray
-    Write-Host "  Never write it without the user's confirmation: it changes how every future plan is classified." -ForegroundColor DarkGray
+    Write-Host "  Research the plan's domain, propose a role to the user in plain language, and only" -ForegroundColor DarkGray
+    Write-Host "  persist it once they confirm - it changes how every future plan is classified." -ForegroundColor DarkGray
     Write-Host ""
 }
 $written = Write-ExpertContract -Contract $contract -Path $target
@@ -143,7 +142,7 @@ Write-Host "      evidence -> PR + issue comment + versioned file" -ForegroundCo
 # is the one line meant to make the codex-rescue path discoverable to a human BEFORE launch,
 # instead of only living in a reference doc nobody reads until something goes wrong.
 if ($contract.codexRescueRequestedButUnavailable) {
-    Write-Host "      independent review -> CI-bot fallback (codex-rescue was REQUESTED but the 'codex@openai-codex' plugin is not installed - install it, then re-run config to actually enable this)" -ForegroundColor Yellow
+    Write-Host "      independent review -> CI-bot fallback (you asked for the stricter path, but I can't turn it on yet - the extra reviewer isn't installed)" -ForegroundColor Yellow
 } elseif ($contract.review.preferCodexRescue) {
     Write-Host "      independent review -> codex-rescue (disk-verified marker, #637/#644) - the run will be told to use it" -ForegroundColor DarkGray
 } elseif ($contract.codexRescueAvailable) {

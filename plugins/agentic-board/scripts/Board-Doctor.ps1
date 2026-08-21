@@ -410,7 +410,7 @@ foreach ($c in Get-DoctorClassOrder) {
 if ($ghosts.Count -gt 0) {
     Write-Host "--- Worktrees fantasma (carpeta ausente) ($($ghosts.Count)) ---" -ForegroundColor Yellow
     foreach ($g in $ghosts) { Write-Host ("   {0,-52} {1}" -f $g.Path, $g.Prunable) }
-    Write-Host "    Se limpian con: git worktree prune" -ForegroundColor DarkGray
+    Write-Host "    Se limpian solos al correr con -Fix (no hay trabajo que perder, git ya sabe que desaparecieron)." -ForegroundColor DarkGray
     Write-Host ""
 }
 

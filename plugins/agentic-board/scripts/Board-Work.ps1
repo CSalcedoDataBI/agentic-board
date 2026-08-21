@@ -1634,7 +1634,7 @@ function Select-CliPerIssue([int[]]$Issues, [hashtable]$Availability) {
     $available = @($Availability.Keys | Where-Object { $Availability[$_] -eq 'ok' })
     $choices = @{}
     foreach ($i in $Issues) {
-        $ans = Read-Host ("  CLI para #{0} [{1}] (enter=claude)" -f $i, ($available -join '/'))
+        $ans = Read-Host ("  Que asistente trabaja el issue #{0}? [{1}] (Enter = claude)" -f $i, ($available -join '/'))
         if ($ans) { $choices[$i] = $ans.Trim().ToLower() }
     }
     return Resolve-IssueCliMap -Issues $Issues -Choices $choices -Availability $Availability
@@ -2453,7 +2453,7 @@ if ($CloseLoop) {
         }
         $go = [bool]$Force
         if (-not $go) {
-            $ans = Read-Host ("Rama '{0}' (PR #{1} MERGED). Cambiar a '{2}' y borrarla? (s/n)" -f $curBranch, $pr.number, $defaultShort)
+            $ans = Read-Host ("Este trabajo ya se mergeo (PR #{0}). Te cambio a '{1}' y limpio la rama vieja '{2}'? (s/n)" -f $pr.number, $defaultShort, $curBranch)
             $go = ($ans -match '^(s|si|y|yes)$')
         }
         if (-not $go) { Write-Host "  Cancelado - la rama se conserva." -ForegroundColor DarkGray; exit 0 }

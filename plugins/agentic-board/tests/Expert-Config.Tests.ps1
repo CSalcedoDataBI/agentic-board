@@ -160,7 +160,7 @@ Describe 'Expert-Config.ps1 (CLI wiring) - codex-rescue opt-in surfaced, not sil
         $script:CliMissing.review.preferCodexRescue | Should -BeFalse
     }
     It 'tells the human WHY it was not enabled, instead of quietly falling back' {
-        $script:StdoutMissing | Should -Match '(?i)REQUESTED but'
-        $script:StdoutMissing | Should -Match '(?i)not installed'
+        $script:StdoutMissing | Should -Match "(?i)asked for the stricter path"
+        $script:StdoutMissing | Should -Match "(?i)isn't installed"
     }
 }
