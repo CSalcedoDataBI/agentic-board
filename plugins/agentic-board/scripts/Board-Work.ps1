@@ -1694,56 +1694,55 @@ function Get-SessionCompletion {
     return [pscustomobject]@{ done = $false; reason = 'en progreso'; merged = $false }
 }
 
-# Classify the CURRENT branch's disposition for cerrar-ciclo (#302), and route it. PURE: every
-# fact is an argument. cerrar-ciclo is deliberately NOT "merge" - merging has the review gate, and
-# the phrase is ambiguous ("ship it" vs "stop for today") - so this only ever PROPOSES the next
-# step and performs exactly ONE action: the single-session teardown of a proven-merged local branch
-# that the fleet path (-Sessions -Watch -AutoClean) never reaches for an interactive session.
+# Classify the CURRENT branch's disposition for cerrar-ciclo (#302/#650), and route it. PURE:
+# every fact is an argument. cerrar-ciclo PERFORMS the disposition's action - it does not merge
+# (that keeps the review gate; "ship it" vs "stop for today" stays the human's call), but every
+# other step it can safely take on its own, it takes, asking first only where a genuine choice
+# exists (reopen a closed PR and keep going, or discard the work).
 #   $OnDefault    - the current branch IS the repo default (nothing to close).
 #   $Dirty        - 'clean' | 'dirty' | 'unknown'  (unknown = fail closed = treat as dirty).
 #   $CommitsAhead - commits on this branch not on its base (0 = nothing committed yet).
 #   $Pr           - $null, or { number; state 'OPEN'|'MERGED'|'CLOSED'; merged [bool] }.
-# Returns { State; Summary; Hint; CanCleanup }. CanCleanup is $true ONLY for a proven-merged branch
-# (PR MERGED and this branch is its tip) that is safe to tear down. Order matters: an uncommitted
-# working tree is decided BEFORE any PR state (you must not lose that work to a cleanup).
+# Returns { State; Summary; Action; CanCleanup }. CanCleanup is $true ONLY for a proven-merged
+# branch (PR MERGED and this branch is its tip) that is safe to tear down. Action tells the caller
+# WHAT to do - 'none' (report only), 'save-handoff' (ask, then Board-Handoff -Save),
+# 'run-gate' (no asking needed - it only checks and reports), 'open-pr' (no asking needed -
+# opening a PR from already-committed work is low-risk and reversible), or
+# 'reopen-or-discard' (ask which - discarding unmerged work is the one truly destructive branch).
+# Order matters: an uncommitted working tree is decided BEFORE any PR state (never lose it to a
+# cleanup or an auto-performed action).
 function Get-CloseLoopDisposition {
     param([bool]$OnDefault, [string]$Dirty = 'clean', [int]$CommitsAhead = 0, $Pr = $null)
     if ($OnDefault) {
-        return [pscustomobject]@{ State = 'on-default'; CanCleanup = $false
-            Summary = "On the default branch - nothing to close. Start work with /board work."; Hint = $null }
+        return [pscustomobject]@{ State = 'on-default'; CanCleanup = $false; Action = 'none'
+            Summary = "On the default branch - nothing to close. Start work with /board work." }
     }
     if ($Dirty -ne 'clean') {
-        return [pscustomobject]@{ State = 'dirty'; CanCleanup = $false
-            Summary = "Uncommitted changes present - decide first: commit them, or save a handoff so nothing is lost."
-            Hint = "Board-Handoff.ps1 -Save -Issue <n> -NextStep '...'" }
+        return [pscustomobject]@{ State = 'dirty'; CanCleanup = $false; Action = 'save-handoff'
+            Summary = "Uncommitted changes present - decide first: commit them, or save a handoff so nothing is lost." }
     }
     if ($Pr -and $Pr.merged) {
-        return [pscustomobject]@{ State = 'merged'; CanCleanup = $true
-            Summary = "PR #$($Pr.number) MERGED and this branch is its tip - safe to tear down the local branch."
-            Hint = $null }
+        return [pscustomobject]@{ State = 'merged'; CanCleanup = $true; Action = 'cleanup'
+            Summary = "PR #$($Pr.number) MERGED and this branch is its tip - safe to tear down the local branch." }
     }
     if ($Pr -and $Pr.state -eq 'MERGED') {
-        return [pscustomobject]@{ State = 'merged-advanced'; CanCleanup = $false
-            Summary = "PR #$($Pr.number) MERGED but this branch moved past its merge commit - NOT deleting (unmerged commits here)."
-            Hint = $null }
+        return [pscustomobject]@{ State = 'merged-advanced'; CanCleanup = $false; Action = 'none'
+            Summary = "PR #$($Pr.number) MERGED but this branch moved past its merge commit - NOT deleting (unmerged commits here)." }
     }
     if ($Pr -and $Pr.state -eq 'OPEN') {
-        return [pscustomobject]@{ State = 'in-review'; CanCleanup = $false
-            Summary = "PR #$($Pr.number) is OPEN - run the review gate; merge if it passes, save a handoff if it does not."
-            Hint = "Board-ReviewGate.ps1 -Repo <owner/name> -PR $($Pr.number)" }
+        return [pscustomobject]@{ State = 'in-review'; CanCleanup = $false; Action = 'run-gate'
+            Summary = "PR #$($Pr.number) is OPEN - running the review gate now." }
     }
     if ($Pr -and $Pr.state -eq 'CLOSED') {
-        return [pscustomobject]@{ State = 'closed-unmerged'; CanCleanup = $false
-            Summary = "PR #$($Pr.number) was CLOSED without merging - decide: reopen/rescue the work, or discard the branch."
-            Hint = "gh pr reopen $($Pr.number)   # or delete the branch if abandoned" }
+        return [pscustomobject]@{ State = 'closed-unmerged'; CanCleanup = $false; Action = 'reopen-or-discard'
+            Summary = "PR #$($Pr.number) was CLOSED without merging - decide: reopen/rescue the work, or discard the branch." }
     }
     if ($CommitsAhead -gt 0) {
-        return [pscustomobject]@{ State = 'no-pr'; CanCleanup = $false
-            Summary = "$CommitsAhead commit(s) on this branch but no PR yet - open one to send it to review."
-            Hint = "New-BoardPR.ps1 -Issue <n>" }
+        return [pscustomobject]@{ State = 'no-pr'; CanCleanup = $false; Action = 'open-pr'
+            Summary = "$CommitsAhead commit(s) on this branch but no PR yet - opening one now." }
     }
-    return [pscustomobject]@{ State = 'empty'; CanCleanup = $false
-        Summary = "On a work branch with no commits and no PR - nothing to close yet."; Hint = $null }
+    return [pscustomobject]@{ State = 'empty'; CanCleanup = $false; Action = 'none'
+        Summary = "On a work branch with no commits and no PR - nothing to close yet." }
 }
 
 # Live completion of one registered session: PR state of its head branch + issue state +
@@ -2434,47 +2433,119 @@ if ($CloseLoop) {
 
     $disp = Get-CloseLoopDisposition -OnDefault $onDefault -Dirty $dirty -CommitsAhead $ahead -Pr $pr
 
+    # Needed by more than one action below (save-handoff, open-pr, and the existing cleanup path) -
+    # resolved once, from the session registry first (authoritative) and the branch name as fallback.
+    $entry    = @(Read-SessionRegistryRaw | Where-Object { $_.branch -eq $curBranch }) | Select-Object -First 1
+    $issueNum = if ($entry) { [int]$entry.issue } elseif ($curBranch -match '^issue-(\d+)') { [int]$Matches[1] } else { 0 }
+
     Write-Host ("=== cerrar-ciclo  ({0})  rama {1} ===" -f $(if ($repo) { $repo } else { '(repo desconocido)' }), $curBranch) -ForegroundColor Cyan
     Write-Host ""
     Write-Host ("  Estado: {0}" -f $disp.State) -ForegroundColor Yellow
     Write-Host ("  {0}" -f $disp.Summary)
-    if ($disp.Hint) {
-        Write-Host ("  -> {0}" -f ($disp.Hint -replace '<owner/name>', $repo)) -ForegroundColor Cyan
-    }
 
-    if ($disp.CanCleanup) {
-        # The GAP (#302): a proven-merged local branch, torn down in place. Squash-merge means
-        # `git branch -d` would refuse (it reads as unmerged), so a PROVEN merge licenses `-D`.
-        # Switch off the branch first (you cannot delete the one you are on), never on a dirty tree.
-        if ($DryRun) {
-            Write-Host ""
-            Write-Host ("  DRY-RUN: cambiaria a '{0}', borraria la rama '{1}' (-D, merge probado) y purgaria su entrada de sesion." -f $defaultShort, $curBranch) -ForegroundColor Yellow
-            exit 0
-        }
-        $go = [bool]$Force
-        if (-not $go) {
-            $ans = Read-Host ("Este trabajo ya se mergeo (PR #{0}). Te cambio a '{1}' y limpio la rama vieja '{2}'? (s/n)" -f $pr.number, $defaultShort, $curBranch)
-            $go = ($ans -match '^(s|si|y|yes)$')
-        }
-        if (-not $go) { Write-Host "  Cancelado - la rama se conserva." -ForegroundColor DarkGray; exit 0 }
+    switch ($disp.Action) {
+        'cleanup' {
+            # The GAP (#302): a proven-merged local branch, torn down in place. Squash-merge means
+            # `git branch -d` would refuse (it reads as unmerged), so a PROVEN merge licenses `-D`.
+            # Switch off the branch first (you cannot delete the one you are on), never on a dirty tree.
+            if ($DryRun) {
+                Write-Host ""
+                Write-Host ("  DRY-RUN: cambiaria a '{0}', borraria la rama '{1}' (-D, merge probado) y purgaria su entrada de sesion." -f $defaultShort, $curBranch) -ForegroundColor Yellow
+                exit 0
+            }
+            $go = [bool]$Force
+            if (-not $go) {
+                $ans = Read-Host ("Este trabajo ya se mergeo (PR #{0}). Te cambio a '{1}' y limpio la rama vieja '{2}'? (s/n)" -f $pr.number, $defaultShort, $curBranch)
+                $go = ($ans -match '^(s|si|y|yes)$')
+            }
+            if (-not $go) { Write-Host "  Cancelado - la rama se conserva." -ForegroundColor DarkGray; exit 0 }
 
-        if (-not $defaultShort) { throw "No pude resolver la rama por defecto para cambiarme antes de borrar." }
-        git checkout $defaultShort 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "No pude cambiar a '$defaultShort' (working tree ocupado?) - no borro la rama." }
-        git pull --ff-only --quiet 2>&1 | Out-Null
-        git branch -D $curBranch 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host ("  WARN no pude borrar '{0}' (checkouteada en otro worktree?) - conservada." -f $curBranch) -ForegroundColor DarkYellow
-        } else {
-            Write-Host ("  OK  rama '{0}' borrada; ahora en '{1}'." -f $curBranch, $defaultShort) -ForegroundColor Green
+            if (-not $defaultShort) { throw "No pude resolver la rama por defecto para cambiarme antes de borrar." }
+            git checkout $defaultShort 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "No pude cambiar a '$defaultShort' (working tree ocupado?) - no borro la rama." }
+            git pull --ff-only --quiet 2>&1 | Out-Null
+            git branch -D $curBranch 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host ("  WARN no pude borrar '{0}' (checkouteada en otro worktree?) - conservada." -f $curBranch) -ForegroundColor DarkYellow
+            } else {
+                Write-Host ("  OK  rama '{0}' borrada; ahora en '{1}'." -f $curBranch, $defaultShort) -ForegroundColor Green
+            }
+            if ($issueNum -gt 0) {
+                Remove-SessionRegistryEntry -IssueNum $issueNum -Outcome 'close-loop'
+                Write-Host ("  OK  entrada de sesion del issue #{0} purgada." -f $issueNum) -ForegroundColor DarkGray
+            }
         }
-        # Prune the session registry entry (by branch, else by the issue-<n> in the name).
-        $entry    = @(Read-SessionRegistryRaw | Where-Object { $_.branch -eq $curBranch }) | Select-Object -First 1
-        $issueNum = if ($entry) { [int]$entry.issue } elseif ($curBranch -match '^issue-(\d+)') { [int]$Matches[1] } else { 0 }
-        if ($issueNum -gt 0) {
-            Remove-SessionRegistryEntry -IssueNum $issueNum -Outcome 'close-loop'
-            Write-Host ("  OK  entrada de sesion del issue #{0} purgada." -f $issueNum) -ForegroundColor DarkGray
+        'save-handoff' {
+            # Non-destructive by construction: a handoff never touches the working tree, so there is
+            # nothing here that -DryRun needs to preview or -Force needs to skip past.
+            $ans = Read-Host "Tenes cambios sin guardar. Guardo un handoff para retomar despues? (s/n)"
+            if ($ans -match '^(s|si|y|yes)$') {
+                if ($issueNum -le 0) {
+                    Write-Host "  No pude identificar el issue de esta rama - guarda el handoff a mano indicando el numero." -ForegroundColor DarkYellow
+                } elseif ($DryRun) {
+                    Write-Host ("  DRY-RUN: guardaria un handoff para el issue #{0}." -f $issueNum) -ForegroundColor Yellow
+                } else {
+                    & (Join-Path $PSScriptRoot 'Board-Handoff.ps1') -Save -Issue $issueNum -Repo $repo -TokenVar $TokenVar
+                }
+            } else {
+                Write-Host "  Ok - seguis trabajando, no se guardo nada." -ForegroundColor DarkGray
+            }
         }
+        'run-gate' {
+            # Purely informational (checks + reports; never merges), so it needs no confirmation -
+            # the only question the gate can raise ("mergeo?") stays with the human, downstream.
+            if ($DryRun) {
+                Write-Host ("  DRY-RUN: correria el review gate sobre el PR #{0}." -f $pr.number) -ForegroundColor Yellow
+            } else {
+                & (Join-Path $PSScriptRoot 'Board-ReviewGate.ps1') -Repo $repo -PR $pr.number -TokenVar $TokenVar
+            }
+        }
+        'open-pr' {
+            # Opening a PR from work already committed is the obvious next step and easy to reverse
+            # (close it again) - no question needed, matching how 'merged'-cleanup is the only path
+            # that still asks (deleting a branch is the one step here that is not trivially undone).
+            if ($issueNum -le 0) {
+                Write-Host "  No pude identificar el issue de esta rama - abre el PR a mano indicando el numero." -ForegroundColor DarkYellow
+            } elseif ($DryRun) {
+                Write-Host ("  DRY-RUN: abriria el PR para el issue #{0}." -f $issueNum) -ForegroundColor Yellow
+            } else {
+                & (Join-Path $PSScriptRoot 'New-BoardPR.ps1') -Issue $issueNum -Repo $repo -TokenVar $TokenVar
+            }
+        }
+        'reopen-or-discard' {
+            # The one truly destructive branch besides 'cleanup': discarding here throws away
+            # UNMERGED work, unlike 'cleanup' which only ever deletes a branch already proven safe
+            # by a merged PR. The question spells that out instead of hiding it behind git jargon.
+            if ($DryRun) {
+                Write-Host ("  DRY-RUN: preguntaria si reabrir el PR #{0} o descartar la rama '{1}' (esto SI perderia trabajo sin mergear)." -f $pr.number, $curBranch) -ForegroundColor Yellow
+                exit 0
+            }
+            $ans = Read-Host ("El PR #{0} se cerro sin mergear. Lo reabro y seguimos, o descarto la rama '{1}' para siempre? [reabrir/descartar]" -f $pr.number, $curBranch)
+            if ($ans -match '^(reabrir|reopen|r)$') {
+                gh pr reopen $pr.number --repo $repo 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { Write-Host "  WARN no pude reabrir el PR - revisalo a mano." -ForegroundColor DarkYellow }
+                else { Write-Host ("  OK  PR #{0} reabierto - segui trabajando en esta rama." -f $pr.number) -ForegroundColor Green }
+            } elseif ($ans -match '^(descartar|discard|d)$') {
+                $confirm = Read-Host ("Esto borra el trabajo sin mergear de '{0}' PARA SIEMPRE. Seguro? (s/n)" -f $curBranch)
+                if ($confirm -match '^(s|si|y|yes)$') {
+                    if (-not $defaultShort) { throw "No pude resolver la rama por defecto para cambiarme antes de borrar." }
+                    git checkout $defaultShort 2>&1 | Out-Null
+                    if ($LASTEXITCODE -ne 0) { throw "No pude cambiar a '$defaultShort' (working tree ocupado?) - no borro la rama." }
+                    git branch -D $curBranch 2>&1 | Out-Null
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host ("  WARN no pude borrar '{0}' (checkouteada en otro worktree?) - conservada." -f $curBranch) -ForegroundColor DarkYellow
+                    } else {
+                        Write-Host ("  OK  rama '{0}' descartada; ahora en '{1}'." -f $curBranch, $defaultShort) -ForegroundColor Green
+                        if ($issueNum -gt 0) { Remove-SessionRegistryEntry -IssueNum $issueNum -Outcome 'close-loop-discard' }
+                    }
+                } else {
+                    Write-Host "  Cancelado - la rama se conserva." -ForegroundColor DarkGray
+                }
+            } else {
+                Write-Host "  No entendi la respuesta - la rama se conserva sin cambios." -ForegroundColor DarkGray
+            }
+        }
+        default { } # 'none': the Summary above already said everything there is to say.
     }
     exit 0
 }
