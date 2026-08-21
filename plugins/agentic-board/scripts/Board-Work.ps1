@@ -2522,9 +2522,12 @@ if ($CloseLoop) {
             }
             $ans = Read-Host ("El PR #{0} se cerro sin mergear. Lo reabro y seguimos, o descarto la rama '{1}' para siempre? [reabrir/descartar]" -f $pr.number, $curBranch)
             if ($ans -match '^(reabrir|reopen|r)$') {
-                gh pr reopen $pr.number --repo $repo 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { Write-Host "  WARN no pude reabrir el PR - revisalo a mano." -ForegroundColor DarkYellow }
-                else { Write-Host ("  OK  PR #{0} reabierto - segui trabajando en esta rama." -f $pr.number) -ForegroundColor Green }
+                try {
+                    $null = Invoke-Gh -GhArgs @('pr','reopen',"$($pr.number)",'--repo',$repo) -What "reabrir el PR #$($pr.number)"
+                    Write-Host ("  OK  PR #{0} reabierto - segui trabajando en esta rama." -f $pr.number) -ForegroundColor Green
+                } catch {
+                    Write-Host "  WARN no pude reabrir el PR - revisalo a mano." -ForegroundColor DarkYellow
+                }
             } elseif ($ans -match '^(descartar|discard|d)$') {
                 $confirm = Read-Host ("Esto borra el trabajo sin mergear de '{0}' PARA SIEMPRE. Seguro? (s/n)" -f $curBranch)
                 if ($confirm -match '^(s|si|y|yes)$') {
