@@ -43,9 +43,18 @@
     Both directions still fail toward SHUT (exit 2, which -RecordReview or -AllowUnreviewed clears)
     rather than toward a merge nobody reviewed.
 #>
-$script:CopilotRefusalPattern    = '(?i)(unable to review this pull request|copilot( code review)? is (not available|unavailable))'
+# Tier 1 is ANCHORED to the start of the body (review round 3). Unanchored, a substantive review of
+# THIS file that quotes the sentence - "the string 'unable to review this pull request' is correct" -
+# matched tier 1, and tier 1 ignores length, so the whole review was thrown away. GitHub's notice
+# leads with it; a review that mentions it does not.
+$script:CopilotRefusalPattern    = '(?i)^\s*(?:copilot\s+)?(?:(?:was|is|were)\s+)?(?:unable|not able)\s+to\s+review\s+this\s+pull\s+request|^\s*copilot(?:\s+code\s+review)?\s+is\s+(?:not\s+available|unavailable)'
 $script:CopilotExhaustionPattern = '(?i)(unable to review|not able to review|cannot review|can''t review|could not review|couldn''t review|quota limit|reached (their|the|its) quota|out of quota|no seats? available)'
 $script:CopilotRefusalMaxLength  = 400
+
+# WHO the bot is. `-match 'copilot'` was a substring test, so a HUMAN called `acme-copilot` or
+# `copilot-fan` was treated as the bot (review round 3) - and since #651 that means their short
+# review can be discarded as a refusal. Anchored to the logins GitHub actually uses.
+$script:CopilotReviewerLoginPattern = '(?i)^copilot(-pull-request-reviewer)?(\[bot\])?$'
 
 # Is THIS body a refusal? Pure; the two-tier rule above lives here so both consumers share it.
 function Test-CopilotRefusalBody {
@@ -69,7 +78,7 @@ function Test-CopilotUnavailableReview {
     $head = "$HeadSha".Trim()
     foreach ($r in @($Reviews)) {
         $login = "$($r.author.login)"
-        if ($login -notmatch '(?i)copilot') { continue }
+        if ($login -notmatch $script:CopilotReviewerLoginPattern) { continue }
         if ($head -and "$($r.commit.oid)".Trim() -ne $head) { continue }
         if (Test-CopilotRefusalBody -Body "$($r.body)") {
             return $true

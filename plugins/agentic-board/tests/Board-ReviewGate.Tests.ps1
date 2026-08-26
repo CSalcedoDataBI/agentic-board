@@ -180,6 +180,18 @@ Describe 'Get-ReviewEvidence - "found nothing" vs "nobody looked" (#510)' {
                                     -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
             $e.reviewed | Should -BeTrue
         }
+        It 'a self-authored review of the CURRENT head is not miscounted as stale (round 3 claim, checked)' {
+            # Round 3 argued the author's own review survives in the real-review pool and then shows
+            # up in `stale`, making the gate complain about reviews of older commits. It does not:
+            # the author filter runs before the partition, so the review never enters the pool at
+            # all. Pinned so a future refactor that reorders them is caught.
+            $e = Get-ReviewEvidence -Reviews @((script:GhReview 'APPROVED' 'the-pr-author' $script:Head)) `
+                                    -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
+            $e.reviewed | Should -BeFalse
+            $e.github   | Should -Be 0
+            $e.stale    | Should -Be 0
+            $e.refused  | Should -Be 0
+        }
         It 'one self-authored and one independent comment: only the independent one counts' {
             $e = Get-ReviewEvidence -CommentBodies @(
                 (script:GhComment "<!-- [abios-review] self sha=$script:Head -->" 'the-pr-author'),

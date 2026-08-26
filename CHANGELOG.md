@@ -45,7 +45,18 @@
   of earlier commits — you pushed after someone reviewed", said about a commit nobody reviewed.
   Refusals are now out of `stale` entirely.
 
-  Verified end to end on the PR that carried the fix, which drew the refusal for real: with two
+  Round 3 closed the last two ways the widened blast radius could still eat a real review, both of
+  them likeliest in this repo of all repos. The machine-sentence tier is now ANCHORED to the start
+  of the body: unanchored it ignored length, so a substantive review that merely QUOTED the sentence
+  — the kind of review this very file attracts — was discarded whole. And "is this the bot?" was a
+  substring test on the login, so a human called `acme-copilot` was treated as Copilot and a short
+  review of theirs could be dropped; it now matches the logins GitHub actually uses. Round 3 also
+  caught one of the new tests passing vacuously (a 900-char body made the length guard short-circuit
+  before the phrase check ran) and claimed a miscount in the self-certification filter that turned
+  out not to exist — the author filter runs before the partition, and there is now a test pinning
+  that ordering rather than an argument about it.
+
+  Verified end to end on the PR that carried the fix, which drew the refusal for real: with three
   Copilot quota answers on record and no other reviewer, the gate printed GATE SIN REVISAR and
   exited 2 — the state that used to print GATE PASSED and exit 0.
 - **A worktree the doctor could not see was quietly costing a git process every 30 minutes

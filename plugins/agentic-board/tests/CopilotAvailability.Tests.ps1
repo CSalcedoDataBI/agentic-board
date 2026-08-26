@@ -24,6 +24,17 @@ Describe 'Test-CopilotUnavailableReview (recognise the no-quota answer)' {
     It 'ignores a non-Copilot author even if the body mentions quota' {
         Test-CopilotUnavailableReview @( (Review 'alice' 'we reached their quota limit last week') ) | Should -BeFalse
     }
+    It 'a HUMAN whose username merely contains "copilot" is not the bot (#651, review round 3)' {
+        # `-match 'copilot'` was a substring test. Since #651 being mistaken for the bot means a
+        # short review can be discarded as a refusal, so the login has to be exact.
+        Test-CopilotUnavailableReview @( (Review 'acme-copilot'  'I cannot review this right now - out of my depth here.') ) | Should -BeFalse
+        Test-CopilotUnavailableReview @( (Review 'copilot-fan'   'unable to review right now') ) | Should -BeFalse
+    }
+    It 'still recognises the real bot logins' {
+        Test-CopilotUnavailableReview @( (Review 'copilot-pull-request-reviewer'      'unable to review right now') ) | Should -BeTrue
+        Test-CopilotUnavailableReview @( (Review 'copilot-pull-request-reviewer[bot]' 'unable to review right now') ) | Should -BeTrue
+        Test-CopilotUnavailableReview @( (Review 'Copilot'                           'unable to review right now') ) | Should -BeTrue
+    }
     It 'is false on no reviews' { Test-CopilotUnavailableReview @() | Should -BeFalse }
 
     Context 'the phrase has to be about REVIEWING, not any availability word (#651)' {
@@ -65,12 +76,29 @@ Describe 'Test-CopilotUnavailableReview (recognise the no-quota answer)' {
             $body.Length | Should -BeGreaterThan 400   # the guard only means something above the threshold
             Test-CopilotRefusalBody -Body $body | Should -BeFalse
         }
-        It 'a long review with NO exhaustion phrase at all is not a refusal either' {
-            Test-CopilotRefusalBody -Body ('Looks correct. ' * 60) | Should -BeFalse
+        It 'a SHORT review with no exhaustion phrase is not a refusal - the phrase is required, not just the length' {
+            # Round 3 caught the first version of this test passing vacuously: it used a 900-char
+            # body, so the length guard short-circuited and the phrase check never ran. Short body,
+            # no phrase: the only way for it to pass is the phrase check actually returning false.
+            $short = 'Looks correct to me; nothing to flag.'
+            $short.Length | Should -BeLessOrEqual 400
+            Test-CopilotRefusalBody -Body $short | Should -BeFalse
         }
         It 'an empty body is not a refusal' {
             Test-CopilotRefusalBody -Body ''    | Should -BeFalse
             Test-CopilotRefusalBody -Body '   ' | Should -BeFalse
+        }
+        It 'a long review that QUOTES the refusal sentence is kept - tier 1 is anchored (round 3)' {
+            # Unanchored, tier 1 matched anywhere and ignored length, so a review OF this file that
+            # quoted the sentence was discarded whole. The gate lives in the repo most likely to
+            # produce exactly that review.
+            $body = 'The tier 1 branch tests for the string "unable to review this pull request", which is right, but it is not anchored, so any review that mentions the phrase trips it. Line 260: the alternation binds looser than it reads - wrap the branches. Line 300: this early return skips the length guard entirely, which I think is intentional but is worth a comment for the next reader, since the length guard is the only thing standing between a long review and being discarded outright.'
+            $body.Length | Should -BeGreaterThan 400
+            Test-CopilotRefusalBody -Body $body | Should -BeFalse
+        }
+        It 'the real notice still matches even though it is anchored' {
+            Test-CopilotRefusalBody -Body 'Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.' | Should -BeTrue
+            Test-CopilotRefusalBody -Body 'Copilot code review is not available for this repository.' | Should -BeTrue
         }
         It 'reaches Test-CopilotUnavailableReview through the same rule' {
             $long = 'The user has reached their quota is the message this branch prints; the test below asserts it, but the assertion compares against a different constant than the one the code reads, so it passes for the wrong reason. Also the loop on line 40 recomputes the pattern on every iteration - hoist it, since it is rebuilt for each review in a list that can hold twenty of them. Nothing else stood out; the rest of the diff is mechanical and reads fine to me overall.'
