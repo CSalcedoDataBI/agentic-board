@@ -2452,16 +2452,19 @@ Describe 'Resolve-StatusOptionId (every Status WRITE is vocabulary-aware, PR #27
     }
 }
 
-Describe 'Get-CloseLoopDisposition (cerrar-ciclo router #302)' {
+Describe 'Get-CloseLoopDisposition (cerrar-ciclo router #302/#650)' {
     It 'on the default branch -> nothing to close' {
-        (Get-CloseLoopDisposition -OnDefault $true).State | Should -Be 'on-default'
-        (Get-CloseLoopDisposition -OnDefault $true).CanCleanup | Should -BeFalse
+        $d = Get-CloseLoopDisposition -OnDefault $true
+        $d.State  | Should -Be 'on-default'
+        $d.CanCleanup | Should -BeFalse
+        $d.Action | Should -Be 'none'
     }
     It 'uncommitted work is decided BEFORE any PR state (never lose it to cleanup)' {
         $merged = [pscustomobject]@{ number = 9; state = 'MERGED'; merged = $true }
         $d = Get-CloseLoopDisposition -OnDefault $false -Dirty 'dirty' -Pr $merged
         $d.State | Should -Be 'dirty'
         $d.CanCleanup | Should -BeFalse
+        $d.Action | Should -Be 'save-handoff'
     }
     It 'an unreadable working tree (unknown) fails closed as dirty' {
         (Get-CloseLoopDisposition -OnDefault $false -Dirty 'unknown').State | Should -Be 'dirty'
@@ -2471,6 +2474,7 @@ Describe 'Get-CloseLoopDisposition (cerrar-ciclo router #302)' {
         $d = Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $pr
         $d.State | Should -Be 'merged'
         $d.CanCleanup | Should -BeTrue
+        $d.Action | Should -Be 'cleanup'
         $d.Summary | Should -Match '#42'
     }
     It 'a MERGED PR whose head is NOT our tip is merged-advanced, never deletable' {
@@ -2478,23 +2482,55 @@ Describe 'Get-CloseLoopDisposition (cerrar-ciclo router #302)' {
         $d = Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $pr
         $d.State | Should -Be 'merged-advanced'
         $d.CanCleanup | Should -BeFalse
+        $d.Action | Should -Be 'none'
     }
-    It 'an OPEN PR routes to the review gate' {
+    It 'an OPEN PR routes to running the review gate directly (#650) - no printed command' {
         $pr = [pscustomobject]@{ number = 7; state = 'OPEN'; merged = $false }
         $d = Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $pr
-        $d.State | Should -Be 'in-review'
-        $d.Hint  | Should -Match 'Board-ReviewGate.*7'
+        $d.State  | Should -Be 'in-review'
+        $d.Action | Should -Be 'run-gate'
+        $d.Summary | Should -Not -Match 'Board-ReviewGate'
     }
-    It 'a CLOSED-unmerged PR routes to a rescue/discard decision' {
+    It 'a CLOSED-unmerged PR routes to a rescue/discard decision the human must make' {
         $pr = [pscustomobject]@{ number = 7; state = 'CLOSED'; merged = $false }
-        (Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $pr).State | Should -Be 'closed-unmerged'
+        $d = Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $pr
+        $d.State  | Should -Be 'closed-unmerged'
+        $d.Action | Should -Be 'reopen-or-discard'
     }
-    It 'commits but no PR routes to opening one' {
+    It 'commits but no PR routes to opening one directly (#650) - no printed command' {
         $d = Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -CommitsAhead 3 -Pr $null
-        $d.State | Should -Be 'no-pr'
-        $d.Hint  | Should -Match 'New-BoardPR'
+        $d.State  | Should -Be 'no-pr'
+        $d.Action | Should -Be 'open-pr'
+        $d.Summary | Should -Not -Match 'New-BoardPR'
     }
     It 'a fresh work branch with no commits and no PR has nothing to close' {
-        (Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -CommitsAhead 0 -Pr $null).State | Should -Be 'empty'
+        $d = Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -CommitsAhead 0 -Pr $null
+        $d.State  | Should -Be 'empty'
+        $d.Action | Should -Be 'none'
+    }
+    It 'no disposition ever names an internal script or a raw command in its Summary (#495/#650)' {
+        # Every branch, exhaustively - the whole point of #650 is that nothing here is copy-paste
+        # text any more. Reuses the #494 detector so this stays true even if the codebase grows
+        # a new banned pattern later.
+        $env:ABIOS_VOCABLEAK_DOTSOURCE = '1'
+        . (Join-Path $PSScriptRoot '..' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
+        $env:ABIOS_VOCABLEAK_DOTSOURCE = ''
+        $prMerged = [pscustomobject]@{ number = 1; state = 'MERGED'; merged = $true }
+        $prAdv    = [pscustomobject]@{ number = 2; state = 'MERGED'; merged = $false }
+        $prOpen   = [pscustomobject]@{ number = 3; state = 'OPEN';   merged = $false }
+        $prClosed = [pscustomobject]@{ number = 4; state = 'CLOSED'; merged = $false }
+        $dispositions = @(
+            (Get-CloseLoopDisposition -OnDefault $true),
+            (Get-CloseLoopDisposition -OnDefault $false -Dirty 'dirty'),
+            (Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $prMerged),
+            (Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $prAdv),
+            (Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $prOpen),
+            (Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -Pr $prClosed),
+            (Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -CommitsAhead 3),
+            (Get-CloseLoopDisposition -OnDefault $false -Dirty 'clean' -CommitsAhead 0)
+        )
+        foreach ($d in $dispositions) {
+            (Find-InternalVocabularyLeak -Text $d.Summary) | Should -BeNullOrEmpty -Because "State '$($d.State)': $($d.Summary)"
+        }
     }
 }
