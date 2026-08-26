@@ -189,6 +189,15 @@ Notes:
      afterwards invalidates it, and correctly so (nobody has reviewed those lines).
   2. **`-AllowUnreviewed`** when a review genuinely buys nothing (a typo, a regenerated file). It
      says out loud that nobody read the code — use it as the exception, never as the routine path.
+
+  **A reviewer that answers "I could not review this" lands on exit 2 too (#651).** Copilot with no
+  quota does not stay silent: it submits a COMMENTED review whose body says it was unable to
+  review. That is a review object bound to the current head, so the evidence count accepted it and
+  the gate printed `GATE PASSED` naming as reviewer a bot that had just said it never looked. A
+  refusal now ends the WAIT (there is no point waiting for a review that is not coming) without
+  satisfying the GATE, and the verdict names it instead of printing a bare "0 reviews" that would
+  contradict the review list right above it. Scoped to the bot by login **and** body — a human
+  review whose prose happens to say "not available" is untouched.
 - **Step 5 is mandatory**: never commit board-tracked issue work directly to main. `Linked pull
   requests` and `Sub-issues progress` are system-derived, read-only columns — the ONLY way to fill
   Linked PRs is finishing through a PR that closes the issue; Sub-issues progress only applies to

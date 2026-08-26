@@ -3,6 +3,29 @@
 ## [Unreleased]
 
 ### Fixed
+- **The review gate passed a PR whose only reviewer had said it could not review it (#651).**
+  Copilot with no quota does not stay silent — it submits a COMMENTED review whose body reads
+  "unable to review ... reached their quota limit". That is a review object bound to the current
+  head, so `Get-ReviewEvidence` counted it, `evidence.reviewed` came out true, and the gate printed
+  `GATE PASSED` / exit 0 naming as reviewer a bot that had just said it never looked. The exact
+  failure #510 exists to close, reopened by the one reviewer most likely to be the only one on the
+  PR — and worse than the original, because a caller reading only the exit code saw a clean pass.
+
+  The detection was already there and already correct: `Test-CopilotUnavailableReview` recognised
+  the refusal, but its verdict was only ever used to arm the per-account cooldown marker, never
+  subtracted from the evidence. The issue guessed the cause was the `$copilotRequested` flag
+  gating that call; reading the executing path showed the flag only gates the marker write — the
+  evidence count never consulted the refusal at all, requested or not.
+
+  A refusal is an **answer**, not a review, and the two now go to different places. It ends the
+  review WAIT (`Test-ReviewAnswerArrived`) — without that, closing the evidence hole would have
+  traded a false pass for a guaranteed stall, since a ten-second "no quota" answer would have left
+  the gate waiting the full timeout for a review that was never coming. And it does not satisfy
+  the GATE: the verdict routes to exit 2 and says why, because the review list printed directly
+  above it *shows* a Copilot review and a bare "0 reviews" would read as a bug in the gate rather
+  than the truth about the PR. The check is scoped to the bot by login **and** body, so a human
+  review whose prose happens to say "not available" is never dropped — that would be a worse bug
+  than the one being closed. `refused` joins `stale` as a named reason on the evidence object.
 - **A worktree the doctor could not see was quietly costing a git process every 30 minutes
   (#618).** The ghost check trusted git's own `prunable` marker, which only ever means "metadata
   present, directory gone". The inverse never had a name: the directory survives under
