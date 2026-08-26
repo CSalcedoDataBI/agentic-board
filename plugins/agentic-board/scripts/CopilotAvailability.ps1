@@ -21,14 +21,40 @@
 
 # ── Pure decision helpers (unit-testable; no I/O) ─────────────────────────────
 
-# What a REFUSAL sounds like. Every phrase here has to be about the reviewer being unable to review
-# or out of quota - never a bare availability word (#651). The first cut matched 'not available',
-# 'isn''t available' and 'no seats' anywhere in the body, which was harmless while this only decided
-# whether to re-request Copilot next time: a false positive cost one skipped request. Since #651 the
-# same verdict REMOVES the review from the gate's evidence, so a substantive Copilot review saying
-# 'this API is not available in v2' would have been discarded and the PR reported as unreviewed. The
-# blast radius grew from bookkeeping to blocking a merge, so the pattern had to earn it.
-$script:CopilotRefusalPattern = '(?i)(unable to review|not able to review|cannot review|can''t review|could not review|couldn''t review|quota limit|reached (their|the|its) quota|out of quota|no seats? available|copilot( code review)? is (not available|unavailable))'
+<#  What a REFUSAL sounds like, in two tiers (#651).
+
+    This used to be one loose phrase list matched anywhere in the body - 'not available', 'no seats',
+    'quota limit'. Harmless while the verdict only decided whether to re-request Copilot next time: a
+    false positive cost one skipped request. Since #651 the same verdict REMOVES the review from the
+    gate's evidence, so a false positive now reports a genuinely reviewed PR as unreviewed. The blast
+    radius grew from bookkeeping to blocking a merge.
+
+    Tightening the phrases was not enough on its own, and this repo is the proof: its own subject
+    matter is Copilot quota, so a REAL review of this very file could easily say "returns 429 when
+    the user has reached their quota" or "handle the case where no seats are available" and be
+    thrown away. Phrase precision cannot separate those from the refusal, because the words are the
+    same. Length can: GitHub's refusal is one machine-generated sentence; a review with something to
+    say is not.
+
+      Tier 1 - the machine sentences themselves. Unambiguous at any length.
+      Tier 2 - an exhaustion phrase, but only in a body short enough to BE a notice rather than a
+               review. A long review that discusses quotas keeps counting.
+
+    Both directions still fail toward SHUT (exit 2, which -RecordReview or -AllowUnreviewed clears)
+    rather than toward a merge nobody reviewed.
+#>
+$script:CopilotRefusalPattern    = '(?i)(unable to review this pull request|copilot( code review)? is (not available|unavailable))'
+$script:CopilotExhaustionPattern = '(?i)(unable to review|not able to review|cannot review|can''t review|could not review|couldn''t review|quota limit|reached (their|the|its) quota|out of quota|no seats? available)'
+$script:CopilotRefusalMaxLength  = 400
+
+# Is THIS body a refusal? Pure; the two-tier rule above lives here so both consumers share it.
+function Test-CopilotRefusalBody {
+    param([string]$Body = '')
+    $b = "$Body"
+    if (-not $b.Trim()) { return $false }
+    if ($b -match $script:CopilotRefusalPattern) { return $true }
+    return (($b.Length -le $script:CopilotRefusalMaxLength) -and ($b -match $script:CopilotExhaustionPattern))
+}
 
 # Does a reviews list show Copilot answering that it could NOT review (no quota / unavailable)? The bot
 # posts this as a COMMENTED review by copilot-pull-request-reviewer. With -HeadSha, only a refusal
@@ -45,7 +71,7 @@ function Test-CopilotUnavailableReview {
         $login = "$($r.author.login)"
         if ($login -notmatch '(?i)copilot') { continue }
         if ($head -and "$($r.commit.oid)".Trim() -ne $head) { continue }
-        if ("$($r.body)" -match $script:CopilotRefusalPattern) {
+        if (Test-CopilotRefusalBody -Body "$($r.body)") {
             return $true
         }
     }

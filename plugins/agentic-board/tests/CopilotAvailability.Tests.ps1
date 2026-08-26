@@ -49,6 +49,36 @@ Describe 'Test-CopilotUnavailableReview (recognise the no-quota answer)' {
         }
     }
 
+    Context 'length is what separates a notice from a review (#651, review round 2)' {
+        # The words are the same in both. A repo whose subject matter IS Copilot quota - this one -
+        # will have real reviews that say "reached their quota". Only the shape of the message
+        # tells them apart: GitHub's refusal is one machine sentence, a review is not.
+        It 'the real refusal is recognised at any length (tier 1 phrase)' {
+            Test-CopilotRefusalBody -Body 'Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.' | Should -BeTrue
+        }
+        It 'a SHORT exhaustion notice is a refusal' {
+            Test-CopilotRefusalBody -Body 'unable to review right now' | Should -BeTrue
+            Test-CopilotRefusalBody -Body 'No seats available for code review on this account.' | Should -BeTrue
+        }
+        It 'a LONG review that merely discusses quotas is NOT a refusal' {
+            $body = 'Line 88: this correctly returns 429 when the user has reached their quota, but the retry path below does not honour the Retry-After header, so a client will hammer the endpoint. Line 140: the branch that runs when no seats are available duplicates the block above it - worth extracting. Line 210: the quota limit constant is defined twice, in this file and in the caller, and they have already drifted apart by one. Everything else reads fine to me.'
+            $body.Length | Should -BeGreaterThan 400   # the guard only means something above the threshold
+            Test-CopilotRefusalBody -Body $body | Should -BeFalse
+        }
+        It 'a long review with NO exhaustion phrase at all is not a refusal either' {
+            Test-CopilotRefusalBody -Body ('Looks correct. ' * 60) | Should -BeFalse
+        }
+        It 'an empty body is not a refusal' {
+            Test-CopilotRefusalBody -Body ''    | Should -BeFalse
+            Test-CopilotRefusalBody -Body '   ' | Should -BeFalse
+        }
+        It 'reaches Test-CopilotUnavailableReview through the same rule' {
+            $long = 'The user has reached their quota is the message this branch prints; the test below asserts it, but the assertion compares against a different constant than the one the code reads, so it passes for the wrong reason. Also the loop on line 40 recomputes the pattern on every iteration - hoist it, since it is rebuilt for each review in a list that can hold twenty of them. Nothing else stood out; the rest of the diff is mechanical and reads fine to me overall.'
+            $long.Length | Should -BeGreaterThan 400
+            Test-CopilotUnavailableReview @( (Review 'copilot-pull-request-reviewer' $long) ) | Should -BeFalse
+        }
+    }
+
     Context 'head-bound refusals (#563)' {
         BeforeAll {
             function script:ShaReview($login, $body, $oid) {

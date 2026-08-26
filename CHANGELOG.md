@@ -34,6 +34,20 @@
   saying "that helper is not available in v2" would have been discarded and a genuinely reviewed PR
   reported as unreviewed. The pattern now has to be about the reviewer being unable to review or
   out of quota, and it is pinned by tests in both directions.
+
+  Round 2 showed phrase precision alone could not do it, and this repo is the proof: its own
+  subject matter is Copilot quota, so a REAL review of this very file would say "returns 429 when
+  the user has reached their quota" or "handle the case where no seats are available" and be thrown
+  away. The words are identical; only the shape differs. The rule is now two-tier — GitHub's
+  machine sentences match at any length, an exhaustion phrase only inside a body short enough to
+  BE a notice rather than a review. Round 2 also moved the refusal partition to cover reviews of
+  EVERY commit: an old refusal used to land in `stale`, which drove the message "there are reviews
+  of earlier commits — you pushed after someone reviewed", said about a commit nobody reviewed.
+  Refusals are now out of `stale` entirely.
+
+  Verified end to end on the PR that carried the fix, which drew the refusal for real: with two
+  Copilot quota answers on record and no other reviewer, the gate printed GATE SIN REVISAR and
+  exited 2 — the state that used to print GATE PASSED and exit 0.
 - **A worktree the doctor could not see was quietly costing a git process every 30 minutes
   (#618).** The ghost check trusted git's own `prunable` marker, which only ever means "metadata
   present, directory gone". The inverse never had a name: the directory survives under

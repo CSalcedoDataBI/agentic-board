@@ -241,11 +241,24 @@ Describe 'Get-ReviewEvidence - "found nothing" vs "nobody looked" (#510)' {
             $e.external | Should -Be 1
             $e.refused  | Should -Be 1
         }
-        It 'a refusal left on an EARLIER commit is stale, not a refusal of this diff' {
+        It 'a refusal left on an EARLIER commit counts as nothing at all - not refused, not stale' {
+            # Round 2: folding it into `stale` made the gate print "there are reviews of earlier
+            # commits - you pushed after someone reviewed" about a commit nobody ever reviewed.
+            # `refused` stays 0 because the verdict has nothing to say about a refusal of old code.
             $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Old $script:Refusal)) -HeadSha $script:Head
             $e.reviewed | Should -BeFalse
             $e.refused  | Should -Be 0
-            $e.stale    | Should -Be 1
+            $e.stale    | Should -Be 0
+        }
+        It 'a LONG Copilot review that discusses quotas is kept - this repo owns that subject matter (round 2)' {
+            # Phrase precision cannot separate "reached their quota" in a refusal from the same
+            # words in a review OF quota-handling code. Length can, and the gate lives in a repo
+            # whose whole subject is Copilot quota.
+            $body = 'Line 88: this correctly returns 429 when the user has reached their quota, but the retry path below does not honour the Retry-After header, so a client will hammer the endpoint. Line 140: the branch that runs when no seats are available duplicates the block above it - worth extracting. Line 210: the quota limit constant is defined twice, in this file and in the caller, and they have already drifted apart by one. Everything else reads fine to me.'
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head $body)) -HeadSha $script:Head
+            $e.reviewed | Should -BeTrue
+            $e.github   | Should -Be 1
+            $e.refused  | Should -Be 0
         }
         It 'a refusal now AND a real review of an earlier commit: one of each, counted separately' {
             # Both verdict branches are live at once; each keeps its own count, so the message the

@@ -289,7 +289,6 @@ function Get-ReviewEvidence {
                   stale = ($allGh.Count + $allExt.Count) }
     }
 
-    $gh  = @($allGh  | Where-Object { "$($_.commit.oid)".Trim() -eq $head })
     $ext = @($allExt | Where-Object { "$_" -match ('(?i)sha\s*=\s*' + [regex]::Escape($head)) })
 
     # A REFUSAL IS AN ANSWER, NOT A REVIEW (#651). Copilot with no quota does not stay silent: it
@@ -301,14 +300,22 @@ function Get-ReviewEvidence {
     # subtracted from the evidence. Scoped to the bot by that same function (login + body), never a
     # body-text match on humans: dropping a human review whose prose happens to say "not available"
     # would be a worse bug than the one this closes.
+    # The partition runs over EVERY GitHub review, not only the ones on this commit (review round
+    # 2). A refusal left on an EARLIER commit is not evidence of anything either, so folding it
+    # into `stale` printed "there are reviews of earlier commits - you pushed after someone
+    # reviewed" about a commit nobody ever reviewed. It is dropped outright; only refusals of the
+    # CURRENT head are counted, because those are the ones the verdict has something to say about.
     # One pass, partitioning rather than filtering twice: `-notcontains` on PSCustomObjects would
-    # have leaned on reference equality to subtract the refusals, which is true here and needlessly
-    # fragile.
-    $kept = @(); $refused = @()
-    foreach ($r in $gh) {
-        if (Test-CopilotUnavailableReview -Reviews @($r) -HeadSha $head) { $refused += $r } else { $kept += $r }
+    # have leaned on reference equality to subtract them, which is true here and needlessly fragile.
+    $real = @(); $refusedHead = 0
+    foreach ($r in $allGh) {
+        if (Test-CopilotUnavailableReview -Reviews @($r)) {
+            if ("$($r.commit.oid)".Trim() -eq $head) { $refusedHead++ }
+            continue
+        }
+        $real += $r
     }
-    $gh = @($kept)
+    $gh = @($real | Where-Object { "$($_.commit.oid)".Trim() -eq $head })
 
     $names = @()
     foreach ($r in $gh) { if ($r.author.login) { $names += "$($r.author.login)" } }
@@ -324,11 +331,11 @@ function Get-ReviewEvidence {
         github    = $gh.Count
         external  = $ext.Count
         reviewers = @($names | Where-Object { $_ } | Select-Object -Unique)
-        # `stale` counts evidence of OTHER commits; a refusal belongs to this one, so it is
-        # reported on its own key instead of being folded into either bucket. Subtracting the
-        # refusals keeps `stale` meaning exactly what its message says (#651).
-        stale     = ((($allGh.Count - $refused.Count) - $gh.Count) + ($allExt.Count - $ext.Count))
-        refused   = $refused.Count
+        # `stale` counts REAL evidence of OTHER commits. Refusals are out of it entirely - of this
+        # commit or an older one - so the message it drives ("you pushed after someone reviewed")
+        # is never printed about a commit nobody reviewed (#651).
+        stale     = (($real.Count - $gh.Count) + ($allExt.Count - $ext.Count))
+        refused   = $refusedHead
     }
 }
 
