@@ -247,6 +247,26 @@ Describe 'Get-ReviewEvidence - "found nothing" vs "nobody looked" (#510)' {
             $e.refused  | Should -Be 0
             $e.stale    | Should -Be 1
         }
+        It 'a refusal now AND a real review of an earlier commit: one of each, counted separately' {
+            # Both verdict branches are live at once; each keeps its own count, so the message the
+            # gate picks is a choice between two true statements, not a collision.
+            $e = Get-ReviewEvidence -Reviews @(
+                (script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head $script:Refusal),
+                (script:GhReviewBody 'APPROVED'  'a-human'                       $script:Old  'Looks good.')
+            ) -HeadSha $script:Head
+            $e.reviewed | Should -BeFalse
+            $e.refused  | Should -Be 1
+            $e.stale    | Should -Be 1
+        }
+        It 'keeps a SUBSTANTIVE Copilot review that happens to say something is not available (#651, review round 1)' {
+            # The escalation this fix created: the refusal phrase list used to be loose enough to
+            # match ordinary review prose. Harmless while it only skipped a re-request; once it
+            # removes evidence, a real review would be thrown away and the PR called unreviewed.
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head 'Line 42: that helper is not available in v2 of the API - use the new one.')) -HeadSha $script:Head
+            $e.reviewed | Should -BeTrue
+            $e.github   | Should -Be 1
+            $e.refused  | Should -Be 0
+        }
     }
 }
 

@@ -26,6 +26,29 @@ Describe 'Test-CopilotUnavailableReview (recognise the no-quota answer)' {
     }
     It 'is false on no reviews' { Test-CopilotUnavailableReview @() | Should -BeFalse }
 
+    Context 'the phrase has to be about REVIEWING, not any availability word (#651)' {
+        # This verdict used to only decide whether to re-request Copilot next time - a false
+        # positive cost one skipped request. Since #651 it REMOVES the review from the gate's
+        # evidence, so a false positive now reports a reviewed PR as unreviewed. Ordinary review
+        # prose must not trip it.
+        It 'is FALSE for a substantive Copilot review that says an API is not available' {
+            Test-CopilotUnavailableReview @( (Review 'copilot-pull-request-reviewer' 'Line 42: that helper is not available in v2 of the API - use the new one. Otherwise this looks correct.') ) | Should -BeFalse
+        }
+        It 'is FALSE for a substantive review mentioning seats in passing' {
+            Test-CopilotUnavailableReview @( (Review 'copilot-pull-request-reviewer' 'The seat allocation loop drops the last row when no seats remain; add a guard.') ) | Should -BeFalse
+        }
+        It 'is FALSE for review prose that merely uses the word unavailable' {
+            Test-CopilotUnavailableReview @( (Review 'Copilot' 'If the endpoint is unavailable this retries forever - bound it.') ) | Should -BeFalse
+        }
+        It 'still recognises Copilot announcing ITSELF unavailable' {
+            Test-CopilotUnavailableReview @( (Review 'Copilot' 'Copilot code review is not available for this repository.') ) | Should -BeTrue
+        }
+        It 'still recognises the out-of-quota phrasings' {
+            Test-CopilotUnavailableReview @( (Review 'Copilot' 'This account is out of quota for code review.') ) | Should -BeTrue
+            Test-CopilotUnavailableReview @( (Review 'Copilot' 'Copilot could not review this pull request.') ) | Should -BeTrue
+        }
+    }
+
     Context 'head-bound refusals (#563)' {
         BeforeAll {
             function script:ShaReview($login, $body, $oid) {

@@ -1011,7 +1011,12 @@ if ($blockers.Count -eq 0) {
         } elseif ($evidence.refused -gt 0) {
             # Say it out loud, because the review list printed above SHOWS a Copilot review and a
             # bare "0 reviews" would read as a bug in the gate rather than the truth about it.
-            Write-Host "  El unico revisor contesto que NO pudo revisar (sin cuota / no disponible)." -ForegroundColor Yellow
+            $linea = if ($evidence.refused -eq 1) {
+                "El unico revisor contesto que NO pudo revisar (sin cuota / no disponible)."
+            } else {
+                "Los $($evidence.refused) revisores contestaron que NO pudieron revisar (sin cuota / no disponible)."
+            }
+            Write-Host ("  {0}" -f $linea) -ForegroundColor Yellow
             Write-Host "  Eso es una respuesta, no una revision: nadie leyo este codigo (#651)." -ForegroundColor DarkGray
         } elseif ($evidence.stale -gt 0) {
             Write-Host ("  Hay {0} revision(es) en el PR, pero de commits ANTERIORES - no cubren el codigo actual." -f $evidence.stale) -ForegroundColor Yellow

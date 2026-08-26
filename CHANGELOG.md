@@ -26,6 +26,14 @@
   than the truth about the PR. The check is scoped to the bot by login **and** body, so a human
   review whose prose happens to say "not available" is never dropped — that would be a worse bug
   than the one being closed. `refused` joins `stale` as a named reason on the evidence object.
+
+  Review round 1 caught the cost of that reuse: `Test-CopilotUnavailableReview`'s phrase list was
+  loose — it matched a bare `not available`, `isn't available` or `no seats` anywhere in the body.
+  Harmless while the verdict only decided whether to re-request Copilot next time (a false positive
+  cost one skipped request); once the same verdict REMOVES evidence, a substantive Copilot review
+  saying "that helper is not available in v2" would have been discarded and a genuinely reviewed PR
+  reported as unreviewed. The pattern now has to be about the reviewer being unable to review or
+  out of quota, and it is pinned by tests in both directions.
 - **A worktree the doctor could not see was quietly costing a git process every 30 minutes
   (#618).** The ghost check trusted git's own `prunable` marker, which only ever means "metadata
   present, directory gone". The inverse never had a name: the directory survives under

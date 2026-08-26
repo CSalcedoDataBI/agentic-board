@@ -21,6 +21,15 @@
 
 # ── Pure decision helpers (unit-testable; no I/O) ─────────────────────────────
 
+# What a REFUSAL sounds like. Every phrase here has to be about the reviewer being unable to review
+# or out of quota - never a bare availability word (#651). The first cut matched 'not available',
+# 'isn''t available' and 'no seats' anywhere in the body, which was harmless while this only decided
+# whether to re-request Copilot next time: a false positive cost one skipped request. Since #651 the
+# same verdict REMOVES the review from the gate's evidence, so a substantive Copilot review saying
+# 'this API is not available in v2' would have been discarded and the PR reported as unreviewed. The
+# blast radius grew from bookkeeping to blocking a merge, so the pattern had to earn it.
+$script:CopilotRefusalPattern = '(?i)(unable to review|not able to review|cannot review|can''t review|could not review|couldn''t review|quota limit|reached (their|the|its) quota|out of quota|no seats? available|copilot( code review)? is (not available|unavailable))'
+
 # Does a reviews list show Copilot answering that it could NOT review (no quota / unavailable)? The bot
 # posts this as a COMMENTED review by copilot-pull-request-reviewer. With -HeadSha, only a refusal
 # bound to THAT commit counts (#563): a stale refusal from an earlier commit is not an answer to the
@@ -36,7 +45,7 @@ function Test-CopilotUnavailableReview {
         $login = "$($r.author.login)"
         if ($login -notmatch '(?i)copilot') { continue }
         if ($head -and "$($r.commit.oid)".Trim() -ne $head) { continue }
-        if ("$($r.body)" -match '(?i)unable to review|quota limit|reached their quota|not available|no seats|isn''t available') {
+        if ("$($r.body)" -match $script:CopilotRefusalPattern) {
             return $true
         }
     }
