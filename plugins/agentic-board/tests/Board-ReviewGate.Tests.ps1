@@ -180,6 +180,18 @@ Describe 'Get-ReviewEvidence - "found nothing" vs "nobody looked" (#510)' {
                                     -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
             $e.reviewed | Should -BeTrue
         }
+        It 'a self-authored review of the CURRENT head is not miscounted as stale (round 3 claim, checked)' {
+            # Round 3 argued the author's own review survives in the real-review pool and then shows
+            # up in `stale`, making the gate complain about reviews of older commits. It does not:
+            # the author filter runs before the partition, so the review never enters the pool at
+            # all. Pinned so a future refactor that reorders them is caught.
+            $e = Get-ReviewEvidence -Reviews @((script:GhReview 'APPROVED' 'the-pr-author' $script:Head)) `
+                                    -HeadSha $script:Head -PrAuthorLogin 'the-pr-author'
+            $e.reviewed | Should -BeFalse
+            $e.github   | Should -Be 0
+            $e.stale    | Should -Be 0
+            $e.refused  | Should -Be 0
+        }
         It 'one self-authored and one independent comment: only the independent one counts' {
             $e = Get-ReviewEvidence -CommentBodies @(
                 (script:GhComment "<!-- [abios-review] self sha=$script:Head -->" 'the-pr-author'),
@@ -189,6 +201,96 @@ Describe 'Get-ReviewEvidence - "found nothing" vs "nobody looked" (#510)' {
             $e.external | Should -Be 1
             $e.reviewers | Should -Contain 'codex-rescue'
             $e.reviewers | Should -Not -Contain 'self'
+        }
+    }
+
+    Context 'a reviewer that answered it could NOT review (#651)' {
+        # The hole #510 left open. Copilot with no quota does not stay silent - it SUBMITS a
+        # COMMENTED review whose body says it was unable to review. That is a review object on the
+        # current head, so the evidence count accepted it and the gate printed GATE PASSED /
+        # exit 0, naming as reviewer a bot that had just said it never looked. A refusal is an
+        # answer, not a review.
+        BeforeAll {
+            $script:Refusal = 'Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.'
+            function script:GhReviewBody([string]$state, [string]$who, [string]$oid, [string]$body) {
+                [pscustomobject]@{ state = $state; author = @{ login = $who }; commit = @{ oid = $oid }; body = $body }
+            }
+        }
+
+        It 'does NOT count the quota refusal as a review' {
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head $script:Refusal)) -HeadSha $script:Head
+            $e.reviewed | Should -BeFalse
+            $e.github   | Should -Be 0
+        }
+        It 'names the refusal instead of hiding it - it is neither evidence nor stale' {
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head $script:Refusal)) -HeadSha $script:Head
+            $e.refused | Should -Be 1
+            $e.stale   | Should -Be 0
+        }
+        It 'does not name the refusing bot as a reviewer' {
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head $script:Refusal)) -HeadSha $script:Head
+            $e.reviewers | Should -Not -Contain 'copilot-pull-request-reviewer'
+        }
+        It 'still counts a REAL Copilot review that has findings' {
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head 'Two nits: the null check on line 12, and the unused import.')) -HeadSha $script:Head
+            $e.reviewed | Should -BeTrue
+            $e.github   | Should -Be 1
+            $e.refused  | Should -Be 0
+        }
+        It 'does NOT reach into a human review that merely uses the words in prose' {
+            # Scoped to the bot on purpose: 'that API is not available in this version' is ordinary
+            # review prose, and dropping a human review over a phrase match would be a worse bug
+            # than the one being fixed.
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'a-human' $script:Head 'That API is not available in this version - use the other one.')) -HeadSha $script:Head
+            $e.reviewed | Should -BeTrue
+            $e.github   | Should -Be 1
+        }
+        It 'a refusal alongside a real external review leaves the external one counting' {
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head $script:Refusal)) `
+                                    -CommentBodies @("<!-- [abios-review] codex sha=$script:Head -->") -HeadSha $script:Head
+            $e.reviewed | Should -BeTrue
+            $e.github   | Should -Be 0
+            $e.external | Should -Be 1
+            $e.refused  | Should -Be 1
+        }
+        It 'a refusal left on an EARLIER commit counts as nothing at all - not refused, not stale' {
+            # Round 2: folding it into `stale` made the gate print "there are reviews of earlier
+            # commits - you pushed after someone reviewed" about a commit nobody ever reviewed.
+            # `refused` stays 0 because the verdict has nothing to say about a refusal of old code.
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Old $script:Refusal)) -HeadSha $script:Head
+            $e.reviewed | Should -BeFalse
+            $e.refused  | Should -Be 0
+            $e.stale    | Should -Be 0
+        }
+        It 'a LONG Copilot review that discusses quotas is kept - this repo owns that subject matter (round 2)' {
+            # Phrase precision cannot separate "reached their quota" in a refusal from the same
+            # words in a review OF quota-handling code. Length can, and the gate lives in a repo
+            # whose whole subject is Copilot quota.
+            $body = 'Line 88: this correctly returns 429 when the user has reached their quota, but the retry path below does not honour the Retry-After header, so a client will hammer the endpoint. Line 140: the branch that runs when no seats are available duplicates the block above it - worth extracting. Line 210: the quota limit constant is defined twice, in this file and in the caller, and they have already drifted apart by one. Everything else reads fine to me.'
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head $body)) -HeadSha $script:Head
+            $e.reviewed | Should -BeTrue
+            $e.github   | Should -Be 1
+            $e.refused  | Should -Be 0
+        }
+        It 'a refusal now AND a real review of an earlier commit: one of each, counted separately' {
+            # Both verdict branches are live at once; each keeps its own count, so the message the
+            # gate picks is a choice between two true statements, not a collision.
+            $e = Get-ReviewEvidence -Reviews @(
+                (script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head $script:Refusal),
+                (script:GhReviewBody 'APPROVED'  'a-human'                       $script:Old  'Looks good.')
+            ) -HeadSha $script:Head
+            $e.reviewed | Should -BeFalse
+            $e.refused  | Should -Be 1
+            $e.stale    | Should -Be 1
+        }
+        It 'keeps a SUBSTANTIVE Copilot review that happens to say something is not available (#651, review round 1)' {
+            # The escalation this fix created: the refusal phrase list used to be loose enough to
+            # match ordinary review prose. Harmless while it only skipped a re-request; once it
+            # removes evidence, a real review would be thrown away and the PR called unreviewed.
+            $e = Get-ReviewEvidence -Reviews @((script:GhReviewBody 'COMMENTED' 'copilot-pull-request-reviewer' $script:Head 'Line 42: that helper is not available in v2 of the API - use the new one.')) -HeadSha $script:Head
+            $e.reviewed | Should -BeTrue
+            $e.github   | Should -Be 1
+            $e.refused  | Should -Be 0
         }
     }
 }
@@ -375,6 +477,45 @@ Describe 'Wait-loop arrival reuses Get-ReviewEvidence - ANY answer for the curre
     }
     It 'a STALE review (earlier commit) is NOT an arrival - it is evidence the verdict will refuse' {
         (Get-ReviewEvidence -Reviews @((script:Rev 'copilot' $script:Old)) -HeadSha $script:Head).reviewed | Should -BeFalse
+    }
+}
+
+Describe 'Get-RefusalNotice - the count is answers, not reviewers (#651, review round 5)' {
+    # `refused` counts review objects on this commit. The same bot answering "no quota" twice after
+    # a re-request is two of them - and the PR that carried this fix collected three. Saying "the 3
+    # reviewers answered" invents two reviewers that never existed.
+    It 'names a single refusal as the only reviewer' {
+        Get-RefusalNotice -Count 1 | Should -BeLike '*unico revisor*'
+    }
+    It 'speaks of ANSWERS, never of reviewers, once there is more than one' {
+        $m = Get-RefusalNotice -Count 3
+        $m | Should -BeLike '*3 respuestas*'
+        $m | Should -Not -BeLike '*revisores*'
+    }
+    It 'does not claim a plural for a count of zero or one' {
+        Get-RefusalNotice -Count 0 | Should -Be (Get-RefusalNotice -Count 1)
+    }
+}
+
+Describe 'Test-ReviewAnswerArrived - a refusal ends the WAIT without passing the GATE (#651)' {
+    # Two questions that used to share one answer. Once a refusal stopped counting as a review,
+    # reusing `.reviewed` for arrival would have made a ten-second "no quota" answer cost the full
+    # review timeout - a guaranteed stall traded for the false pass. The wait asks "did the
+    # reviewer respond"; the verdict asks "did anyone review".
+    It 'a real review is an arrival' {
+        Test-ReviewAnswerArrived -Evidence @{ reviewed = $true; refused = 0 } | Should -BeTrue
+    }
+    It 'a REFUSAL is an arrival too - waiting longer cannot produce a review that is not coming' {
+        Test-ReviewAnswerArrived -Evidence @{ reviewed = $false; refused = 1 } | Should -BeTrue
+    }
+    It 'nothing at all is not an arrival - the wait continues' {
+        Test-ReviewAnswerArrived -Evidence @{ reviewed = $false; refused = 0 } | Should -BeFalse
+    }
+    It 'fails closed (keeps waiting) on a null evidence object' {
+        Test-ReviewAnswerArrived -Evidence $null | Should -BeFalse
+    }
+    It 'tolerates evidence with no refused key at all (a pre-#651 shape)' {
+        Test-ReviewAnswerArrived -Evidence @{ reviewed = $false } | Should -BeFalse
     }
 }
 

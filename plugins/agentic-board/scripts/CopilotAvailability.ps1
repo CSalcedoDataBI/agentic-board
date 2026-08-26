@@ -21,6 +21,56 @@
 
 # ── Pure decision helpers (unit-testable; no I/O) ─────────────────────────────
 
+<#  What a REFUSAL sounds like, in two tiers (#651).
+
+    This used to be one loose phrase list matched anywhere in the body - 'not available', 'no seats',
+    'quota limit'. Harmless while the verdict only decided whether to re-request Copilot next time: a
+    false positive cost one skipped request. Since #651 the same verdict REMOVES the review from the
+    gate's evidence, so a false positive now reports a genuinely reviewed PR as unreviewed. The blast
+    radius grew from bookkeeping to blocking a merge.
+
+    Tightening the phrases was not enough on its own, and this repo is the proof: its own subject
+    matter is Copilot quota, so a REAL review of this very file could easily say "returns 429 when
+    the user has reached their quota" or "handle the case where no seats are available" and be
+    thrown away. Phrase precision cannot separate those from the refusal, because the words are the
+    same. Length can: GitHub's refusal is one machine-generated sentence; a review with something to
+    say is not.
+
+      Tier 1 - the machine sentences themselves. Unambiguous at any length.
+      Tier 2 - an exhaustion phrase, but only in a body short enough to BE a notice rather than a
+               review. A long review that discusses quotas keeps counting.
+
+    Both directions still fail toward SHUT (exit 2, which -RecordReview or -AllowUnreviewed clears)
+    rather than toward a merge nobody reviewed.
+#>
+# Tier 1 is ANCHORED to the start of the body (review round 3). Unanchored, a substantive review of
+# THIS file that quotes the sentence - "the string 'unable to review this pull request' is correct" -
+# matched tier 1, and tier 1 ignores length, so the whole review was thrown away. GitHub's notice
+# leads with it; a review that mentions it does not.
+$script:CopilotRefusalPattern    = '(?i)^\s*(?:copilot\s+)?(?:(?:was|is|were)\s+)?(?:unable|not able)\s+to\s+review|^\s*(?:copilot\s+)?(?:can''t|cannot|could\s*not|couldn''t)\s+review|^\s*copilot(?:\s+code\s+review)?\s+is\s+(?:not\s+available|unavailable)'
+# Tier 2 is now EXHAUSTION ONLY - a resource actually running out (review round 4). It used to also
+# carry the inability phrases ('cannot review', "can't review", 'could not review'), which are
+# ordinary things for a reviewer to say about the CODE: "I can't review binary files here", "this
+# helper cannot review nested objects". Under the 400-char guard a short review saying either was
+# discarded as a refusal. Those phrases moved into the ANCHORED tier above, where they only count
+# when the message OPENS with them - which is what a notice does and a review does not.
+$script:CopilotExhaustionPattern = '(?i)(quota limit|reached (their|the|its) quota|out of quota|no seats? (available|remaining))'
+$script:CopilotRefusalMaxLength  = 400
+
+# WHO the bot is. `-match 'copilot'` was a substring test, so a HUMAN called `acme-copilot` or
+# `copilot-fan` was treated as the bot (review round 3) - and since #651 that means their short
+# review can be discarded as a refusal. Anchored to the logins GitHub actually uses.
+$script:CopilotReviewerLoginPattern = '(?i)^copilot(-pull-request-reviewer)?(\[bot\])?$'
+
+# Is THIS body a refusal? Pure; the two-tier rule above lives here so both consumers share it.
+function Test-CopilotRefusalBody {
+    param([string]$Body = '')
+    $b = "$Body"
+    if (-not $b.Trim()) { return $false }
+    if ($b -match $script:CopilotRefusalPattern) { return $true }
+    return (($b.Length -le $script:CopilotRefusalMaxLength) -and ($b -match $script:CopilotExhaustionPattern))
+}
+
 # Does a reviews list show Copilot answering that it could NOT review (no quota / unavailable)? The bot
 # posts this as a COMMENTED review by copilot-pull-request-reviewer. With -HeadSha, only a refusal
 # bound to THAT commit counts (#563): a stale refusal from an earlier commit is not an answer to the
@@ -34,9 +84,9 @@ function Test-CopilotUnavailableReview {
     $head = "$HeadSha".Trim()
     foreach ($r in @($Reviews)) {
         $login = "$($r.author.login)"
-        if ($login -notmatch '(?i)copilot') { continue }
+        if ($login -notmatch $script:CopilotReviewerLoginPattern) { continue }
         if ($head -and "$($r.commit.oid)".Trim() -ne $head) { continue }
-        if ("$($r.body)" -match '(?i)unable to review|quota limit|reached their quota|not available|no seats|isn''t available') {
+        if (Test-CopilotRefusalBody -Body "$($r.body)") {
             return $true
         }
     }

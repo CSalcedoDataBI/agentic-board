@@ -3,6 +3,70 @@
 ## [Unreleased]
 
 ### Fixed
+- **The review gate passed a PR whose only reviewer had said it could not review it (#651).**
+  Copilot with no quota does not stay silent — it submits a COMMENTED review whose body reads
+  "unable to review ... reached their quota limit". That is a review object bound to the current
+  head, so `Get-ReviewEvidence` counted it, `evidence.reviewed` came out true, and the gate printed
+  `GATE PASSED` / exit 0 naming as reviewer a bot that had just said it never looked. The exact
+  failure #510 exists to close, reopened by the one reviewer most likely to be the only one on the
+  PR — and worse than the original, because a caller reading only the exit code saw a clean pass.
+
+  The detection was already there and already correct: `Test-CopilotUnavailableReview` recognised
+  the refusal, but its verdict was only ever used to arm the per-account cooldown marker, never
+  subtracted from the evidence. The issue guessed the cause was the `$copilotRequested` flag
+  gating that call; reading the executing path showed the flag only gates the marker write — the
+  evidence count never consulted the refusal at all, requested or not.
+
+  A refusal is an **answer**, not a review, and the two now go to different places. It ends the
+  review WAIT (`Test-ReviewAnswerArrived`) — without that, closing the evidence hole would have
+  traded a false pass for a guaranteed stall, since a ten-second "no quota" answer would have left
+  the gate waiting the full timeout for a review that was never coming. And it does not satisfy
+  the GATE: the verdict routes to exit 2 and says why, because the review list printed directly
+  above it *shows* a Copilot review and a bare "0 reviews" would read as a bug in the gate rather
+  than the truth about the PR. The check is scoped to the bot by login **and** body, so a human
+  review whose prose happens to say "not available" is never dropped — that would be a worse bug
+  than the one being closed. `refused` joins `stale` as a named reason on the evidence object.
+
+  Review round 1 caught the cost of that reuse: `Test-CopilotUnavailableReview`'s phrase list was
+  loose — it matched a bare `not available`, `isn't available` or `no seats` anywhere in the body.
+  Harmless while the verdict only decided whether to re-request Copilot next time (a false positive
+  cost one skipped request); once the same verdict REMOVES evidence, a substantive Copilot review
+  saying "that helper is not available in v2" would have been discarded and a genuinely reviewed PR
+  reported as unreviewed. The pattern now has to be about the reviewer being unable to review or
+  out of quota, and it is pinned by tests in both directions.
+
+  Round 2 showed phrase precision alone could not do it, and this repo is the proof: its own
+  subject matter is Copilot quota, so a REAL review of this very file would say "returns 429 when
+  the user has reached their quota" or "handle the case where no seats are available" and be thrown
+  away. The words are identical; only the shape differs. The rule is now two-tier — GitHub's
+  machine sentences match at any length, an exhaustion phrase only inside a body short enough to
+  BE a notice rather than a review. Round 2 also moved the refusal partition to cover reviews of
+  EVERY commit: an old refusal used to land in `stale`, which drove the message "there are reviews
+  of earlier commits — you pushed after someone reviewed", said about a commit nobody reviewed.
+  Refusals are now out of `stale` entirely.
+
+  Round 3 closed the last two ways the widened blast radius could still eat a real review, both of
+  them likeliest in this repo of all repos. The machine-sentence tier is now ANCHORED to the start
+  of the body: unanchored it ignored length, so a substantive review that merely QUOTED the sentence
+  — the kind of review this very file attracts — was discarded whole. And "is this the bot?" was a
+  substring test on the login, so a human called `acme-copilot` was treated as Copilot and a short
+  review of theirs could be dropped; it now matches the logins GitHub actually uses. Round 3 also
+  caught one of the new tests passing vacuously (a 900-char body made the length guard short-circuit
+  before the phrase check ran) and claimed a miscount in the self-certification filter that turned
+  out not to exist — the author filter runs before the partition, and there is now a test pinning
+  that ordering rather than an argument about it.
+
+  Round 4 finished the separation the earlier rounds had only half made. The inability phrases
+  (`cannot review`, "can't review", `could not review`) were still in the length-guarded tier, and
+  they are ordinary things for a reviewer to say about the CODE — "I can't review binary files
+  here" — so a short review saying one was discarded. They moved into the anchored tier, where they
+  count only when the message OPENS with them; the length-guarded tier is now exhaustion only, a
+  resource actually running out. The same round-3 login fix was also applied to the silence-cooldown
+  branch, which had been left on the old substring match.
+
+  Verified end to end on the PR that carried the fix, which drew the refusal for real: with three
+  Copilot quota answers on record and no other reviewer, the gate printed GATE SIN REVISAR and
+  exited 2 — the state that used to print GATE PASSED and exit 0.
 - **A worktree the doctor could not see was quietly costing a git process every 30 minutes
   (#618).** The ghost check trusted git's own `prunable` marker, which only ever means "metadata
   present, directory gone". The inverse never had a name: the directory survives under

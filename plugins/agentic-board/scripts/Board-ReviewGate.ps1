@@ -244,8 +244,15 @@ $script:ExternalReviewMarker = '[abios-review]'
     Empty -PrAuthorLogin (the default) skips the check - existing callers that never pass it keep
     today's behaviour exactly, which is what every pre-#622 test below still relies on.
 
-    Returns @{ reviewed; github; external; reviewers; stale }. `stale` counts evidence that exists
-    but belongs to an older commit, so the caller can say WHY it does not count. Pure.
+    A REVIEWER'S REFUSAL DOES NOT COUNT (#651): Copilot with no quota answers with a COMMENTED
+    review saying it was unable to review. It is a review object on the current head, so it
+    satisfied every rule above - and the gate passed on the strength of a reviewer that said it
+    never looked. Recognised by Test-CopilotUnavailableReview (login AND body), so it never
+    reaches a human review whose prose happens to use the same words.
+
+    Returns @{ reviewed; github; external; reviewers; stale; refused }. `stale` counts evidence
+    that exists but belongs to an older commit, and `refused` counts refusals for THIS commit, so
+    the caller can say WHY it does not count. Pure.
 #>
 function Get-ReviewEvidence {
     param(
@@ -282,8 +289,33 @@ function Get-ReviewEvidence {
                   stale = ($allGh.Count + $allExt.Count) }
     }
 
-    $gh  = @($allGh  | Where-Object { "$($_.commit.oid)".Trim() -eq $head })
     $ext = @($allExt | Where-Object { "$_" -match ('(?i)sha\s*=\s*' + [regex]::Escape($head)) })
+
+    # A REFUSAL IS AN ANSWER, NOT A REVIEW (#651). Copilot with no quota does not stay silent: it
+    # submits a COMMENTED review on the current head whose body says it was unable to review. That
+    # is a review OBJECT, so it satisfied the count above and the gate printed GATE PASSED naming
+    # as reviewer a bot that had just said it never looked - the #510 hole, reopened by the one
+    # reviewer most likely to be the only one on the PR. Test-CopilotUnavailableReview already knew
+    # how to recognise it; its verdict was only ever used to arm the per-account cooldown, never
+    # subtracted from the evidence. Scoped to the bot by that same function (login + body), never a
+    # body-text match on humans: dropping a human review whose prose happens to say "not available"
+    # would be a worse bug than the one this closes.
+    # The partition runs over EVERY GitHub review, not only the ones on this commit (review round
+    # 2). A refusal left on an EARLIER commit is not evidence of anything either, so folding it
+    # into `stale` printed "there are reviews of earlier commits - you pushed after someone
+    # reviewed" about a commit nobody ever reviewed. It is dropped outright; only refusals of the
+    # CURRENT head are counted, because those are the ones the verdict has something to say about.
+    # One pass, partitioning rather than filtering twice: `-notcontains` on PSCustomObjects would
+    # have leaned on reference equality to subtract them, which is true here and needlessly fragile.
+    $real = @(); $refusedHead = 0
+    foreach ($r in $allGh) {
+        if (Test-CopilotUnavailableReview -Reviews @($r)) {
+            if ("$($r.commit.oid)".Trim() -eq $head) { $refusedHead++ }
+            continue
+        }
+        $real += $r
+    }
+    $gh = @($real | Where-Object { "$($_.commit.oid)".Trim() -eq $head })
 
     $names = @()
     foreach ($r in $gh) { if ($r.author.login) { $names += "$($r.author.login)" } }
@@ -299,8 +331,41 @@ function Get-ReviewEvidence {
         github    = $gh.Count
         external  = $ext.Count
         reviewers = @($names | Where-Object { $_ } | Select-Object -Unique)
-        stale     = (($allGh.Count - $gh.Count) + ($allExt.Count - $ext.Count))
+        # `stale` counts REAL evidence of OTHER commits. Refusals are out of it entirely - of this
+        # commit or an older one - so the message it drives ("you pushed after someone reviewed")
+        # is never printed about a commit nobody reviewed (#651).
+        stale     = (($real.Count - $gh.Count) + ($allExt.Count - $ext.Count))
+        refused   = $refusedHead
     }
+}
+
+<#  How to say "the reviewer refused" for N refusals (#651, review round 5).
+
+    `refused` counts review OBJECTS on this commit, not distinct reviewers - the same bot answering
+    "no quota" twice after a re-request is two of them. The first wording said "the N reviewers
+    answered", which invented a second reviewer that never existed. Counting logins instead would be
+    the other repair, but the number the reader needs is how many ANSWERS are on record; who sent
+    them is already printed in the review list above. Pure.
+#>
+function Get-RefusalNotice {
+    param([int]$Count)
+    if ($Count -le 1) { return "El unico revisor contesto que NO pudo revisar (sin cuota / no disponible)." }
+    return "Hay $Count respuestas de 'no pude revisar' sobre este commit (sin cuota / no disponible)."
+}
+
+<#  Did the review side of the wait get an ANSWER? (#651)
+
+    Not the same question as "was it reviewed". The wait exists to stop as soon as the requested
+    reviewer responds; the verdict then judges what the response was worth. Before #651 the loop
+    used `.reviewed` for both, which was right until a refusal stopped counting as a review: with
+    only that rule, a Copilot answering "no quota" in ten seconds would have kept the gate waiting
+    the full -TimeoutMinutes for a review that was never coming - trading a false pass for a
+    guaranteed stall. A refusal ends the wait and blocks the verdict. Pure.
+#>
+function Test-ReviewAnswerArrived {
+    param($Evidence)
+    if (-not $Evidence) { return $false }
+    return ([bool]$Evidence.reviewed -or ([int]$Evidence.refused -gt 0))
 }
 
 # (#644) Extract a codex-rescue marker's rollout path + thread id from a comment body, if present.
@@ -479,6 +544,12 @@ function Test-CopilotSilentTimeout {
     return ($Requested -and (-not $Answered) -and ($Now -ge $Deadline))
 }
 
+# Per-account memory of Copilot (un)availability so the gate stops re-requesting + waiting (#367).
+# Loaded ABOVE the dot-source guard on purpose (#651): Test-CopilotUnavailableReview is a pure
+# helper that Get-ReviewEvidence now depends on, so it has to be present in the pure-helper-only
+# load the tests use. The file is pure at load - it defines functions and touches nothing.
+. (Join-Path $PSScriptRoot 'CopilotAvailability.ps1')
+
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
 if ($env:ABIOS_REVIEWGATE_DOTSOURCE) { return }
 
@@ -486,8 +557,6 @@ if ($env:ABIOS_REVIEWGATE_DOTSOURCE) { return }
 # a false-empty review read reads as "0 unresolved -> GATE PASSED" and authorizes a merge. The
 # CI/review POLLING reads stay best-effort (a transient failure must keep polling, not throw).
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
-# Per-account memory of Copilot (un)availability so the gate stops re-requesting + waiting (#367).
-. (Join-Path $PSScriptRoot 'CopilotAvailability.ps1')
 
 if (-not $env:GH_TOKEN) {
     $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
@@ -828,9 +897,9 @@ while ($true) {
     # Copilot answering first is an answer. Stale evidence of earlier commits keeps waiting.
     if (-not $prState -or ($copilotRequested -and -not $reviewArrived)) {
         $prState = Get-ReviewState
-        $reviewArrived = (Get-ReviewEvidence -Reviews @($prState.reviews.nodes) `
+        $reviewArrived = Test-ReviewAnswerArrived -Evidence (Get-ReviewEvidence -Reviews @($prState.reviews.nodes) `
                              -CommentBodies (Get-CodexVerifiedComments -CommentBodies @($prState.comments.nodes) -PreferCodexRescue $PreferCodexRescue) `
-                             -HeadSha "$($prState.headRefOid)" -PrAuthorLogin $prAuthorLogin).reviewed
+                             -HeadSha "$($prState.headRefOid)" -PrAuthorLogin $prAuthorLogin)
     }
 
     if (Test-GateWaitDone -ChecksSettled ([bool]$verdictCi.Settled) `
@@ -888,8 +957,11 @@ if ($copilotRequested -and (Test-CopilotUnavailableReview -Reviews $reviews -Hea
     # "Answered" means answered FOR THE CURRENT HEAD (external review, round 2): a stale Copilot
     # review of an earlier commit is not an answer to this run's request, and treating it as one
     # suppressed the cooldown in exactly the repeat-timeout scenario this change removes.
+    # Same login rule as the refusal check (#651, review round 4): leaving the substring match here
+    # would have half-closed the round-3 fix - a human called `acme-copilot` answering on this head
+    # would count as "Copilot answered" and suppress the silence cooldown the gate is owed.
     $copilotAnswered = [bool](@($reviews) | Where-Object {
-        $_.author.login -match '(?i)copilot' -and "$($_.commit.oid)".Trim() -eq "$($prState.headRefOid)".Trim()
+        $_.author.login -match $script:CopilotReviewerLoginPattern -and "$($_.commit.oid)".Trim() -eq "$($prState.headRefOid)".Trim()
     })
     if (Test-CopilotSilentTimeout -Requested $copilotRequested -Answered $copilotAnswered -Now (Get-Date) -Deadline $reviewDeadline) {
         if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays(1) -Reason "Copilot stayed silent past the $TimeoutMinutes-minute review timeout") {
@@ -960,6 +1032,11 @@ if ($blockers.Count -eq 0) {
             # could not even read the head commit would send them chasing the wrong thing.
             Write-Host "  No pude leer el commit actual del PR, asi que no puedo probar que ninguna" -ForegroundColor Yellow
             Write-Host "  revision corresponda a este codigo. Se rechaza por precaucion, no por falta de review." -ForegroundColor Yellow
+        } elseif ($evidence.refused -gt 0) {
+            # Say it out loud, because the review list printed above SHOWS a Copilot review and a
+            # bare "0 reviews" would read as a bug in the gate rather than the truth about it.
+            Write-Host ("  {0}" -f (Get-RefusalNotice -Count $evidence.refused)) -ForegroundColor Yellow
+            Write-Host "  Eso es una respuesta, no una revision: nadie leyo este codigo (#651)." -ForegroundColor DarkGray
         } elseif ($evidence.stale -gt 0) {
             Write-Host ("  Hay {0} revision(es) en el PR, pero de commits ANTERIORES - no cubren el codigo actual." -f $evidence.stale) -ForegroundColor Yellow
             Write-Host "  Empujaste cambios despues de que se reviso; esos cambios no los ha visto nadie." -ForegroundColor DarkGray
