@@ -339,6 +339,20 @@ function Get-ReviewEvidence {
     }
 }
 
+<#  How to say "the reviewer refused" for N refusals (#651, review round 5).
+
+    `refused` counts review OBJECTS on this commit, not distinct reviewers - the same bot answering
+    "no quota" twice after a re-request is two of them. The first wording said "the N reviewers
+    answered", which invented a second reviewer that never existed. Counting logins instead would be
+    the other repair, but the number the reader needs is how many ANSWERS are on record; who sent
+    them is already printed in the review list above. Pure.
+#>
+function Get-RefusalNotice {
+    param([int]$Count)
+    if ($Count -le 1) { return "El unico revisor contesto que NO pudo revisar (sin cuota / no disponible)." }
+    return "Hay $Count respuestas de 'no pude revisar' sobre este commit (sin cuota / no disponible)."
+}
+
 <#  Did the review side of the wait get an ANSWER? (#651)
 
     Not the same question as "was it reviewed". The wait exists to stop as soon as the requested
@@ -1021,12 +1035,7 @@ if ($blockers.Count -eq 0) {
         } elseif ($evidence.refused -gt 0) {
             # Say it out loud, because the review list printed above SHOWS a Copilot review and a
             # bare "0 reviews" would read as a bug in the gate rather than the truth about it.
-            $linea = if ($evidence.refused -eq 1) {
-                "El unico revisor contesto que NO pudo revisar (sin cuota / no disponible)."
-            } else {
-                "Los $($evidence.refused) revisores contestaron que NO pudieron revisar (sin cuota / no disponible)."
-            }
-            Write-Host ("  {0}" -f $linea) -ForegroundColor Yellow
+            Write-Host ("  {0}" -f (Get-RefusalNotice -Count $evidence.refused)) -ForegroundColor Yellow
             Write-Host "  Eso es una respuesta, no una revision: nadie leyo este codigo (#651)." -ForegroundColor DarkGray
         } elseif ($evidence.stale -gt 0) {
             Write-Host ("  Hay {0} revision(es) en el PR, pero de commits ANTERIORES - no cubren el codigo actual." -f $evidence.stale) -ForegroundColor Yellow

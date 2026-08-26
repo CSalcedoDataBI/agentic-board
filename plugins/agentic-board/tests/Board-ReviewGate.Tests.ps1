@@ -480,6 +480,23 @@ Describe 'Wait-loop arrival reuses Get-ReviewEvidence - ANY answer for the curre
     }
 }
 
+Describe 'Get-RefusalNotice - the count is answers, not reviewers (#651, review round 5)' {
+    # `refused` counts review objects on this commit. The same bot answering "no quota" twice after
+    # a re-request is two of them - and the PR that carried this fix collected three. Saying "the 3
+    # reviewers answered" invents two reviewers that never existed.
+    It 'names a single refusal as the only reviewer' {
+        Get-RefusalNotice -Count 1 | Should -BeLike '*unico revisor*'
+    }
+    It 'speaks of ANSWERS, never of reviewers, once there is more than one' {
+        $m = Get-RefusalNotice -Count 3
+        $m | Should -BeLike '*3 respuestas*'
+        $m | Should -Not -BeLike '*revisores*'
+    }
+    It 'does not claim a plural for a count of zero or one' {
+        Get-RefusalNotice -Count 0 | Should -Be (Get-RefusalNotice -Count 1)
+    }
+}
+
 Describe 'Test-ReviewAnswerArrived - a refusal ends the WAIT without passing the GATE (#651)' {
     # Two questions that used to share one answer. Once a refusal stopped counting as a review,
     # reusing `.reviewed` for arrival would have made a ten-second "no quota" answer cost the full
