@@ -56,6 +56,14 @@
   out not to exist — the author filter runs before the partition, and there is now a test pinning
   that ordering rather than an argument about it.
 
+  Round 4 finished the separation the earlier rounds had only half made. The inability phrases
+  (`cannot review`, "can't review", `could not review`) were still in the length-guarded tier, and
+  they are ordinary things for a reviewer to say about the CODE — "I can't review binary files
+  here" — so a short review saying one was discarded. They moved into the anchored tier, where they
+  count only when the message OPENS with them; the length-guarded tier is now exhaustion only, a
+  resource actually running out. The same round-3 login fix was also applied to the silence-cooldown
+  branch, which had been left on the old substring match.
+
   Verified end to end on the PR that carried the fix, which drew the refusal for real: with three
   Copilot quota answers on record and no other reviewer, the gate printed GATE SIN REVISAR and
   exited 2 — the state that used to print GATE PASSED and exit 0.

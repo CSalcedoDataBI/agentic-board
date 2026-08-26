@@ -100,6 +100,17 @@ Describe 'Test-CopilotUnavailableReview (recognise the no-quota answer)' {
             Test-CopilotRefusalBody -Body 'Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.' | Should -BeTrue
             Test-CopilotRefusalBody -Body 'Copilot code review is not available for this repository.' | Should -BeTrue
         }
+        It 'a SHORT review that says it cannot review something IN THE CODE is kept (round 4)' {
+            # "cannot review" / "can't review" are ordinary things to say ABOUT the code. They only
+            # mean a refusal when the message OPENS with them, which is what a notice does.
+            Test-CopilotRefusalBody -Body 'I can''t review binary files here, but the rest of the diff looks fine.' | Should -BeFalse
+            Test-CopilotRefusalBody -Body 'Line 30: this helper cannot review nested objects - it stops at the first level.' | Should -BeFalse
+            Test-CopilotRefusalBody -Body 'Note that the gate could not review anything before #510, which is the point of the test.' | Should -BeFalse
+        }
+        It 'but the same phrase OPENING the message is still a refusal' {
+            Test-CopilotRefusalBody -Body 'Copilot could not review this pull request.' | Should -BeTrue
+            Test-CopilotRefusalBody -Body 'Cannot review: no seats remaining on this account.' | Should -BeTrue
+        }
         It 'reaches Test-CopilotUnavailableReview through the same rule' {
             $long = 'The user has reached their quota is the message this branch prints; the test below asserts it, but the assertion compares against a different constant than the one the code reads, so it passes for the wrong reason. Also the loop on line 40 recomputes the pattern on every iteration - hoist it, since it is rebuilt for each review in a list that can hold twenty of them. Nothing else stood out; the rest of the diff is mechanical and reads fine to me overall.'
             $long.Length | Should -BeGreaterThan 400

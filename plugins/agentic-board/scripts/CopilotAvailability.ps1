@@ -47,8 +47,14 @@
 # THIS file that quotes the sentence - "the string 'unable to review this pull request' is correct" -
 # matched tier 1, and tier 1 ignores length, so the whole review was thrown away. GitHub's notice
 # leads with it; a review that mentions it does not.
-$script:CopilotRefusalPattern    = '(?i)^\s*(?:copilot\s+)?(?:(?:was|is|were)\s+)?(?:unable|not able)\s+to\s+review\s+this\s+pull\s+request|^\s*copilot(?:\s+code\s+review)?\s+is\s+(?:not\s+available|unavailable)'
-$script:CopilotExhaustionPattern = '(?i)(unable to review|not able to review|cannot review|can''t review|could not review|couldn''t review|quota limit|reached (their|the|its) quota|out of quota|no seats? available)'
+$script:CopilotRefusalPattern    = '(?i)^\s*(?:copilot\s+)?(?:(?:was|is|were)\s+)?(?:unable|not able)\s+to\s+review|^\s*(?:copilot\s+)?(?:can''t|cannot|could\s*not|couldn''t)\s+review|^\s*copilot(?:\s+code\s+review)?\s+is\s+(?:not\s+available|unavailable)'
+# Tier 2 is now EXHAUSTION ONLY - a resource actually running out (review round 4). It used to also
+# carry the inability phrases ('cannot review', "can't review", 'could not review'), which are
+# ordinary things for a reviewer to say about the CODE: "I can't review binary files here", "this
+# helper cannot review nested objects". Under the 400-char guard a short review saying either was
+# discarded as a refusal. Those phrases moved into the ANCHORED tier above, where they only count
+# when the message OPENS with them - which is what a notice does and a review does not.
+$script:CopilotExhaustionPattern = '(?i)(quota limit|reached (their|the|its) quota|out of quota|no seats? (available|remaining))'
 $script:CopilotRefusalMaxLength  = 400
 
 # WHO the bot is. `-match 'copilot'` was a substring test, so a HUMAN called `acme-copilot` or

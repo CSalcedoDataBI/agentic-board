@@ -943,8 +943,11 @@ if ($copilotRequested -and (Test-CopilotUnavailableReview -Reviews $reviews -Hea
     # "Answered" means answered FOR THE CURRENT HEAD (external review, round 2): a stale Copilot
     # review of an earlier commit is not an answer to this run's request, and treating it as one
     # suppressed the cooldown in exactly the repeat-timeout scenario this change removes.
+    # Same login rule as the refusal check (#651, review round 4): leaving the substring match here
+    # would have half-closed the round-3 fix - a human called `acme-copilot` answering on this head
+    # would count as "Copilot answered" and suppress the silence cooldown the gate is owed.
     $copilotAnswered = [bool](@($reviews) | Where-Object {
-        $_.author.login -match '(?i)copilot' -and "$($_.commit.oid)".Trim() -eq "$($prState.headRefOid)".Trim()
+        $_.author.login -match $script:CopilotReviewerLoginPattern -and "$($_.commit.oid)".Trim() -eq "$($prState.headRefOid)".Trim()
     })
     if (Test-CopilotSilentTimeout -Requested $copilotRequested -Answered $copilotAnswered -Now (Get-Date) -Deadline $reviewDeadline) {
         if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays(1) -Reason "Copilot stayed silent past the $TimeoutMinutes-minute review timeout") {
