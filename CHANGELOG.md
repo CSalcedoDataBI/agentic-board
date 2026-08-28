@@ -2,6 +2,95 @@
 
 ## [Unreleased]
 
+### Changed
+- **Grouping related issues into one PR is now the default posture, not the exception it had to
+  argue for (#662).** The machinery to work several issues through one branch, one PR, one gate
+  and one merge shipped with #633 and works. What was missing is that nothing ever pointed at it:
+  in `verbs-work.md`, one PR per issue sat at step 5 marked MANDATORY, and `-StartGroup` was
+  introduced at 4b as the narrow exception for "several SMALL, SEQUENTIAL sub-issues of the same
+  epic". Read in order — which is how an agent reads a contract — the default was N PRs for N
+  issues, and grouping was the deviation you had to justify. So a user who wanted fewer, larger
+  PRs had to say so every session, and did.
+
+  The cost being paid is not the code. It is the per-PR cycle: one review-gate run against the
+  subscription quota, a `second-opinion` round whenever no real reviewer shows up, and a merge
+  confirmation that needs the user's attention. That is charged once per PR regardless of how
+  small the issue was, so across a board of related issues it dominates the work itself.
+
+  Three things changed, and only the third actually closes it:
+
+  1. **The contract.** A new step 3b decides the PR shape BEFORE anything is started: when the
+     chosen issues overlap they go in one PR, and one-per-issue is what now needs a reason —
+     independent risk that should be able to fail review alone, or a separate approver. Step 5
+     still makes the PR + gate mandatory; what it no longer implies is one PR per issue.
+  2. **The arithmetic, at the moment it is paid.** The pending list names the groups it found,
+     the evidence for each, and what grouping would remove in review rounds. Evidence is only
+     ever something it can name: two pending issues that name the SAME FILE OF THIS REPO
+     (matched against `git ls-files`, so a grouping can never rest on a filename the tool
+     imagined), or a shared board Area. If it cannot say why two issues belong together it does
+     not suggest them.
+  3. **A per-repo standing answer.** `-PreferGroupedPRs on|off|auto` records the decision in
+     `.agentic-board/config.json` — versioned alongside `roles.json`, because how a team shapes
+     its PRs is a team decision and not machine state. Without this the preference lives in the
+     operator's memory and is re-applied by hand every session, which is the actual complaint.
+     Recording it needs no GitHub token: it runs above the auth guard, since a local decision
+     has no business demanding a PAT.
+
+  Two limits are deliberate. A group is capped at **4 issues**: run against the real 56-item
+  board, uncapped grouping cheerfully proposed eight issues in one PR — far past the 600-line /
+  20-file threshold the review gate itself warns about, trading a cost the user pays knowingly
+  for one they do not. The overflow is never dropped silently; it is named as a second batch.
+  And the offer shows the five biggest savings and counts the rest, because twelve groups is a
+  wall, not an offer.
+
+  `off` is a real answer, not an absence: a repo that asked for one PR per issue gets the offer
+  suppressed entirely, and a config file that cannot be parsed is reported rather than read as
+  "no preference recorded". `on` is bounded in the other direction: it never invents a group out
+  of issues that share nothing — there is no honest way to batch two unrelated issues — and when
+  nothing overlaps it SAYS so, because silence there is indistinguishable from `auto` having
+  nothing to report, and the repo's standing preference would look ignored.
+
+  A group also never spans two repositories. A board holding several repos is ordinary here (it
+  is what #523 is about), and a single PR lives in ONE repo: `Closes #n` closes an issue of that
+  repo and nothing else, and `-StartGroup` puts the whole batch on one branch in one checkout.
+  An area shared across repos would therefore have produced a batch that CANNOT be finished — it
+  would move every issue to In Progress, post claims on all of them, and strand the foreign ones
+  with no PR able to close them. Every signal is computed per repo, and file evidence applies
+  only to the repo the checkout actually is, since the file list comes from its own
+  `git ls-files`: a foreign issue naming `Board-Work.ps1` is naming a different file.
+
+  Scoping is per repo all the way down, including the set that remembers which issues are
+  already in a group. That set is keyed on the issue number, and issue numbers are unique inside
+  a repository and nowhere else — kept board-wide it let `owner/alpha#10` lock `owner/beta#10`
+  out of every group, silently, and only on the mixed boards the partitioning was added to
+  serve. And the repo NAME is read through one accessor, because this script carries two item
+  shapes that disagree: the board listing returns `content.repository` as a string while the
+  GraphQL start path nests it under `nameWithOwner`. Stringifying the second would have given
+  every repo the same bucket name and merged the board back into one group — the partitioning
+  failing while looking like it works.
+
+  The "next step" line obeys the same boundary. It offers the biggest group OF THIS REPO rather
+  than the biggest group on the board — a batch the current folder cannot open a PR for is not a
+  next step — and when every group belongs elsewhere it names those repos instead of proposing
+  one anyway.
+
+  Running the listing OUTSIDE a clone keeps working, which the offer nearly broke: resolving
+  "which repo am I" throws when there is no `origin`, and an unguarded call killed the listing
+  *after* printing it — over a feature that is only ever an offer. It is guarded now, and with
+  no repo the file signal simply does not apply: the same board reports 12 saved review rounds
+  from Area evidence alone instead of 24. Degrading is the honest outcome; a filename cannot be
+  evidence when the file list was never read.
+
+  Seven defects came out of the external review rounds and are fixed here rather than filed. The
+  config WRITER carried the same PowerShell trap the reader had already been fixed for: `-is
+  [pscustomobject]` is true for every value, because PowerShell wraps everything in a PSObject,
+  so a file containing `"just a string"` was accepted as an object and its own `.Length` property
+  written back as a config key. Both call sites now share one `Test-IsJsonObject`, since keeping
+  a copy each is exactly how one of them kept the bug after the other was fixed. The preference
+  command sat below the GitHub token guard, so a purely local write threw on a machine with no
+  PAT. And `on` was documented as "always group" while only ever changing the closing sentence —
+  the words now match what the code does.
+
 ### Fixed
 - **The review gate passed a PR whose only reviewer had said it could not review it (#651).**
   Copilot with no quota does not stay silent — it submits a COMMENTED review whose body reads

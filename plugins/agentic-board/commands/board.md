@@ -9,7 +9,7 @@ for the user to pick (they can answer with just the number):
 ```
 ¿Qué quieres hacer con el board?
 
-1. work             → ver qué issues están pendientes y empezar a trabajar uno (o varios en paralelo)
+1. work             → ver qué issues están pendientes y empezar a trabajar (los relacionados van juntos en un solo PR)
 2. plan             → planificar (o tomar un plan existente) y convertir sus tareas en epic + issues
 3. fill --dry-run   → ver qué gaps hay (assignees, Status, Priority, Size, Type) SIN cambiar nada
 4. fill --auto      → llenar todos los gaps automáticamente (convierte drafts a issues reales)
@@ -67,7 +67,10 @@ from the projects-admin skill's `references/` directory NOW and follow it exactl
 improvise the recipe from this summary:
 
 - **work** — the daily driver: pending work → start an issue → PR + review gate + merge
-  (single or `-Parallel`/`-Launch` fleet). Full contract: `references/verbs-work.md`.
+  (single or `-Parallel`/`-Launch` fleet). The pending list also offers the issues that would
+  sensibly share ONE PR, with the evidence behind each group and what that saves in review
+  rounds — grouped is the default posture when they overlap (#662), and the repo can record its
+  standing answer with `-PreferGroupedPRs on|off|auto`. Full contract: `references/verbs-work.md`.
 - **plan** — turn a plan into a tracked epic + native sub-issues (interactive or from a doc),
   with the enriched sections `/board expert auto` reads. Full contract: `references/verbs-plan.md`.
 - **fill** — detect and fill ALL board gaps (drafts→issues, assignees, Status, Priority, Size,
