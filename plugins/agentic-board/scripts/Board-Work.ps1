@@ -333,6 +333,11 @@ function Get-GroupingSuggestions {
     param(
         [object[]] $Pending,
         [string[]] $RepoFiles = @(),
+        # The repo this checkout IS. File evidence comes from its `git ls-files`, so it can only
+        # speak about its own issues: a foreign-repo issue naming `Board-Work.ps1` is naming a
+        # different file. Empty (outside a repo) disables the file signal entirely rather than
+        # letting it match across repos it cannot see.
+        [string]   $CurrentRepo = '',
         [int]      $MinGroup  = 2,
         # A group is only a saving if the PR it produces is still REVIEWABLE. Left uncapped,
         # this happily proposed eight issues in one PR against the real board - well past the
@@ -348,58 +353,83 @@ function Get-GroupingSuggestions {
     $suggestions = @()
     $claimed     = @{}
 
-    # --- file evidence -------------------------------------------------------
-    $tokens = Get-RepoFileTokens -Paths $RepoFiles
-    $byFile = @{}
+    # A single PR lives in ONE repo. `Closes #n` closes an issue of that same repo and nothing
+    # else, and -StartGroup puts the whole batch on one branch in one checkout - so a group
+    # spanning two repos is a batch that CANNOT be finished. It would start every issue in it,
+    # move them to In Progress, post claims, and then strand the foreign ones with no PR that
+    # can close them. Boards holding several repos are ordinary here (it is what #523 is about),
+    # so every signal below is computed per repo, never across the board as a whole.
+    $byRepo = @{}
     foreach ($item in $items) {
-        $text = "{0}`n{1}" -f $item.content.title, $item.content.body
-        foreach ($token in @($tokens.Keys)) {
-            if (Test-NamesToken -Text $text -Token $token) {
-                $file = $tokens[$token]
-                if (-not $byFile.ContainsKey($file)) { $byFile[$file] = @() }
-                if ($byFile[$file] -notcontains $item.content.number) { $byFile[$file] += $item.content.number }
+        $repo = if ($item.content.repository) { [string]$item.content.repository } else { '' }
+        if (-not $byRepo.ContainsKey($repo)) { $byRepo[$repo] = @() }
+        $byRepo[$repo] += $item
+    }
+
+    foreach ($repo in @($byRepo.Keys | Sort-Object)) {
+        $repoItems = @($byRepo[$repo])
+        if ($repoItems.Count -lt $MinGroup) { continue }
+
+        # --- file evidence ---------------------------------------------------
+        # Only for the repo this checkout actually is: the token list came from ITS git ls-files.
+        # When the current repo is unknown (outside a clone), the signal is skipped rather than
+        # applied to a repo whose files were never read.
+        $byFile = @{}
+        if ($CurrentRepo -and $repo -eq $CurrentRepo) {
+            $tokens = Get-RepoFileTokens -Paths $RepoFiles
+            foreach ($item in $repoItems) {
+                $text = "{0}`n{1}" -f $item.content.title, $item.content.body
+                foreach ($token in @($tokens.Keys)) {
+                    if (Test-NamesToken -Text $text -Token $token) {
+                        $file = $tokens[$token]
+                        if (-not $byFile.ContainsKey($file)) { $byFile[$file] = @() }
+                        if ($byFile[$file] -notcontains $item.content.number) { $byFile[$file] += $item.content.number }
+                    }
+                }
             }
         }
-    }
 
-    foreach ($file in @($byFile.Keys | Sort-Object)) {
-        $nums = @($byFile[$file] | Where-Object { -not $claimed.ContainsKey($_) } | Sort-Object)
-        if ($nums.Count -lt $MinGroup) { continue }
-        # Claim ALL of them, capped or not: an issue held out of this group for size must not
-        # reappear under a weaker signal further down, which would read as a second, unrelated
-        # reason to batch it.
-        foreach ($n in $nums) { $claimed[$n] = $true }
-        $take    = @($nums | Select-Object -First $MaxGroup)
-        $dropped = @($nums | Select-Object -Skip  $MaxGroup)
-        $suggestions += [pscustomobject]@{
-            reason   = 'file'
-            evidence = $file
-            issues   = $take
-            dropped  = $dropped
+        foreach ($file in @($byFile.Keys | Sort-Object)) {
+            $nums = @($byFile[$file] | Where-Object { -not $claimed.ContainsKey($_) } | Sort-Object)
+            if ($nums.Count -lt $MinGroup) { continue }
+            # Claim ALL of them, capped or not: an issue held out of this group for size must not
+            # reappear under a weaker signal further down, which would read as a second, unrelated
+            # reason to batch it.
+            foreach ($n in $nums) { $claimed[$n] = $true }
+            $take    = @($nums | Select-Object -First $MaxGroup)
+            $dropped = @($nums | Select-Object -Skip  $MaxGroup)
+            $suggestions += [pscustomobject]@{
+                reason   = 'file'
+                evidence = $file
+                repo     = $repo
+                issues   = $take
+                dropped  = $dropped
+            }
         }
-    }
 
-    # --- area evidence -------------------------------------------------------
-    $byArea = @{}
-    foreach ($item in $items) {
-        $area = $item.area
-        if ([string]::IsNullOrWhiteSpace($area)) { continue }
-        if ($claimed.ContainsKey($item.content.number)) { continue }
-        if (-not $byArea.ContainsKey($area)) { $byArea[$area] = @() }
-        $byArea[$area] += $item.content.number
-    }
+        # --- area evidence ---------------------------------------------------
+        $byArea = @{}
+        foreach ($item in $repoItems) {
+            $area = $item.area
+            if ([string]::IsNullOrWhiteSpace($area)) { continue }
+            if ($claimed.ContainsKey($item.content.number)) { continue }
+            if (-not $byArea.ContainsKey($area)) { $byArea[$area] = @() }
+            $byArea[$area] += $item.content.number
+        }
 
-    foreach ($area in @($byArea.Keys | Sort-Object)) {
-        $nums = @($byArea[$area] | Sort-Object)
-        if ($nums.Count -lt $MinGroup) { continue }
-        foreach ($n in $nums) { $claimed[$n] = $true }
-        $take    = @($nums | Select-Object -First $MaxGroup)
-        $dropped = @($nums | Select-Object -Skip  $MaxGroup)
-        $suggestions += [pscustomobject]@{
-            reason   = 'area'
-            evidence = $area
-            issues   = $take
-            dropped  = $dropped
+        foreach ($area in @($byArea.Keys | Sort-Object)) {
+            $nums = @($byArea[$area] | Sort-Object)
+            if ($nums.Count -lt $MinGroup) { continue }
+            foreach ($n in $nums) { $claimed[$n] = $true }
+            $take    = @($nums | Select-Object -First $MaxGroup)
+            $dropped = @($nums | Select-Object -Skip  $MaxGroup)
+            $suggestions += [pscustomobject]@{
+                reason   = 'area'
+                evidence = $area
+                repo     = $repo
+                issues   = $take
+                dropped  = $dropped
+            }
         }
     }
 
@@ -443,6 +473,7 @@ function Show-GroupingOffer {
     param(
         [object[]] $Suggestions,
         [string]   $Posture = 'auto',
+        [string]   $CurrentRepo = '',
         # Twelve groups is a wall, not an offer. Show the biggest savings and COUNT the rest -
         # the user is choosing where to start, not reading an inventory.
         [int]      $MaxShown = 5
@@ -480,6 +511,11 @@ function Show-GroupingOffer {
                   else                      { "los $(@($s.issues).Count) estan en la misma area del board ($($s.evidence))" }
         Write-Host ("  {0}  ->  un solo PR" -f $nums) -ForegroundColor Yellow
         Write-Host ("        porque {0}" -f $porque) -ForegroundColor DarkGray
+        # On a board holding several repos, WHICH repo the batch lands in is part of the offer:
+        # the PR can only be opened where the issues live.
+        if ($CurrentRepo -and $s.repo -and $s.repo -ne $CurrentRepo) {
+            Write-Host ("        (en {0}, no en este repo - el PR va alli)" -f $s.repo) -ForegroundColor DarkGray
+        }
         # Never let a cap pass for a complete answer: say what was held back and why.
         if (@($s.dropped).Count -gt 0) {
             $more = ($s.dropped | ForEach-Object { "#$_" }) -join ', '
@@ -3088,8 +3124,9 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         Write-Host "Sigo con el criterio por defecto; no asumo que no haya preferencia." -ForegroundColor DarkGray
     }
     $posture = Resolve-GroupingPosture $cfgRead.config
-    $groups  = @(Get-GroupingSuggestions -Pending $pending -RepoFiles (Get-RepoTrackedFiles))
-    Show-GroupingOffer -Suggestions $groups -Posture $posture
+    $hereRepo = Get-RepoFromOrigin
+    $groups  = @(Get-GroupingSuggestions -Pending $pending -RepoFiles (Get-RepoTrackedFiles) -CurrentRepo $hereRepo)
+    Show-GroupingOffer -Suggestions $groups -Posture $posture -CurrentRepo $hereRepo
 
     Write-Host ""
     if ($posture -ne 'never' -and $groups.Count -gt 0) {

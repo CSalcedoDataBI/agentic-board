@@ -23,13 +23,14 @@ BeforeAll {
             [string]  $Body   = '',
             [string]  $Area   = $null,
             [string]  $Type   = 'Issue',
+            [string]  $Repo   = 'owner/repo',
             [string[]]$Labels = @()
         )
         [pscustomobject]@{
             area    = $Area
             labels  = $Labels
             content = [pscustomobject]@{
-                number = $Number; title = $Title; body = $Body; type = $Type
+                number = $Number; title = $Title; body = $Body; type = $Type; repository = $Repo
             }
         }
     }
@@ -115,7 +116,7 @@ Describe 'Get-GroupingSuggestions - file evidence' {
             (New-PendingItem -Number 657 -Title 'Review gate counts missing checks'   -Body 'Board-ReviewGate.ps1 again'),
             (New-PendingItem -Number 999 -Title 'something unrelated'                 -Body 'no file here')
         )
-        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files)
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/repo')
         $s.Count            | Should -Be 1
         $s[0].reason        | Should -BeExactly 'file'
         $s[0].evidence      | Should -BeExactly 'Board-ReviewGate.ps1'
@@ -127,7 +128,7 @@ Describe 'Get-GroupingSuggestions - file evidence' {
             (New-PendingItem -Number 1 -Title 'only one' -Body 'Board-ReviewGate.ps1'),
             (New-PendingItem -Number 2 -Title 'unrelated' -Body '')
         )
-        @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files).Count | Should -Be 0
+        @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/repo').Count | Should -Be 0
     }
 
     It 'finds the file name in the TITLE, not only the body' {
@@ -135,7 +136,7 @@ Describe 'Get-GroupingSuggestions - file evidence' {
             (New-PendingItem -Number 649 -Title 'Apply-FieldPreset reports created on failure'),
             (New-PendingItem -Number 654 -Title 'Apply-FieldPreset: reserved name Type')
         )
-        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files)
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/repo')
         $s.Count       | Should -Be 1
         $s[0].evidence | Should -BeExactly 'Apply-FieldPreset.ps1'
     }
@@ -147,7 +148,7 @@ Describe 'Get-GroupingSuggestions - file evidence' {
             (New-PendingItem -Number 12 -Title 'c' -Body 'no file'              -Area 'Work'),
             (New-PendingItem -Number 13 -Title 'd' -Body 'no file'              -Area 'Work')
         )
-        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files)
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/repo')
         $s.Count | Should -Be 2
         ($s | Where-Object { $_.reason -eq 'file' }).issues | Should -Be @(10, 11)
         ($s | Where-Object { $_.reason -eq 'area' }).issues | Should -Be @(12, 13)
@@ -190,9 +191,59 @@ Describe 'Get-GroupingSuggestions - area evidence' {
     }
 }
 
+Describe 'Get-GroupingSuggestions - a board can hold more than one repo' {
+    # A single PR lives in ONE repo. `Closes #n` only closes an issue of that same repo, and
+    # -StartGroup puts the whole batch on one branch in one checkout. So a group spanning two
+    # repos is a batch that cannot be finished -- it starts the issues and then strands them.
+    It 'never groups issues from different repos, even when the area matches' {
+        $pending = @(
+            (New-PendingItem -Number 1 -Area 'Work' -Repo 'owner/alpha'),
+            (New-PendingItem -Number 2 -Area 'Work' -Repo 'owner/beta')
+        )
+        @(Get-GroupingSuggestions -Pending $pending -RepoFiles @()).Count | Should -Be 0
+    }
+
+    It 'groups within each repo separately when both have enough issues' {
+        $pending = @(
+            (New-PendingItem -Number 1 -Area 'Work' -Repo 'owner/alpha'),
+            (New-PendingItem -Number 2 -Area 'Work' -Repo 'owner/alpha'),
+            (New-PendingItem -Number 3 -Area 'Work' -Repo 'owner/beta'),
+            (New-PendingItem -Number 4 -Area 'Work' -Repo 'owner/beta')
+        )
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles @())
+        $s.Count | Should -Be 2
+        foreach ($g in $s) { @($g.repo).Count | Should -Be 1 }
+        ($s | Where-Object { $_.repo -eq 'owner/alpha' }).issues | Should -Be @(1, 2)
+        ($s | Where-Object { $_.repo -eq 'owner/beta'  }).issues | Should -Be @(3, 4)
+    }
+
+    It 'applies file evidence ONLY to issues of the current checkout' {
+        # The file list comes from THIS checkout's git ls-files. A foreign-repo issue naming
+        # the same filename is naming a different file.
+        $pending = @(
+            (New-PendingItem -Number 1 -Body 'Board-ReviewGate.ps1' -Repo 'owner/alpha'),
+            (New-PendingItem -Number 2 -Body 'Board-ReviewGate.ps1' -Repo 'owner/beta')
+        )
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/alpha')
+        $s.Count | Should -Be 0
+    }
+
+    It 'still groups by file within the current repo' {
+        $pending = @(
+            (New-PendingItem -Number 1 -Body 'Board-ReviewGate.ps1' -Repo 'owner/alpha'),
+            (New-PendingItem -Number 2 -Body 'Board-ReviewGate.ps1' -Repo 'owner/alpha'),
+            (New-PendingItem -Number 3 -Body 'Board-ReviewGate.ps1' -Repo 'owner/beta')
+        )
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/alpha')
+        $s.Count       | Should -Be 1
+        $s[0].reason   | Should -BeExactly 'file'
+        $s[0].issues   | Should -Be @(1, 2)
+    }
+}
+
 Describe 'Get-GroupingSuggestions - shape and ordering' {
     It 'returns an empty set for an empty board' {
-        @(Get-GroupingSuggestions -Pending @() -RepoFiles $script:Files).Count | Should -Be 0
+        @(Get-GroupingSuggestions -Pending @() -RepoFiles $script:Files -CurrentRepo 'owner/repo').Count | Should -Be 0
     }
 
     It 'returns an empty set when a single issue is pending' {
@@ -216,7 +267,7 @@ Describe 'Get-GroupingSuggestions - shape and ordering' {
 Describe 'Get-GroupingSuggestions - the group-size cap' {
     It 'caps the group and returns the overflow instead of dropping it silently' {
         $pending = 1..7 | ForEach-Object { New-PendingItem -Number $_ -Body 'Board-ReviewGate.ps1' }
-        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -MaxGroup 4)
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/repo' -MaxGroup 4)
         $s.Count       | Should -Be 1
         $s[0].issues   | Should -Be @(1, 2, 3, 4)
         $s[0].dropped  | Should -Be @(5, 6, 7)
@@ -224,7 +275,7 @@ Describe 'Get-GroupingSuggestions - the group-size cap' {
 
     It 'leaves dropped empty when the group fits' {
         $pending = 1..3 | ForEach-Object { New-PendingItem -Number $_ -Body 'Board-ReviewGate.ps1' }
-        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -MaxGroup 4)
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/repo' -MaxGroup 4)
         @($s[0].dropped).Count | Should -Be 0
     }
 
@@ -233,7 +284,7 @@ Describe 'Get-GroupingSuggestions - the group-size cap' {
         # back for size - it must not resurface as an "area" group, which would read to the
         # user as a second, independent reason to batch it.
         $pending = 1..5 | ForEach-Object { New-PendingItem -Number $_ -Body 'Board-ReviewGate.ps1' -Area 'Work' }
-        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -MaxGroup 4)
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/repo' -MaxGroup 4)
         $s.Count     | Should -Be 1
         $s[0].reason | Should -BeExactly 'file'
         $s[0].issues | Should -Not -Contain 5
@@ -241,7 +292,7 @@ Describe 'Get-GroupingSuggestions - the group-size cap' {
 
     It 'counts only the PRs actually saved by the capped group' {
         $pending = 1..7 | ForEach-Object { New-PendingItem -Number $_ -Body 'Board-ReviewGate.ps1' }
-        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -MaxGroup 4)
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles $script:Files -CurrentRepo 'owner/repo' -MaxGroup 4)
         Get-GroupingSavings -Suggestions $s | Should -Be 3
     }
 }

@@ -50,7 +50,16 @@
   nothing overlaps it SAYS so, because silence there is indistinguishable from `auto` having
   nothing to report, and the repo's standing preference would look ignored.
 
-  Three defects came out of the external review round and are fixed here rather than filed. The
+  A group also never spans two repositories. A board holding several repos is ordinary here (it
+  is what #523 is about), and a single PR lives in ONE repo: `Closes #n` closes an issue of that
+  repo and nothing else, and `-StartGroup` puts the whole batch on one branch in one checkout.
+  An area shared across repos would therefore have produced a batch that CANNOT be finished — it
+  would move every issue to In Progress, post claims on all of them, and strand the foreign ones
+  with no PR able to close them. Every signal is computed per repo, and file evidence applies
+  only to the repo the checkout actually is, since the file list comes from its own
+  `git ls-files`: a foreign issue naming `Board-Work.ps1` is naming a different file.
+
+  Four defects came out of the external review rounds and are fixed here rather than filed. The
   config WRITER carried the same PowerShell trap the reader had already been fixed for: `-is
   [pscustomobject]` is true for every value, because PowerShell wraps everything in a PSObject,
   so a file containing `"just a string"` was accepted as an object and its own `.Length` property
