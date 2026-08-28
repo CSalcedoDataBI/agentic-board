@@ -54,6 +54,15 @@ Describe 'Get-RepoFileTokens' {
         $t.Count | Should -Be 0
     }
 
+    It 'drops a non-distinctive file ENTIRELY, not just its bare stem' {
+        # Deliberate, and worth pinning: an external reviewer read the gate as applying only to
+        # the stem. It does not. "Two issues both mention board.md" is not a reason to put them
+        # in one PR, so the full name with extension is dropped too.
+        $t = Get-RepoFileTokens -Paths @('commands/board.md')
+        $t.ContainsKey('board.md') | Should -BeFalse
+        $t.ContainsKey('board')    | Should -BeFalse
+    }
+
     It 'ignores a hyphenated stem that is too short to be evidence' {
         $t = Get-RepoFileTokens -Paths @('a-b.ps1')
         $t.Count | Should -Be 0

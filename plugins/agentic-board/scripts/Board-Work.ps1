@@ -262,13 +262,20 @@ function Test-Pending($item) {
 # reviewable PR) where the reason is the whole point.
 # ------------------------------------------------------------------------------
 
-# The tokens by which an issue can NAME a file of this repo. Two forms, both exact:
-#   * the file name with extension         -> "Board-ReviewGate.ps1"
-#   * the stem, only when it is hyphenated -> "Board-ReviewGate"
-# The hyphen requirement is what keeps this honest. Bare stems like "work", "board"
-# or "tools" are ordinary English and would match nearly every issue on the board,
-# producing confident groupings with no basis - the exact failure mode this tool
-# keeps hitting. A hyphenated PowerShell verb-noun name is not prose.
+# The tokens by which an issue can NAME a file of this repo.
+#
+# A file qualifies as evidence at all only when its stem is DISTINCTIVE: hyphenated and at
+# least six characters. That gate applies to the whole file, not just to the bare stem - a
+# non-qualifying file contributes no token, not even its full name with extension. This is
+# deliberate, and it is what keeps the grouping honest. Run over this repo the rule excludes
+# 73 names, and they are exactly the ones that would produce confident groupings with no
+# basis: `board.md`, `bi.json`, `automation.md`, `413.md`, `.gitignore`. "Two issues both
+# say board.md" is not a reason to put them in one PR. A hyphenated verb-noun name is not
+# prose, and that is the whole distinction being drawn.
+#
+# A qualifying file contributes two tokens, both matched exactly:
+#   * the file name with extension -> "Board-ReviewGate.ps1"
+#   * the bare stem                -> "Board-ReviewGate"   (issues name scripts both ways)
 function Get-RepoFileTokens {
     [CmdletBinding()]
     param([string[]]$Paths)
