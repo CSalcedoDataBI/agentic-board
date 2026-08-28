@@ -217,6 +217,22 @@ Describe 'Get-GroupingSuggestions - a board can hold more than one repo' {
         ($s | Where-Object { $_.repo -eq 'owner/beta'  }).issues | Should -Be @(3, 4)
     }
 
+    It 'does not let an issue number claimed in one repo block the same number in another' {
+        # Issue numbers are unique PER REPO, not across a board. Keying the "already in a group"
+        # set on the bare number makes owner/alpha#10 lock out owner/beta#10 -- silently, and
+        # only on the multi-repo boards this partitioning exists to serve.
+        $pending = @(
+            (New-PendingItem -Number 10 -Area 'Work' -Repo 'owner/alpha'),
+            (New-PendingItem -Number 11 -Area 'Work' -Repo 'owner/alpha'),
+            (New-PendingItem -Number 10 -Area 'Work' -Repo 'owner/beta'),
+            (New-PendingItem -Number 11 -Area 'Work' -Repo 'owner/beta')
+        )
+        $s = @(Get-GroupingSuggestions -Pending $pending -RepoFiles @())
+        $s.Count | Should -Be 2
+        ($s | Where-Object { $_.repo -eq 'owner/alpha' }).issues | Should -Be @(10, 11)
+        ($s | Where-Object { $_.repo -eq 'owner/beta'  }).issues | Should -Be @(10, 11)
+    }
+
     It 'applies file evidence ONLY to issues of the current checkout' {
         # The file list comes from THIS checkout's git ls-files. A foreign-repo issue naming
         # the same filename is naming a different file.
@@ -238,6 +254,23 @@ Describe 'Get-GroupingSuggestions - a board can hold more than one repo' {
         $s.Count       | Should -Be 1
         $s[0].reason   | Should -BeExactly 'file'
         $s[0].issues   | Should -Be @(1, 2)
+    }
+}
+
+Describe 'Get-ItemRepoName - the two item shapes this script carries' {
+    It 'reads the plain string that the board listing returns' {
+        Get-ItemRepoName ([pscustomobject]@{ content = [pscustomobject]@{ repository = 'owner/repo' } }) |
+            Should -BeExactly 'owner/repo'
+    }
+    It 'reads nameWithOwner from the GraphQL shape instead of stringifying the object' {
+        # Stringifying would give every repo the same bucket name, merging the board back into
+        # one group - the partitioning failing while looking like it works.
+        $item = [pscustomobject]@{ content = [pscustomobject]@{
+            repository = [pscustomobject]@{ nameWithOwner = 'owner/repo' } } }
+        Get-ItemRepoName $item | Should -BeExactly 'owner/repo'
+    }
+    It 'is empty when there is no repository at all' {
+        Get-ItemRepoName ([pscustomobject]@{ content = [pscustomobject]@{} }) | Should -BeExactly ''
     }
 }
 

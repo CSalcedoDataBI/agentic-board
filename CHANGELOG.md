@@ -59,7 +59,17 @@
   only to the repo the checkout actually is, since the file list comes from its own
   `git ls-files`: a foreign issue naming `Board-Work.ps1` is naming a different file.
 
-  Four defects came out of the external review rounds and are fixed here rather than filed. The
+  Scoping is per repo all the way down, including the set that remembers which issues are
+  already in a group. That set is keyed on the issue number, and issue numbers are unique inside
+  a repository and nowhere else — kept board-wide it let `owner/alpha#10` lock `owner/beta#10`
+  out of every group, silently, and only on the mixed boards the partitioning was added to
+  serve. And the repo NAME is read through one accessor, because this script carries two item
+  shapes that disagree: the board listing returns `content.repository` as a string while the
+  GraphQL start path nests it under `nameWithOwner`. Stringifying the second would have given
+  every repo the same bucket name and merged the board back into one group — the partitioning
+  failing while looking like it works.
+
+  Five defects came out of the external review rounds and are fixed here rather than filed. The
   config WRITER carried the same PowerShell trap the reader had already been fixed for: `-is
   [pscustomobject]` is true for every value, because PowerShell wraps everything in a PSObject,
   so a file containing `"just a string"` was accepted as an object and its own `.Length` property

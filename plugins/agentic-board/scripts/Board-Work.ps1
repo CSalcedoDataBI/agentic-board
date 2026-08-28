@@ -316,6 +316,24 @@ function Test-Groupable($item) {
     $true
 }
 
+# `owner/name` for a board item. This script handles items from BOTH readers and they do not
+# agree on the shape: `Get-BoardItems` (gh project item-list) hands back `content.repository` as
+# a plain string, while `Get-BoardItem` (GraphQL, used by the start path) nests it as
+# `content.repository.nameWithOwner`. Grouping is fed by the first, but a caller reaching for
+# the second must not silently produce one bucket named after a stringified object - that would
+# merge every repo on the board back into a single group, which is the failure the partitioning
+# exists to prevent, wearing the disguise of working code.
+function Get-ItemRepoName {
+    [CmdletBinding()]
+    param($Item)
+
+    $r = $Item.content.repository
+    if (-not $r) { return '' }
+    if ($r -is [string]) { return $r }
+    if ($r.PSObject.Properties['nameWithOwner'] -and $r.nameWithOwner) { return [string]$r.nameWithOwner }
+    [string]$r
+}
+
 # The suggestions themselves. Each carries the EVIDENCE that produced it, because that
 # is what the user judges - not the tool's confidence.
 #
@@ -351,7 +369,6 @@ function Get-GroupingSuggestions {
     if ($items.Count -lt $MinGroup) { return @() }
 
     $suggestions = @()
-    $claimed     = @{}
 
     # A single PR lives in ONE repo. `Closes #n` closes an issue of that same repo and nothing
     # else, and -StartGroup puts the whole batch on one branch in one checkout - so a group
@@ -361,7 +378,7 @@ function Get-GroupingSuggestions {
     # so every signal below is computed per repo, never across the board as a whole.
     $byRepo = @{}
     foreach ($item in $items) {
-        $repo = if ($item.content.repository) { [string]$item.content.repository } else { '' }
+        $repo = Get-ItemRepoName $item
         if (-not $byRepo.ContainsKey($repo)) { $byRepo[$repo] = @() }
         $byRepo[$repo] += $item
     }
@@ -369,6 +386,13 @@ function Get-GroupingSuggestions {
     foreach ($repo in @($byRepo.Keys | Sort-Object)) {
         $repoItems = @($byRepo[$repo])
         if ($repoItems.Count -lt $MinGroup) { continue }
+
+        # Per REPO, not per board. Issue numbers are unique inside a repository and nowhere else,
+        # so a board-wide "already grouped" set keyed on the bare number lets owner/alpha#10 lock
+        # out owner/beta#10 - silently, and only on the multi-repo boards this partitioning was
+        # added to serve. Scoping the set to the repo makes the collision impossible rather than
+        # unlikely.
+        $claimed = @{}
 
         # --- file evidence ---------------------------------------------------
         # Only for the repo this checkout actually is: the token list came from ITS git ls-files.
