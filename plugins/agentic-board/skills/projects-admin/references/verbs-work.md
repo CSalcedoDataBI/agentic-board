@@ -54,10 +54,18 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
 
      **The repo's standing answer.** `Board-Work.ps1 -PreferGroupedPRs on|off|auto` records it
      in `.agentic-board/config.json` (versioned, like `roles.json` — it is a team decision, not
-     machine state). `on` = always group; `off` = one PR per issue, and the offer stops
-     appearing; `auto` = the default, group only where there is evidence. **Ask once, then
-     record it** — a preference the user has to restate every session is not a preference.
-     A corrupt config file is reported, never silently read as "no preference".
+     machine state). `on` = group whatever overlaps without asking each time; `off` = one PR per
+     issue, and the offer stops appearing; `auto` = the default, propose it and let the user
+     decide. **Ask once, then record it** — a preference the user has to restate every session is
+     not a preference. Recording it needs no GitHub token: it is a local decision, so it works on
+     a machine with no PAT configured.
+
+     Note what `on` does NOT mean: it never invents a group out of issues that share nothing.
+     There is no honest way to batch two unrelated issues, and a group with no reason behind it
+     is what this whole feature refuses to produce. When nothing overlaps under `on`, the tool
+     SAYS so — going silent would be indistinguishable from `auto` having nothing to report, and
+     the repo's standing preference would look ignored. A corrupt config file is reported too,
+     never silently read as "no preference".
 
   4. **Start it.** Run with `-ProjectNum <n> -Start <issueNum> -Branch` — moves the item to
      In Progress, assigns the owner, creates + checks out the work branch `issue-<num>-<slug>`
@@ -194,7 +202,7 @@ and wait for; never assume the account or the scope:
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
 | 3b. Choose the PR shape | (read the offer printed under the pending list) | **Grouped is the default when the issues overlap (#662)**: the listing names each group, the evidence behind it (same repo file named in both issues, or a shared board Area), what it saves in review rounds, and what it held back to keep the PR reviewable (cap 4). One PR per issue is the case that needs a reason — independent risk, or a separate approver |
-| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` | Writes `.agentic-board/config.json` (versioned, like `roles.json`). `on` = always group · `off` = one PR per issue, offer suppressed · `auto` = default, group on evidence. Ask once, record it — never make the user restate it each session |
+| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide. `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
 | 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, for a group chosen at 3b (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch, so all of them close through ONE PR/gate/merge |
 | 5. Finish it | push branch → PR with `Closes #<num>` (or `New-BoardPR.ps1 -Issue <n1,n2,...>` for a batch — one `Closes #<n>` line per issue) → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → merge-confirmation summary → user confirms → `Board-Merge.ps1 -PR <n>` only on exit 0 AND confirmation | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. On exit 0, present the mandatory merge-confirmation summary (#630/#631, four parts, above) and WAIT for the user's answer before merging — gate green is a precondition for asking, never a reason to skip asking. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself for every closed issue |
 

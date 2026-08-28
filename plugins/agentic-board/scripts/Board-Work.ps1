@@ -446,7 +446,19 @@ function Show-GroupingOffer {
         Write-Host "Este repo pidio un PR por issue: no agrupo nada aunque se solapen." -ForegroundColor DarkGray
         return
     }
-    if (@($Suggestions).Count -eq 0) { return }
+    # 'always' does not invent groups out of nothing - there is no honest way to batch issues
+    # that share no file and no area, and a group with no reason behind it is exactly what this
+    # feature refuses to produce. What it must NOT do is go silent and look identical to 'auto'
+    # with nothing to say: the repo asked for grouping, so when none is possible that is the
+    # answer it is owed.
+    if (@($Suggestions).Count -eq 0) {
+        if ($Posture -eq 'always') {
+            Write-Host ""
+            Write-Host "Este repo pidio juntar los PRs, pero no hay dos pendientes que se solapen:" -ForegroundColor DarkYellow
+            Write-Host "ninguno comparte archivo ni area del board, asi que cada uno va en el suyo." -ForegroundColor DarkGray
+        }
+        return
+    }
 
     $saved = Get-GroupingSavings -Suggestions $Suggestions
     $all   = @($Suggestions)
@@ -475,7 +487,7 @@ function Show-GroupingOffer {
     Write-Host ""
     Write-Host ("Te ahorra {0} ronda(s) de revision y {0} confirmacion(es) de merge." -f $saved) -ForegroundColor Green
     if ($Posture -eq 'always') {
-        Write-Host "Este repo ya pidio juntarlos, asi que es lo que hare salvo que digas otra cosa." -ForegroundColor DarkGray
+        Write-Host "Este repo ya pidio juntar lo que se solape, asi que es lo que hare salvo que digas otra cosa." -ForegroundColor DarkGray
     } else {
         Write-Host "Separalos solo si alguno tiene riesgo propio o alguien debe poder aprobarlo o rechazarlo aparte." -ForegroundColor DarkGray
     }
@@ -2540,6 +2552,51 @@ if ($Relaunch -gt 0) {
     exit 0
 }
 
+# ==============================================================================
+# PREFERENCE MODE: -PreferGroupedPRs on|off|auto  -> record this repo's standing
+# answer about grouped PRs (#662) and stop. It is a decision, not a run: writing it
+# and then also listing the board would bury the confirmation the user needs to see.
+# ==============================================================================
+if ($PreferGroupedPRs) {
+    $cfgPath = Get-BoardConfigPath
+    if (-not $cfgPath) {
+        Write-Host "No estoy dentro de un repo git, asi que no hay donde guardar la preferencia." -ForegroundColor Red
+        exit 1
+    }
+    $value = switch ($PreferGroupedPRs) {
+        'on'   { $true }
+        'off'  { $false }
+        'auto' { $null }
+    }
+    Set-BoardConfigValue -Path $cfgPath -Key 'preferGroupedPRs' -Value $value | Out-Null
+
+    # Read it BACK. The whole point of a recorded preference is that it survives, and a
+    # write this script only claims to have done is the failure this repo keeps finding.
+    $check   = Read-BoardConfig -Path $cfgPath
+    $posture = Resolve-GroupingPosture $check.config
+    $expected = switch ($PreferGroupedPRs) { 'on' { 'always' } 'off' { 'never' } 'auto' { 'auto' } }
+    if (-not $check.ok -or $posture -ne $expected) {
+        Write-Host "No pude guardar la preferencia: la volvi a leer y no dice lo que escribi." -ForegroundColor Red
+        if ($check.error) { Write-Host "  $($check.error)" -ForegroundColor DarkGray }
+        exit 1
+    }
+
+    $said = switch ($posture) {
+        'always' { 'juntar en un solo PR los que se solapen, sin preguntarte cada vez' }
+        'never'  { 'un PR por issue, sin agrupar' }
+        'auto'   { 'proponerte juntarlos cuando se solapen, y lo decides tu' }
+    }
+    Write-Host "=== Preferencia del repo guardada ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  De ahora en adelante: $said." -ForegroundColor Green
+    Write-Host "  Queda con el repo, asi que no hay que repetirlo cada sesion." -ForegroundColor DarkGray
+    Write-Host ""
+    exit 0
+}
+
+# Everything BELOW this line talks to GitHub. -PreferGroupedPRs does not: it records a local
+# decision in the repo's own config file, so it runs FIRST and never demands a token it has no
+# use for - otherwise a machine with no PAT configured could not set the preference at all.
 # -- Token (respect GH_TOKEN if gh-account already set it) ---------------------
 if (-not $env:GH_TOKEN) {
     $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
@@ -2800,48 +2857,6 @@ if ($CloseLoop) {
 }
 
 # ==============================================================================
-# ==============================================================================
-# PREFERENCE MODE: -PreferGroupedPRs on|off|auto  -> record this repo's standing
-# answer about grouped PRs (#662) and stop. It is a decision, not a run: writing it
-# and then also listing the board would bury the confirmation the user needs to see.
-# ==============================================================================
-if ($PreferGroupedPRs) {
-    $cfgPath = Get-BoardConfigPath
-    if (-not $cfgPath) {
-        Write-Host "No estoy dentro de un repo git, asi que no hay donde guardar la preferencia." -ForegroundColor Red
-        exit 1
-    }
-    $value = switch ($PreferGroupedPRs) {
-        'on'   { $true }
-        'off'  { $false }
-        'auto' { $null }
-    }
-    Set-BoardConfigValue -Path $cfgPath -Key 'preferGroupedPRs' -Value $value | Out-Null
-
-    # Read it BACK. The whole point of a recorded preference is that it survives, and a
-    # write this script only claims to have done is the failure this repo keeps finding.
-    $check   = Read-BoardConfig -Path $cfgPath
-    $posture = Resolve-GroupingPosture $check.config
-    $expected = switch ($PreferGroupedPRs) { 'on' { 'always' } 'off' { 'never' } 'auto' { 'auto' } }
-    if (-not $check.ok -or $posture -ne $expected) {
-        Write-Host "No pude guardar la preferencia: la volvi a leer y no dice lo que escribi." -ForegroundColor Red
-        if ($check.error) { Write-Host "  $($check.error)" -ForegroundColor DarkGray }
-        exit 1
-    }
-
-    $said = switch ($posture) {
-        'always' { 'juntar los issues relacionados en un solo PR' }
-        'never'  { 'un PR por issue, sin agrupar' }
-        'auto'   { 'juntarlos solo cuando se solapen de verdad' }
-    }
-    Write-Host "=== Preferencia del repo guardada ===" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  De ahora en adelante: $said." -ForegroundColor Green
-    Write-Host "  Queda con el repo, asi que no hay que repetirlo cada sesion." -ForegroundColor DarkGray
-    Write-Host ""
-    exit 0
-}
-
 # MODE 0: -Sessions  -> monitor the local parallel-session fleet
 #         -Sessions -Watch [-AutoClean]  -> block until the sessions finish, then
 #         (opt-in) tear down their worktrees/branches/registry entries (issue #135).

@@ -34,6 +34,24 @@ function Get-BoardConfigDefaults {
     }
 }
 
+# Is this parsed JSON an OBJECT, as opposed to a scalar or an array?
+#
+# `$x -is [pscustomobject]` cannot answer that: PowerShell wraps EVERY value in a PSObject, so a
+# bare JSON string passes it. Reading past that check then enumerates the STRING's own properties
+# - `Length` - which is how a config file that said `"just a string"` came back out of the writer
+# as `{"Length": 13, ...}`. The base type is what actually distinguishes them.
+#
+# It lives here, once, because the reader and the writer both need it and having each carry its
+# own copy is exactly how one of them kept the bug after the other was fixed.
+function Test-IsJsonObject {
+    [CmdletBinding()]
+    param($Value)
+
+    if ($null -eq $Value) { return $false }
+    $base = if ($Value -is [psobject]) { $Value.PSObject.BaseObject } else { $Value }
+    $base -is [System.Management.Automation.PSCustomObject]
+}
+
 function Get-BoardConfigPath {
     [CmdletBinding()]
     param([string]$Root)
@@ -75,11 +93,7 @@ function Read-BoardConfig {
         return [pscustomobject]@{ ok = $false; config = $cfg; error = 'no es JSON valido'; path = $Path; exists = $true }
     }
 
-    # `-is [pscustomobject]` is useless here: PowerShell wraps EVERY value in a PSObject, so a bare
-    # JSON string passes it. The base type is the one that actually distinguishes an object from a
-    # scalar or an array - a test caught this returning "ok" for `"just a string"`.
-    $base = if ($null -ne $parsed -and $parsed -is [psobject]) { $parsed.PSObject.BaseObject } else { $parsed }
-    if ($base -isnot [System.Management.Automation.PSCustomObject]) {
+    if (-not (Test-IsJsonObject $parsed)) {
         return [pscustomobject]@{ ok = $false; config = $cfg; error = 'el contenido no es un objeto JSON'; path = $Path; exists = $true }
     }
 
@@ -106,8 +120,11 @@ function Set-BoardConfigValue {
     if (Test-Path -LiteralPath $Path) {
         try {
             $existing = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-            if ($existing -is [pscustomobject]) {
-                foreach ($p in $existing.PSObject.Properties) { $obj[$p.Name] = $p.Value }
+            # Only an OBJECT has keys worth preserving. A scalar or an array is not a config file
+            # we can merge into - and enumerating one would drag its own .NET properties in as
+            # keys, which is worse than dropping it.
+            if (Test-IsJsonObject $existing) {
+                foreach ($prop in $existing.PSObject.Properties) { $obj[$prop.Name] = $prop.Value }
             }
         } catch {
             # Unreadable existing file: start clean rather than refuse. The alternative is a repo

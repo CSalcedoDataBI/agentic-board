@@ -33,6 +33,8 @@
      `.agentic-board/config.json` — versioned alongside `roles.json`, because how a team shapes
      its PRs is a team decision and not machine state. Without this the preference lives in the
      operator's memory and is re-applied by hand every session, which is the actual complaint.
+     Recording it needs no GitHub token: it runs above the auth guard, since a local decision
+     has no business demanding a PAT.
 
   Two limits are deliberate. A group is capped at **4 issues**: run against the real 56-item
   board, uncapped grouping cheerfully proposed eight issues in one PR — far past the 600-line /
@@ -43,7 +45,20 @@
 
   `off` is a real answer, not an absence: a repo that asked for one PR per issue gets the offer
   suppressed entirely, and a config file that cannot be parsed is reported rather than read as
-  "no preference recorded".
+  "no preference recorded". `on` is bounded in the other direction: it never invents a group out
+  of issues that share nothing — there is no honest way to batch two unrelated issues — and when
+  nothing overlaps it SAYS so, because silence there is indistinguishable from `auto` having
+  nothing to report, and the repo's standing preference would look ignored.
+
+  Three defects came out of the external review round and are fixed here rather than filed. The
+  config WRITER carried the same PowerShell trap the reader had already been fixed for: `-is
+  [pscustomobject]` is true for every value, because PowerShell wraps everything in a PSObject,
+  so a file containing `"just a string"` was accepted as an object and its own `.Length` property
+  written back as a config key. Both call sites now share one `Test-IsJsonObject`, since keeping
+  a copy each is exactly how one of them kept the bug after the other was fixed. The preference
+  command sat below the GitHub token guard, so a purely local write threw on a machine with no
+  PAT. And `on` was documented as "always group" while only ever changing the closing sentence —
+  the words now match what the code does.
 
 ### Fixed
 - **The review gate passed a PR whose only reviewer had said it could not review it (#651).**

@@ -97,6 +97,26 @@ Describe 'Set-BoardConfigValue' {
         $raw.preferGroupedPRs | Should -BeTrue
     }
 
+    It 'does NOT absorb the .NET properties of a JSON scalar as config keys' {
+        # `"just a string"` parses fine - it is valid JSON, just not an object. The old writer
+        # accepted it as one and enumerated the STRING's properties, producing
+        # {"Length": 13, "preferGroupedPRs": true} in the repo's committed config file.
+        $p = Join-Path $TestDrive 'scalar-write.json'
+        '"just a string"' | Set-Content -LiteralPath $p
+        Set-BoardConfigValue -Path $p -Key 'preferGroupedPRs' -Value $true | Out-Null
+        $raw = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
+        $raw.PSObject.Properties.Name | Should -Be @('preferGroupedPRs')
+        $raw.preferGroupedPRs | Should -BeTrue
+    }
+
+    It 'does NOT absorb the properties of a JSON array either' {
+        $p = Join-Path $TestDrive 'array-write.json'
+        '[1, 2, 3]' | Set-Content -LiteralPath $p
+        Set-BoardConfigValue -Path $p -Key 'preferGroupedPRs' -Value $false | Out-Null
+        $raw = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
+        $raw.PSObject.Properties.Name | Should -Be @('preferGroupedPRs')
+    }
+
     It 'writes readable JSON over a corrupt file rather than refusing forever' {
         $p = Join-Path $TestDrive 'wascorrupt.json'
         '{ not json' | Set-Content -LiteralPath $p

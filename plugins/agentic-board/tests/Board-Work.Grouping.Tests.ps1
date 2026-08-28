@@ -237,6 +237,58 @@ Describe 'Get-GroupingSuggestions - the group-size cap' {
     }
 }
 
+Describe 'Show-GroupingOffer - what each posture actually says' {
+    BeforeAll {
+        # Pester 5 only exposes helpers defined inside BeforeAll to the It blocks.
+        # Write-Host goes to the information stream in PowerShell 7, so 6>&1 captures it.
+        function Get-OfferText {
+            param($Suggestions, [string]$Posture)
+            (Show-GroupingOffer -Suggestions $Suggestions -Posture $Posture 6>&1 | Out-String)
+        }
+
+        $script:OneGroup = @([pscustomobject]@{ reason = 'file'; evidence = 'Board-Work.ps1'; issues = @(1, 2); dropped = @() })
+    }
+
+    It 'says nothing at all under auto when there is nothing to group' {
+        (Get-OfferText -Suggestions @() -Posture 'auto').Trim() | Should -BeExactly ''
+    }
+
+    It 'under always, SAYS that nothing overlaps instead of going silent like auto' {
+        # The repo asked for grouping. Silence here is indistinguishable from "auto had nothing
+        # to say", so the standing preference would look like it was ignored.
+        $text = Get-OfferText -Suggestions @() -Posture 'always'
+        $text | Should -Match 'no hay dos pendientes que se solapen'
+    }
+
+    It 'under never, suppresses the offer even when groups exist' {
+        $text = Get-OfferText -Suggestions $script:OneGroup -Posture 'never'
+        $text | Should -Match 'un PR por issue'
+        $text | Should -Not -Match 'Se pueden juntar'
+    }
+
+    It 'under auto, presents the group with its evidence' {
+        $text = Get-OfferText -Suggestions $script:OneGroup -Posture 'auto'
+        $text | Should -Match 'Se pueden juntar'
+        $text | Should -Match 'Board-Work\.ps1'
+        $text | Should -Match '#1, #2'
+    }
+
+    It 'names the issues it held back for size instead of dropping them silently' {
+        $capped = @([pscustomobject]@{ reason = 'file'; evidence = 'Board-Work.ps1'; issues = @(1, 2, 3, 4); dropped = @(5, 6) })
+        $text = Get-OfferText -Suggestions $capped -Posture 'auto'
+        $text | Should -Match '#5, #6'
+        $text | Should -Match 'revisable'
+    }
+
+    It 'counts the groups it did not print rather than truncating in silence' {
+        $many = 1..8 | ForEach-Object {
+            [pscustomobject]@{ reason = 'area'; evidence = "A$_"; issues = @($_, $_ + 100); dropped = @() }
+        }
+        $text = Get-OfferText -Suggestions $many -Posture 'auto'
+        $text | Should -Match 'y 3 grupo\(s\) mas'
+    }
+}
+
 Describe 'Get-GroupingSavings' {
     It 'counts the PR cycles removed, not the issues' {
         $s = @(
