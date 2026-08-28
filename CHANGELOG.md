@@ -2,7 +2,43 @@
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-08-28
+
 ### Changed
+- **Where a question could be answered by doing the thing, the tool now does the thing
+  (#650/#653).** `cerrar-ciclo` classified the state of a finished branch correctly and then
+  printed a command for the user to copy and run. Every state it detects now carries an action
+  the router executes directly — save the handoff, open the PR, run the gate, clean up, reopen
+  or discard a closed PR. Merging stays a human decision, and so does a genuine fork (save a
+  handoff or not; reopen or discard); everything else it can safely take, it takes. This
+  reverses a documented design choice on purpose: printing a command is not help, it is the work
+  handed back to someone who asked the tool to do it.
+- **Prompts and hints are phrased in the user's intent, not in tool jargon (#495).** A survey
+  found nine places where a live session asked a BI professional to adjudicate git semantics or
+  paste a command. Seven are fixed here: the doctor's ghost-worktree hint no longer names a git
+  plumbing command (the fix already did it safely — only the wording was wrong), the expert
+  config's "no role matched" hint no longer prints raw PowerShell splat syntax, and two prompts
+  in the work driver now ask what the human actually decides ("this already shipped, want me to
+  clean up?") instead of restating branch and PR state as a puzzle. The eighth and largest is
+  the `cerrar-ciclo` change above; it needed its own issue because it reverses a design choice
+  rather than a sentence.
+
+### Added
+- **An opt-in second reviewer for autonomous runs, and it is now visible where the decision is
+  made (#645, #646).** The review gate can embed a disk-checkable marker when an external review
+  is recorded, and re-verify it at gate time — a marker that does not verify is dropped from the
+  evidence as if it had never been posted, so "someone reviewed this" cannot rest on a claim the
+  gate is unable to check. It is opt-in: the CI-bot fallback stays the default and callers that
+  do not ask for the stricter path are untouched.
+
+  The option had been living only in reference docs, which nobody setting up an autonomous run
+  reads first, so the choice moved to `/board expert config` where review strictness is actually
+  decided. It refuses to record `true` when the plugin providing that reviewer is not installed
+  — reporting why, rather than writing the preference and silently falling back — and the run's
+  brief now renders the branch that was actually configured instead of mentioning the option
+  regardless. The earlier "not headless-invocable" finding turned out to be a naming bug, not an
+  infrastructure limit (#637).
+
 - **Grouping related issues into one PR is now the default posture, not the exception it had to
   argue for (#662).** The machinery to work several issues through one branch, one PR, one gate
   and one merge shipped with #633 and works. What was missing is that nothing ever pointed at it:
