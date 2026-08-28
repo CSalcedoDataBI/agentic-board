@@ -382,6 +382,33 @@ Describe 'Show-GroupingOffer - what each posture actually says' {
     }
 }
 
+Describe 'Select-StartableGroup - the batch the next-step line may actually offer' {
+    BeforeAll {
+        $script:Mine    = [pscustomobject]@{ repo = 'owner/here';    issues = @(1, 2);       evidence = 'a' }
+        $script:Foreign = [pscustomobject]@{ repo = 'owner/elsewhere'; issues = @(3, 4, 5, 6); evidence = 'b' }
+    }
+
+    It 'picks the biggest group OF THIS REPO, not the biggest group overall' {
+        # -StartGroup creates the branch in the current checkout. Offering a foreign batch would
+        # start those issues here and then open a PR that cannot close them.
+        $g = Select-StartableGroup -Suggestions @($script:Foreign, $script:Mine) -CurrentRepo 'owner/here'
+        $g.repo | Should -BeExactly 'owner/here'
+    }
+
+    It 'returns nothing when every group belongs to another repo' {
+        Select-StartableGroup -Suggestions @($script:Foreign) -CurrentRepo 'owner/here' | Should -BeNullOrEmpty
+    }
+
+    It 'returns nothing when there are no groups at all' {
+        Select-StartableGroup -Suggestions @() -CurrentRepo 'owner/here' | Should -BeNullOrEmpty
+    }
+
+    It 'falls back to the ordering when there is no current repo to compare against' {
+        $g = Select-StartableGroup -Suggestions @($script:Foreign, $script:Mine) -CurrentRepo ''
+        $g.repo | Should -BeExactly 'owner/elsewhere'
+    }
+}
+
 Describe 'Get-GroupingSavings' {
     It 'counts the PR cycles removed, not the issues' {
         $s = @(

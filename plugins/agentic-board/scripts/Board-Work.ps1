@@ -463,6 +463,28 @@ function Get-GroupingSuggestions {
                                            @{Expression={ $_.evidence }; Descending=$false})
 }
 
+# Which group the "next step" line should actually offer.
+#
+# Not simply the biggest one. Suggestions are ordered by saving, and on a board holding several
+# repos the biggest can belong to a repo this checkout is not: `-StartGroup` would then create
+# the branch here and try to open a PR that cannot close those issues. So the offer is the
+# biggest group OF THE CURRENT REPO, and when none of the groups belong here the caller says
+# where they do belong instead of naming a batch that cannot be started from this folder.
+#
+# Returns $null when there is nothing startable here - a real answer, not an empty group.
+function Select-StartableGroup {
+    [CmdletBinding()]
+    param([object[]]$Suggestions, [string]$CurrentRepo)
+
+    $all = @($Suggestions)
+    if ($all.Count -eq 0) { return $null }
+    # Outside a clone there is no "here" to compare against; the ordering is all we have.
+    if (-not $CurrentRepo) { return $all[0] }
+    $mine = @($all | Where-Object { $_.repo -eq $CurrentRepo })
+    if ($mine.Count -eq 0) { return $null }
+    $mine[0]
+}
+
 # How many PR cycles a suggestion set removes: N issues that would have cost N PRs now cost 1.
 function Get-GroupingSavings {
     [CmdletBinding()]
@@ -3153,10 +3175,17 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     Show-GroupingOffer -Suggestions $groups -Posture $posture -CurrentRepo $hereRepo
 
     Write-Host ""
-    if ($posture -ne 'never' -and $groups.Count -gt 0) {
-        $first = ($groups[0].issues) -join ','
+    $startable = if ($posture -ne 'never') { Select-StartableGroup -Suggestions $groups -CurrentRepo $hereRepo } else { $null }
+    if ($startable) {
+        $first = ($startable.issues) -join ','
         Write-Host "Siguiente paso: /board work -StartGroup $first (un PR), o -Start <issueNum> para uno suelto." -ForegroundColor Cyan
     } else {
+        if ($posture -ne 'never' -and $groups.Count -gt 0 -and $hereRepo) {
+            # There ARE groups, just none in this folder. Offering the biggest one anyway would
+            # start issues here whose PR cannot close them.
+            $otros = (@($groups | ForEach-Object { $_.repo } | Sort-Object -Unique) -join ', ')
+            Write-Host "Los lotes de arriba son de otros repos ($otros): hay que abrirlos desde su propia copia." -ForegroundColor DarkYellow
+        }
         Write-Host "Siguiente paso: /board work -Start <issueNum> (o -Parallel <n1,n2,...>)." -ForegroundColor Cyan
     }
     Write-Host ""

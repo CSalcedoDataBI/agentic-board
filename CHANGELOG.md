@@ -69,7 +69,12 @@
   every repo the same bucket name and merged the board back into one group — the partitioning
   failing while looking like it works.
 
-  Five defects came out of the external review rounds and are fixed here rather than filed. The
+  The "next step" line obeys the same boundary. It offers the biggest group OF THIS REPO rather
+  than the biggest group on the board — a batch the current folder cannot open a PR for is not a
+  next step — and when every group belongs elsewhere it names those repos instead of proposing
+  one anyway.
+
+  Six defects came out of the external review rounds and are fixed here rather than filed. The
   config WRITER carried the same PowerShell trap the reader had already been fixed for: `-is
   [pscustomobject]` is true for every value, because PowerShell wraps everything in a PSObject,
   so a file containing `"just a string"` was accepted as an object and its own `.Length` property
