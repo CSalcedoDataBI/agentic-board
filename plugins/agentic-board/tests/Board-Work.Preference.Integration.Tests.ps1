@@ -41,6 +41,21 @@ BeforeAll {
     }
 }
 
+Describe 'Board-Work.ps1 -PreferGroupedPRs outside a git repo' {
+    It 'says where it would have saved the preference instead of throwing' {
+        $plain = Join-Path $TestDrive 'not-a-repo'
+        New-Item -ItemType Directory -Path $plain -Force | Out-Null
+        $saved = $env:GH_TOKEN
+        $env:GH_TOKEN = ''
+        try {
+            Push-Location $plain
+            $out = & $script:Script -PreferGroupedPRs on -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 6>&1 2>&1 | Out-String
+            Pop-Location
+        } finally { $env:GH_TOKEN = $saved }
+        $out | Should -Match 'no hay donde guardar la preferencia'
+    }
+}
+
 Describe 'Board-Work.ps1 -PreferGroupedPRs' {
     It 'records the preference with no GitHub token available at all' {
         $repo = New-ThrowawayRepo 'pref-no-token'

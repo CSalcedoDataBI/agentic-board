@@ -3170,7 +3170,12 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         Write-Host "Sigo con el criterio por defecto; no asumo que no haya preferencia." -ForegroundColor DarkGray
     }
     $posture = Resolve-GroupingPosture $cfgRead.config
-    $hereRepo = Get-RepoFromOrigin
+    # Not being in a clone is a SUPPORTED way to run this listing - the contract's step 1 says so
+    # ("outside a repo, skip the scope question"). Get-RepoFromOrigin throws there, so it is
+    # guarded exactly like the CloseLoop call site: no repo just means no file evidence and no
+    # "is this group mine" comparison, which the helpers already handle. Letting it throw would
+    # kill the listing AFTER printing it, over a feature that is only ever an offer.
+    $hereRepo = try { Get-RepoFromOrigin } catch { '' }
     $groups  = @(Get-GroupingSuggestions -Pending $pending -RepoFiles (Get-RepoTrackedFiles) -CurrentRepo $hereRepo)
     Show-GroupingOffer -Suggestions $groups -Posture $posture -CurrentRepo $hereRepo
 

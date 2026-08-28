@@ -74,7 +74,14 @@
   next step — and when every group belongs elsewhere it names those repos instead of proposing
   one anyway.
 
-  Six defects came out of the external review rounds and are fixed here rather than filed. The
+  Running the listing OUTSIDE a clone keeps working, which the offer nearly broke: resolving
+  "which repo am I" throws when there is no `origin`, and an unguarded call killed the listing
+  *after* printing it — over a feature that is only ever an offer. It is guarded now, and with
+  no repo the file signal simply does not apply: the same board reports 12 saved review rounds
+  from Area evidence alone instead of 24. Degrading is the honest outcome; a filename cannot be
+  evidence when the file list was never read.
+
+  Seven defects came out of the external review rounds and are fixed here rather than filed. The
   config WRITER carried the same PowerShell trap the reader had already been fixed for: `-is
   [pscustomobject]` is true for every value, because PowerShell wraps everything in a PSObject,
   so a file containing `"just a string"` was accepted as an object and its own `.Length` property
