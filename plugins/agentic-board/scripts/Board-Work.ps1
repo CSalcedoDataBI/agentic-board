@@ -142,6 +142,13 @@ param(
     # `pwsh -File` flattening reason. Mutually exclusive with -Start and -Parallel: those are
     # two other, different ways of starting issues.
     [string[]] $StartGroup = @(),
+    # Records this repo's standing answer to "one PR, or one per issue?" in
+    # .agentic-board/config.json, so the preference survives the session instead of living in
+    # the operator's head and being restated every time (#662). 'on' = always propose one PR
+    # for the batch; 'off' = never propose grouping (each issue gets its own reviewable PR);
+    # 'auto' = the default, propose it only where there is evidence the issues overlap.
+    [ValidateSet('on', 'off', 'auto')]
+    [string] $PreferGroupedPRs = '',
     [switch]$Launch,
     [switch]$Fleet,
     [switch]$Sessions,
@@ -219,6 +226,9 @@ $ErrorActionPreference = "Stop"
 # owner/name resolver from origin (dot-safe regex) - cerrar-ciclo (#302) resolves the current repo.
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
 
+# Per-repo preferences (#662) - today: whether related issues should share one PR.
+. (Join-Path $PSScriptRoot 'Get-BoardConfig.ps1')
+
 # NOTE: the GH_TOKEN check lives in the main-entry guard below (after every function
 # is defined) so the pure helpers can be dot-sourced for unit tests without a token
 # and without side effects (set $env:ABIOS_BOARDWORK_DOTSOURCE=1 before dot-sourcing).
@@ -233,6 +243,242 @@ function Get-BoardUrl([int]$num) { "https://github.com/users/$Owner/projects/$nu
 function Test-Pending($item) {
     if (-not $item.status) { return $true }
     (Get-CanonicalOptionName 'Status' $item.status) -eq 'Backlog'
+}
+
+# ------------------------------------------------------------------------------
+# Grouped PRs (#662): finding the issues that would sensibly share one PR.
+#
+# The per-PR cycle - a review-gate run against the subscription quota, a
+# second-opinion round when no real reviewer shows up, and a merge confirmation
+# that costs the user's attention - is paid ONCE PER PR, not per issue. On a
+# board of related issues that cost dominates the work itself. The machinery to
+# avoid it (-StartGroup + a single PR closing several issues) already shipped
+# with #633; what was missing is that nothing ever POINTS AT IT, so a session
+# following the contract literally opens N PRs for N issues.
+#
+# These helpers only ever SUGGEST, and only off evidence they can name. A
+# suggestion the user cannot check is worse than none: it asks them to trust a
+# grouping whose reason is invisible, on the one decision (what lands in one
+# reviewable PR) where the reason is the whole point.
+# ------------------------------------------------------------------------------
+
+# The tokens by which an issue can NAME a file of this repo. Two forms, both exact:
+#   * the file name with extension         -> "Board-ReviewGate.ps1"
+#   * the stem, only when it is hyphenated -> "Board-ReviewGate"
+# The hyphen requirement is what keeps this honest. Bare stems like "work", "board"
+# or "tools" are ordinary English and would match nearly every issue on the board,
+# producing confident groupings with no basis - the exact failure mode this tool
+# keeps hitting. A hyphenated PowerShell verb-noun name is not prose.
+function Get-RepoFileTokens {
+    [CmdletBinding()]
+    param([string[]]$Paths)
+
+    $map = @{}
+    foreach ($path in @($Paths)) {
+        if (-not $path) { continue }
+        $leaf = Split-Path -Leaf $path
+        if (-not $leaf) { continue }
+        $stem = [System.IO.Path]::GetFileNameWithoutExtension($leaf)
+        if ($stem -notmatch '-') { continue }
+        if ($stem.Length -lt 6)  { continue }
+        $map[$leaf] = $leaf
+        $map[$stem] = $leaf
+    }
+    $map
+}
+
+# Does $Text name $Token as a whole word? Anchored on both sides by a non-name
+# character so "Board-Work" does not match inside "Board-Workspace".
+function Test-NamesToken {
+    [CmdletBinding()]
+    param([string]$Text, [string]$Token)
+
+    if ([string]::IsNullOrWhiteSpace($Text) -or [string]::IsNullOrWhiteSpace($Token)) { return $false }
+    $escaped = [regex]::Escape($Token)
+    [bool]($Text -match "(?i)(^|[^A-Za-z0-9_.-])$escaped($|[^A-Za-z0-9_-])")
+}
+
+# An item can be batched only if it can be STARTED at all: a draft note has no issue
+# to close, and a blocked one is refused by -StartGroup anyway. Offering either in a
+# batch would produce a group that falls apart the moment the user accepts it.
+function Test-Groupable($item) {
+    if (-not $item) { return $false }
+    if ($item.content.type -eq 'DraftIssue') { return $false }
+    if (-not $item.content.number)           { return $false }
+    if (@($item.labels) -contains 'blocked') { return $false }
+    $true
+}
+
+# The suggestions themselves. Each carries the EVIDENCE that produced it, because that
+# is what the user judges - not the tool's confidence.
+#
+#   reason 'file' - two or more pending issues name the same file of this repo. The
+#                   strongest signal available before any code is written, and the one
+#                   that best predicts a merge conflict between two separate branches.
+#   reason 'area' - two or more share the board's Area field. Weaker (an area is a
+#                   neighbourhood, not a file) but it is a human's own classification.
+#
+# An issue lands in at most ONE suggestion, file evidence winning, so the printed groups
+# never overlap - two suggestions naming the same issue would be advice the user cannot
+# act on twice.
+function Get-GroupingSuggestions {
+    [CmdletBinding()]
+    param(
+        [object[]] $Pending,
+        [string[]] $RepoFiles = @(),
+        [int]      $MinGroup  = 2,
+        # A group is only a saving if the PR it produces is still REVIEWABLE. Left uncapped,
+        # this happily proposed eight issues in one PR against the real board - well past the
+        # 600-line / 20-file threshold the review gate itself warns about, which trades a cost
+        # the user pays knowingly (N review rounds) for one they do not (a PR nobody can read).
+        # The overflow is never silently dropped: it is returned in `dropped` and printed.
+        [int]      $MaxGroup  = 4
+    )
+
+    $items = @(@($Pending) | Where-Object { Test-Groupable $_ })
+    if ($items.Count -lt $MinGroup) { return @() }
+
+    $suggestions = @()
+    $claimed     = @{}
+
+    # --- file evidence -------------------------------------------------------
+    $tokens = Get-RepoFileTokens -Paths $RepoFiles
+    $byFile = @{}
+    foreach ($item in $items) {
+        $text = "{0}`n{1}" -f $item.content.title, $item.content.body
+        foreach ($token in @($tokens.Keys)) {
+            if (Test-NamesToken -Text $text -Token $token) {
+                $file = $tokens[$token]
+                if (-not $byFile.ContainsKey($file)) { $byFile[$file] = @() }
+                if ($byFile[$file] -notcontains $item.content.number) { $byFile[$file] += $item.content.number }
+            }
+        }
+    }
+
+    foreach ($file in @($byFile.Keys | Sort-Object)) {
+        $nums = @($byFile[$file] | Where-Object { -not $claimed.ContainsKey($_) } | Sort-Object)
+        if ($nums.Count -lt $MinGroup) { continue }
+        # Claim ALL of them, capped or not: an issue held out of this group for size must not
+        # reappear under a weaker signal further down, which would read as a second, unrelated
+        # reason to batch it.
+        foreach ($n in $nums) { $claimed[$n] = $true }
+        $take    = @($nums | Select-Object -First $MaxGroup)
+        $dropped = @($nums | Select-Object -Skip  $MaxGroup)
+        $suggestions += [pscustomobject]@{
+            reason   = 'file'
+            evidence = $file
+            issues   = $take
+            dropped  = $dropped
+        }
+    }
+
+    # --- area evidence -------------------------------------------------------
+    $byArea = @{}
+    foreach ($item in $items) {
+        $area = $item.area
+        if ([string]::IsNullOrWhiteSpace($area)) { continue }
+        if ($claimed.ContainsKey($item.content.number)) { continue }
+        if (-not $byArea.ContainsKey($area)) { $byArea[$area] = @() }
+        $byArea[$area] += $item.content.number
+    }
+
+    foreach ($area in @($byArea.Keys | Sort-Object)) {
+        $nums = @($byArea[$area] | Sort-Object)
+        if ($nums.Count -lt $MinGroup) { continue }
+        foreach ($n in $nums) { $claimed[$n] = $true }
+        $take    = @($nums | Select-Object -First $MaxGroup)
+        $dropped = @($nums | Select-Object -Skip  $MaxGroup)
+        $suggestions += [pscustomobject]@{
+            reason   = 'area'
+            evidence = $area
+            issues   = $take
+            dropped  = $dropped
+        }
+    }
+
+    # Biggest saving first - the group that removes the most PR cycles is the one worth
+    # reading. Ties break on the evidence name so the output is stable between runs.
+    @($suggestions | Sort-Object -Property @{Expression={ @($_.issues).Count }; Descending=$true},
+                                           @{Expression={ $_.evidence }; Descending=$false})
+}
+
+# How many PR cycles a suggestion set removes: N issues that would have cost N PRs now cost 1.
+function Get-GroupingSavings {
+    [CmdletBinding()]
+    param([object[]]$Suggestions)
+
+    $total = 0
+    foreach ($s in @($Suggestions)) { $total += (@($s.issues).Count - 1) }
+    $total
+}
+
+# The repo's tracked files, as evidence for the file signal. `git ls-files` and nothing else:
+# the point is to match issue text against files that ACTUALLY EXIST here, so a grouping can
+# never be built on a filename the tool imagined. Outside a repo, or on any git failure, it
+# returns empty - the area signal still works, and no suggestion is invented from nothing.
+function Get-RepoTrackedFiles {
+    [CmdletBinding()]
+    param()
+
+    try {
+        $out = git ls-files 2>$null
+        if ($LASTEXITCODE -ne 0) { return @() }
+        return @($out | Where-Object { $_ })
+    } catch { return @() }
+}
+
+# Prints the grouping offer under the pending list. Says the SAVING in the currency the user
+# actually pays (review rounds and merge confirmations, not "PRs"), names the evidence for
+# every group, and ends with the exact selection to accept - so saying yes is one answer, not
+# a research task.
+function Show-GroupingOffer {
+    [CmdletBinding()]
+    param(
+        [object[]] $Suggestions,
+        [string]   $Posture = 'auto',
+        # Twelve groups is a wall, not an offer. Show the biggest savings and COUNT the rest -
+        # the user is choosing where to start, not reading an inventory.
+        [int]      $MaxShown = 5
+    )
+
+    if ($Posture -eq 'never') {
+        Write-Host ""
+        Write-Host "Este repo pidio un PR por issue: no agrupo nada aunque se solapen." -ForegroundColor DarkGray
+        return
+    }
+    if (@($Suggestions).Count -eq 0) { return }
+
+    $saved = Get-GroupingSavings -Suggestions $Suggestions
+    $all   = @($Suggestions)
+    $show  = @($all | Select-Object -First $MaxShown)
+    $rest  = @($all | Select-Object -Skip  $MaxShown)
+
+    Write-Host ""
+    Write-Host "Se pueden juntar en menos PRs:" -ForegroundColor Cyan
+    foreach ($s in $show) {
+        $nums   = ($s.issues | ForEach-Object { "#$_" }) -join ', '
+        $porque = if ($s.reason -eq 'file') { "los $(@($s.issues).Count) tocan el mismo archivo ($($s.evidence))" }
+                  else                      { "los $(@($s.issues).Count) estan en la misma area del board ($($s.evidence))" }
+        Write-Host ("  {0}  ->  un solo PR" -f $nums) -ForegroundColor Yellow
+        Write-Host ("        porque {0}" -f $porque) -ForegroundColor DarkGray
+        # Never let a cap pass for a complete answer: say what was held back and why.
+        if (@($s.dropped).Count -gt 0) {
+            $more = ($s.dropped | ForEach-Object { "#$_" }) -join ', '
+            Write-Host ("        (dejo fuera {0} para que el PR siga siendo revisable - van en un segundo lote)" -f $more) -ForegroundColor DarkGray
+        }
+    }
+    if ($rest.Count -gt 0) {
+        $restIssues = 0
+        foreach ($r in $rest) { $restIssues += @($r.issues).Count }
+        Write-Host ("  ... y {0} grupo(s) mas ({1} issues), por si prefieres empezar por otro lado." -f $rest.Count, $restIssues) -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    Write-Host ("Te ahorra {0} ronda(s) de revision y {0} confirmacion(es) de merge." -f $saved) -ForegroundColor Green
+    if ($Posture -eq 'always') {
+        Write-Host "Este repo ya pidio juntarlos, asi que es lo que hare salvo que digas otra cosa." -ForegroundColor DarkGray
+    } else {
+        Write-Host "Separalos solo si alguno tiene riesgo propio o alguien debe poder aprobarlo o rechazarlo aparte." -ForegroundColor DarkGray
+    }
 }
 
 # The board's Status options that are LEGACY names this tool would migrate
@@ -2554,6 +2800,48 @@ if ($CloseLoop) {
 }
 
 # ==============================================================================
+# ==============================================================================
+# PREFERENCE MODE: -PreferGroupedPRs on|off|auto  -> record this repo's standing
+# answer about grouped PRs (#662) and stop. It is a decision, not a run: writing it
+# and then also listing the board would bury the confirmation the user needs to see.
+# ==============================================================================
+if ($PreferGroupedPRs) {
+    $cfgPath = Get-BoardConfigPath
+    if (-not $cfgPath) {
+        Write-Host "No estoy dentro de un repo git, asi que no hay donde guardar la preferencia." -ForegroundColor Red
+        exit 1
+    }
+    $value = switch ($PreferGroupedPRs) {
+        'on'   { $true }
+        'off'  { $false }
+        'auto' { $null }
+    }
+    Set-BoardConfigValue -Path $cfgPath -Key 'preferGroupedPRs' -Value $value | Out-Null
+
+    # Read it BACK. The whole point of a recorded preference is that it survives, and a
+    # write this script only claims to have done is the failure this repo keeps finding.
+    $check   = Read-BoardConfig -Path $cfgPath
+    $posture = Resolve-GroupingPosture $check.config
+    $expected = switch ($PreferGroupedPRs) { 'on' { 'always' } 'off' { 'never' } 'auto' { 'auto' } }
+    if (-not $check.ok -or $posture -ne $expected) {
+        Write-Host "No pude guardar la preferencia: la volvi a leer y no dice lo que escribi." -ForegroundColor Red
+        if ($check.error) { Write-Host "  $($check.error)" -ForegroundColor DarkGray }
+        exit 1
+    }
+
+    $said = switch ($posture) {
+        'always' { 'juntar los issues relacionados en un solo PR' }
+        'never'  { 'un PR por issue, sin agrupar' }
+        'auto'   { 'juntarlos solo cuando se solapen de verdad' }
+    }
+    Write-Host "=== Preferencia del repo guardada ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  De ahora en adelante: $said." -ForegroundColor Green
+    Write-Host "  Queda con el repo, asi que no hay que repetirlo cada sesion." -ForegroundColor DarkGray
+    Write-Host ""
+    exit 0
+}
+
 # MODE 0: -Sessions  -> monitor the local parallel-session fleet
 #         -Sessions -Watch [-AutoClean]  -> block until the sessions finish, then
 #         (opt-in) tear down their worktrees/branches/registry entries (issue #135).
@@ -2767,8 +3055,27 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
             Write-Host ("  #{0}  rama {1}  (PID {2} vivo, desde {3}) en {4}" -f $s.issue, $s.branch, $s.sessionPid, $s.started, $s.workPath) -ForegroundColor DarkCyan
         }
     }
+
+    # Grouped PRs (#662). The per-PR cycle - review gate, second-opinion round, merge
+    # confirmation - is paid once per PR, so the moment to say what N separate PRs will cost
+    # is HERE, while the user is still choosing, not after the first one is already open.
+    $cfgRead = Read-BoardConfig -Path (Get-BoardConfigPath)
+    if (-not $cfgRead.ok) {
+        Write-Host ""
+        Write-Host "No pude leer la preferencia de este repo sobre agrupar PRs ($($cfgRead.error))." -ForegroundColor Yellow
+        Write-Host "Sigo con el criterio por defecto; no asumo que no haya preferencia." -ForegroundColor DarkGray
+    }
+    $posture = Resolve-GroupingPosture $cfgRead.config
+    $groups  = @(Get-GroupingSuggestions -Pending $pending -RepoFiles (Get-RepoTrackedFiles))
+    Show-GroupingOffer -Suggestions $groups -Posture $posture
+
     Write-Host ""
-    Write-Host "Siguiente paso: /board work -Start <issueNum> (o -Parallel <n1,n2,...>)." -ForegroundColor Cyan
+    if ($posture -ne 'never' -and $groups.Count -gt 0) {
+        $first = ($groups[0].issues) -join ','
+        Write-Host "Siguiente paso: /board work -StartGroup $first (un PR), o -Start <issueNum> para uno suelto." -ForegroundColor Cyan
+    } else {
+        Write-Host "Siguiente paso: /board work -Start <issueNum> (o -Parallel <n1,n2,...>)." -ForegroundColor Cyan
+    }
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0

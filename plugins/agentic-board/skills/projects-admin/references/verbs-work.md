@@ -34,6 +34,31 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      comment (hostname, PID, time, branch). To reserve an issue for ANOTHER machine without
      starting it here, use `Board-Work.ps1 -ProjectNum <n> -Lock <issueNum>` (posts the LOCK
      claim + moves Status to In Progress; symmetric `-Unlock <issueNum>` releases it).
+  3b. **Decide the PR shape BEFORE starting anything — grouped is the default (#662).**
+     The per-PR cycle is what costs the user: one review-gate run against the subscription
+     quota, a `second-opinion` round whenever no real reviewer shows up, and a merge
+     confirmation that needs their attention. That is paid ONCE PER PR, not per issue — so on
+     a board of related issues it dominates the cost of the work itself. **When the chosen
+     issues overlap, they go in ONE PR.** One PR per issue is the case that needs a reason:
+     - the issue carries risk that should be able to fail review on its own, or
+     - someone should be able to approve or reject it separately from the others, or
+     - the repo said so (`preferGroupedPRs: false`, below).
+
+     `Board-Work.ps1 -ProjectNum <n>` does this arithmetic for you: under the pending list it
+     names the groups it found, **the evidence for each** (the same file of this repo named in
+     both issues, or a shared board Area), and how many review rounds grouping would remove.
+     Read the evidence, not the count — the tool proposes, you decide. It caps a group at 4
+     issues so the PR stays reviewable, and says out loud which issues it held back for a
+     second batch. Never merge the leftovers back in silently: an unreviewable PR trades a cost
+     the user pays knowingly for one they do not.
+
+     **The repo's standing answer.** `Board-Work.ps1 -PreferGroupedPRs on|off|auto` records it
+     in `.agentic-board/config.json` (versioned, like `roles.json` — it is a team decision, not
+     machine state). `on` = always group; `off` = one PR per issue, and the offer stops
+     appearing; `auto` = the default, group only where there is evidence. **Ask once, then
+     record it** — a preference the user has to restate every session is not a preference.
+     A corrupt config file is reported, never silently read as "no preference".
+
   4. **Start it.** Run with `-ProjectNum <n> -Start <issueNum> -Branch` — moves the item to
      In Progress, assigns the owner, creates + checks out the work branch `issue-<num>-<slug>`
      (when the cwd is a clone of the issue's repo), and prints the full issue context (body,
@@ -49,6 +74,11 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
        isolated **git worktree** `../<repo>--issue-<n>` automatically (the official
        parallel-sessions pattern) and prints `cd <path>`: CONTINUE THE WORK THERE. After the
        PR merges, clean it with `git worktree remove <path>`.
+     - **Starting a group?** Use `-StartGroup <n1,n2,...> -Branch` instead of running this step
+       once per issue: the first issue gets the branch/worktree and the rest get only the board
+       mechanics (Status/assignee/claim) on that SAME branch, so they finish through ONE PR,
+       one gate and one merge. This is the normal path for issues the offer grouped, not a
+       special case — see step 3b for when to split them back out instead.
      - **Too big for one PR?** Break it down FIRST with
        `scripts/Board-Breakdown.ps1 -Parent <issueNum> -Tasks "child A", "child B"` — creates
        native sub-issues (Sub-issues progress fills itself) — then start one child. Use a
@@ -58,7 +88,9 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
        them with `/board triage -Issue <n> -Type <t> -Area <a> -Estimate <n>`, and PROPOSE a Priority
        (`-Priority P2 -Rationale '...'`) for the user to confirm. Do not leave them blank until Done —
        a field filled after the work is over can no longer inform a decision.
-  5. **Finish with a PR + review gate — MANDATORY.** When the work is done:
+  5. **Finish with a PR + review gate — MANDATORY.** What is mandatory is that the work lands
+     through a PR and a gate, NOT that each issue gets its own: a batch started at step 3b
+     finishes through one PR carrying one `Closes #<n>` per issue. When the work is done:
      a. Run `scripts/New-BoardPR.ps1 -Issue <issueNum>` — the cross-account push+PR step:
         it resolves the RIGHT account from the repo OWNER (CSalcedoDataBI → personal PAT,
         PAL-Devs → business PAT; `-TokenVar` forces one), verifies push permission, pushes
@@ -161,7 +193,9 @@ and wait for; never assume the account or the scope:
 | 2. Pick a board | `Board-Work.ps1 -ListBoards [-Repo <owner/name>]` | With `-Repo`: only boards LINKED to that repo (`repository.projectsV2`) — exactly one result skips this pick. Without: every board of the owner (backups excluded). Both show pending count (Backlog or no Status) + URL, most pending first |
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
-| 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, but for several SMALL, SEQUENTIAL sub-issues of the same epic (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch. Use this instead of running step 4 once per sub-issue when they're too small/related to justify a PR each — mirrors what #631+#632 did by hand in PR #634 |
+| 3b. Choose the PR shape | (read the offer printed under the pending list) | **Grouped is the default when the issues overlap (#662)**: the listing names each group, the evidence behind it (same repo file named in both issues, or a shared board Area), what it saves in review rounds, and what it held back to keep the PR reviewable (cap 4). One PR per issue is the case that needs a reason — independent risk, or a separate approver |
+| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` | Writes `.agentic-board/config.json` (versioned, like `roles.json`). `on` = always group · `off` = one PR per issue, offer suppressed · `auto` = default, group on evidence. Ask once, record it — never make the user restate it each session |
+| 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, for a group chosen at 3b (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch, so all of them close through ONE PR/gate/merge |
 | 5. Finish it | push branch → PR with `Closes #<num>` (or `New-BoardPR.ps1 -Issue <n1,n2,...>` for a batch — one `Closes #<n>` line per issue) → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → merge-confirmation summary → user confirms → `Board-Merge.ps1 -PR <n>` only on exit 0 AND confirmation | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. On exit 0, present the mandatory merge-confirmation summary (#630/#631, four parts, above) and WAIT for the user's answer before merging — gate green is a precondition for asking, never a reason to skip asking. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself for every closed issue |
 
 Notes:
@@ -170,10 +204,13 @@ Notes:
 - **Step 4b / batch (#633)**: `-StartGroup` is mutually exclusive with `-Start` and `-Parallel` —
   three different ways to start issues, never combined. If the FIRST (leader) issue can't start
   (blocked, already claimed, etc.) the whole batch aborts untouched; a later issue in the group
-  that can't start is just dropped from it with a warning — the rest still share the branch. Judge
-  "small and sequential" the way #631+#632 were: same epic, no PR-worthy risk on its own, nobody
-  else likely to want to review them separately. Don't batch issues that are independently risky
-  or that different people should be able to approve/reject on their own.
+  that can't start is just dropped from it with a warning — the rest still share the branch.
+- **What splits a group back out (#662)**: an issue that carries risk which should be able to fail
+  review on its own, or that a different person should be able to approve or reject separately.
+  Those are the reasons — and they are reasons to SPLIT, not conditions to satisfy before daring
+  to group. The tool never groups a draft note (there is no issue for a PR to close) or a blocked
+  one (`-StartGroup` would drop it anyway), and it never proposes a group on evidence it cannot
+  name: if it cannot say WHY two issues belong together, it does not suggest them.
 - After step 4, the agent continues working the issue in-session — the printed context is the briefing.
 - **Gate exit 2 — "GATE SIN REVISAR" (#510).** Checks are green but *nobody looked at the code*: no
   GitHub review, no registered external review. This used to print `GATE PASSED` with a reminder
