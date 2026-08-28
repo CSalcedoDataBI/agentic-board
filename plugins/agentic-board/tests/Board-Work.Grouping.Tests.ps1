@@ -366,6 +366,29 @@ Describe 'Show-GroupingOffer - what each posture actually says' {
         $text | Should -Match '#1, #2'
     }
 
+    It 'says WHERE a group lands when it belongs to another repo on the board' {
+        # The branch the change itself calls critical: -StartGroup opens the PR in the current
+        # checkout, so a batch belonging elsewhere has to say so or the user starts issues here
+        # that no PR from here can close.
+        $foreign = @([pscustomobject]@{ reason = 'area'; evidence = 'Work'; repo = 'owner/elsewhere'; issues = @(1, 2); dropped = @() })
+        $text = (Show-GroupingOffer -Suggestions $foreign -Posture 'auto' -CurrentRepo 'owner/here' 6>&1 | Out-String)
+        $text | Should -Match 'owner/elsewhere'
+        $text | Should -Match 'el PR va alli'
+    }
+
+    It 'does NOT add that note for a group of the current repo' {
+        $mine = @([pscustomobject]@{ reason = 'area'; evidence = 'Work'; repo = 'owner/here'; issues = @(1, 2); dropped = @() })
+        $text = (Show-GroupingOffer -Suggestions $mine -Posture 'auto' -CurrentRepo 'owner/here' 6>&1 | Out-String)
+        $text | Should -Not -Match 'el PR va alli'
+    }
+
+    It 'stays quiet about repos when there is no current repo to compare against' {
+        # Outside a clone there is no "here", so calling a group foreign would be an invention.
+        $foreign = @([pscustomobject]@{ reason = 'area'; evidence = 'Work'; repo = 'owner/elsewhere'; issues = @(1, 2); dropped = @() })
+        $text = (Show-GroupingOffer -Suggestions $foreign -Posture 'auto' -CurrentRepo '' 6>&1 | Out-String)
+        $text | Should -Not -Match 'el PR va alli'
+    }
+
     It 'names the issues it held back for size instead of dropping them silently' {
         $capped = @([pscustomobject]@{ reason = 'file'; evidence = 'Board-Work.ps1'; issues = @(1, 2, 3, 4); dropped = @(5, 6) })
         $text = Get-OfferText -Suggestions $capped -Posture 'auto'
