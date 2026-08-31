@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-08-31
+
 ### Fixed
 - **Every shipped PowerShell script now carries a UTF-8 BOM, so Windows PowerShell 5.1 can read
   it.** A session on a Spanish Windows could not run `Board-Fill.ps1` at all: it died at parse
