@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Encoding ratchet: every PowerShell file we ship must start with a UTF-8 BOM.
 
     Field report (2026-08-31): a session on a Spanish Windows could not run Board-Fill.ps1 at all —
