@@ -1,4 +1,4 @@
-<#  Get-ToolsCatalog.ps1 — the unified referenced-tools catalog resolver (#385).
+﻿<#  Get-ToolsCatalog.ps1 — the unified referenced-tools catalog resolver (#385).
 
     Merges the two sources that describe the external tools a project references and can install:
       - the knowledge registry  (knowledge/registry.json)   — the *references* (what exists / why)

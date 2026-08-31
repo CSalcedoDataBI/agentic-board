@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Fleet-Plan.ps1 - the advisory board-lead planner (P3-2). It reads
     pending board issues and emits an assignment map (issue -> CLI -> dependency wave)
     WITHOUT launching anything. Side-effecting at the edges (gh), so a dot-source guard

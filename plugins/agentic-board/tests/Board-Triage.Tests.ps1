@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Board-Triage.ps1's pure triage logic (#306).
 
     Board-Triage.ps1 is side-effecting (reads/writes the board over gh), so it exposes a dot-source

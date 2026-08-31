@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Review gate for /board work step 5: no PR merges blind.
 

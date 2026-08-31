@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Regenerate the derived parts of README.md so they never drift from the source:
     the command catalog (from each command's frontmatter) and the version string

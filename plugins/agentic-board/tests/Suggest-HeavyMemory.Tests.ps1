@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Suggest-HeavyMemory.ps1 - the security-gated heavy-memory escalation.
 
     The script hits PyPI and can install, so it exposes a dot-source guard: with

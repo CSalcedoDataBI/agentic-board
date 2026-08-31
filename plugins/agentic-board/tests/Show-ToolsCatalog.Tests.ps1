@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Show-ToolsCatalog.ps1 (#386) — the browse + research view over the catalog resolver.
     browse: every tool listed, grouped by domain, each row carrying its URL and installed-state.
     research <id>: surfaces one tool's exact reference (URL + note) before install.

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for New-BoardPR.ps1's pure PR-existence check (#336).
 
     New-BoardPR.ps1 is side-effecting (git push + gh pr create), so it exposes a dot-source guard:

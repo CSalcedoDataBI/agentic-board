@@ -1,4 +1,4 @@
-<#  CopilotAvailability.ps1 — remember, per GitHub account, that Copilot code review is unavailable so
+﻿<#  CopilotAvailability.ps1 — remember, per GitHub account, that Copilot code review is unavailable so
     the review gate stops requesting + WAITING for it on every PR (#367).
 
     The gate used to request a Copilot review and wait up to -TimeoutMinutes for it on EVERY PR, even

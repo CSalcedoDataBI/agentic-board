@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Fleet-Ownership.ps1 - the fleet file-ownership guard (P3-3,
     "one owner per file"). Side-effecting (disk + git + process liveness), so it
     exposes a dot-source guard ($env:ABIOS_FLEETOWNERSHIP_DOTSOURCE) to unit-test the

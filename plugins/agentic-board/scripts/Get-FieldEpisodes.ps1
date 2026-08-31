@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Stage 2 of /board telemetry (#476) — turn transcript events into candidate episodes.
 

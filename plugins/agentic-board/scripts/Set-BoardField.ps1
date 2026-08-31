@@ -1,4 +1,4 @@
-<#  Set-BoardField.ps1 — bulk-fill ONE custom field across a board's items by a per-item rule.
+﻿<#  Set-BoardField.ps1 — bulk-fill ONE custom field across a board's items by a per-item rule.
     Generalizes the common "fill every column" chore: set a single-select field by a title-prefix
     map, or a text field by a {title} template, or a constant for all items. Idempotent, retries
     transient 5xx (502 Bad Gateway is common at scale), handles single-select vs text automatically.

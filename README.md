@@ -248,7 +248,7 @@ Two layers protect this repo:
    tool (no repo names, client names, data, GUIDs, or paths).
 2. **A guard you can't forget** — after cloning, run once:
    ```
-   powershell -File scripts/install-guard.ps1
+   pwsh -File scripts/install-guard.ps1
    ```
    This wires a `pre-commit` + `pre-push` hook that **blocks** any commit/push whose added lines
    contain a known secret pattern or a term from your local `.abios/private-denylist.txt`

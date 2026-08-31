@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Add-KnowledgeRef.ps1: inits a seeded registry, appends a record,
     regenerates the table, enforces the domain guard and the local-path-exists guard,
     infers type, and increments ids. #>

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Board-Merge.ps1 — specifically the end-to-end brake check (#536).
 
     THE DEFECT THESE EXIST FOR, because it is invisible in a normal reading:

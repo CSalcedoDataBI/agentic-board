@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-InstalledPlugins.ps1 — parsing `claude plugin list` output into
     match keys (plugin + marketplace), best-effort. #>
 

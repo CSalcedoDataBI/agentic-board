@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for scripts/Test-IssueLanguage.ps1 (#305).
 
     A heuristic detector is only worth shipping if its thresholds are pinned, so this asserts BOTH

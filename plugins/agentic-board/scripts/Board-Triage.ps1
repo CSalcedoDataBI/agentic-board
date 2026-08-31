@@ -1,4 +1,4 @@
-<#  Board-Triage.ps1 — fill an item's TRIAGE fields from evidence, and PROPOSE (never silently
+﻿<#  Board-Triage.ps1 — fill an item's TRIAGE fields from evidence, and PROPOSE (never silently
     write) its Priority (#306).
 
     The board's pending items — the only part anyone plans from — sit blank on Type / Area /

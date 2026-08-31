@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Repo-wide syntax check: every plugin script must PARSE (#282).
 
     Motivation, from #274 / PR #280: the string "limite de $PrLimit:" parsed as a scope-qualified

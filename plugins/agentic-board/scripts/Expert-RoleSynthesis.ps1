@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Role synthesis for /board expert — map a plan to a domain, hook the relevant installed
     skills/profiles, and render the "role-as-objective" block the auto-expert adopts.

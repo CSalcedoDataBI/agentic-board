@@ -1,4 +1,4 @@
-<#  Get-BoardItems.ps1 - read EVERY item of a board, or say out loud that it could not (#484).
+﻿<#  Get-BoardItems.ps1 - read EVERY item of a board, or say out loud that it could not (#484).
 
     Why this exists. `gh project item-list` takes a `--limit` and, on reaching it, returns exactly
     that many items with no warning, no error and exit 0. It also returns them OLDEST-FIRST, so on a

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Board-Changelog.ps1's CHANGELOG-write logic (#324).
 
     Board-Changelog.ps1 is side-effecting (reads the board over gh), so it exposes a dot-source

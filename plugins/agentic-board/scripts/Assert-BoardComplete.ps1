@@ -1,4 +1,4 @@
-<#  Assert-BoardComplete.ps1 — the pass/fail check for "the board is fully worked" (no pending items).
+﻿<#  Assert-BoardComplete.ps1 — the pass/fail check for "the board is fully worked" (no pending items).
 
     A runnable gate that answers one question: does board <ProjectNum> still have any PENDING work?
     "Pending" is the SAME definition /board work uses to list what to start (Board-Work.ps1

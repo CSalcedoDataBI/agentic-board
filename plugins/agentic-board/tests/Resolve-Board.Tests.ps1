@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Resolve-Board.ps1 - the read must FAIL CLOSED (#313, part of #303).
 
     Resolve-Board's whole job is "find-or-reuse, create only if none exists". The find is a

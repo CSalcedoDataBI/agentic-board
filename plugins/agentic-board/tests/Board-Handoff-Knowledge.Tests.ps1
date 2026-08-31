@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for the capture-in-handoff helper Get-HandoffKnowledgeCandidates in
     Board-Handoff.ps1 (the knowledge anti-rot hook, #162). Dot-sourced via the guard so
     only the pure helper runs — zero gh/git/network. Covers URL extraction from the

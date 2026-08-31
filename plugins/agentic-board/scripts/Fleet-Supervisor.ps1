@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Fleet supervisor: stall detection + fleet termination policy (Phase 3, P3-5).
 

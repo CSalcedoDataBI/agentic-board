@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Maintain a durable "run-ledger" for a long /board work run so it SURVIVES
     auto-compaction (epic #348).

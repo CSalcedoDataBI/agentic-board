@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Brake-Guard.ps1 — the irreversible brake as a mechanical control (#440 / #516).
 
     The defect these guard against: the brake used to be a paragraph in the launch briefing, and

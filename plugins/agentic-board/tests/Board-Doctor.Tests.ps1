@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Board-Doctor.ps1 - the git-reality branch/worktree audit (#274).
 
     The whole point of the command is that it does NOT trust `git branch --merged` (this repo

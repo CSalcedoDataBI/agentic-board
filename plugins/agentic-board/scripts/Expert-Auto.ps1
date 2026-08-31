@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     /board expert `auto` — compose the autonomous brief and launch the auto-expert run.
 

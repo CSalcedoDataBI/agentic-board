@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Load and merge the /board expert role catalog — shipped preset + optional global + project-local file.
 

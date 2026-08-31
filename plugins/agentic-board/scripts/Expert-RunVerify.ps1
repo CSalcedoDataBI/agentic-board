@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Completion check for /board expert runs — prove the run used the tool instead of asserting it.
 

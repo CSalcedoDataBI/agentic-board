@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     TMDL diff review (M2.2): detect breaking semantic-model schema changes.
 

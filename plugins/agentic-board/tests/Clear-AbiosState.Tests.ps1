@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Clear-AbiosState.ps1 — the .agentic-board/ garbage collector (#574).
 
     The state dir accumulated 48 files across the project's entire life because nothing ever

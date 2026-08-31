@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Get-BoardItems.ps1 — the board read that reports its own truncation (#484).
 
     The bug being pinned here is not an off-by-N. `gh project item-list --limit 200` returns exit 0

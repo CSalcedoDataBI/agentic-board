@@ -1,4 +1,4 @@
-<#  Welcome-SessionStartHook.ps1 - first-run welcome banner, shown exactly once.
+﻿<#  Welcome-SessionStartHook.ps1 - first-run welcome banner, shown exactly once.
 
     Wired as an AUTO-REGISTERED Claude Code SessionStart hook (hooks/hooks.json) - not
     opt-in: the whole point is that it "just works" right after `/plugin install`, so the

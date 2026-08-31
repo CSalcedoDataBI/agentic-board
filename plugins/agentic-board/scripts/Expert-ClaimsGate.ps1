@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Claims verification gate for /board expert deliverables (#479).
 

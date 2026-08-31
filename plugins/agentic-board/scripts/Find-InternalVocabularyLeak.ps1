@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Detect internal implementation vocabulary (script filenames, bare extensions, version-pinned
     cache paths) in a string meant for a user to read.

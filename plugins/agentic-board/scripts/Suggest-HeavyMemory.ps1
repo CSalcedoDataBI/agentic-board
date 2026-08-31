@@ -1,4 +1,4 @@
-<#  Suggest-HeavyMemory.ps1 - the security-gated "heavy memory" escalation (#143).
+﻿<#  Suggest-HeavyMemory.ps1 - the security-gated "heavy memory" escalation (#143).
 
     The lightweight, git-committed HANDOFF.md is the DEFAULT. For the HEAVY case only -
     persistent SEMANTIC memory across projects - this script does NOT reinvent memory

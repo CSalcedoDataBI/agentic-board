@@ -1,4 +1,4 @@
-<#  Test-IssueLanguage.ps1 — flag issue text that is not in English (#305).
+﻿<#  Test-IssueLanguage.ps1 — flag issue text that is not in English (#305).
 
     This repo is English-only, but `abios-feedback` files its issues from ANY project, usually while
     the conversation with the user is in Spanish. The rule itself lives where the text is drafted

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Apply-FieldPreset.ps1 - the field-list read must FAIL CLOSED (#313, part of #303).
 
     This is the exact repro named in #303: `$existing = (gh project field-list ... |

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Evidence logging for /board expert — format the recorded test evidence and pick its
     destinations (PR body, [abios-evidence] issue comment, versioned file).

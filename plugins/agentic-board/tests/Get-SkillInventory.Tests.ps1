@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-SkillInventory.ps1.
     Builds a deliberately messy skill layout in a temp fixture (canonical + misplaced
     + near-duplicate + over-cap + first-person) and asserts the inventory contract. #>

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Fleet file-ownership guard (Phase 3, P3-3) - "one owner per file" for the parallel
     /board work fleet.

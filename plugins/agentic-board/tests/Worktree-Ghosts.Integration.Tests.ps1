@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Integration tests for Worktree-Ghosts.ps1 against a REAL git repo (#618).
 
     WHY THIS FILE EXISTS, separate from the pure suite. Two bugs shipped past a fully green pure

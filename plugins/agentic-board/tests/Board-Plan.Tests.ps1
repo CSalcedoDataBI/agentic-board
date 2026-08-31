@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Board-Plan.ps1 — the /board plan epic creator.
 
     Side-effecting (creates issues over gh), so it exposes a dot-source guard: with

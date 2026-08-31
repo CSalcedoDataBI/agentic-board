@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Update-Docs.ps1 - README docs generator (#202).
 
     Update-Docs.ps1 is side-effecting (reads command files + plugin.json, rewrites

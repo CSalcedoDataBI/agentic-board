@@ -1,4 +1,4 @@
-<#  Get-SkillGaps.ps1 — which catalog tools are missing for a profile?
+﻿<#  Get-SkillGaps.ps1 — which catalog tools are missing for a profile?
 
     Reads a curated PROFILE catalog (presets/toolkits/<profile>.json), compares it against
     what is actually installed, and reports installed vs gaps. It NEVER installs anything and

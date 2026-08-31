@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Autonomy gate for /board expert — decide whether an action is irreversible (stop for the
     human) or safe to perform autonomously.

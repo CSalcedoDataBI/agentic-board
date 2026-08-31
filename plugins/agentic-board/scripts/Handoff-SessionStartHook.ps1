@@ -1,4 +1,4 @@
-<#  Handoff-SessionStartHook.ps1 - surface a saved handoff when a session begins.
+﻿<#  Handoff-SessionStartHook.ps1 - surface a saved handoff when a session begins.
 
     Meant to be wired as a Claude Code SessionStart hook (OPT-IN - see
     skills/projects-admin/references/handoff-hook.md). When RESUMING a prior session

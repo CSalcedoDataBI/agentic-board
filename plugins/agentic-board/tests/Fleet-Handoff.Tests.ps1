@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Fleet-Handoff.ps1 - dependency-aware hand-off (P3-4). A dependent
     issue waits for its blockers' PRs to merge, and inherits the upstream findings as
     context. Pure core (readiness + context) behind a dot-source guard

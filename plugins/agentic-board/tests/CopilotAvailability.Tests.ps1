@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for CopilotAvailability.ps1 — the per-account "Copilot has no quota, stop waiting" memory (#367).
 
     Pure at load (functions only), so it dot-sources directly. The two decisions the gate depends on:

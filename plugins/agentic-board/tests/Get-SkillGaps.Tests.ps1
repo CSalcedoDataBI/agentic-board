@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-SkillGaps.ps1 — profile catalogs + gap detection against injected
     install sets (skill-clone by name, plugin by detect/marketplace). #>
 

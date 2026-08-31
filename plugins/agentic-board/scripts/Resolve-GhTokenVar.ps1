@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Decide WHICH GitHub identity applies here (#550, part of #541).
 

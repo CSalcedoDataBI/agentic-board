@@ -1,4 +1,4 @@
-<#  Get-GhAccount.ps1 — resolve GitHub account + token for agentic-board.
+﻿<#  Get-GhAccount.ps1 — resolve GitHub account + token for agentic-board.
     Default account: CSalcedoDataBI. Override: -Account pal-devs.
     Reads the PAT from the Windows USER registry (not $env:, which can be stale).
     Verifies the 'project' scope. Emits an object with .Token to set $env:GH_TOKEN.  #>

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Error-boundary tests — exit 1 with no message and raw exceptions (#485).
 
     Field sweep (#476): 945 sessions, 295 failed invocations. Two failure shapes

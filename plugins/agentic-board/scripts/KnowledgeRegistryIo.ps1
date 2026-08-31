@@ -1,4 +1,4 @@
-<#  KnowledgeRegistryIo.ps1 — read/write the knowledge registry as JSON *or* YAML (#298).
+﻿<#  KnowledgeRegistryIo.ps1 — read/write the knowledge registry as JSON *or* YAML (#298).
 
     `/knowledge` versions its registry in `knowledge/registry.json`. A repo whose pre-commit hook uses
     an allow-list (only code: .py .md .toml .yaml …) blocks a `.json` file — often ON PURPOSE, because

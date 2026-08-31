@@ -1,4 +1,4 @@
-<#
+﻿<#
     The single resolver for "which owner/name is this clone?" — dot-source it, never invoke it.
 
     WHY THIS FILE EXISTS (#281). The derivation was copy-pasted into eleven scripts in two

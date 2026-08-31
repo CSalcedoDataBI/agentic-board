@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Publish-KnowledgeWiki.ps1.
 
     Since #405, Publish-KnowledgeWiki.ps1 is a thin alias that delegates entirely to

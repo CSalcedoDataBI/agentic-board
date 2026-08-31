@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-EndToEnd.ps1 — may an autonomous run close its own work? (#530, part of #526)
 
     Four conditions, each covering a failure the others cannot see. The tests that matter are the

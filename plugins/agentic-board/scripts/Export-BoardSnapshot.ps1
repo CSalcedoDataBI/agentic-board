@@ -1,4 +1,4 @@
-<#  Export-BoardSnapshot.ps1 - render a Projects board as a Markdown table (a publishable snapshot).
+﻿<#  Export-BoardSnapshot.ps1 - render a Projects board as a Markdown table (a publishable snapshot).
     Requires $env:GH_TOKEN (via gh-account). ASCII-only source.
     Usage: ./Export-BoardSnapshot.ps1 -Number 13 -Owner CSalcedoDataBI -OutFile snapshot.md  #>
 [CmdletBinding()]

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for the Command Surface Contract (CONTRIBUTING.md § "Command surface").
 
     Enforces the invariant that let a menu tell users to type `/abios-feedback` (a command that

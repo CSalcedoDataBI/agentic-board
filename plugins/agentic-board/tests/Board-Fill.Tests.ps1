@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Board-Fill.ps1 - the /board fill gap-filler.
 
     Board-Fill.ps1 is a side-effecting command (gh + Write-Host), so it exposes a

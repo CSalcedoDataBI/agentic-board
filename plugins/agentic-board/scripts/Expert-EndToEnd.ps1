@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Decide whether an autonomous run may close its own work end-to-end (#530, part of #526).
 

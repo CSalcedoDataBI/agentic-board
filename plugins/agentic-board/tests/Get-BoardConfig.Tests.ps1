@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-BoardConfig.ps1 - the per-repo preference file (#662).
 
     The script is pure at load (functions only), so it is dot-sourced directly.

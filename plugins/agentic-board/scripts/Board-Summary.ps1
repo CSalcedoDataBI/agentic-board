@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     The closing summary every user-facing flow ends with — four blocks, always the same four.
 

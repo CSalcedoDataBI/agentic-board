@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for scripts/Get-ReleaseNotes.ps1 (release L1, #322).
 
     Get-ReleaseNotes.ps1 reads CHANGELOG.md and prints one version's block for the release workflow

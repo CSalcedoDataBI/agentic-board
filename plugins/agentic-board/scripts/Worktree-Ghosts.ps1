@@ -1,4 +1,4 @@
-<#  Worktree-Ghosts.ps1 - inventory of managed worktree directories that git no longer knows.
+﻿<#  Worktree-Ghosts.ps1 - inventory of managed worktree directories that git no longer knows.
 
     THE GAP THIS CLOSES (#618). The doctor's existing ghost check trusts git's own `prunable`
     marker, which git sets when the METADATA survives but the DIRECTORY is gone. The inverse

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Merge a gated PR for /board work step 5d - handling the pr-before-merge ruleset.
 

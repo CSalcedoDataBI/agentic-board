@@ -1,4 +1,4 @@
-<#  Backup-Board.ps1 - make a COMPLETE backup of a Projects board. ALWAYS run before delete.
+﻿<#  Backup-Board.ps1 - make a COMPLETE backup of a Projects board. ALWAYS run before delete.
     Writes a JSON snapshot (project meta + fields + items) AND creates a restorable live clone.
     Requires $env:GH_TOKEN (via gh-account). Backups go to $env:ABIOS_BACKUP_DIR or ~/.agentic-board/backups.
     Usage: ./Backup-Board.ps1 -Number 13 -Owner CSalcedoDataBI

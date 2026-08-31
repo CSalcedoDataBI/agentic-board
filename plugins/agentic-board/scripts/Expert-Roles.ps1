@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     /board expert `roles` — show the effective role catalog and explain how a plan matches.
 

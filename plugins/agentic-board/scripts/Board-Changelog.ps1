@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Generate a Keep-a-Changelog block from closed board items (M4.2).
 
