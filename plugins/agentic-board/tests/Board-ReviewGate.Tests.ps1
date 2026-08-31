@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Board-ReviewGate.ps1's pure foreign-commit detection (#309).
 
     Board-ReviewGate.ps1 is side-effecting (reads the PR over gh, waits for CI/review), so it exposes

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Bpa-GateReview.ps1's pure BPA logic (M3.3, issue #16).
 
     Bpa-GateReview.ps1 is side-effecting (runs gh + Tabular Editor), so it exposes a dot-source guard:

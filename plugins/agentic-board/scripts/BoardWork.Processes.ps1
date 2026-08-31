@@ -1,4 +1,4 @@
-# BoardWork.Processes.ps1 - process supervision (tree kill, orphan reaper), extracted
+﻿# BoardWork.Processes.ps1 - process supervision (tree kill, orphan reaper), extracted
 # VERBATIM from Board-Work.ps1 (#575). Function definitions only; Board-Work dot-sources
 # this file before its own dot-source guard, so the surface is unchanged.
 

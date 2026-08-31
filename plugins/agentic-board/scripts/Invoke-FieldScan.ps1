@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     /board telemetry — sweep local session transcripts and report how agentic-board behaved (#476).
 

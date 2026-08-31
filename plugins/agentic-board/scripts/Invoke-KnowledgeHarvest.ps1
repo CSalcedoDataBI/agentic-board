@@ -1,4 +1,4 @@
-<#  Invoke-KnowledgeHarvest.ps1 — scan the repo for candidate references (read-only).
+﻿<#  Invoke-KnowledgeHarvest.ps1 — scan the repo for candidate references (read-only).
     Finds docs/**/*.md files and http(s) markdown links in README/docs, dedups against
     the existing registry, and emits candidates. The skill drives the pick + Add. #>
 [CmdletBinding()]

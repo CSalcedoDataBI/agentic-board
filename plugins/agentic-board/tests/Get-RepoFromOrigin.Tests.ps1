@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-RepoFromOrigin.ps1 — the single owner/name + issue-number resolver (#281).
 
     Both helpers replace an inline one-liner that was copy-pasted across eleven scripts and got

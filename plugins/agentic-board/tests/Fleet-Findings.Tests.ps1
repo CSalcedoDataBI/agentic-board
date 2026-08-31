@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Fleet-Findings.ps1 - the fleet shared-findings blackboard (P3-1).
 
     Fleet-Findings.ps1 is a side-effecting command (disk + git + Write-Host), so it

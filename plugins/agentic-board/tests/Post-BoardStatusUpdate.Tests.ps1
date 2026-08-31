@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Post-BoardStatusUpdate.ps1 - reads must FAIL CLOSED (#315, part of #303).
 
     The write here is a public status update posted to the board. Two hazards:

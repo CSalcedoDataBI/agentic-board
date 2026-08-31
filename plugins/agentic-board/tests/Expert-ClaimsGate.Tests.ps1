@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-ClaimsGate.ps1 — the claims verification gate for deliverables (#479).
 
     Five tests from the issue:

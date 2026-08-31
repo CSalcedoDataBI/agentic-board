@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-AbiosStateDir.ps1 — the single internal state-dir resolver.
 
     Covers the rename hardening (#244): the new name going forward, the one-time

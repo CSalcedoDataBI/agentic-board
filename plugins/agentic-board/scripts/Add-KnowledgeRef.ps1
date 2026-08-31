@@ -1,4 +1,4 @@
-<#  Add-KnowledgeRef.ps1 — add one reference to the project knowledge registry.
+﻿<#  Add-KnowledgeRef.ps1 — add one reference to the project knowledge registry.
     Inits the registry (seeded taxonomy) if absent. Enforces the domain guard
     (declared or -NewDomain) and, for local refs, that the path exists (never invent
     references). Appends the record and regenerates KNOWLEDGE.md.

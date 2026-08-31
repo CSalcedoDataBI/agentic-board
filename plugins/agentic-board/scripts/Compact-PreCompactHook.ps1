@@ -1,4 +1,4 @@
-<#  Compact-PreCompactHook.ps1 - snapshot the transcript before a compaction (epic #348).
+﻿<#  Compact-PreCompactHook.ps1 - snapshot the transcript before a compaction (epic #348).
 
     Wired as a Claude Code PreCompact hook. It is the belt-and-suspenders half of the
     compaction-survival feature: the run-ledger (Board-RunLedger.ps1) is the primary

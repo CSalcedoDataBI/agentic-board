@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Move-SkillsLayout.ps1.
     Builds a temp git repo with one misplaced skill and one canonical skill, then
     asserts: dry-run changes nothing, -Apply relocates only the misplaced one and

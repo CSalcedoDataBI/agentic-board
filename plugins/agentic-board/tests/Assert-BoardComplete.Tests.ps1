@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Assert-BoardComplete.ps1 — the "board is fully worked" pass/fail check.
 
     Side-effecting (reads the board over gh), so it exposes a dot-source guard: with

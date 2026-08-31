@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Inventory and classify every local branch and worktree from GIT REALITY - not from
     the session registry. Read-only by default; `-Fix` cleans up, confirming per branch.

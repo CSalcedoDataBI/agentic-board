@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Lint: no NEW raw `gh` call sites outside Invoke-Gh.ps1 (#571).
 
     Invoke-Gh.ps1 exists because bare gh turns a 401 into an empty result (#303/#86) - and yet

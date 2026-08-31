@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Fleet-Supervisor.ps1 - stall detection + fleet termination (P3-5).
     Watches the live fleet and decides: which sessions have stalled (running too long with
     no PR), whether the whole run is complete, and whether it should STOP (guard against

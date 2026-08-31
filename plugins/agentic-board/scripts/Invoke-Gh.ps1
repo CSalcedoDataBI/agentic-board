@@ -1,4 +1,4 @@
-<#  Invoke-Gh.ps1 - run gh so that a failure is a FAILURE, not an empty result (#303).
+﻿<#  Invoke-Gh.ps1 - run gh so that a failure is a FAILURE, not an empty result (#303).
 
     Why this exists. `gh` signals failure ONLY through its exit code, and a native command
     that exits non-zero does NOT throw in PowerShell - not even under

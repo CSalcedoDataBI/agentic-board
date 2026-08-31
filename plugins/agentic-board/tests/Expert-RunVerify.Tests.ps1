@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-RunVerify.ps1 — the completion check that proves a run wrote its evidence
     instead of asserting it did (#532, part of #526).
 

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Resolve-GhTokenVar.ps1 — which GitHub identity applies (#550, part of #541).
 
     The decision that matters is the FAILURE one. An armed run with no agent token must STOP, not

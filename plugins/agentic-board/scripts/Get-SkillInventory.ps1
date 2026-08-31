@@ -1,4 +1,4 @@
-<#  Get-SkillInventory.ps1 — read-only inventory of Agent Skills across the 3 scopes.
+﻿<#  Get-SkillInventory.ps1 — read-only inventory of Agent Skills across the 3 scopes.
 
     Enumerates every SKILL.md in:
       - plugin   : ~/.claude/plugins/**/skills/<skill>/SKILL.md   (namespace plugin:skill)

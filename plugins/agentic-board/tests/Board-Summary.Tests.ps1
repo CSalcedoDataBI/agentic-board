@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Board-Summary.ps1 — the closing summary every user-facing flow must end with.
 
     The contract is four blocks, always the same four, always in the same order: what I found,

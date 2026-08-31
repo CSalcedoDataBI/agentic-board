@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for ExpertContractIo.ps1 — the /board expert contract (config writes it, auto reads it).
 
     Pure filesystem IO (no gh), guarded by $env:ABIOS_EXPERTCONTRACT_DOTSOURCE. These pin the

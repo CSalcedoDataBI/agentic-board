@@ -1,4 +1,4 @@
-<#  Move-SkillsLayout.ps1 — reorganize scattered project skills into the canonical layout.
+﻿<#  Move-SkillsLayout.ps1 — reorganize scattered project skills into the canonical layout.
 
     Target layout (consumer repo / monorepo):
         <Root>/.claude/skills/<project>/<skill>/SKILL.md

@@ -1,4 +1,4 @@
-<#  Show-ToolsCatalog.ps1 — browse + research view over Get-ToolsCatalog (#386).
+﻿<#  Show-ToolsCatalog.ps1 — browse + research view over Get-ToolsCatalog (#386).
 
     The read-only presentation layer of the /tools catalog. With no -Id it BROWSES: every
     referenced tool grouped by domain, each row carrying its kind, installed-state and URL — so

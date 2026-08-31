@@ -1,4 +1,4 @@
-<#  SkillAudit-StopHook.ps1 — passive, suggest-only skill health nudge (Phase 2).
+﻿<#  SkillAudit-StopHook.ps1 — passive, suggest-only skill health nudge (Phase 2).
 
     Meant to be wired as a Claude Code Stop hook (OPT-IN — see
     skills/skills-audit/references/stop-hook.md). On each stop it runs a fast static

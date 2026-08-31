@@ -1,4 +1,4 @@
-<#  Get-InstalledMcpServers.ps1 — installed Claude Code MCP servers as match keys.
+﻿<#  Get-InstalledMcpServers.ps1 — installed Claude Code MCP servers as match keys.
 
     Parses `claude mcp list` output into a flat, de-duplicated list of lowercase server
     names a catalog's `detect`/`name` can be matched against. Each line is expected in the

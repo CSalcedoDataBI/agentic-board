@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Get-ToolsCatalog.ps1 (#385) — the unified referenced-tools catalog resolver.
 
     It merges the knowledge registry (references) with the toolkit presets (installers) into one

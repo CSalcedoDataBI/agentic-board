@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Install issue forms + PR template into a repository (/board templates).
 

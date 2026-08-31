@@ -1,4 +1,4 @@
-<#  Apply-FieldPreset.ps1 — idempotently create the fields of a preset on a Projects
+﻿<#  Apply-FieldPreset.ps1 — idempotently create the fields of a preset on a Projects
     board AND apply the preset's canonical single-select option colors.
 
     `gh project field-create` cannot set option colors (GitHub auto-assigns random

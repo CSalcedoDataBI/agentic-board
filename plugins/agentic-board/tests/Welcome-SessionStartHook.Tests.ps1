@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Welcome-SessionStartHook.ps1 - the auto-registered first-run banner.
 
     The hook reads stdin and writes a marker file, so it exposes a dot-source guard: with

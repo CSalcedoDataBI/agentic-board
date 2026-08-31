@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Read/write the /board expert contract — the settings `config` writes and `auto` reads.
 

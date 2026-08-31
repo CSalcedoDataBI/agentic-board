@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Integration coverage for the /tools catalog (#389).
 
     Exercises the resolver + view + installer together against the REAL shipped sources

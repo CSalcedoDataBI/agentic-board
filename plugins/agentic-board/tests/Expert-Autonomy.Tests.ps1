@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-Autonomy.ps1 — the single guard deciding when the autonomous run must
     stop for the human. Autonomy brakes ONLY on the irreversible; everything else proceeds.
     Fail-safe: an UNKNOWN action is treated as irreversible (stop and ask), never waved through.

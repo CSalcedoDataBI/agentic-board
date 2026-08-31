@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Extract one version's notes from a Keep-a-Changelog CHANGELOG (release L1, #322).
 

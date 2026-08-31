@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for SkillAudit-StopHook.ps1 — passive, suggest-only, never throws. #>
 
 BeforeAll {

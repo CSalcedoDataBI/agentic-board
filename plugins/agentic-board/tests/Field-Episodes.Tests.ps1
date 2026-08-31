@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Get-FieldEpisodes.ps1 — stage 2 of /board field (#476).
 
     Pure core behind $env:ABIOS_FIELDEPISODES_DOTSOURCE. Fixtures are normalized event lists, so

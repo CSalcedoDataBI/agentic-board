@@ -212,7 +212,7 @@ long-titled tracking issues are skipped; pass your own to widen/narrow the set.
 
 ```bash
 # 1) MANDATORY, unconditional backup (do NOT ask) — JSON snapshot + restorable live clone:
-powershell -File "${CLAUDE_PLUGIN_ROOT}/scripts/Backup-Board.ps1" -Number <num> -Owner <owner>
+pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Backup-Board.ps1" -Number <num> -Owner <owner>
 
 # 2) Then confirm with the user (destructive), then delete.
 #    gh project delete has NO --yes/-y flag — pipe a confirmation to stdin:

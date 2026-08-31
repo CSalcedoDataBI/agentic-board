@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Prepare a release: bump the version, fold the CHANGELOG, keep the manifests
     consistent. Prepares files only — never commits, tags, or pushes.

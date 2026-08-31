@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-Config.ps1 — the /board expert `config` verb: build the contract with a
     synthesized role and persist it. Pure composition (New-ExpertConfig) behind
     ABIOS_EXPERTCONFIG_DOTSOURCE; it reuses ExpertContractIo + Expert-RoleSynthesis. #>

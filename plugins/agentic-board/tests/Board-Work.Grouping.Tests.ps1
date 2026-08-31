@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for the grouped-PR suggestion helpers of Board-Work.ps1 (#662).
 
     These are pure functions over board items, so they run through the script's

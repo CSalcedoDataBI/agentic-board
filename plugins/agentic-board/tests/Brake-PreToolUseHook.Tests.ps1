@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Brake-PreToolUseHook.ps1 — the half of the brake that does not depend on the agent's
     cooperation (#516), taught the end-to-end order in #536.
 

@@ -1,4 +1,4 @@
-<#  Worktree-SessionStartHook.ps1 - sweep empty orphan worktree directories at session start (#618).
+﻿<#  Worktree-SessionStartHook.ps1 - sweep empty orphan worktree directories at session start (#618).
 
     WHY A HOOK AND NOT A COMMAND. These orphans are born from abnormal session termination, so
     the moment a new session starts is exactly when the previous one's wreckage is on disk and

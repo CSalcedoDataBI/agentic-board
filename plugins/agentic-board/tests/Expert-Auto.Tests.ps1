@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-Auto.ps1 — the `auto` verb: compose the autonomous brief and resolve the
     time budget the launch hands to the brake marker (#564). Pure cores (Format-AutoBrief,
     Get-ContractBudgetMinutes, Test-GhScope, Assert-BrakeCompliance, Format-ComplianceReport)

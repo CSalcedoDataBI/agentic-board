@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for scripts/Invoke-Gh.ps1 (#311, part of #303).
 
     The whole point of the helper is that a gh failure must NOT be readable as an empty

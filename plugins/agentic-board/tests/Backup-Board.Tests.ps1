@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Backup-Board.ps1 and Export-BoardSnapshot.ps1 (#312, part of #303).
 
     These two are the ugliest instance of the silent-gh bug. Every other victim misreports

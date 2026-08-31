@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for ExpertRolesIo.ps1 — loads the shipped role preset plus the optional project-local
     roles.json, validates both, and merges them into the effective catalog. Pure filesystem IO
     (no gh) behind ABIOS_EXPERTROLES_DOTSOURCE. #>

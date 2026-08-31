@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Install-ToolFromCatalog.ps1 (#387) — install ONE referenced tool by id.
 
     skill-clone → delegates to the injected installer (real default: Install-SkillFromRepo.ps1).

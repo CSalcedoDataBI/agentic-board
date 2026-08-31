@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     The irreversible brake, as a mechanical control (#440 / #516).
 

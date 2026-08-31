@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Integration tests for `Board-Work.ps1 -PreferGroupedPRs` (#662).
 
     Pure tests could not have caught what these do. The bug they exist for was not in any

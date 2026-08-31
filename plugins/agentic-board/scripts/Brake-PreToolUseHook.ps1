@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     PreToolUse hook: refuse an irreversible command inside a brake-armed autonomous run (#516).
 

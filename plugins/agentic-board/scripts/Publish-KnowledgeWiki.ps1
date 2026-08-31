@@ -1,4 +1,4 @@
-<#  Publish-KnowledgeWiki.ps1 — DEPRECATED alias for Publish-DocsWiki.ps1.
+﻿<#  Publish-KnowledgeWiki.ps1 — DEPRECATED alias for Publish-DocsWiki.ps1.
 
     The GitHub Wiki is a single git repository; having two publishers independently clone
     and push it causes race conditions and lost updates. Publish-DocsWiki.ps1 is now the

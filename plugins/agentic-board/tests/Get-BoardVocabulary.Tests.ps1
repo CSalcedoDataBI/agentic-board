@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-BoardVocabulary.ps1 - the canonical/legacy option map
     behind issue #278 (a board born from GitHub's default template used to be
     silently invisible to /board work, and /board field apply could not migrate it). #>

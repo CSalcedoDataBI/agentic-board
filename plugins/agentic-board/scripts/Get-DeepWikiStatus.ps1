@@ -1,4 +1,4 @@
-<#  Get-DeepWikiStatus.ps1 — report DeepWiki indexing status for the current repo (#416).
+﻿<#  Get-DeepWikiStatus.ps1 — report DeepWiki indexing status for the current repo (#416).
 
     Resolves the repo from `origin`, checks GitHub visibility, probes DeepWiki,
     and returns one of four statuses:

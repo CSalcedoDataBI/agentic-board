@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-KnowledgeInventory.ps1. Builds a temp registry with a broken
     local path, a duplicate ref, an orphan domain and a missing note, then asserts the
     health contract. Also asserts the empty-registry seed path. #>

@@ -1,4 +1,4 @@
-<#  Bpa-GateReview.ps1 — run Tabular Editor's Best Practice Analyzer against a PBIP/TMDL model and,
+﻿<#  Bpa-GateReview.ps1 — run Tabular Editor's Best Practice Analyzer against a PBIP/TMDL model and,
     on request, BLOCK a merge when it reports rule violations (M3.3, issue #16).
 
     The review gate already runs Tmdl-DiffReview.ps1 (breaking schema changes) warn-only. M3.3 adds

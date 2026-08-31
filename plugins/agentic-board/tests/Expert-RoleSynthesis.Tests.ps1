@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-RoleSynthesis.ps1 — the deterministic skeleton the auto-expert fills.
 
     The LLM does the actual prior-art research; this script gives the reproducible parts:

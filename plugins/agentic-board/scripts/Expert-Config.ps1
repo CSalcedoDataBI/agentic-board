@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     /board expert `config` — build the auto-expert contract with a synthesized role and persist it.
 

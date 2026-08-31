@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Get-ToolkitFreshness.ps1 — provenance scan + fresh/behind/unknown
     classification against an injected upstream-SHA map (no network). #>
 

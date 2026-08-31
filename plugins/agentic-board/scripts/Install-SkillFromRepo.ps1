@@ -1,4 +1,4 @@
-<#  Install-SkillFromRepo.ps1 — clean-clone a single skill from a GitHub repo.
+﻿<#  Install-SkillFromRepo.ps1 — clean-clone a single skill from a GitHub repo.
 
     Shallow-clones the source repo to a temp dir, copies ONLY the requested skill folder
     into the personal skills dir (~/.claude/skills/<name>), preserves the source LICENSE

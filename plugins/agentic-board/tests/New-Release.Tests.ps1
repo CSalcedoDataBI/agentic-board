@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for New-Release.ps1 — release prep (#206).
 
     New-Release.ps1 is side-effecting (disk + git + Board-Changelog), so it exposes

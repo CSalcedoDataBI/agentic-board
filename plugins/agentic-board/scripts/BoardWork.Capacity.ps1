@@ -1,4 +1,4 @@
-# BoardWork.Capacity.ps1 - the machine-capacity governor, extracted VERBATIM from
+﻿# BoardWork.Capacity.ps1 - the machine-capacity governor, extracted VERBATIM from
 # Board-Work.ps1 (#575). Function definitions only; Board-Work dot-sources this file
 # before its own dot-source guard, so tests and callers see the same surface as before.
 

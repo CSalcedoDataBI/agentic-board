@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Find-InternalVocabularyLeak.ps1 — the detector behind the "no internal names in
     user-facing output" regression test (#491/#494). Pure text matching, guarded by
     $env:ABIOS_VOCABLEAK_DOTSOURCE so these run with no filesystem access for the detector half;

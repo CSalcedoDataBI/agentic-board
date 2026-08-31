@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-Roles.ps1 — the `roles list` / `roles why` verb: show the effective catalog
     and explain which role a plan resolves to. Pure behind ABIOS_EXPERTROLESCMD_DOTSOURCE. #>
 

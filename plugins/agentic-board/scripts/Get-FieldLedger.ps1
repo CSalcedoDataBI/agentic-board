@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Ledger and incremental watermark for /board telemetry — the field-observation sweep.
 

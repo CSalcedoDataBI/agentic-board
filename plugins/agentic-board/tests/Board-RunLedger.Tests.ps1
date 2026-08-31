@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Board-RunLedger.ps1 - the run-ledger writer (epic #348).
 
     The script touches gh + the filesystem, so it exposes a dot-source guard: with

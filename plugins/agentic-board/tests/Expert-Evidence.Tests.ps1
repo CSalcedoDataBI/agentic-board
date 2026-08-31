@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-Evidence.ps1 — the recorded test-evidence the auto-expert leaves behind.
 
     Pure formatting behind ABIOS_EXPERTEVIDENCE_DOTSOURCE. These pin the durable [abios-evidence]

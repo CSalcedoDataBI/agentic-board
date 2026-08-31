@@ -1,4 +1,4 @@
-<#  Get-ToolkitFreshness.ps1 — is each installed toolkit skill still current with upstream?
+﻿<#  Get-ToolkitFreshness.ps1 — is each installed toolkit skill still current with upstream?
 
     REPORT-ONLY. Scans the skills dir for `<skill>/.abios-provenance.json` markers written by
     Install-SkillFromRepo.ps1, and for each compares the installed commit SHA against the latest

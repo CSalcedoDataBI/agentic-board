@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Compact-PreCompactHook.ps1 - the transcript-snapshot safety net
     (epic #348).
 

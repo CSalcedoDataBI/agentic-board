@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Garbage-collect .agentic-board/ — the state dir nothing ever cleaned (#574).
 

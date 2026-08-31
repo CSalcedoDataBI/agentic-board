@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Set-BoardField.ps1 - the reads must FAIL CLOSED (#313, part of #303).
 
     Set-BoardField reads the project id, the field list and the item list up front, then loops

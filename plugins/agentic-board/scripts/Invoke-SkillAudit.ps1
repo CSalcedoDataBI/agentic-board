@@ -1,4 +1,4 @@
-<#  Invoke-SkillAudit.ps1 — deterministic health audit over the skill inventory.
+﻿<#  Invoke-SkillAudit.ps1 — deterministic health audit over the skill inventory.
 
     Runs Get-SkillInventory and turns its lint / budget / overlap / misplaced signals
     into classified findings, each routed to its OWNING repo via Resolve-SkillOwner

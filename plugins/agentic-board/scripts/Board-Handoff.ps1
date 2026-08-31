@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Write a verified session handoff (/board handoff save) so work can resume in a
     fresh session days later - even on another machine.

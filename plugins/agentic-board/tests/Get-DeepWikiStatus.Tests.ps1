@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Get-DeepWikiStatus.ps1 (#416).
 
     Pure helpers (Get-DeepWikiUrl, Resolve-DeepWikiIndex) are dot-sourced and tested

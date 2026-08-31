@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Source-level regression lock for #329 across ALL paginated board reads.
 
     Every Projects-v2 read that paginates once built its page-2 cursor argument by splicing it

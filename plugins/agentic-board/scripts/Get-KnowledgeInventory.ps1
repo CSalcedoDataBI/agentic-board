@@ -1,4 +1,4 @@
-<#  Get-KnowledgeInventory.ps1 — read-only inventory of the project knowledge registry.
+﻿<#  Get-KnowledgeInventory.ps1 — read-only inventory of the project knowledge registry.
     Reads knowledge/registry.json under -Root, normalizes it, and computes a health
     report (broken local paths, duplicate refs, orphan domains, missing notes). If the
     registry is absent, returns an empty inventory seeded with the default BI taxonomy.

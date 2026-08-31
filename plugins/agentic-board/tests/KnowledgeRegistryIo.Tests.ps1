@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for KnowledgeRegistryIo.ps1 — the JSON-or-YAML knowledge registry (#298).
 
     KnowledgeRegistryIo.ps1 is pure at load (functions only), so it dot-sources directly. The point of

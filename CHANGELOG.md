@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Every shipped PowerShell script now carries a UTF-8 BOM, so Windows PowerShell 5.1 can read
+  it.** A session on a Spanish Windows could not run `Board-Fill.ps1` at all: it died at parse
+  time with "Unexpected token '}'" on lines 370 and 508. The script was fine — the reader was
+  not. All 185 tracked `.ps1` files were UTF-8 *without* a BOM, and they are full of box-drawing
+  rules (U+2500) and em dashes (U+2014); both encode to a byte sequence containing `0x94`.
+  Windows PowerShell 5.1 reads a BOM-less file as the machine's ANSI codepage, and on cp1252
+  `0x94` is a curly closing quote — which the PowerShell tokenizer accepts as a *string
+  delimiter*. An odd number of them opens a string that swallows real code, and the next closing
+  brace lands inside a literal. 28 shipped files failed to parse this way; the rest silently
+  printed mojibake. `Scripts.Parse.Tests.ps1` had been parsing every script all along and stayed
+  green, because it runs under pwsh 7, which assumes UTF-8 for a BOM-less file: same parse,
+  different host, and the host was the whole bug. A BOM makes each file self-describing, so 5.1
+  and 7.x both read it correctly on any codepage.
+- **The docs no longer point contributors at the interpreter that breaks.** `README.md`,
+  `CONTRIBUTING.md`, `install-guard.ps1` and the `projects-admin` board-ops reference all said
+  `powershell -File` — Windows PowerShell 5.1. Everything else in the repo, CI included, targets
+  `pwsh` 7, and four scripts use pwsh-7-only operators (`??`, `? :`) that 5.1 cannot parse at
+  all. They now say `pwsh -File`.
+
+### Added
+- **`ScriptEncoding.Tests.ps1` — an encoding ratchet.** Every git-tracked PowerShell file must
+  declare its own interpreter: a UTF-8 BOM, or a shebang, never both. A BOM in front of `#!`
+  occupies the same first bytes and hides the shebang from the Unix loader, so the two VHS demo
+  assets under `.github/assets` keep their `#!/usr/bin/env pwsh` and everything else takes the BOM.
+  The test then proves it end-to-end by having Windows PowerShell 5.1 itself parse every file. Six
+  files are declared unreadable-by-5.1 on purpose, each with its reason — four use pwsh-7-only
+  operators, two are the shebang assets — and the test fails if any of those exemptions goes stale.
+  CI runs Pester on `windows-latest`, so 5.1 is present and the check is not vacuous there.
+
 ## [0.38.0] - 2026-08-28
 
 ### Changed

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for the diagram-authoring skill (#376) and the Diagrams knowledge domain (#378).
 
     Asserts the skill exists as an INTERNAL support skill (never a typed command), and that the

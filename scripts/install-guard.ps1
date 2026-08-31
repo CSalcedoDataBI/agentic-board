@@ -1,5 +1,5 @@
-<#  install-guard.ps1 — wire the private-content guard into THIS clone of the public repo.
-    Run once after cloning:  powershell -File scripts/install-guard.ps1  #>
+﻿<#  install-guard.ps1 — wire the private-content guard into THIS clone of the public repo.
+    Run once after cloning:  pwsh -File scripts/install-guard.ps1  #>
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'

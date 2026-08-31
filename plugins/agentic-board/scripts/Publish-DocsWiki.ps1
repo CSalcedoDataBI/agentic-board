@@ -1,4 +1,4 @@
-<#  Publish-DocsWiki.ps1 — single publisher for the repo's GitHub Wiki.
+﻿<#  Publish-DocsWiki.ps1 — single publisher for the repo's GitHub Wiki.
 
     Generates ALL wiki pages in one clone → commit → push:
       Product docs (always):

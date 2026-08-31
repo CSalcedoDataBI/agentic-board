@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Invoke-SkillAudit.ps1 and Resolve-SkillOwner.ps1.
     Fixture has one healthy skill and one broken skill (first-person, no triggers,
     no when-not clause) so the classifier's findings can be asserted. #>

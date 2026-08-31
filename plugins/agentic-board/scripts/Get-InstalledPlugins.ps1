@@ -1,4 +1,4 @@
-<#  Get-InstalledPlugins.ps1 — installed Claude Code plugins as match keys.
+﻿<#  Get-InstalledPlugins.ps1 — installed Claude Code plugins as match keys.
 
     Parses `claude plugin list` into a flat, de-duplicated list of lowercase identifiers a
     catalog's `detect`/`name` can be matched against. For each installed `<plugin>@<marketplace>`

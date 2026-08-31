@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Write-KnowledgeTable.ps1. Writes a two-domain registry, regenerates
     the table, and asserts grouping, the generated-header guard, and url link rendering. #>
 BeforeAll {

@@ -1,4 +1,4 @@
-<#  Get-BoardConfig.ps1 - the SINGLE reader/writer of the per-repo preference file.
+﻿<#  Get-BoardConfig.ps1 - the SINGLE reader/writer of the per-repo preference file.
 
     Dot-source it (never invoke it): `. (Join-Path $PSScriptRoot 'Get-BoardConfig.ps1')`
 

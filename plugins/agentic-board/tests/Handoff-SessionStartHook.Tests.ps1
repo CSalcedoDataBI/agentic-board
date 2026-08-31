@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Handoff-SessionStartHook.ps1 - the opt-in SessionStart hook.
 
     The hook reads stdin and touches the filesystem, so it exposes a dot-source guard:

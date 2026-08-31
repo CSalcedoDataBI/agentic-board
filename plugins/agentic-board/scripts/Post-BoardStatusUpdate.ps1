@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Post a status update on a GitHub Projects v2 board (/board update).
 

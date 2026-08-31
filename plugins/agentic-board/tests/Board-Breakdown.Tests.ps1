@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Board-Breakdown.ps1 - addSubIssue must FAIL CLOSED on errors[] (#315, part of #303).
 
     addSubIssue is a `gh api graphql` mutation. The old code piped it to Out-Null and only checked

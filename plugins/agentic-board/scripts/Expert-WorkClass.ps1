@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Classify a change as CODE or VISUAL, so the autonomy boundary can follow the owner's actual
     rule instead of a flat action list (#529, part of #526).

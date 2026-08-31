@@ -1,4 +1,4 @@
-<#  Write-KnowledgeTable.ps1 — regenerate knowledge/KNOWLEDGE.md from registry.json,
+﻿<#  Write-KnowledgeTable.ps1 — regenerate knowledge/KNOWLEDGE.md from registry.json,
     grouped by domain. Generated artifact — never hand-edited. #>
 [CmdletBinding()]
 param([string]$Root = (Get-Location).Path)

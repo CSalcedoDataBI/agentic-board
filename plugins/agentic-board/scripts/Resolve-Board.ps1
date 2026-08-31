@@ -1,4 +1,4 @@
-<#  Resolve-Board.ps1 - find-or-reuse the board for a repo; create only if none exists.
+﻿<#  Resolve-Board.ps1 - find-or-reuse the board for a repo; create only if none exists.
     Prevents the "new duplicate board every time" bug. Returns the project NUMBER on stdout.
     Requires $env:GH_TOKEN (via gh-account).
     Usage: $num = & ./Resolve-Board.ps1 -Owner CSalcedoDataBI -Repo CSalcedoDataBI/agentic-board

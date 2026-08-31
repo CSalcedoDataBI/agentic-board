@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Worktree-Ghosts.ps1 - the orphan-worktree classifier (#618).
 
     The bug being pinned: the doctor's original check trusted git's `prunable` marker, which

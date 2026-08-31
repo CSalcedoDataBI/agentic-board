@@ -1,4 +1,4 @@
-<#  Get-BoardVocabulary.ps1 - the single source of truth for the board's option
+﻿<#  Get-BoardVocabulary.ps1 - the single source of truth for the board's option
     vocabulary: the CANONICAL option names (presets/fields.en.json) plus the
     LEGACY names that mean the same thing (GitHub's default Projects template,
     older hand-made boards).

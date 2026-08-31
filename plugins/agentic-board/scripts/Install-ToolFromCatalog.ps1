@@ -1,4 +1,4 @@
-<#  Install-ToolFromCatalog.ps1 — install referenced tools from the unified catalog (#387).
+﻿<#  Install-ToolFromCatalog.ps1 — install referenced tools from the unified catalog (#387).
 
     Resolves items through Get-ToolsCatalog and installs by KIND, never duplicating:
       - skill-clone : delegates to Install-SkillFromRepo.ps1 (clean clone, LICENSE preserved).

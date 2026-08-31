@@ -1,4 +1,4 @@
-<#  Get-AbiosStateDir.ps1 — the SINGLE resolver for the internal state directory.
+﻿<#  Get-AbiosStateDir.ps1 — the SINGLE resolver for the internal state directory.
 
     Dot-source this file (never invoke it): `. (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')`
     then call `Get-AbiosStateDir`.

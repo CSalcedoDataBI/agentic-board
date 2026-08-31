@@ -1,4 +1,4 @@
-<#  guard-no-private.ps1 — block private content / secrets from entering this PUBLIC repo.
+﻿<#  guard-no-private.ps1 — block private content / secrets from entering this PUBLIC repo.
     Wired as a pre-commit and pre-push git hook (see scripts/install-guard.ps1).
     Scans ONLY the ADDED lines of the change against:
       1. built-in secret patterns (tokens, keys, connection strings)

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for the toolkit catalogs (presets/toolkits/*.json) — schema + content. #>
 
 BeforeAll {

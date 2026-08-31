@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Invoke-KnowledgeHarvest.ps1: finds docs md files + http links,
     dedups against the existing registry, and never writes. #>
 BeforeAll {

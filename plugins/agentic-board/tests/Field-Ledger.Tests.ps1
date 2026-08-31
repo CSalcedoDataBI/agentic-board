@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Get-FieldLedger.ps1 — the incremental watermark behind /board field.
 
     The pure core loads behind $env:ABIOS_FIELDLEDGER_DOTSOURCE (same convention as the other

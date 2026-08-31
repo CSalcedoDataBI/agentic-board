@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Pester tests for Publish-DocsWiki.ps1 page generation (-PagesOnly, no git/network).
     Validates:
       - Docs-Home is generated from README.md (HTML stripped, GENERATED marker present)

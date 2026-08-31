@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Expert-WorkClass.ps1 — classifying a change as CODE or VISUAL (#529, part of #526).
 
     The rule being encoded: code is judged by READING it, so an agent that reviewed it carefully can

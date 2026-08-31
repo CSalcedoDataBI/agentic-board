@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Marketplace structure check: every plugin source must ship a plugin.json (#420).
 
     Motivation, from inbox/IMPROVEMENTS.md (2026-06-26, "plugin packaging: root-as-plugin is

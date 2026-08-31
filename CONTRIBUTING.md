@@ -16,7 +16,7 @@ Two layers protect the repo — please keep both honest:
    tool. When you file an issue or open a PR, describe the *general* problem, not the private case.
 2. **A guard you can't forget.** After cloning, run once:
    ```
-   powershell -File scripts/install-guard.ps1
+   pwsh -File scripts/install-guard.ps1
    ```
    This wires `pre-commit` + `pre-push` hooks that **block** any commit/push whose added lines
    contain a known secret pattern or a term from your local `.abios/private-denylist.txt`
