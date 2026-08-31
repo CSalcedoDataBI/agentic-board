@@ -23,11 +23,14 @@
   all. They now say `pwsh -File`.
 
 ### Added
-- **`ScriptEncoding.Tests.ps1` — an encoding ratchet.** Asserts every git-tracked PowerShell file
-  starts with a UTF-8 BOM, and then proves it end-to-end by having Windows PowerShell 5.1 itself
-  parse all of them. The four scripts that genuinely require pwsh 7 are declared by name, and the
-  test fails if that exemption ever goes stale. CI runs Pester on `windows-latest`, so 5.1 is
-  present and the check is not vacuous there.
+- **`ScriptEncoding.Tests.ps1` — an encoding ratchet.** Every git-tracked PowerShell file must
+  declare its own interpreter: a UTF-8 BOM, or a shebang, never both. A BOM in front of `#!`
+  occupies the same first bytes and hides the shebang from the Unix loader, so the two VHS demo
+  assets under `.github/assets` keep their `#!/usr/bin/env pwsh` and everything else takes the BOM.
+  The test then proves it end-to-end by having Windows PowerShell 5.1 itself parse every file. Six
+  files are declared unreadable-by-5.1 on purpose, each with its reason — four use pwsh-7-only
+  operators, two are the shebang assets — and the test fails if any of those exemptions goes stale.
+  CI runs Pester on `windows-latest`, so 5.1 is present and the check is not vacuous there.
 
 ## [0.38.0] - 2026-08-28
 

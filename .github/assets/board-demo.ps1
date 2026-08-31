@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 # board-demo.ps1 — scripted playback for the README hero GIF (issue #210).
 #
 # This is NOT a live Claude Code session: it reproduces, with simulated typing,

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 # board-loop.ps1 — scripted playback for the SECOND README GIF (issue #210).
 #
 # Shows agentic-board IN USE: the natural-language work loop
