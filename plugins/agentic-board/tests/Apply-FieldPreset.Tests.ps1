@@ -42,3 +42,81 @@ Describe 'Apply-FieldPreset invocation ergonomics (#297)' {
             Should -Throw -ExpectedMessage "*Preset file not found: $missing*"
     }
 }
+
+Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
+
+    # The lie this pins: `gh project field-create` was called RAW and its exit code was never
+    # read, so `created: <name>` printed whether the field was created or refused. GitHub now
+    # rejects a custom field named "Type" ("Name cannot have a reserved value"), which makes it
+    # fire on every fresh English board - reported four separate times (#649, #654, #658, #667)
+    # because the run reads clean. `gh` is mocked at the executable seam: the field-list read
+    # succeeds and returns an empty board, every field-create fails.
+
+    BeforeAll {
+        $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Apply-FieldPreset.ps1' | Resolve-Path
+
+        # All streams to a FILE, and the terminating error swallowed. The run is SUPPOSED to end
+        # in an error now, and `... | Out-String` inside a throwing pipeline never assigns - which
+        # would fail these tests on the very behaviour they exist to prove. A file is written as
+        # the run goes, so everything printed before the error survives it.
+        function script:Get-RunOutput {
+            param([string]$LogDir)
+            $log = Join-Path $LogDir ([guid]::NewGuid().ToString('N') + '.log')
+            try { & $script:Script -Number 13 -Owner 'X' -Lang en -Yes *> $log } catch { }
+            if (Test-Path $log) { return (Get-Content $log -Raw) }
+            return ''
+        }
+    }
+
+    BeforeEach {
+        Mock gh {
+            if ($args -contains 'field-list')   { $global:LASTEXITCODE = 0; return '{"fields":[]}' }
+            # The colour pass reads each single-select field back. On an empty board the honest
+            # answer is "no such field yet" - a graphql body with a null field and NO errors[],
+            # which Invoke-Gh accepts (absent) rather than rejecting (failed).
+            if ($args -contains 'graphql') {
+                $global:LASTEXITCODE = 0
+                return '{"data":{"user":{"projectV2":{"field":null}}}}'
+            }
+            if ($args -contains 'field-create') {
+                $global:LASTEXITCODE = 1
+                # -ErrorAction Continue on purpose: the script runs under
+                # $ErrorActionPreference='Stop', where a plain Write-Error in the mock would
+                # TERMINATE the run and make these tests fail for the wrong reason - the script
+                # would never reach the reporting code under test. A real native gh does not
+                # throw either; it writes to stderr and exits non-zero.
+                Write-Error -ErrorAction Continue 'GraphQL: Name cannot have a reserved value, Name has already been taken (createProjectV2Field)'
+                return
+            }
+            $global:LASTEXITCODE = 0
+        }
+    }
+
+    It 'does NOT print "created:" for a field the API refused' {
+        script:Get-RunOutput -LogDir $TestDrive | Should -Not -Match 'created:\s*Type'
+    }
+
+    It 'prints a FAILED line naming the field and the reason' {
+        $out = script:Get-RunOutput -LogDir $TestDrive
+        $out | Should -Match 'FAILED:\s*Type'
+        $out | Should -Match 'reserved value'
+    }
+
+    It 'ENDS IN A HARD ERROR naming the fields that were not created' {
+        # NOT an assertion on $LASTEXITCODE: the mocked gh sets it itself, so that check passed
+        # even against the unfixed script - green for a reason that had nothing to do with the
+        # behaviour. The terminating error is the real contract, and it is what makes
+        # Resolve-Board warn instead of printing "preset applied" over a half-built board.
+        { & $script:Script -Number 13 -Owner 'X' -Lang en -Yes *> (Join-Path $TestDrive 'throw.log') } |
+            Should -Throw -ExpectedMessage '*NO se crearon*Type*'
+    }
+
+    It 'still attempts the REMAINING fields instead of aborting on the first refusal' {
+        # Honest reporting must not cost coverage: one rejected name must not strand the fields
+        # after it. Target is the last field of the English preset.
+        script:Get-RunOutput -LogDir $TestDrive | Out-Null
+        Should -Invoke gh -ParameterFilter {
+            ($args -contains 'field-create') -and ($args -contains 'Target')
+        } -Times 1
+    }
+}

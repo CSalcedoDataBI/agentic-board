@@ -27,7 +27,7 @@ BeforeAll {
     # in #571). A file not listed here has ZERO tolerated raw calls.
     $script:Baseline = @{
         'Board-Work.ps1'            = 8
-        'Apply-FieldPreset.ps1'     = 6
+        'Apply-FieldPreset.ps1'     = 4   # 6 -> 4: both field-create calls now go through Invoke-Gh (#649)
         'Board-Plan.ps1'            = 6
         'Board-ReviewGate.ps1'      = 5
         'Board-Merge.ps1'           = 5

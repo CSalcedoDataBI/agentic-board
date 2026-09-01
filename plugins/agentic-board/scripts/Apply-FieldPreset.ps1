@@ -343,6 +343,13 @@ if ($DryRun -or ($Migrate -and ($renames.Count -gt 0 -or $merges.Count -gt 0))) 
 if ($DryRun) {
   Write-Host "DRY-RUN: no se ejecuto ningun cambio." -ForegroundColor Cyan
   Write-Host "Board: https://github.com/users/$Owner/projects/$Number" -ForegroundColor Cyan
+
+# A half-applied preset must never read as a clean run. Last, so the report above is complete
+# and every field that COULD be created has been.
+if ($failedFields.Count -gt 0) {
+  Write-Error ("{0} campo(s) del preset NO se crearon: {1}. El board quedo incompleto — mira las lineas FAILED de arriba." -f `
+               $failedFields.Count, ($failedFields -join ', '))
+}
   exit 0
 }
 
@@ -361,19 +368,43 @@ if ($Migrate -and ($willRename -or $willMerge) -and -not $Yes) {
 }
 
 # ── Apply ─────────────────────────────────────────────────────────────────────
+$failedFields = @()
 foreach ($f in $preset.fields) {
   if ($existing -contains $f.name) {
     Write-Host "skip (exists): $($f.name)"
   } else {
-    if ($f.type -eq 'SINGLE_SELECT') {
-      $optNames = @($f.options | ForEach-Object { Get-OptName $_ })
-      gh project field-create $Number --owner $Owner --name $f.name `
-        --data-type SINGLE_SELECT --single-select-options ($optNames -join ',') | Out-Null
+    # Through Invoke-Gh, not bare gh. `field-create` signals a refusal ONLY through its exit
+    # code, and the unchecked call printed `created:` for a field GitHub had rejected — the
+    # run read clean while the board came out missing the field. That is the defect reported
+    # four separate times (#649, #654, #658, #667): GitHub now reserves the field name "Type",
+    # so it fires on every fresh English board.
+    #
+    # Caught PER FIELD rather than left to propagate: one refused name must not strand the
+    # fields after it. The run still ends in a hard error below, so a caller cannot mistake a
+    # half-applied preset for a clean one — Resolve-Board already warns instead of claiming
+    # success when this throws.
+    $createArgs = if ($f.type -eq 'SINGLE_SELECT') {
+      @('project','field-create',"$Number",'--owner',$Owner,'--name',$f.name,
+        '--data-type','SINGLE_SELECT','--single-select-options',
+        (@($f.options | ForEach-Object { Get-OptName $_ }) -join ','))
     } else {
-      gh project field-create $Number --owner $Owner --name $f.name --data-type $f.type | Out-Null
+      @('project','field-create',"$Number",'--owner',$Owner,'--name',$f.name,'--data-type',$f.type)
     }
-    $script:FieldCache.Remove($f.name) | Out-Null   # it exists now — re-read its live options
-    Write-Host "created: $($f.name) ($($f.type))"
+
+    try {
+      $null = Invoke-Gh -GhArgs $createArgs -What "crear el campo '$($f.name)' en el board #$Number"
+      $script:FieldCache.Remove($f.name) | Out-Null   # it exists now — re-read its live options
+      Write-Host "created: $($f.name) ($($f.type))"
+    } catch {
+      $reason = ($_.Exception.Message -replace '\s+', ' ').Trim()
+      Write-Host "FAILED: $($f.name) ($($f.type)) — $reason" -ForegroundColor Red
+      if ($reason -match 'reserved value') {
+        Write-Host ("        GitHub reserva ese nombre de campo, asi que NINGUN reintento lo va a crear. " +
+                    "Renombralo en el preset ($PresetPath) y vuelve a correr.") -ForegroundColor DarkYellow
+      }
+      $failedFields += $f.name
+      continue   # no colors for a field that does not exist
+    }
   }
 
   # Apply canonical colors when the preset provides any (idempotent; also upgrades
@@ -410,3 +441,10 @@ if (-not $Migrate) {
   Write-Host "(Corre sin -NoMigrate para renombrar las opciones legacy -> canonicas y estandarizar el board.)" -ForegroundColor DarkGray
 }
 Write-Host "Board: https://github.com/users/$Owner/projects/$Number" -ForegroundColor Cyan
+
+# A half-applied preset must never read as a clean run. Last, so the report above is complete
+# and every field that COULD be created has been.
+if ($failedFields.Count -gt 0) {
+  Write-Error ("{0} campo(s) del preset NO se crearon: {1}. El board quedo incompleto — mira las lineas FAILED de arriba." -f `
+               $failedFields.Count, ($failedFields -join ', '))
+}
