@@ -550,6 +550,31 @@ function Test-CopilotSilentTimeout {
 # load the tests use. The file is pure at load - it defines functions and touches nothing.
 . (Join-Path $PSScriptRoot 'CopilotAvailability.ps1')
 
+# Does this repo have any workflow that could produce a check? Read once per run and cached by
+# the caller. Fails CLOSED on a read error: reporting "no workflows" from a failed read would
+# hand back the very shortcut this exists to remove, so an unreadable answer is treated as "yes,
+# there is CI" and the empty check list has to survive the grace period like any other.
+function Test-RepoHasActiveWorkflows {
+    param([string]$Repo)
+    try {
+        $resp = Invoke-Gh -GhArgs @('api',"repos/$Repo/actions/workflows") `
+                          -What "leer los workflows de $Repo" -Json
+        return (@($resp.workflows | Where-Object { $_.state -eq 'active' }).Count -gt 0)
+    } catch {
+        return $true
+    }
+}
+
+function Test-NoChecksIsBenign {
+    param(
+        [bool]  $RepoHasActiveWorkflows,
+        [double]$SecondsSinceFirstSeen,
+        [int]   $GraceSeconds = 90
+    )
+    if (-not $RepoHasActiveWorkflows) { return $true }
+    return ($SecondsSinceFirstSeen -ge $GraceSeconds)
+}
+
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
 if ($env:ABIOS_REVIEWGATE_DOTSOURCE) { return }
 
@@ -606,6 +631,19 @@ if ($InstallRuleset) {
 
 if ($PR -le 0) { throw "Usa -PR <numero> (o -InstallRuleset)." }
 
+# Is an empty `gh pr checks` really "this repo has no CI"?
+#
+# `gh pr checks` prints "no checks reported on the ... branch" for TWO different states: a repo
+# with no CI at all, and a repo whose workflow runs for the new head have not been REGISTERED yet.
+# The gate read both as the first and passed CI unchecked seconds after a push - observed live on
+# PR #655 of this repo, whose CI had run green on the two previous commits of the same branch
+# (#657). A gate that answers "pass" about a commit no check ever saw is the #510 hole again.
+#
+# Two signals, and both are needed. Active workflows alone would block for the full CI timeout on
+# a repo whose workflows are cron- or release-only and legitimately never run on a PR. A grace
+# period alone would still pass unchecked on a slow registration. So: no active workflows means
+# there is genuinely nothing to wait for; otherwise the empty answer has to PERSIST before it is
+# believed, which an unregistered run cannot do - it shows up within seconds.
 # ── Record an external review so the gate can see it (#510) ───────────────────
 # A reviewer without a GitHub identity (second-opinion / Codex, or a careful human read) leaves no
 # review object, so to the gate it was indistinguishable from nobody looking. This writes the
@@ -886,7 +924,18 @@ while ($true) {
         # Probe the human-readable form to tell them apart: only the explicit "no checks" text
         # counts as benign; anything else stays unparsed and fails closed at the deadline.
         $probe = (gh pr checks $PR --repo $Repo 2>&1 | Out-String)
-        if ($probe -match '(?i)no checks') { $parsedList = @(); $parsedOk = $true }
+        if ($probe -match '(?i)no checks') {
+            # ...and even then, not on sight. "no checks" also means "the runs for this head are
+            # not registered yet", which is what let a fresh push pass CI unchecked (#657).
+            if (-not $script:NoChecksSince) { $script:NoChecksSince = Get-Date }
+            if ($null -eq $script:RepoHasWorkflows) { $script:RepoHasWorkflows = Test-RepoHasActiveWorkflows -Repo $Repo }
+            $waited = ((Get-Date) - $script:NoChecksSince).TotalSeconds
+            if (Test-NoChecksIsBenign -RepoHasActiveWorkflows $script:RepoHasWorkflows -SecondsSinceFirstSeen $waited) {
+                $parsedList = @(); $parsedOk = $true
+            }
+        } else {
+            $script:NoChecksSince = $null
+        }
     }
     $verdictCi = Get-ChecksVerdict -Checks $parsedList -Parsed $parsedOk
 
@@ -944,7 +993,11 @@ $decision   = $prState.reviewDecision
 # If Copilot answered that it could NOT review (no quota), remember it per account so the NEXT PR skips
 # the request + the wait entirely (#367). Only when we actually requested it this run — a skipped run
 # has nothing new to learn. Best-effort: a marker write failure never affects the gate verdict.
-if ($copilotRequested -and (Test-CopilotUnavailableReview -Reviews $reviews -HeadSha "$($prState.headRefOid)")) {
+# Test-CopilotOnlyRefused, NOT Test-CopilotUnavailableReview: the latter is true if ANY entry is a
+# refusal, so a Copilot that answered twice on the same head - a real review AND a refusal from a
+# re-request - armed the cooldown and was skipped for days despite having just reviewed the code
+# (#656). Arming needs the narrower question: did it ONLY refuse?
+if ($copilotRequested -and (Test-CopilotOnlyRefused -Reviews $reviews -HeadSha "$($prState.headRefOid)")) {
     $cooldownDays = [Math]::Max(1, $CopilotCooldownDays)
     if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays($cooldownDays) -Reason 'Copilot answered: unable to review (quota/limit)') {
         Write-Host ("  Copilot sin disponibilidad detectada - marcado NO disponible para {0} por {1} dia(s); no lo volvere a solicitar/esperar hasta entonces (#367)." -f $copilotOwner, $cooldownDays) -ForegroundColor DarkYellow

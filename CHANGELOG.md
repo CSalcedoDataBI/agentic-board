@@ -14,6 +14,34 @@
   still attempted, and the run ends in a hard error naming what was not created. That last part
   also fixes the lie one level up for free: `Resolve-Board` applies the preset at board birth
   inside a try/catch, so it now warns instead of printing "preset applied" over a half-built board.
+- **The review gate no longer passes CI it never saw (#657).** `gh pr checks` prints *"no checks
+  reported"* for two different states — a repo with no CI, and a repo whose workflow runs for a
+  brand-new head are not registered yet — and the gate read both as the first. Observed live: a
+  PR of this repo passed CI seconds after a push, on a branch whose CI had run green on the two
+  previous commits. It now needs two signals before believing an empty answer: the repo has no
+  active workflows (nothing to wait for), or the empty answer has PERSISTED past a grace period,
+  which an unregistered run cannot do. The workflow read fails CLOSED — an unreadable answer counts
+  as "there is CI", never as a shortcut.
+- **A Copilot that reviews AND refuses is no longer silenced for a week (#656).** The per-account
+  cooldown was armed from `Test-CopilotUnavailableReview`, which answers *"is there a refusal
+  anywhere in this array"*. A re-requested Copilot can answer twice on the same head — one real
+  review, one refusal — so the marker armed and the bot was skipped for `-CopilotCooldownDays` on a
+  PR it had just reviewed properly. Arming now asks the narrower `Test-CopilotOnlyRefused`: a
+  refusal with no substantive review beside it, on the current head. The broad predicate keeps its
+  own job, subtracting refusals from the review evidence per review.
+
+- **`Board-Fill` writes the assignee to the item's OWN repo, and verifies it stuck (#659).** `-Auto`
+  reported `OK #<n> assignee -> <login>` for every item and assigned nobody. Both causes the report
+  guessed were wrong — the write already went to the issue endpoint and already went through
+  `Invoke-Gh` — and running the same `gh` call by hand assigns fine. The fault was the ADDRESS: a
+  board is not a repo, its items can come from several, and `-Repo` is one script-level value
+  defaulting to the tool's own repo, so the write went to `repos/<default>/issues/<same number>` —
+  a URL GitHub answers 200 for whenever that number exists there. The assignment landed on an
+  unrelated issue in an unrelated repo while the intended one stayed empty. The board query never
+  asked which repo an item belongs to, so the information to address it correctly was not even
+  fetched. It is now asked for, used, and the result is READ BACK before counting OK, because a 200
+  is not proof: GitHub silently drops an assignee it cannot assign on that repo and still answers 200.
+
 - **Raw-`gh` baseline for `Apply-FieldPreset.ps1` lowered from 6 to 4**, locking in the migration
   so the two checked calls cannot silently revert to unchecked ones.
 

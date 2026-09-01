@@ -76,6 +76,33 @@ function Test-CopilotRefusalBody {
 # bound to THAT commit counts (#563): a stale refusal from an earlier commit is not an answer to the
 # current request, and letting it renew the full cooldown suppressed the 1-day silence path the gate
 # uses for a request that got no answer at all. Without -HeadSha the old any-refusal behavior holds. Pure.
+# Did Copilot ONLY refuse? The cooldown must not be armed off the presence of a refusal alone.
+# Test-CopilotUnavailableReview answers "is there a refusal in this array", which is the right
+# question for subtracting a non-review from the evidence, and the WRONG one for arming a
+# multi-day cooldown: a re-requested Copilot can answer twice on the same head, once with a real
+# review and once with a refusal. Asked about the whole array, the old call saw the refusal and
+# silenced Copilot for a week on a PR it had just reviewed properly (#656).
+#
+# So: among Copilot's reviews OF THIS HEAD, arm only when there is a refusal and no substantive
+# review beside it. Same login/body recognition as its sibling - never a body match on humans.
+function Test-CopilotOnlyRefused {
+    param(
+        [object[]]$Reviews,
+        [string]$HeadSha = ''
+    )
+    $head = "$HeadSha".Trim()
+    $refused = $false
+    $substantive = $false
+    foreach ($r in @($Reviews)) {
+        $login = "$($r.author.login)"
+        if ($login -notmatch $script:CopilotReviewerLoginPattern) { continue }
+        if ($head -and "$($r.commit.oid)".Trim() -ne $head) { continue }
+        if (Test-CopilotRefusalBody -Body "$($r.body)") { $refused = $true }
+        else                                             { $substantive = $true }
+    }
+    return ($refused -and -not $substantive)
+}
+
 function Test-CopilotUnavailableReview {
     param(
         [object[]]$Reviews,

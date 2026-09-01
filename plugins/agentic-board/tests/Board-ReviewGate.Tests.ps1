@@ -651,3 +651,46 @@ Describe 'Get-CodexVerifiedComments - a bogus codex marker is treated as if neve
         (Get-ReviewEvidence -CommentBodies $filtered -HeadSha $head).reviewed | Should -BeTrue
     }
 }
+
+Describe 'Test-NoChecksIsBenign - "no checks" is not proof there is no CI (#657)' {
+
+    # `gh pr checks` prints "no checks reported" both for a repo with no CI and for a repo whose
+    # runs for the new head are not registered yet. Reading both as the first passed CI unchecked
+    # seconds after a push, on a PR whose CI had run green on the two previous commits.
+
+    It 'passes immediately when the repo has no active workflows - there is nothing to wait for' {
+        Test-NoChecksIsBenign -RepoHasActiveWorkflows $false -SecondsSinceFirstSeen 0 | Should -BeTrue
+    }
+
+    It 'does NOT pass on sight when the repo HAS workflows (the #657 case)' {
+        Test-NoChecksIsBenign -RepoHasActiveWorkflows $true -SecondsSinceFirstSeen 2 | Should -BeFalse
+    }
+
+    It 'accepts the empty answer once it has PERSISTED past the grace period' {
+        # A repo whose workflows are cron- or release-only never runs on a PR. Without this the
+        # gate would block for the full CI timeout on a PR that legitimately has no checks.
+        Test-NoChecksIsBenign -RepoHasActiveWorkflows $true -SecondsSinceFirstSeen 120 | Should -BeTrue
+    }
+
+    It 'treats the grace boundary as reached, not as still-waiting' {
+        Test-NoChecksIsBenign -RepoHasActiveWorkflows $true -SecondsSinceFirstSeen 90 -GraceSeconds 90 | Should -BeTrue
+        Test-NoChecksIsBenign -RepoHasActiveWorkflows $true -SecondsSinceFirstSeen 89 -GraceSeconds 90 | Should -BeFalse
+    }
+}
+
+Describe 'The Copilot cooldown is armed from the narrow question (#656)' {
+
+    It 'arms Set-CopilotUnavailable from Test-CopilotOnlyRefused, not the broad predicate' {
+        # Structural, and deliberately so: both predicates exist and both are correct for their
+        # own job, so a behavioural test of either one stays green while the CALL SITE uses the
+        # wrong one. What regresses here is which question the arming code asks.
+        $src = Get-Content $script:Script -Raw
+        $src | Should -Match 'copilotRequested -and \(Test-CopilotOnlyRefused'
+        $src | Should -Not -Match 'copilotRequested -and \(Test-CopilotUnavailableReview'
+    }
+
+    It 'still uses the broad predicate where ANY refusal is the right question' {
+        # Subtracting a refusal from the review evidence is per-review and must keep working.
+        (Get-Content $script:Script -Raw) | Should -Match 'Test-CopilotUnavailableReview -Reviews @\(\$r\)'
+    }
+}
