@@ -201,6 +201,7 @@ query(`$proj:ID!, `$cursor:String) {
             ... on DraftIssue { title }
             ... on Issue {
               number title state
+              repository { nameWithOwner }
               labels(first:10) { nodes { name } }
               assignees(first:5) { nodes { login } }
               timelineItems(first:20 itemTypes:[CROSS_REFERENCED_EVENT]) {
@@ -263,6 +264,20 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
 
 # Dot-source guard: tests set this to load the functions above without running
 # the token check or any gh call (same contract as Board-Work.ps1).
+# Which repo does THIS item's issue live in? A board is not a repo: its items can come from
+# several, and -Repo is one script-level value that DEFAULTS to the tool's own repo. Building a
+# write URL from that default sends the request to `<default>/issues/<same number>` - which, if
+# that number exists there, GitHub answers 200 for. The write then lands on an unrelated issue in
+# an unrelated repo, the intended one stays untouched, and the run still reports OK (#659).
+#
+# The fallback is only for an item the query could not resolve; it is never the preferred answer.
+function Get-IssueRepo {
+    param($Content, [string]$FallbackRepo)
+    $r = $Content.repository.nameWithOwner
+    if ($r) { return $r }
+    return $FallbackRepo
+}
+
 if ($env:ABIOS_BOARDFILL_DOTSOURCE) { return }
 
 # ── Top-level error boundary (#485): any unhandled exception becomes a clean
@@ -446,6 +461,7 @@ foreach ($item in $items) {
             IssueNum = $c.number
             Title    = $c.title
             State    = $c.state
+            Repo     = Get-IssueRepo -Content $c -FallbackRepo $Repo
             Changes  = $changes
         }
     }
@@ -492,12 +508,27 @@ foreach ($entry in $plan) {
     foreach ($ch in $entry.Changes) {
         try {
             if ($ch.Type -eq "assignee") {
-                # An unchecked write reports "OK" for an assignment that never happened. Invoke-Gh
-                # throws on a non-zero exit (caught below -> FAIL, $fail++) so the count is honest.
-                $assignUrl = "repos/$Repo/issues/$($entry.IssueNum)/assignees"
+                # $entry.Repo, NOT $Repo. The script-level value is ONE repo and defaults to the
+                # tool's own; every item on a board that lives elsewhere was being written to
+                # `<default>/issues/<same number>`, which GitHub answers 200 for whenever that
+                # number happens to exist there. The assignment landed on an unrelated issue and
+                # the intended one stayed empty - reported as OK either way (#659).
+                $assignUrl = "repos/$($entry.Repo)/issues/$($entry.IssueNum)/assignees"
                 $null = Invoke-Gh -GhArgs @('api',$assignUrl,'-X','POST','-F',"assignees[]=$Owner") `
-                                  -What "asignar #$($entry.IssueNum) a $Owner"
-                Write-Host "  OK  #$($entry.IssueNum) assignee -> $Owner" -ForegroundColor Green
+                                  -What "asignar #$($entry.IssueNum) a $Owner en $($entry.Repo)"
+
+                # Read it back. A 200 is not proof: GitHub SILENTLY DROPS an assignee who cannot
+                # be assigned on that repo (not a collaborator) and still answers 200 with the
+                # issue unchanged. This command exists so nobody has to check the board by hand,
+                # so a false OK here is worse than a loud failure - the board looks governed and
+                # is not.
+                $after = Invoke-Gh -GhArgs @('api',"repos/$($entry.Repo)/issues/$($entry.IssueNum)",'--jq','[.assignees[].login]') `
+                                   -What "verificar la asignacion de #$($entry.IssueNum)" -Json
+                if (@($after) -notcontains $Owner) {
+                    throw "la API acepto la asignacion pero #$($entry.IssueNum) sigue sin $Owner en $($entry.Repo) (GitHub descarta en silencio a quien no puede asignar en ese repo)"
+                }
+
+                Write-Host "  OK  #$($entry.IssueNum) assignee -> $Owner  ($($entry.Repo))" -ForegroundColor Green
                 $ok++
             }
             elseif ($ch.Type -eq "single") {
