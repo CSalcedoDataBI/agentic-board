@@ -1,7 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
+## [0.38.2] - 2026-09-01
 ### Fixed
 - **`Apply-FieldPreset` no longer reports a field it failed to create (#649).** It called
   `gh project field-create` raw and never read the exit code, so `created: <name>` printed
@@ -44,7 +43,6 @@
 
 - **Raw-`gh` baseline for `Apply-FieldPreset.ps1` lowered from 6 to 4**, locking in the migration
   so the two checked calls cannot silently revert to unchecked ones.
-
 ## [0.38.1] - 2026-08-31
 
 ### Fixed
