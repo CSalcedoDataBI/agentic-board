@@ -678,6 +678,24 @@ Describe 'Test-NoChecksIsBenign - "no checks" is not proof there is no CI (#657)
     }
 }
 
+Describe 'The no-checks shortcut cannot be reopened by pagination or a stale stamp (#673 review)' {
+
+    It 'reads ALL workflows, not just the first page' {
+        # The endpoint defaults to 30 per page. A repo whose active workflows fall on a later page
+        # would answer "no active workflows" -> benign pass -> CI unchecked, which is the exact
+        # hole #657 closed, reopened from a different direction. Structural: the failure is a
+        # missing query parameter, and no behavioural test can see it without a 30+-workflow repo.
+        $src = Get-Content $script:Script -Raw
+        $src | Should -Match 'actions/workflows\?per_page=100'
+    }
+
+    It 'clears the first-seen stamp when checks DO come back' {
+        # Otherwise a later empty answer inherits an old timestamp and is believed on sight.
+        $src = Get-Content $script:Script -Raw
+        $src | Should -Match 'ConvertFrom-Json\); \$parsedOk = \$true \} catch \{ \}[\s\S]{0,400}?\$script:NoChecksSince = \$null'
+    }
+}
+
 Describe 'The Copilot cooldown is armed from the narrow question (#656)' {
 
     It 'arms Set-CopilotUnavailable from Test-CopilotOnlyRefused, not the broad predicate' {

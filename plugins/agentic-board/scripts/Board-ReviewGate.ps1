@@ -557,7 +557,10 @@ function Test-CopilotSilentTimeout {
 function Test-RepoHasActiveWorkflows {
     param([string]$Repo)
     try {
-        $resp = Invoke-Gh -GhArgs @('api',"repos/$Repo/actions/workflows") `
+        # per_page=100: the endpoint defaults to 30, and a repo whose active workflows fall on a
+        # later page would answer "no active workflows" - a FALSE benign pass, i.e. exactly the
+        # hole this function exists to close, reopened by pagination (review of #673).
+        $resp = Invoke-Gh -GhArgs @('api',"repos/$Repo/actions/workflows?per_page=100") `
                           -What "leer los workflows de $Repo" -Json
         return (@($resp.workflows | Where-Object { $_.state -eq 'active' }).Count -gt 0)
     } catch {
@@ -919,6 +922,10 @@ while ($true) {
     $parsedList = @(); $parsedOk = $false
     if ($checksJson) {
         try { $parsedList = @($checksJson | ConvertFrom-Json); $parsedOk = $true } catch { }
+        # Checks came back, so any earlier "no checks" stretch is over. Without this reset a
+        # later empty answer would inherit a stale stamp and be believed immediately
+        # (review of #673) - rare with gh today, but it is the wrong way to be wrong.
+        $script:NoChecksSince = $null
     } else {
         # Empty stdout is either "no checks configured" (benign) or a transient read failure.
         # Probe the human-readable form to tell them apart: only the explicit "no checks" text
