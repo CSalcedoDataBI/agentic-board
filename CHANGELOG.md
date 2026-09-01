@@ -17,7 +17,6 @@
 - **Raw-`gh` baseline for `Apply-FieldPreset.ps1` lowered from 6 to 4**, locking in the migration
   so the two checked calls cannot silently revert to unchecked ones.
 
-
 ## [0.38.1] - 2026-08-31
 
 ### Fixed

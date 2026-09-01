@@ -344,12 +344,6 @@ if ($DryRun) {
   Write-Host "DRY-RUN: no se ejecuto ningun cambio." -ForegroundColor Cyan
   Write-Host "Board: https://github.com/users/$Owner/projects/$Number" -ForegroundColor Cyan
 
-# A half-applied preset must never read as a clean run. Last, so the report above is complete
-# and every field that COULD be created has been.
-if ($failedFields.Count -gt 0) {
-  Write-Error ("{0} campo(s) del preset NO se crearon: {1}. El board quedo incompleto — mira las lineas FAILED de arriba." -f `
-               $failedFields.Count, ($failedFields -join ', '))
-}
   exit 0
 }
 

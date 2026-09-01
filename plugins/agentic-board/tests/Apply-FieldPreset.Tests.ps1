@@ -111,6 +111,38 @@ Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
             Should -Throw -ExpectedMessage '*NO se crearon*Type*'
     }
 
+    It 'never reads $failedFields before the line that declares it (review of #672)' {
+        # The first cut of this fix pasted the end-of-run failure report into the -DryRun branch
+        # as well, ABOVE the `$failedFields = @()` that feeds it. Today that is only dead code -
+        # $null.Count is not an error without Set-StrictMode - so a behavioural test passes with
+        # the defect in place and proves nothing. The defect is STRUCTURAL, so the assertion is
+        # too: walk the AST and require every read of the variable to come after its assignment.
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                   $script:Script, [ref]$null, [ref]$null)
+
+        $vars = $ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $n.VariablePath.UserPath -eq 'failedFields' }, $true)
+
+        $assign = $ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $n.Left.VariablePath.UserPath -eq 'failedFields' }, $true) |
+            Sort-Object { $_.Extent.StartLineNumber } | Select-Object -First 1
+
+        $assign | Should -Not -BeNullOrEmpty -Because 'the accumulator must be declared somewhere'
+
+        $tooEarly = @($vars | Where-Object { $_.Extent.StartLineNumber -lt $assign.Extent.StartLineNumber } |
+                              ForEach-Object { "line $($_.Extent.StartLineNumber)" })
+        $tooEarly -join ', ' | Should -BeNullOrEmpty
+    }
+
+    It '-DryRun still creates nothing' {
+        { & $script:Script -Number 13 -Owner 'X' -Lang en -DryRun *> (Join-Path $TestDrive 'dry.log') } |
+            Should -Not -Throw
+        Should -Invoke gh -ParameterFilter { $args -contains 'field-create' } -Times 0 -Exactly
+    }
+
     It 'still attempts the REMAINING fields instead of aborting on the first refusal' {
         # Honest reporting must not cost coverage: one rejected name must not strand the fields
         # after it. Target is the last field of the English preset.
