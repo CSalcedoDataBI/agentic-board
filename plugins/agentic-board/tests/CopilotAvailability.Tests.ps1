@@ -183,3 +183,52 @@ Describe 'Marker I/O round-trip (set -> skip -> clear), keyed by owner' {
         (Test-CopilotShouldSkip -Owner 'CSalcedoDataBI' -Now (Get-Date)).Skip | Should -BeFalse
     }
 }
+
+Describe 'Test-CopilotOnlyRefused (arm the cooldown only when Copilot did NOT review) (#656)' {
+
+    # The cooldown used to be armed from Test-CopilotUnavailableReview, which answers "is there a
+    # refusal anywhere in this array". A re-requested Copilot can answer TWICE on the same head -
+    # a real review and a refusal - and that question says yes, silencing the bot for days on a PR
+    # it had just reviewed properly. The arming question has to be narrower.
+
+    BeforeAll {
+        # NOT named `R`: that is PowerShell's built-in alias for Invoke-History, and names are
+        # case-insensitive - so `R 'login' $body 'oid'` called Invoke-History and failed on its
+        # second argument instead of building a review.
+        function script:NewReview($login, $body, $oid) {
+            [pscustomobject]@{
+                author = [pscustomobject]@{ login = $login }
+                body   = $body
+                commit = [pscustomobject]@{ oid = $oid }
+            }
+        }
+        $script:Refusal = 'Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.'
+    }
+
+    It 'is TRUE when Copilot only refused on this head' {
+        Test-CopilotOnlyRefused -Reviews @( (NewReview 'copilot-pull-request-reviewer' $script:Refusal 'abc') ) -HeadSha 'abc' |
+            Should -BeTrue
+    }
+
+    It 'is FALSE when Copilot also left a real review on the same head (the #656 case)' {
+        Test-CopilotOnlyRefused -Reviews @(
+            (NewReview 'copilot-pull-request-reviewer' $script:Refusal 'abc'),
+            (NewReview 'copilot-pull-request-reviewer' 'Two findings: the retry loop never resets the counter.' 'abc')
+        ) -HeadSha 'abc' | Should -BeFalse
+    }
+
+    It 'is FALSE when Copilot did not answer at all' {
+        Test-CopilotOnlyRefused -Reviews @() -HeadSha 'abc' | Should -BeFalse
+    }
+
+    It 'ignores a refusal left on an EARLIER commit' {
+        # Arming a multi-day cooldown off an old head would skip Copilot on work it never saw.
+        Test-CopilotOnlyRefused -Reviews @( (NewReview 'copilot-pull-request-reviewer' $script:Refusal 'old') ) -HeadSha 'abc' |
+            Should -BeFalse
+    }
+
+    It 'ignores humans whose prose happens to say "unable to review"' {
+        Test-CopilotOnlyRefused -Reviews @( (NewReview 'a-person' 'I was unable to review this properly, sorry' 'abc') ) -HeadSha 'abc' |
+            Should -BeFalse
+    }
+}

@@ -175,3 +175,50 @@ Describe 'Resolve-Opt (canonical option with legacy fallback, issue #278)' {
         Resolve-Opt $null 'Size' 'M' | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Board-Fill writes the assignee to the item OWN repo (#659)' {
+
+    # The reported symptom was "reports OK assignee for every item and assigns nobody". The two
+    # causes the report guessed were both wrong - the write already went to the ISSUE endpoint and
+    # already went through Invoke-Gh, and the exact gh call works when run by hand. The real cause
+    # is the ADDRESS: a board is not a repo, its items can come from several, and -Repo is one
+    # script-level value defaulting to the tool's own repo. `repos/<default>/issues/<same number>`
+    # is a URL GitHub answers 200 for whenever that number exists there - so the assignment landed
+    # on an unrelated issue in an unrelated repo while the intended one stayed empty.
+
+    It 'asks the board which repo each issue belongs to' {
+        # Structural: without this field on the query there is nothing to address the write with,
+        # and every behavioural test would be asserting against the fallback.
+        $src = Get-Content $script:Script -Raw
+        $src | Should -Match 'repository\s*\{\s*nameWithOwner\s*\}'
+    }
+
+    It 'prefers the issue OWN repo over the script-level fallback' {
+        $content = [pscustomobject]@{ repository = [pscustomobject]@{ nameWithOwner = 'someone/other-repo' } }
+        Get-IssueRepo -Content $content -FallbackRepo 'CSalcedoDataBI/agentic-board' |
+            Should -Be 'someone/other-repo'
+    }
+
+    It 'falls back only when the item carries no repo of its own' {
+        # A fallback is for an unresolvable item, never the preferred answer.
+        Get-IssueRepo -Content ([pscustomobject]@{}) -FallbackRepo 'owner/fallback' |
+            Should -Be 'owner/fallback'
+        Get-IssueRepo -Content ([pscustomobject]@{ repository = $null }) -FallbackRepo 'owner/fallback' |
+            Should -Be 'owner/fallback'
+    }
+
+    It 'builds the write URL from the entry repo, not from $Repo' {
+        # Pins the address itself: this is the line that sent every write to the default repo.
+        $src = Get-Content $script:Script -Raw
+        $src | Should -Match 'repos/\$\(\$entry\.Repo\)/issues/'
+        $src | Should -Not -Match 'repos/\$Repo/issues/\$\(\$entry\.IssueNum\)/assignees'
+    }
+
+    It 'verifies the assignment stuck instead of trusting the 200' {
+        # GitHub answers 200 and SILENTLY DROPS an assignee it cannot assign on that repo, so the
+        # status code alone cannot tell a real assignment from a discarded one.
+        $src = Get-Content $script:Script -Raw
+        $src | Should -Match 'verificar la asignacion'
+        $src | Should -Match 'notcontains \$Owner'
+    }
+}
