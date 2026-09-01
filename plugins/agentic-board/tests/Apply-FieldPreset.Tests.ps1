@@ -145,10 +145,16 @@ Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
 
     It 'still attempts the REMAINING fields instead of aborting on the first refusal' {
         # Honest reporting must not cost coverage: one rejected name must not strand the fields
-        # after it. Target is the last field of the English preset.
+        # after it. The last field is READ FROM THE PRESET rather than spelled here - hardcoding
+        # "Target" would quietly stop testing anything the day someone reorders fields.en.json,
+        # and the test would keep passing while proving nothing (review of #672).
+        $presetPath = Join-Path $PSScriptRoot '..' 'presets' 'fields.en.json' | Resolve-Path
+        $lastField  = (Get-Content $presetPath -Raw -Encoding UTF8 | ConvertFrom-Json).fields[-1].name
+        $lastField | Should -Not -BeNullOrEmpty -Because 'the preset must have fields to test with'
+
         script:Get-RunOutput -LogDir $TestDrive | Out-Null
         Should -Invoke gh -ParameterFilter {
-            ($args -contains 'field-create') -and ($args -contains 'Target')
+            ($args -contains 'field-create') -and ($args -contains $lastField)
         } -Times 1
     }
 }
