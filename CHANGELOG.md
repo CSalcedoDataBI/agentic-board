@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`Apply-FieldPreset` no longer reports a field it failed to create (#649).** It called
+  `gh project field-create` raw and never read the exit code, so `created: <name>` printed
+  whether GitHub created the field or refused it. GitHub now reserves the field name `Type`
+  (verified directly: `Type` is rejected with *Name cannot have a reserved value*, `Task Type`
+  is accepted), so this fired on **every fresh English board** — the run read clean and the board
+  came out missing the field, which is why the same defect was reported four separate times
+  (#649, #654, #658, #667). Both `field-create` calls now go through `Invoke-Gh`, which fails on
+  a non-zero exit; a refusal prints `FAILED: <field> — <reason>` instead, the remaining fields are
+  still attempted, and the run ends in a hard error naming what was not created. That last part
+  also fixes the lie one level up for free: `Resolve-Board` applies the preset at board birth
+  inside a try/catch, so it now warns instead of printing "preset applied" over a half-built board.
+- **Raw-`gh` baseline for `Apply-FieldPreset.ps1` lowered from 6 to 4**, locking in the migration
+  so the two checked calls cannot silently revert to unchecked ones.
+
 ## [0.38.1] - 2026-08-31
 
 ### Fixed
