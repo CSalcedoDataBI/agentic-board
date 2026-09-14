@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.38.3] - 2026-09-14
+### Fixed
+- **`/expert` loads with its description again (#677).** Its frontmatter `description` was an
+  unquoted YAML scalar containing `: ` (`Three verbs: config …`), which YAML reads as the start of a
+  mapping — so Claude Code rejected the whole frontmatter and loaded the command with empty
+  metadata (`claude plugin validate` reported it), while the command-surface test, which extracts
+  the field with a regex, stayed green. The value is now quoted; `Update-Docs` returns the scalar
+  without its YAML quotes, so the README catalog is byte-identical; and a new `CommandSurface`
+  guard fails CI when any command or skill frontmatter carries an unquoted `: ` or ` #`.
+
 ## [0.38.2] - 2026-09-01
 ### Fixed
 - **`Apply-FieldPreset` no longer reports a field it failed to create (#649).** It called
