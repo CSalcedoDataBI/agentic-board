@@ -41,6 +41,27 @@ Describe 'Get-FrontmatterField' {
         $raw = "---`nname: x`n---`ndescription: in the body"
         Get-FrontmatterField -Raw $raw -Field 'description' | Should -BeNullOrEmpty
     }
+    It 'returns the scalar, not its quotes, for a double-quoted value (#677)' {
+        # A value containing ': ' must be quoted to parse as YAML; the catalog must not show the quotes.
+        $raw = "---`n" + 'description: "Three verbs: config (define), auto (run)"' + "`n---"
+        Get-FrontmatterField -Raw $raw -Field 'description' | Should -Be 'Three verbs: config (define), auto (run)'
+    }
+    It 'unescapes \" and \\ inside a double-quoted value' {
+        $raw = "---`n" + 'description: "say \"hi\" \\ ok"' + "`n---"
+        Get-FrontmatterField -Raw $raw -Field 'description' | Should -Be 'say "hi" \ ok'
+    }
+    It 'returns the scalar for a single-quoted value, folding a doubled quote' {
+        $raw = "---`n" + "description: 'it''s: fine'" + "`n---"
+        Get-FrontmatterField -Raw $raw -Field 'description' | Should -Be "it's: fine"
+    }
+    It 'leaves an unquoted value that merely contains quotes untouched' {
+        $raw = "---`n" + 'description: a "quoted" word' + "`n---"
+        Get-FrontmatterField -Raw $raw -Field 'description' | Should -Be 'a "quoted" word'
+    }
+    It 'keeps an em dash inside a double-quoted value' {
+        $raw = "---`ndescription: `"a dash " + [char]0x2014 + " here`"`n---"
+        Get-FrontmatterField -Raw $raw -Field 'description' | Should -Be ("a dash " + [char]0x2014 + " here")
+    }
 }
 
 Describe 'Get-CommandCatalog' {

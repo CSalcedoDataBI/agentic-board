@@ -70,7 +70,16 @@ function Get-FrontmatterField {
     $block = $m.Groups[1].Value
     $fm = [regex]::Match($block, '(?m)^' + [regex]::Escape($Field) + '\s*:\s*(.+?)\s*$')
     if (-not $fm.Success) { return $null }
-    $fm.Groups[1].Value.Trim()
+    $value = $fm.Groups[1].Value.Trim()
+    # A value may be YAML-quoted — it must be when it contains ': ' or ' #' (#677). Return the
+    # scalar, not its quotes, so the generated catalog reads the same whether or not it is quoted.
+    if ($value.Length -ge 2 -and $value[0] -eq '"' -and $value[-1] -eq '"') {
+        return [regex]::Replace($value.Substring(1, $value.Length - 2), '\\(["\\])', '$1')
+    }
+    if ($value.Length -ge 2 -and $value[0] -eq "'" -and $value[-1] -eq "'") {
+        return $value.Substring(1, $value.Length - 2).Replace("''", "'")
+    }
+    $value
 }
 
 # Build the command catalog from a directory of `*.md` command files. Each file's
