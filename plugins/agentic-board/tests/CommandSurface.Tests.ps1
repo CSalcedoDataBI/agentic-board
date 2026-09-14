@@ -181,3 +181,45 @@ Describe 'Command surface — no internal vocabulary leaks into Write-Host outpu
         $violations | Should -BeNullOrEmpty -Because "$Name must speak to a BI professional, not name its own implementation (#491/#494): $($violations -join '; ')"
     }
 }
+
+# --- discovery scope: every frontmatter the client parses as YAML (#677) --------
+$FrontmatterCases = @(
+    foreach ($pattern in @(
+            (Join-Path $PSScriptRoot '..' 'commands' '*.md'),
+            (Join-Path $PSScriptRoot '..' 'skills' '*' 'SKILL.md'),
+            (Join-Path $PSScriptRoot '..' 'agents' '*.md'))) {
+        Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
+            ForEach-Object { @{ Name = "$($_.Directory.Name)/$($_.Name)"; Path = $_.FullName } }
+    }
+)
+
+Describe 'Command surface — frontmatter parses as YAML in the client (#677)' {
+    <#  The description test above extracts `description:` with a regex, so it stayed green while
+        Claude Code's real YAML parser rejected commands/expert.md and loaded /expert with EMPTY
+        metadata (`claude plugin validate`: "frontmatter failed to parse"). This asserts what the
+        client parses, not what a regex can find.
+        No YAML module is installed in CI, so it checks the two plain-scalar hazards directly, on
+        unquoted single-line values: ': ' fails to parse (it opens a mapping), ' #' parses but
+        silently truncates the value as a comment. The fix for either is to quote the value. #>
+    It 'discovers frontmatter files to check (a guard over zero files passes vacuously)' -ForEach @(@{ Count = $FrontmatterCases.Count }) {
+        $Count | Should -BeGreaterThan 0
+    }
+
+    It '<Name>: no unquoted frontmatter value contains ": " or " #"' -ForEach $FrontmatterCases {
+        $lines = @(Get-Content -LiteralPath $Path)
+        $violations = @()
+        if ($lines.Count -gt 0 -and $lines[0] -eq '---') {
+            for ($i = 1; $i -lt $lines.Count -and $lines[$i] -ne '---'; $i++) {
+                if ($lines[$i] -notmatch '^([A-Za-z0-9_-]+):[ \t]+(.+?)\s*$') { continue }
+                $key = $matches[1]; $value = $matches[2]
+                if ($value[0] -in @('"', "'", '|', '>')) { continue }   # quoted or block scalar
+                if ($value.Contains(': ')) {
+                    $violations += "line $($i + 1) '$key': unquoted value contains ': ' (YAML parse error)"
+                } elseif ($value.Contains(' #')) {
+                    $violations += "line $($i + 1) '$key': unquoted value contains ' #' (silently truncated)"
+                }
+            }
+        }
+        $violations | Should -BeNullOrEmpty -Because "$Name loads with empty metadata when its frontmatter does not parse - quote the value: $($violations -join '; ')"
+    }
+}
