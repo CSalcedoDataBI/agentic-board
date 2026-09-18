@@ -77,6 +77,9 @@ Describe 'Compact-PreCompactHook end to end - non-ASCII working directory (#682)
         $repo = Join-Path $script:Base $script:Odd
         New-Item -ItemType Directory -Force $repo | Out-Null
         & git -C $repo init -q 2>$null
+        # If git could not initialise the repo the hook would fall back to $cwd and this test would
+        # pass without ever exercising the decoding of git's output.
+        $LASTEXITCODE | Should -Be 0
         $tr = Join-Path $script:Base 'transcript.jsonl'
         Set-Content -LiteralPath $tr -Value '{"a":1}'
 

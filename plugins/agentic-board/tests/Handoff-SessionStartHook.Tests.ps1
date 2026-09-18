@@ -98,3 +98,51 @@ Describe 'Get-CompactSessionContext' {
         Get-CompactSessionContext $m | Should -Match 'status from the board'
     }
 }
+
+Describe 'Handoff-SessionStartHook end to end - non-ASCII repository path (#682)' {
+
+    BeforeAll {
+        $script:Odd = "IA-AUTOMATIZACI$([char]0x00D3)N-A$([char]0x00D1)O"
+        $script:Base = Join-Path ([IO.Path]::GetTempPath()) ("abios-682h-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Force $script:Base | Out-Null
+
+        # The REAL hook as a child process, payload fed as UTF-8 bytes, like Claude Code does.
+        function script:RunHook {
+            param([string]$Cwd, [string]$Source)
+            $psi = [System.Diagnostics.ProcessStartInfo]::new('pwsh')
+            foreach ($a in '-NoProfile', '-File', $script:Script.Path) { $psi.ArgumentList.Add($a) }
+            $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+            $psi.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+            $psi.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+            $psi.UseShellExecute = $false
+            $p = [System.Diagnostics.Process]::Start($psi)
+            try {
+                $json = @{ cwd = $Cwd; source = $Source } | ConvertTo-Json -Compress
+                $p.StandardInput.Write($json); $p.StandardInput.Close()
+                $outTask = $p.StandardOutput.ReadToEndAsync(); $errTask = $p.StandardError.ReadToEndAsync()
+                if (-not $p.WaitForExit(30000)) { throw 'the hook did not exit within 30 seconds' }
+                $errTask.GetAwaiter().GetResult() | Out-Null
+                $outTask.GetAwaiter().GetResult()
+            }
+            finally {
+                if (-not $p.HasExited) { try { $p.Kill($true) } catch { } }
+                $p.Dispose()
+            }
+        }
+    }
+    AfterAll { Remove-Item -LiteralPath $script:Base -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'finds the run marker in a repo whose path has accented letters' {
+        $repo = Join-Path $script:Base $script:Odd
+        New-Item -ItemType Directory -Force (Join-Path $repo '.agentic-board') | Out-Null
+        & git -C $repo init -q 2>$null
+        $LASTEXITCODE | Should -Be 0
+        Set-Content -LiteralPath (Join-Path $repo '.agentic-board' 'active-run.json') `
+            -Value '{"status":"active","epic":348,"board":13,"repo":"o/r","queue":[1,2]}'
+
+        $out = script:RunHook -Cwd $repo -Source 'compact'
+
+        # Silence here is the bug: the hook could not find the marker and lost the run's context.
+        $out | Should -Match 'epic #348'
+    }
+}

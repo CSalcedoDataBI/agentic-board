@@ -92,6 +92,13 @@ Describe 'Brake hook — an armed run without the order' {
         script:DecisionOf (script:RunHook -Cwd $wt -Command 'gh pr merge 490 --squash --delete-branch') |
             Should -Be 'deny'
     }
+    It 'still denies inside an armed worktree whose path has accented letters (#682)' {
+        # The hook used to decode stdin with the console code page: the cwd arrived garbled, the
+        # marker was not found, and the brake stayed silent - a fail-open on any accented path.
+        $wt = script:NewWorktree "armed-AUTOMATIZACI$([char]0x00D3)N-A$([char]0x00D1)O" (script:Marker)
+        script:DecisionOf (script:RunHook -Cwd $wt -Command 'gh pr merge 490 --squash --delete-branch') |
+            Should -Be 'deny'
+    }
     It 'denies the gated merge script too — without an order it is just another merge' {
         $wt = script:NewWorktree 'armed-gated' (script:Marker)
         script:DecisionOf (script:RunHook -Cwd $wt -Command 'pwsh scripts/Board-Merge.ps1 -PR 535') |
