@@ -98,17 +98,22 @@ ${ITEM_FIELDS_HEAD} $1 $2 ${ITEM_TAIL}
 }"
 }
 
-# One page, up to 3 attempts. The cursor goes in as a variable, never spliced into the query text.
+# One page, several attempts. The cursor goes in as a variable, never spliced into the query text.
+# A CI run of the fix showed the full query failing three times in a row and then succeeding seconds
+# later, so the failure looks like a cold server-side timeout rather than a bad selection: more
+# attempts and a longer wait, and each failure records how long it took so that can be confirmed.
+ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-6}"
 fetch_items_page() {
-  local cursor="$1" attempt=1 out
-  while [ "$attempt" -le 3 ]; do
+  local cursor="$1" attempt=1 out started
+  while [ "$attempt" -le "$ATTEMPTS" ]; do
+    started=$SECONDS
     if [ -n "$cursor" ]; then
       out=$(gh api graphql -f query="$(items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")" -F proj="$PROJECT_ID" -F cursor="$cursor" 2>"$ERR_FILE") && { printf '%s' "$out"; return 0; }
     else
       out=$(gh api graphql -f query="$(items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")" -F proj="$PROJECT_ID" 2>"$ERR_FILE") && { printf '%s' "$out"; return 0; }
     fi
-    echo "  items query failed (attempt $attempt/3): $(head -c 300 "$ERR_FILE")" >&2
-    [ "$attempt" -lt 3 ] && sleep $((attempt * BACKOFF))
+    echo "  items query failed (attempt $attempt/$ATTEMPTS, $((SECONDS - started))s): $(head -c 300 "$ERR_FILE")" >&2
+    [ "$attempt" -lt "$ATTEMPTS" ] && sleep $((attempt * BACKOFF))
     attempt=$((attempt + 1))
   done
   return 1
@@ -116,7 +121,7 @@ fetch_items_page() {
 
 # The query kept failing: say which selection is the culprit, so the next step is a fix, not a guess.
 diagnose_items_failure() {
-  echo "::error::board-sync: the items query failed 3 times. Diagnosing which part breaks (gh $(gh --version | head -1))" >&2
+  echo "::error::board-sync: the items query failed $ATTEMPTS times. Diagnosing which part breaks (gh $(gh --version | head -1))" >&2
   local label assignees timeline
   for variant in "full|$ITEM_ASSIGNEES|$ITEM_TIMELINE" "without timelineItems|$ITEM_ASSIGNEES|" "without assignees||$ITEM_TIMELINE" "without both||"; do
     label="${variant%%|*}"; rest="${variant#*|}"; assignees="${rest%%|*}"; timeline="${rest#*|}"

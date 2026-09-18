@@ -101,7 +101,7 @@ echo '{}'
     It 'rides out a transient server-side failure' {
         $r = script:RunSync @{ FAKE_PAGES = 1; FAKE_FAIL_FIRST = 2 }
         $r.Exit | Should -Be 0
-        $r.Err | Should -Match 'attempt 2/3'
+        $r.Err | Should -Match 'attempt 2/6'
         $r.Out | Should -Match 'Items found: 1'
     }
 

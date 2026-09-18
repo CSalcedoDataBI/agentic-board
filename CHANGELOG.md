@@ -6,7 +6,7 @@
   The workflow has been red on every run since 2026-09-07: its single `items(first:100)` query, with
   three nested connections, began failing in CI with a bare "Something went wrong while executing
   your query" and the script exited with nothing to act on. It now reads the board in pages of 25,
-  retries each page up to three times with a growing wait, and when it still fails it re-runs the
+  retries each page up to six times with a growing wait (a CI run showed the full query failing three times and then succeeding seconds later, which points to a cold server-side timeout), and when it still fails it re-runs the
   query without `timelineItems`, without `assignees`, and without both, and prints which variant
   breaks. A board whose not-started option is `Backlog` (the plugin's own presets) used to compare
   against an empty id, so an issue with an open PR was never moved to In Progress; it now falls
