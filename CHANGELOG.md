@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **Board Sync no longer dies with no cause, and no longer mishandles a `Backlog` board (#679).**
+  The workflow has been red on every run since 2026-09-07: its single `items(first:100)` query, with
+  three nested connections, began failing in CI with a bare "Something went wrong while executing
+  your query" and the script exited with nothing to act on. It now reads the board in pages of 25,
+  retries each page up to three times with a growing wait, and when it still fails it re-runs the
+  query without `timelineItems`, without `assignees`, and without both, and prints which variant
+  breaks. A board whose not-started option is `Backlog` (the plugin's own presets) used to compare
+  against an empty id, so an issue with an open PR was never moved to In Progress; it now falls
+  back from `Todo` to `Backlog`. Covered by a test that drives the real script with a fake `gh`.
+
 ## [0.38.4] - 2026-09-18
 ### Fixed
 - **Hooks no longer garble a working directory with a non-ASCII letter (#682).** Every hook read

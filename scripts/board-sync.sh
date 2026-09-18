@@ -38,16 +38,25 @@ STATUS_ID=$(echo "$PROJECT"  | jq -r '.data.user.projectV2.fields.nodes[] | sele
 DONE_OPT=$(echo "$PROJECT"   | jq -r '.data.user.projectV2.fields.nodes[] | select(.name=="Status") | .options[] | select(.name=="Done") | .id')
 INPROG_OPT=$(echo "$PROJECT" | jq -r '.data.user.projectV2.fields.nodes[] | select(.name=="Status") | .options[] | select(.name=="In Progress") | .id')
 TODO_OPT=$(echo "$PROJECT"   | jq -r '.data.user.projectV2.fields.nodes[] | select(.name=="Status") | .options[] | select(.name=="Todo") | .id')
+# Boards use either name for the not-started option (the plugin's own presets ship 'Backlog'). Without
+# this fallback the comparison further down is against an empty id and an issue with an open PR is
+# never moved to In Progress (#679).
+if [ -z "$TODO_OPT" ]; then
+  TODO_OPT=$(echo "$PROJECT" | jq -r '.data.user.projectV2.fields.nodes[] | select(.name=="Status") | .options[] | select(.name=="Backlog") | .id')
+fi
 
 echo "Project ID : $PROJECT_ID"
 echo "Status field: $STATUS_ID  (Done=$DONE_OPT  InProg=$INPROG_OPT  Todo=$TODO_OPT)"
 
-# ── 2. Load all project items ──────────────────────────────────────────────────
-ITEMS=$(gh api graphql -f query='
-query($proj:ID!) {
-  node(id:$proj) {
-    ... on ProjectV2 {
-      items(first:100) {
+# ── 2. Load all project items (small pages, retried) ──────────────────────────
+# One items(first:100) query with three nested connections (fieldValues, assignees, timelineItems)
+# began failing in CI on 2026-09-07 with a bare "Something went wrong while executing your query"
+# and no cause (#679). Small pages keep each query cheap, a retry rides out a transient server-side
+# failure, and a persistent failure now says WHICH part of the query breaks instead of a bare exit 1.
+BACKOFF="${BOARD_SYNC_BACKOFF:-5}"
+ERR_FILE="$(mktemp)"
+
+ITEM_FIELDS_HEAD='
         nodes {
           id
           fieldValues(first:20) {
@@ -57,8 +66,9 @@ query($proj:ID!) {
           }
           content {
             ... on Issue {
-              number state assignees(first:5) { nodes { login } }
-              timelineItems(first:20 itemTypes:[CROSS_REFERENCED_EVENT]) {
+              number state'
+ITEM_ASSIGNEES='assignees(first:5) { nodes { login } }'
+ITEM_TIMELINE='timelineItems(first:20 itemTypes:[CROSS_REFERENCED_EVENT]) {
                 nodes {
                   ... on CrossReferencedEvent {
                     willCloseTarget
@@ -67,17 +77,74 @@ query($proj:ID!) {
                     }
                   }
                 }
-              }
+              }'
+ITEM_TAIL='
             }
           }
-        }
+        }'
+
+# $1 = assignees fragment, $2 = timeline fragment, $3 = cursor ("" for the first page)
+items_query() {
+  printf '%s' "
+query(\$proj:ID!, \$cursor:String) {
+  node(id:\$proj) {
+    ... on ProjectV2 {
+      items(first:25, after:\$cursor) {
+        pageInfo { hasNextPage endCursor }
+${ITEM_FIELDS_HEAD} $1 $2 ${ITEM_TAIL}
       }
     }
   }
-}' -F proj="$PROJECT_ID")
+}"
+}
 
-ITEM_COUNT=$(echo "$ITEMS" | jq '.data.node.items.nodes | length')
-echo "Items found: $ITEM_COUNT"
+# One page, up to 3 attempts. The cursor goes in as a variable, never spliced into the query text.
+fetch_items_page() {
+  local cursor="$1" attempt=1 out
+  while [ "$attempt" -le 3 ]; do
+    if [ -n "$cursor" ]; then
+      out=$(gh api graphql -f query="$(items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")" -F proj="$PROJECT_ID" -F cursor="$cursor" 2>"$ERR_FILE") && { printf '%s' "$out"; return 0; }
+    else
+      out=$(gh api graphql -f query="$(items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")" -F proj="$PROJECT_ID" 2>"$ERR_FILE") && { printf '%s' "$out"; return 0; }
+    fi
+    echo "  items query failed (attempt $attempt/3): $(head -c 300 "$ERR_FILE")" >&2
+    [ "$attempt" -lt 3 ] && sleep $((attempt * BACKOFF))
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
+# The query kept failing: say which selection is the culprit, so the next step is a fix, not a guess.
+diagnose_items_failure() {
+  echo "::error::board-sync: the items query failed 3 times. Diagnosing which part breaks (gh $(gh --version | head -1))" >&2
+  local label assignees timeline
+  for variant in "full|$ITEM_ASSIGNEES|$ITEM_TIMELINE" "without timelineItems|$ITEM_ASSIGNEES|" "without assignees||$ITEM_TIMELINE" "without both||"; do
+    label="${variant%%|*}"; rest="${variant#*|}"; assignees="${rest%%|*}"; timeline="${rest#*|}"
+    if gh api graphql -f query="$(items_query "$assignees" "$timeline")" -F proj="$PROJECT_ID" >/dev/null 2>&1; then
+      echo "  variant '$label': OK" >&2
+    else
+      echo "  variant '$label': FAILS" >&2
+    fi
+  done
+}
+
+ITEM_NODES='[]'
+CURSOR=""
+PAGES=0
+while :; do
+  PAGE=$(fetch_items_page "$CURSOR") || { diagnose_items_failure; exit 1; }
+  ITEM_NODES=$(jq -c --argjson page "$(printf '%s' "$PAGE" | jq -c '.data.node.items.nodes')" '. + $page' <<<"$ITEM_NODES")
+  PAGES=$((PAGES + 1))
+  [ "$(printf '%s' "$PAGE" | jq -r '.data.node.items.pageInfo.hasNextPage')" = "true" ] || break
+  CURSOR=$(printf '%s' "$PAGE" | jq -r '.data.node.items.pageInfo.endCursor')
+  if [ -z "$CURSOR" ] || [ "$CURSOR" = "null" ] || [ "$PAGES" -ge 40 ]; then
+    echo "::error::board-sync: pagination did not terminate (cursor='$CURSOR', pages=$PAGES)" >&2
+    exit 1
+  fi
+done
+
+ITEM_COUNT=$(printf '%s' "$ITEM_NODES" | jq 'length')
+echo "Items found: $ITEM_COUNT  ($PAGES page(s))"
 
 # ── 3. Process each item ───────────────────────────────────────────────────────
 set_status() {
@@ -97,7 +164,8 @@ assign_issue() {
     -X POST -F "assignees[]=$OWNER" > /dev/null 2>&1 || true
 }
 
-echo "$ITEMS" | jq -c '.data.node.items.nodes[]' | while read -r item; do
+printf '%s
+' "$ITEM_NODES" | jq -c '.[]' | while read -r item; do
   ITEM_ID=$(echo "$item" | jq -r '.id')
   ISSUE_NUM=$(echo "$item" | jq -r '.content.number // empty')
 
