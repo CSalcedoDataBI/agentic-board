@@ -125,12 +125,17 @@ diagnose_items_failure() {
   done
 }
 
-# EXPERIMENT (#679): run the diagnosis BEFORE any normal attempt. If its query succeeds while first,
-# the difference is the call site; if the loop then succeeds too, earlier state matters.
+# EXPERIMENT (#679): change ONE factor per call to find what makes the loop's query fail.
 ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-6}"
-echo '=== PROBE: diagnosis before the loop ===' >&2
-diagnose_items_failure
-echo '=== PROBE done ===' >&2
+CURSOR=""
+probe() { local label="$1"; shift; local out rc=0; out=$("$@") || rc=$?; echo "  PROBE $label: exit=$rc bytes=${#out} err='$(head -c 100 "$ERR_FILE" | tr '
+' ' ')'" >&2; }
+_a="$ITEM_ASSIGNEES"; _t="$ITEM_TIMELINE"
+probe "A loop-style args (\$ITEM_*, \$CURSOR)" run_items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE" "$CURSOR"
+probe "B \$ITEM_* with literal empty cursor" run_items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE" ""
+probe "C copies of the fragments" run_items_query "$_a" "$_t" ""
+probe "D again like A" run_items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE" "$CURSOR"
+if PAGE=$(run_items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE" "$CURSOR"); then echo "  PROBE E assignment-style: OK bytes=${#PAGE}" >&2; else echo "  PROBE E assignment-style: FAILS" >&2; fi
 
 # The retry loop runs in THIS shell, the same context as the diagnosis above, not inside a nested
 # command substitution: see the note on diagnose_items_failure.
