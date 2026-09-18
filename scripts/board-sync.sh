@@ -98,20 +98,27 @@ ${ITEM_FIELDS_HEAD} $1 $2 ${ITEM_TAIL}
 }"
 }
 
-# One page, several attempts. The cursor goes in as a variable, never spliced into the query text.
-# A CI run of the fix showed the full query failing three times in a row and then succeeding seconds
-# later, so the failure looks like a cold server-side timeout rather than a bad selection: more
-# attempts and a longer wait, and each failure records how long it took so that can be confirmed.
+# ONE place that runs the items query, so the normal path and the diagnosis cannot differ.
+# $1 = assignees fragment, $2 = timeline fragment, $3 = cursor ("" for the first page).
+# The cursor goes in as a variable, never spliced into the query text. stderr lands in $ERR_FILE.
+run_items_query() {
+  if [ -n "$3" ]; then
+    gh api graphql -f query="$(items_query "$1" "$2")" -F proj="$PROJECT_ID" -F cursor="$3" 2>"$ERR_FILE"
+  else
+    gh api graphql -f query="$(items_query "$1" "$2")" -F proj="$PROJECT_ID" 2>"$ERR_FILE"
+  fi
+}
+
+# One page, several attempts. A CI run of the fix showed the full query failing on every attempt (each
+# in 1-2 s, so a rejection, not a timeout) while the very same query, run a moment later by the
+# diagnosis, succeeded - so each failure now records how long it took, and the diagnosis reports the
+# exit code and message of every variant instead of a bare OK/FAILS.
 ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-6}"
 fetch_items_page() {
   local cursor="$1" attempt=1 out started
   while [ "$attempt" -le "$ATTEMPTS" ]; do
     started=$SECONDS
-    if [ -n "$cursor" ]; then
-      out=$(gh api graphql -f query="$(items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")" -F proj="$PROJECT_ID" -F cursor="$cursor" 2>"$ERR_FILE") && { printf '%s' "$out"; return 0; }
-    else
-      out=$(gh api graphql -f query="$(items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")" -F proj="$PROJECT_ID" 2>"$ERR_FILE") && { printf '%s' "$out"; return 0; }
-    fi
+    out=$(run_items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE" "$cursor") && { printf '%s' "$out"; return 0; }
     echo "  items query failed (attempt $attempt/$ATTEMPTS, $((SECONDS - started))s): $(head -c 300 "$ERR_FILE")" >&2
     [ "$attempt" -lt "$ATTEMPTS" ] && sleep $((attempt * BACKOFF))
     attempt=$((attempt + 1))
@@ -122,14 +129,12 @@ fetch_items_page() {
 # The query kept failing: say which selection is the culprit, so the next step is a fix, not a guess.
 diagnose_items_failure() {
   echo "::error::board-sync: the items query failed $ATTEMPTS times. Diagnosing which part breaks (gh $(gh --version | head -1))" >&2
-  local label assignees timeline
+  local variant label rest assignees timeline out rc
   for variant in "full|$ITEM_ASSIGNEES|$ITEM_TIMELINE" "without timelineItems|$ITEM_ASSIGNEES|" "without assignees||$ITEM_TIMELINE" "without both||"; do
     label="${variant%%|*}"; rest="${variant#*|}"; assignees="${rest%%|*}"; timeline="${rest#*|}"
-    if gh api graphql -f query="$(items_query "$assignees" "$timeline")" -F proj="$PROJECT_ID" >/dev/null 2>&1; then
-      echo "  variant '$label': OK" >&2
-    else
-      echo "  variant '$label': FAILS" >&2
-    fi
+    rc=0; out=$(run_items_query "$assignees" "$timeline" "") || rc=$?
+    echo "  variant '$label': exit=$rc bytes=${#out} err='$(head -c 160 "$ERR_FILE" | tr '\n' ' ')'" >&2
+    [ "$rc" -eq 0 ] && echo "  variant '$label': OK" >&2 || echo "  variant '$label': FAILS" >&2
   done
 }
 
