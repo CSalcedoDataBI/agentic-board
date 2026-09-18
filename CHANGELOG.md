@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.38.4] - 2026-09-18
 ### Fixed
 - **Hooks no longer garble a working directory with a non-ASCII letter (#682).** Every hook read
   its JSON payload with `[Console]::In`, which decodes with the console OEM code page, so `Ó`
