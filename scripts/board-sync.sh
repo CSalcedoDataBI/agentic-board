@@ -127,6 +127,7 @@ diagnose_items_failure() {
 
 # EXPERIMENT (#679): run the diagnosis BEFORE any normal attempt. If its query succeeds while first,
 # the difference is the call site; if the loop then succeeds too, earlier state matters.
+ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-6}"
 echo '=== PROBE: diagnosis before the loop ===' >&2
 diagnose_items_failure
 echo '=== PROBE done ===' >&2
