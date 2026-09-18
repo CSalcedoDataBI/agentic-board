@@ -51,7 +51,7 @@ function Test-ArmedFast {
 $armed  = $false
 $marker = $null
 try {
-    $raw = [Console]::In.ReadToEnd()
+    $raw = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false)).ReadToEnd()
     if (-not $raw) { exit 0 }
     $payload = $raw | ConvertFrom-Json -ErrorAction Stop
 

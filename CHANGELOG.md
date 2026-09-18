@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **Hooks no longer garble a working directory with a non-ASCII letter (#682).** Every hook read
+  its JSON payload with `[Console]::In`, which decodes with the console OEM code page, so `Ó`
+  (UTF-8 `C3 93`) arrived as `├ô`. Separately, `git rev-parse --show-toplevel` output was decoded
+  the same wrong way. The PreCompact hook then created a twin folder with the garbled name and
+  wrote the transcript snapshot there (~137 MB in one real repo) instead of in the repo. All five
+  hooks now read stdin as UTF-8; the PreCompact and Handoff hooks decode git's output as UTF-8;
+  and the PreCompact hook exits without writing when the working directory does not exist, so it
+  can never create a folder. Covered by an end-to-end test that runs the real hook with a
+  `cwd` containing `Ó` and `Ñ`.
+
 ## [0.38.3] - 2026-09-14
 ### Fixed
 - **`/expert` loads with its description again (#677).** Its frontmatter `description` was an

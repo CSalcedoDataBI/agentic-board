@@ -84,7 +84,7 @@ try {
     if (-not [Console]::IsInputRedirected) { exit 0 }
 
     $raw = ""
-    try { $raw = [Console]::In.ReadToEnd() } catch { $raw = "" }
+    try { $raw = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false)).ReadToEnd() } catch { $raw = "" }
     $in = $null
     if ($raw) { try { $in = $raw | ConvertFrom-Json } catch { $in = $null } }
 
@@ -98,6 +98,7 @@ try {
     if ($source -ne 'resume' -and $source -ne 'compact') { exit 0 }
 
     $cwd = if ($in -and $in.cwd) { [string]$in.cwd } else { (Get-Location).Path }
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)   # git prints UTF-8 paths; the default OEM decode garbles them (#682)
     $root = git -C $cwd rev-parse --show-toplevel 2>$null
     if (-not $root) { $root = $cwd }
 
