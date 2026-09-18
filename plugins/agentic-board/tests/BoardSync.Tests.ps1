@@ -37,6 +37,9 @@ Describe 'board-sync.sh items load (#679)' -Skip:(-not $script:CanRun) {
         #                             real failure: a page fails as a whole, each item reads alone
         #   FAKE_POISON_TIMELINE=i    any request covering item i that asks for timelineItems fails
         #   FAKE_POISON_HARD=i        any request covering item i fails, except the minimal id-only one
+        #   FAKE_GARBAGE_BATCH=1      a request for more than one item answers 200 with a body that is not JSON
+        #   FAKE_GARBAGE_SINGLE=1     a request for a single item answers 200 with valid JSON that is NOT a page
+        #                             (no pageInfo): the case that used to end the pagination silently
         $fake = @'
 #!/usr/bin/env bash
 state="$FAKE_STATE"
@@ -66,6 +69,8 @@ case "$q" in
     if covers "$FAKE_POISON" && [ "$size" -gt 1 ]; then fail; fi
     if covers "$FAKE_POISON_TIMELINE" && [ "$has_tl" = 1 ]; then fail; fi
     if covers "$FAKE_POISON_HARD" && [ "$minimal" = 0 ]; then fail; fi
+    [ -n "$FAKE_GARBAGE_BATCH" ] && [ "$size" -gt 1 ] && { echo 'not json at all'; exit 0; }
+    [ -n "$FAKE_GARBAGE_SINGLE" ] && [ "$size" -eq 1 ] && { echo '{"data":{"node":{"items":{"nodes":[]}}}}'; exit 0; }
     nodes=$(for ((k=start; k<=end; k++)); do
       jq -cn --argjson i "$k" --argjson tl "$has_tl" --argjson min "$minimal" '
         if $min == 1 then {id: ("I" + ($i|tostring))}
@@ -155,6 +160,22 @@ echo '{}'
         $r.Exit | Should -Be 0
         $r.Err | Should -Match '::warning::board-sync: skipped an item that could not be read at all'
         $r.Out | Should -Match 'Items found: 4'
+    }
+
+    It 'treats a 200 with a broken body as a failed page and salvages it, instead of trusting it' {
+        $r = script:RunSync @{ FAKE_ITEMS = 5; FAKE_GARBAGE_BATCH = 1 }
+        $r.Exit | Should -Be 0
+        $r.Err | Should -Match 'the response was not a page'
+        $r.Out | Should -Match 'Items found: 5'
+    }
+
+    It 'ends the run, rather than truncating the list, when a salvaged response is not a page' {
+        # salvage runs where bash suspends set -e; a bad response there used to end the pagination
+        # early and the sync reported success over a partial board.
+        $r = script:RunSync @{ FAKE_ITEMS = 5; FAKE_POISON = 4; FAKE_GARBAGE_SINGLE = 1 }
+        $r.Exit | Should -Not -Be 0
+        $r.Err | Should -Match '::error::board-sync'
+        $r.Out | Should -Not -Match 'Items found'
     }
 
     It 'fails loudly when nothing can be read, instead of reporting a clean sync' {

@@ -126,13 +126,19 @@ run_query() {
   fi
 }
 
+# Does this look like a page? A 200 with a broken body must count as a failure, not as an empty page.
+page_ok() { jq -e '.data.node.items | (.nodes | type == "array") and (.pageInfo.hasNextPage | type == "boolean")' >/dev/null 2>&1; }
+
 # Read one page at $CURSOR, retrying a few times. Sets PAGE and returns 0, or returns 1.
 read_page() {
   local attempt=1 rc started
   while [ "$attempt" -le "$ATTEMPTS" ]; do
     started=$SECONDS; rc=0
     PAGE=$(run_query "$(items_query "$PAGE_SIZE" "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")" "$CURSOR") || rc=$?
-    [ "$rc" -eq 0 ] && return 0
+    if [ "$rc" -eq 0 ]; then
+      if printf '%s' "$PAGE" | page_ok; then return 0; fi
+      rc=1; echo "  items page unreadable (cursor='${CURSOR:-start}'): the response was not a page" >"$ERR_FILE"
+    fi
     echo "  items page failed (cursor='${CURSOR:-start}', attempt $attempt/$ATTEMPTS, $((SECONDS - started))s): $(head -c 200 "$ERR_FILE")" >&2
     [ "$attempt" -lt "$ATTEMPTS" ] && sleep $((attempt * BACKOFF))
     attempt=$((attempt + 1))
@@ -140,6 +146,8 @@ read_page() {
   return 1
 }
 
+# NOTE: this runs inside an `||` list (PAGE=$(salvage_page) || ...), where bash suspends `set -e`, so
+# every step that can fail returns explicitly: a bad response must end the run, not the pagination.
 # The page kept failing: read it one item at a time. Prints a page-shaped JSON document.
 # Per item, in order of decreasing fidelity: full, without its linked PRs, then just enough to step
 # past it. Anything below "full" is reported with ::warning:: naming the item.
@@ -159,12 +167,16 @@ salvage_page() {
           return 1
         fi
         echo "::warning::board-sync: skipped an item that could not be read at all (id $(printf '%s' "$one" | jq -r '.data.node.items.nodes[0].id // "?"'))" >&2
-        one=$(printf '%s' "$one" | jq -c '.data.node.items.nodes |= []')
+        one=$(printf '%s' "$one" | jq -c '.data.node.items.nodes |= []') || return 1
       fi
     fi
-    nodes=$(jq -c --argjson add "$(printf '%s' "$one" | jq -c '.data.node.items.nodes')" '. + $add' <<<"$nodes")
-    has_next=$(printf '%s' "$one" | jq -r '.data.node.items.pageInfo.hasNextPage')
-    cursor=$(printf '%s' "$one" | jq -r '.data.node.items.pageInfo.endCursor')
+    if ! printf '%s' "$one" | page_ok; then
+      echo "::error::board-sync: the response for the item after cursor '${cursor:-start}' was not a page" >&2
+      return 1
+    fi
+    nodes=$(jq -c --argjson add "$(printf '%s' "$one" | jq -c '.data.node.items.nodes')" '. + $add' <<<"$nodes") || return 1
+    has_next=$(printf '%s' "$one" | jq -r '.data.node.items.pageInfo.hasNextPage') || return 1
+    cursor=$(printf '%s' "$one" | jq -r '.data.node.items.pageInfo.endCursor') || return 1
     got=$((got + 1))
   done
   jq -cn --argjson nodes "$nodes" --arg more "$has_next" --arg end "$cursor" \
