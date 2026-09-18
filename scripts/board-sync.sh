@@ -58,8 +58,11 @@ echo "Status field: $STATUS_ID  (Done=$DONE_OPT  InProg=$INPROG_OPT  Todo=$TODO_
 # be read at all is skipped with a warning that names it. One bad item no longer stops the sync.
 BACKOFF="${BOARD_SYNC_BACKOFF:-5}"
 ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-3}"
+# Small pages on purpose: a page of 100 (the original) or of 25 fails on this board, and a failing page
+# costs one call per item to salvage, so 10 keeps both the failure rate and that cost low.
 PAGE_SIZE="${BOARD_SYNC_PAGE_SIZE:-10}"
 ERR_FILE="$(mktemp)"
+trap 'rm -f "$ERR_FILE"' EXIT
 
 ITEM_FIELDS_HEAD='
         nodes {
