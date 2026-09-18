@@ -2,15 +2,19 @@
 
 ## [Unreleased]
 ### Fixed
-- **Board Sync no longer dies with no cause, and no longer mishandles a `Backlog` board (#679).**
-  The workflow has been red on every run since 2026-09-07: its single `items(first:100)` query, with
-  three nested connections, began failing in CI with a bare "Something went wrong while executing
-  your query" and the script exited with nothing to act on. It now reads the board in pages of 25,
-  retries each page up to six times with a growing wait (a CI run showed the full query failing three times and then succeeding seconds later, which points to a cold server-side timeout), and when it still fails it re-runs the
-  query without `timelineItems`, without `assignees`, and without both, and prints which variant
-  breaks. A board whose not-started option is `Backlog` (the plugin's own presets) used to compare
-  against an empty id, so an issue with an open PR was never moved to In Progress; it now falls
-  back from `Todo` to `Backlog`. Covered by a test that drives the real script with a fake `gh`.
+- **Board Sync works again after 11 days red, and no longer mishandles a `Backlog` board (#679).**
+  The workflow failed on every run since 2026-09-07 with a bare "Something went wrong while
+  executing your query". Running experiments inside CI showed what the cause is and is not: not
+  transient, not a bad selection, not the runner's `gh`. The same query that read page 1 failed on a
+  later page, yet every item of that page read fine on its own — the server rejects certain groups of
+  board items as a whole. The script now reads the board in pages of 10, retries a page three times,
+  and when a page keeps failing re-reads it one item at a time. An item that only fails with its
+  linked PRs is kept without them and reported by number; one that cannot be read at all is skipped
+  with a warning that names it; and if nothing can be read the run fails with an error instead of
+  reporting a clean sync. Separately, a board whose not-started option is `Backlog` (the plugin's
+  own presets) compared against an empty id, so an issue with an open PR was never moved to In
+  Progress; it now falls back from `Todo` to `Backlog`. Covered by six tests that drive the real
+  script with a fake `gh`, each mutation-checked.
 
 ## [0.38.4] - 2026-09-18
 ### Fixed
