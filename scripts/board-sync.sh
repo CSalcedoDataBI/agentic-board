@@ -58,7 +58,7 @@ echo "Status field: $STATUS_ID  (Done=$DONE_OPT  InProg=$INPROG_OPT  Todo=$TODO_
 # be read at all is skipped with a warning that names it. One bad item no longer stops the sync.
 BACKOFF="${BOARD_SYNC_BACKOFF:-5}"
 ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-3}"
-PAGE_SIZE="${BOARD_SYNC_PAGE_SIZE:-25}"
+PAGE_SIZE="${BOARD_SYNC_PAGE_SIZE:-10}"
 ERR_FILE="$(mktemp)"
 
 ITEM_FIELDS_HEAD='
