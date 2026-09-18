@@ -34,7 +34,7 @@ try {
     if (-not [Console]::IsInputRedirected) { exit 0 }
 
     $raw = ""
-    try { $raw = [Console]::In.ReadToEnd() } catch { $raw = "" }
+    try { $raw = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false)).ReadToEnd() } catch { $raw = "" }
     $in = $null
     if ($raw) { try { $in = $raw | ConvertFrom-Json } catch { $in = $null } }
     if (-not $in) { exit 0 }
@@ -43,6 +43,9 @@ try {
     if (-not $transcript -or -not (Test-Path -LiteralPath $transcript)) { exit 0 }
 
     $cwd = if ($in.cwd) { [string]$in.cwd } else { (Get-Location).Path }
+    # Never invent a directory: a cwd that does not exist (a mis-decoded path) must not become one.
+    if (-not (Test-Path -LiteralPath $cwd -PathType Container)) { exit 0 }
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)   # git prints UTF-8 paths; the default OEM decode garbles them (#682)
     $root = git -C $cwd rev-parse --show-toplevel 2>$null
     if (-not $root) { $root = $cwd }
 

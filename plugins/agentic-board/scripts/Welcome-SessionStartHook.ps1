@@ -68,7 +68,7 @@ try {
     if (-not [Console]::IsInputRedirected) { exit 0 }
 
     $raw = ""
-    try { $raw = [Console]::In.ReadToEnd() } catch { $raw = "" }
+    try { $raw = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false)).ReadToEnd() } catch { $raw = "" }
     $in = $null
     if ($raw) { try { $in = $raw | ConvertFrom-Json } catch { $in = $null } }
 
