@@ -109,40 +109,39 @@ run_items_query() {
   fi
 }
 
-# One page, several attempts. A CI run of the fix showed the full query failing on every attempt (each
-# in 1-2 s, so a rejection, not a timeout) while the very same query, run a moment later by the
-# diagnosis, succeeded - so each failure now records how long it took, and the diagnosis reports the
-# exit code and message of every variant instead of a bare OK/FAILS.
-ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-6}"
-fetch_items_page() {
-  local cursor="$1" attempt=1 out started
-  while [ "$attempt" -le "$ATTEMPTS" ]; do
-    started=$SECONDS
-    out=$(run_items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE" "$cursor") && { printf '%s' "$out"; return 0; }
-    echo "  items query failed (attempt $attempt/$ATTEMPTS, $((SECONDS - started))s): $(head -c 300 "$ERR_FILE")" >&2
-    [ "$attempt" -lt "$ATTEMPTS" ] && sleep $((attempt * BACKOFF))
-    attempt=$((attempt + 1))
-  done
-  return 1
-}
-
 # The query kept failing: say which selection is the culprit, so the next step is a fix, not a guess.
+# A CI run showed the full query failing on every normal attempt (1-2 s each, a rejection rather than a
+# timeout) while the very same query, run by this diagnosis, succeeded. The fingerprint of the query
+# text is printed on both paths so "same query" is a fact in the log, not an assumption.
+qsum() { items_query "$1" "$2" | sha1sum | cut -c1-8; }
 diagnose_items_failure() {
   echo "::error::board-sync: the items query failed $ATTEMPTS times. Diagnosing which part breaks (gh $(gh --version | head -1))" >&2
   local variant label rest assignees timeline out rc
   for variant in "full|$ITEM_ASSIGNEES|$ITEM_TIMELINE" "without timelineItems|$ITEM_ASSIGNEES|" "without assignees||$ITEM_TIMELINE" "without both||"; do
     label="${variant%%|*}"; rest="${variant#*|}"; assignees="${rest%%|*}"; timeline="${rest#*|}"
     rc=0; out=$(run_items_query "$assignees" "$timeline" "") || rc=$?
-    echo "  variant '$label': exit=$rc bytes=${#out} err='$(head -c 160 "$ERR_FILE" | tr '\n' ' ')'" >&2
+    echo "  variant '$label': exit=$rc bytes=${#out} query=$(qsum "$assignees" "$timeline") err='$(head -c 160 "$ERR_FILE" | tr '\n' ' ')'" >&2
     [ "$rc" -eq 0 ] && echo "  variant '$label': OK" >&2 || echo "  variant '$label': FAILS" >&2
   done
 }
 
+# The retry loop runs in THIS shell, the same context as the diagnosis above, not inside a nested
+# command substitution: see the note on diagnose_items_failure.
+ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-6}"
 ITEM_NODES='[]'
 CURSOR=""
 PAGES=0
 while :; do
-  PAGE=$(fetch_items_page "$CURSOR") || { diagnose_items_failure; exit 1; }
+  attempt=1; rc=1; PAGE=""
+  while [ "$attempt" -le "$ATTEMPTS" ]; do
+    started=$SECONDS; rc=0
+    PAGE=$(run_items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE" "$CURSOR") || rc=$?
+    [ "$rc" -eq 0 ] && break
+    echo "  items query failed (attempt $attempt/$ATTEMPTS, $((SECONDS - started))s, query=$(qsum "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")): $(head -c 300 "$ERR_FILE")" >&2
+    [ "$attempt" -lt "$ATTEMPTS" ] && sleep $((attempt * BACKOFF))
+    attempt=$((attempt + 1))
+  done
+  [ "$rc" -eq 0 ] || { diagnose_items_failure; exit 1; }
   ITEM_NODES=$(jq -c --argjson page "$(printf '%s' "$PAGE" | jq -c '.data.node.items.nodes')" '. + $page' <<<"$ITEM_NODES")
   PAGES=$((PAGES + 1))
   [ "$(printf '%s' "$PAGE" | jq -r '.data.node.items.pageInfo.hasNextPage')" = "true" ] || break
