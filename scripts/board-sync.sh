@@ -125,6 +125,12 @@ diagnose_items_failure() {
   done
 }
 
+# EXPERIMENT (#679): run the diagnosis BEFORE any normal attempt. If its query succeeds while first,
+# the difference is the call site; if the loop then succeeds too, earlier state matters.
+echo '=== PROBE: diagnosis before the loop ===' >&2
+diagnose_items_failure
+echo '=== PROBE done ===' >&2
+
 # The retry loop runs in THIS shell, the same context as the diagnosis above, not inside a nested
 # command substitution: see the note on diagnose_items_failure.
 ATTEMPTS="${BOARD_SYNC_ATTEMPTS:-6}"
