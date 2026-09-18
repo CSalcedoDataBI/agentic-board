@@ -52,18 +52,23 @@ Describe 'Compact-PreCompactHook end to end - non-ASCII working directory (#682)
             $psi.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
             $psi.UseShellExecute = $false
             $p = [System.Diagnostics.Process]::Start($psi)
-            $json = @{ cwd = $Cwd; transcript_path = $Transcript; trigger = 'manual' } | ConvertTo-Json -Compress
-            $p.StandardInput.Write($json); $p.StandardInput.Close()
-            # Read both streams concurrently, THEN wait with a bound: reading one stream to the end
-            # first can deadlock on a full pipe, and a wait placed after a blocking read never times out.
-            $outTask = $p.StandardOutput.ReadToEndAsync()
-            $errTask = $p.StandardError.ReadToEndAsync()
-            if (-not $p.WaitForExit(30000)) {
-                try { $p.Kill($true) } catch { }
-                throw 'the hook did not exit within 30 seconds'
+            try {
+                $json = @{ cwd = $Cwd; transcript_path = $Transcript; trigger = 'manual' } | ConvertTo-Json -Compress
+                $p.StandardInput.Write($json); $p.StandardInput.Close()
+                # Read both streams concurrently, THEN wait with a bound: reading one stream to the end
+                # first can deadlock on a full pipe, and a wait placed after a blocking read never times out.
+                $outTask = $p.StandardOutput.ReadToEndAsync()
+                $errTask = $p.StandardError.ReadToEndAsync()
+                if (-not $p.WaitForExit(30000)) { throw 'the hook did not exit within 30 seconds' }
+                $null = $outTask.GetAwaiter().GetResult(); $null = $errTask.GetAwaiter().GetResult()
+                $p.ExitCode
             }
-            $null = $outTask.GetAwaiter().GetResult(); $null = $errTask.GetAwaiter().GetResult()
-            $p.ExitCode
+            finally {
+                # Whatever went wrong above, never leave the child running. (Process.Kill(bool) needs
+                # PowerShell 7 - as does everything else in this file, which also spawns pwsh.)
+                if (-not $p.HasExited) { try { $p.Kill($true) } catch { } }
+                $p.Dispose()
+            }
         }
     }
     AfterAll { Remove-Item -LiteralPath $script:Base -Recurse -Force -ErrorAction SilentlyContinue }
