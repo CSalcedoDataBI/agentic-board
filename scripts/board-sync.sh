@@ -135,6 +135,9 @@ while :; do
   attempt=1; rc=1; PAGE=""
   while [ "$attempt" -le "$ATTEMPTS" ]; do
     started=$SECONDS; rc=0
+    # EXPERIMENT (#679): the diagnosis always runs `gh --version` right before its first query, and its
+    # query succeeds where the identical one here fails. Do the same here to see whether that is the difference.
+    gh --version >/dev/null 2>&1 || true
     PAGE=$(run_items_query "$ITEM_ASSIGNEES" "$ITEM_TIMELINE" "$CURSOR") || rc=$?
     [ "$rc" -eq 0 ] && break
     echo "  items query failed (attempt $attempt/$ATTEMPTS, $((SECONDS - started))s, query=$(qsum "$ITEM_ASSIGNEES" "$ITEM_TIMELINE")): $(head -c 300 "$ERR_FILE")" >&2
