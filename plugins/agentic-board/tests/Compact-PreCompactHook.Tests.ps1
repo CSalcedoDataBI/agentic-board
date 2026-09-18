@@ -54,7 +54,10 @@ Describe 'Compact-PreCompactHook end to end - non-ASCII working directory (#682)
             $p = [System.Diagnostics.Process]::Start($psi)
             $json = @{ cwd = $Cwd; transcript_path = $Transcript; trigger = 'manual' } | ConvertTo-Json -Compress
             $p.StandardInput.Write($json); $p.StandardInput.Close()
-            $null = $p.StandardOutput.ReadToEnd(); $null = $p.StandardError.ReadToEnd()
+            # Drain stderr concurrently: reading stdout to the end first can deadlock if the child
+            # fills the stderr pipe while we are still waiting for stdout to close.
+            $errTask = $p.StandardError.ReadToEndAsync()
+            $null = $p.StandardOutput.ReadToEnd(); $null = $errTask.GetAwaiter().GetResult()
             $p.WaitForExit(30000) | Out-Null
             $p.ExitCode
         }
