@@ -147,8 +147,10 @@ param(
     # the operator's head and being restated every time (#662). 'on' = always propose one PR
     # for the batch; 'off' = never propose grouping (each issue gets its own reviewable PR);
     # 'auto' = the default, propose it only where there is evidence the issues overlap.
-    # 'show' only READS the current value and where it came from (no write, no token) - it is what
-    # the /board menu runs so the menu can state the repo's setting (#681).
+    # 'show' only READS the current value and where it came from (writes no preference, needs no
+    # token) - it is what the /board menu runs so the menu can state the repo's setting (#681). Like
+    # every call that resolves the state dir it may perform that resolver's one-time silent rename of
+    # a legacy `.agentic-bi-ops/` folder; it never touches config.json.
     [ValidateSet('on', 'off', 'auto', 'show')]
     [string] $PreferGroupedPRs = '',
     [switch]$Launch,

@@ -62,8 +62,8 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      **Seeing it.** `Board-Work.ps1 -PreferGroupedPRs show` prints the current setting and where
      it came from — `PRs agrupados: on (config del repo)`, or `auto (por defecto)` when the repo
      recorded nothing (a recorded `auto` is stored as "no decision", so it also reads `por
-     defecto`). It only reads: no write, no token, and outside a git repo it answers `auto (por
-     defecto)`. The `/board` menu runs it to show the value under `work`, and every group the
+     defecto`). It writes no preference and needs no token, and outside a git repo it answers `auto
+     (por defecto)`. The `/board` menu runs it to show the value under `work`, and every group the
      pending list proposes says which setting produced it and how to change it (#681).
 
      Note what `on` does NOT mean: it never invents a group out of issues that share nothing.

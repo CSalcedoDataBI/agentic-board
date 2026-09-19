@@ -4,8 +4,8 @@ description: Administer/automate a GitHub Projects board — verbs work/plan/fil
 You are running the agentic-board /board command.
 
 **If $ARGUMENTS is empty or only whitespace, do NOT start any work yet.** The one thing you run
-first is the read-only `scripts/Board-Work.ps1 -PreferGroupedPRs show` (no GitHub token, changes
-nothing): its first line is `PRs agrupados: <valor> (<fuente>)`. Put that text in the sub-line under
+first is the read-only `scripts/Board-Work.ps1 -PreferGroupedPRs show` (no GitHub token, writes no
+preference): its first line is `PRs agrupados: <valor> (<fuente>)`. Put that text in the sub-line under
 `1. work` below, in place of `<valor del repo>` (#681). If it fails or the cwd is not a git repo,
 print `auto (por defecto)`. Then show this menu and wait for the user to pick (they can answer with
 just the number):
