@@ -30,8 +30,14 @@ echo %* >>"%FAKE_GH_LOG%"
 if "%1 %2"=="project field-list" (type "%~dp0fields.json" & exit /b 0)
 if "%1 %2"=="project view" (type "%~dp0view.json" & exit /b 0)
 if "%1 %2"=="project item-list" (type "%~dp0items.json" & exit /b 0)
-if "%1 %2"=="project item-edit" exit /b 0
+if "%1 %2"=="project item-edit" goto edit
 echo fake gh: unexpected call: %* 1>&2
+exit /b 1
+:edit
+if defined FAKE_GH_EDIT_FAIL goto editfail
+exit /b 0
+:editfail
+echo HTTP 401 Bad credentials 1>&2
 exit /b 1
 '@ | Set-Content (Join-Path $script:FakeDir 'gh.cmd') -Encoding ASCII
     $opt = { param($id, $name) "{`"id`":`"$id`",`"name`":`"$name`"}" }
@@ -50,17 +56,19 @@ exit /b 1
     # Run the real script through `pwsh -File`, with the fake gh first on PATH. Returns the output
     # text, the exit code and the log lines (one per gh call).
     function Invoke-TriageWithFakeGh {
-        param([string[]]$ScriptArgs)
+        param([string[]]$ScriptArgs, [hashtable]$ExtraEnv = @{})
         Remove-Item -LiteralPath $script:Log -Force -ErrorAction SilentlyContinue
         $saved = @{ PATH = $env:PATH; GH_TOKEN = $env:GH_TOKEN; FAKE_GH_LOG = $env:FAKE_GH_LOG }
         try {
             $env:PATH        = "$($script:FakeDir);$($env:PATH)"
             $env:GH_TOKEN    = 'not-a-real-token'
             $env:FAKE_GH_LOG = $script:Log
+            foreach ($k in $ExtraEnv.Keys) { Set-Item -Path "Env:$k" -Value $ExtraEnv[$k] }
             $out  = (& pwsh -NoProfile -File $script:Script @ScriptArgs 2>&1 | Out-String)
             $code = $LASTEXITCODE
         } finally {
             $env:PATH = $saved.PATH; $env:GH_TOKEN = $saved.GH_TOKEN; $env:FAKE_GH_LOG = $saved.FAKE_GH_LOG
+            foreach ($k in $ExtraEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $null) }
         }
         $calls = if (Test-Path -LiteralPath $script:Log) { @(Get-Content -LiteralPath $script:Log) } else { @() }
         [pscustomobject]@{ Out = $out; Code = $code; Calls = $calls
@@ -207,5 +215,49 @@ Describe '#605 - a batch reads the board ONCE (end to end, counted)' -Skip:$scri
         $r.Out    | Should -Match '\(no escrita\)'
         $r2 = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '1,2', '-Priority', 'P1', '-Rationale', 'blocks', '-ConfirmPriority')
         $r2.Writes | Should -Be 2
+    }
+}
+
+Describe 'review of #686 - batch edge cases' -Skip:$script:notWindows {
+    It 'validates every entry BEFORE the first gh call of any kind, board resolution from origin included' {
+        $bf = Join-Path $script:FakeDir 'bad2.json'
+        '[{"issue":1,"type":"Bug"},{"issue":2,"estimate":"huge"}]' | Set-Content $bf -Encoding UTF8
+        # No -Number: the board would be resolved from origin (gh api graphql) if validation ran later.
+        $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Owner', 'o', '-BatchFile', $bf)
+        $r.Code | Should -Be 1
+        $r.Out  | Should -Match 'no escribi nada'
+        $r.Calls.Count | Should -Be 0
+    }
+    It 'a ONE-row -BatchFile is still a batch: an unresolvable target is listed for retry, not thrown' {
+        $bf = Join-Path $script:FakeDir 'one.json'
+        '[{"issue":99,"type":"Bug"}]' | Set-Content $bf -Encoding UTF8
+        $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-BatchFile', $bf)
+        $r.Code | Should -Be 1
+        $r.Out  | Should -Match 'Pendientes para reintentar'
+        $r.Out  | Should -Match '#99'
+    }
+    It 'a ONE-item -Issues is still a batch' {
+        $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '99', '-Type', 'Bug')
+        $r.Code | Should -Be 1
+        $r.Out  | Should -Match 'Pendientes para reintentar'
+    }
+    It 'a single -Issue that cannot be resolved still throws exactly as before (no retry list)' {
+        $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issue', '99', '-Type', 'Bug')
+        $r.Code | Should -Be 1
+        $r.Out  | Should -Match 'ERROR: El issue #99 no esta en el board'
+        $r.Out  | Should -Not -Match 'Pendientes para reintentar'
+    }
+    It 'a failed WRITE stops the batch (no more writes are issued) and lists everything not yet done' {
+        $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '1,2,3', '-Type', 'Bug') -ExtraEnv @{ FAKE_GH_EDIT_FAIL = '1' }
+        $r.Code   | Should -Be 1
+        $r.Writes | Should -Be 1          # the first write failed; issues 2 and 3 were never attempted
+        $r.Out    | Should -Match 'detengo el lote'
+        $r.Out    | Should -Match 'Pendientes para reintentar'
+        @($r.Out -split "`n" | Where-Object { $_ -match 'no procesado' }).Count | Should -Be 2
+    }
+    It 'an unresolvable target does NOT stop the batch (only a failed write does)' {
+        $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '99,2,3', '-Type', 'Bug')
+        $r.Writes | Should -Be 2
+        $r.Out    | Should -Not -Match 'detengo el lote'
     }
 }

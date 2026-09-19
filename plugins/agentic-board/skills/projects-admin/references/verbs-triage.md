@@ -17,8 +17,10 @@ Loaded on demand by /board (#573).
     `-BatchFile triage.json` — a JSON array `[{"issue":42,"type":"Bug","area":"scripts","estimate":3,
     "priority":"P2","rationale":"..."}, ...]` (only `issue` is required; `repo` qualifies a bare number
     on a multi-repo board). Every entry is validated before the first write, so a bad row 40 of 45
-    refuses the batch instead of leaving it half-done; a target that cannot be resolved is listed at
-    the end as "Pendientes para reintentar" (exit 1) while the rest are still triaged. `-ProjectNum`
+    refuses the batch instead of leaving it half-done (before any gh call, board resolution included);
+    a target that cannot be resolved is listed at the end as "Pendientes para reintentar" (exit 1) while
+    the rest are still triaged, but a failed WRITE (API/auth/quota) stops the batch and lists every
+    entry not yet done. Any `-Issues`/`-BatchFile` run is a batch, even with a single entry. `-ProjectNum`
     is accepted as an alias of `-Number`, like everywhere else in the suite (#511).
   - **Priority is a business judgement NOT in the repo.** PROPOSE P0–P3 with a one-line rationale per
     issue and let the user confirm in a batch: `-Priority P2 -Rationale '...'` PRINTS the proposal and

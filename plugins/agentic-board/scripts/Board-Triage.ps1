@@ -288,6 +288,17 @@ trap {
 # Board reads that report their own truncation (#484).
 . (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 
+# Early input check — refuse an un-rationalised Priority before any read. Every target of a
+# batch is validated HERE, all of them, before the first gh call of ANY kind (board resolution from
+# origin included) and before the first write (#605).
+$badPriority = Test-PriorityRequest -Priority $Priority -Rationale $Rationale
+if ($badPriority) { throw $badPriority }
+if ($Estimate -and ($Estimate -notmatch '^\d+(\.\d+)?$')) { throw "-Estimate debe ser numerico (recibi '$Estimate')." }
+$entries = @(Get-TriageEntries -Issue $Issue -Issues $Issues -BatchFile $BatchFile -Defaults @{
+    Repo = $Repo; Type = $Type; Area = $Area; Estimate = $Estimate; Priority = $Priority; Rationale = $Rationale })
+$entryErrors = @($entries | ForEach-Object { Test-TriageEntry $_ } | Where-Object { $_ })
+if ($entryErrors.Count) { throw ("Batch rechazado, no escribi nada:`n  " + ($entryErrors -join "`n  ")) }
+
 if (-not $env:GH_TOKEN) {
     $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
 }
@@ -315,16 +326,6 @@ if ($plan.ResolveFromOrigin) {
 }
 
 $boardUrl = "https://github.com/users/$Owner/projects/$Number"
-
-# Early input check — refuse an un-rationalised Priority before any read. Every target of a
-# batch is validated HERE, all of them, before the first read or write (#605).
-$badPriority = Test-PriorityRequest -Priority $Priority -Rationale $Rationale
-if ($badPriority) { throw $badPriority }
-if ($Estimate -and ($Estimate -notmatch '^\d+(\.\d+)?$')) { throw "-Estimate debe ser numerico (recibi '$Estimate')." }
-$entries = @(Get-TriageEntries -Issue $Issue -Issues $Issues -BatchFile $BatchFile -Defaults @{
-    Repo = $Repo; Type = $Type; Area = $Area; Estimate = $Estimate; Priority = $Priority; Rationale = $Rationale })
-$entryErrors = @($entries | ForEach-Object { Test-TriageEntry $_ } | Where-Object { $_ })
-if ($entryErrors.Count) { throw ("Batch rechazado, no escribi nada:`n  " + ($entryErrors -join "`n  ")) }
 
 # Fields (types + option maps) and items, both fail-closed.
 $fields = (Invoke-Gh -GhArgs @('project','field-list',"$Number",'--owner',$Owner,'--format','json') `
@@ -411,6 +412,7 @@ function Set-ItemField($item, [string]$name, [string]$value) {
 # Triage ONE target against the already-read board. Throws on an unresolvable target; the caller
 # decides whether that ends the run (a single -Issue) or is recorded and skipped (a batch).
 function Invoke-TriageEntry($entry) {
+    $script:TriagePhase = 'resolve'
     # Resolve the ref (bare or qualified) and find the matching board item(s) (#506).
     $issueRef    = Resolve-IssueRef -IssueArg $entry.Issue -ExplicitRepo $entry.Repo
     $itemMatches = Find-TriageItems -Ref $issueRef -Items $items
@@ -433,6 +435,7 @@ function Invoke-TriageEntry($entry) {
     }
 
     $item = $itemMatches[0]
+    $script:TriagePhase = 'write'      # from here on a throw is a failed board write, not an unresolvable target
     Write-Host ("=== Triage {0}: {1} ===" -f (Format-ItemRef $item), $item.content.title) -ForegroundColor Cyan
 
     if ($entry.Type)     { $null = Set-ItemField $item 'Type' $entry.Type }
@@ -460,18 +463,33 @@ function Invoke-TriageEntry($entry) {
     }
 }
 
-if ($entries.Count -eq 1) {
+# "Batch" is decided by what the caller ASKED for, not by how many targets it produced: a one-row
+# -BatchFile or `-Issues 42` is still a batch and owes the retry list when its target fails.
+$batchMode = ("$BatchFile".Trim() -ne '') -or (@(ConvertTo-TriageRefList $Issues).Count -gt 0)
+if (-not $batchMode -and $entries.Count -eq 1) {
     # One target: a failure IS the run's failure, exactly as before batching existed.
     Invoke-TriageEntry $entries[0]
 } else {
     # A batch: one unresolvable target must not abandon the rest of a 45-issue sweep, and the caller
-    # needs the list of what did not get done to resume from (#605).
+    # needs the list of what did not get done to resume from (#605). A failed WRITE is different: it
+    # is an API/auth/quota failure that every remaining write would repeat (each with its own
+    # retries), so the batch stops there and lists everything not yet done.
     $failed = @()
-    foreach ($e in $entries) {
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        $e   = $entries[$i]
+        $ref = if ($e.Repo -and $e.Issue -notmatch '#') { "$($e.Repo)#$($e.Issue)" } else { $e.Issue }
         try { Invoke-TriageEntry $e }
         catch {
-            $failed += [pscustomobject]@{ Ref = $(if ($e.Repo -and $e.Issue -notmatch '#') { "$($e.Repo)#$($e.Issue)" } else { $e.Issue }); Why = $_.Exception.Message }
-            Write-Host ("  FALLO {0}: {1}" -f $failed[-1].Ref, $failed[-1].Why) -ForegroundColor Red
+            $failed += [pscustomobject]@{ Ref = $ref; Why = $_.Exception.Message }
+            Write-Host ("  FALLO {0}: {1}" -f $ref, $_.Exception.Message) -ForegroundColor Red
+            if ($script:TriagePhase -eq 'write') {
+                Write-Host "  Una escritura fallo: detengo el lote en vez de repetir el mismo fallo en los que quedan." -ForegroundColor Red
+                for ($j = $i + 1; $j -lt $entries.Count; $j++) {
+                    $r2 = if ($entries[$j].Repo -and $entries[$j].Issue -notmatch '#') { "$($entries[$j].Repo)#$($entries[$j].Issue)" } else { $entries[$j].Issue }
+                    $failed += [pscustomobject]@{ Ref = $r2; Why = 'no procesado: el lote se detuvo por el error de escritura' }
+                }
+                break
+            }
         }
     }
     Write-Host ""
