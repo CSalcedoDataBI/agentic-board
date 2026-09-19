@@ -132,6 +132,14 @@ foreach ($role in @($catalog.roles)) {
         @($role.keywords).Count, $hooks) -ForegroundColor $colour
 }
 Write-Host ""
+# (#470) Read-only: `-List` only reports. `config` (or persisting a role) does the repair.
+$localRolesPath = Get-ExpertRoleLocalPath
+if ($localRolesPath -and (Test-Path -LiteralPath $localRolesPath -PathType Leaf) -and
+    (Test-RolesFileTrackable -RolesPath $localRolesPath) -eq $false) {
+    Write-Host "  Note: this project's roles.json is ignored by git, so it is not shared with the team." -ForegroundColor Yellow
+    Write-Host "  /board expert config repairs that on its own." -ForegroundColor Yellow
+    Write-Host ""
+}
 Write-Host "  Global catalog: $(Get-ExpertRoleGlobalPath)" -ForegroundColor DarkGray
 Write-Host "  Local catalog:  $(Get-ExpertRoleLocalPath)" -ForegroundColor DarkGray
 Write-Host "  A role hooking 0 skills will give the expert no toolset - fix its 'skills' patterns." -ForegroundColor DarkGray

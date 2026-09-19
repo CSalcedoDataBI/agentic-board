@@ -16,12 +16,26 @@ committed into a project — it is not under any repo's `.git` at all.
 
 > If your project's `.gitignore` excludes `.agentic-board/`, `roles.json` cannot be versioned:
 > git **cannot re-include** a file whose parent directory is excluded, so a plain
-> `!.agentic-board/roles.json` would be dead config that looks like it works. Exclude the
-> directory's *contents* instead:
+> `!.agentic-board/roles.json` is dead config that looks like it works. The working form
+> excludes the directory's *contents* and then re-includes the file:
 > ```gitignore
 > .agentic-board/*
 > !.agentic-board/roles.json
 > ```
+> **The tool applies this itself — you never do.** `Repair-RolesGitignore` (in `ExpertRolesIo.ps1`)
+> rewrites the directory rule, asks *git* (`check-ignore` and `add --dry-run`, not a grep of the
+> file) whether `roles.json` is now accepted while the rest of `.agentic-board/` stays ignored,
+> and restores the original `.gitignore` byte for byte if git still refuses. It runs when a role
+> is persisted with `Add-ExpertRole` (default path) and on every `/board expert config`; `roles`
+> only reports (read-only). It never emits the directory-level negation.
+>
+> **How to talk about it.** Report the outcome in the tool's own plain words ("fixed — the role
+> file will now be shared with the team"). Do not ask the user a git question ("apply and commit,
+> or leave it ignored?"), do not print a command for them to paste, and do not show the
+> version-pinned plugin cache path (`.../plugins/cache/agentic-board/<version>/scripts/...`) — it
+> breaks on the next release and is plumbing they have no reason to see. Run what has to be run
+> yourself; the only decision worth putting to the user is *"should the team share this role?"*.
+>
 > This only applies to the **project-local** file — the global one is outside any repo, so it is
 > never subject to a project's `.gitignore` in the first place.
 
