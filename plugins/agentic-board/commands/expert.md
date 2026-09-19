@@ -96,9 +96,15 @@ Still pass it when the user says it: the launched session is told the order was 
 be acted on, which is what stops it reading its own refusal as a failure to work around. And tell
 the user plainly that the close is still theirs — never imply the run will finish it.
 
+**Second account / refused start.** For a board on another account add `-Owner <account>` (and
+`-Repo <owner/name>` when the clone is not the target); the token variable is then resolved from the
+owner unless `-TokenVar` names one. When the launch refuses an issue another session claimed or a
+blocker list flagged, `-TakeOver` / `-IgnoreBlocked` are forwarded to the launch — pass them only
+when the user says so for THIS run, never from memory of a previous one.
+
 Run `scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`. It reads the contract, composes the
-autonomous brief (role objective + enriched plan + DoD + the capability map + the irreversible
-line), and launches a dedicated Claude session in an isolated worktree (reusing the fleet/launch
+autonomous brief (role objective + enriched plan + the issue's bounded comment thread + DoD + the
+capability map + the irreversible line), and launches a dedicated Claude session in an isolated worktree (reusing the fleet/launch
 machinery). You are freed; monitor with `/board work -Sessions -Watch`. The launched session:
 
 - **Becomes the expert** — researches prior-art via `/knowledge`, acquires tooling via `/skills`.
