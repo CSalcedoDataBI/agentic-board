@@ -1391,6 +1391,36 @@ function Resolve-LaunchBrake {
     return $true    # default: brake for every fleet/launch session (#598)
 }
 
+# How the session briefing NAMES a plugin script so the session can run it (#480).
+# The briefing used to hard-code `plugins/agentic-board/scripts/<name>`, a path relative to the
+# session's working directory that exists in exactly one repository - this one. In every
+# consumer project the four commands pointed at nothing, the session improvised a bare
+# `gh pr create`, and the review gate never ran.
+#   1. The session's own working copy carries the plugin (this repo, or one that vendors it):
+#      keep the relative form. It resolves from the session's cwd exactly as before and runs
+#      the branch's own copy of the script.
+#   2. Anywhere else: the copy of the script sitting next to the one that is composing the
+#      briefing - the same install, so it exists by construction. Forward slashes (safe for pwsh
+#      on Windows), quoted only when the path has whitespace.
+#   3. Neither exists: say so (found = $false) so the briefing can report it instead of naming a
+#      path that leads nowhere.
+# The absolute form embeds the install's directory, which is version-pinned for a marketplace
+# install; that directory stays on disk while the session that was handed it runs.
+function Resolve-BriefingScriptRef {
+    param([string]$Name, [string]$WorkPath, [string]$ScriptsDir)
+    $rel = "plugins/agentic-board/scripts/$Name"
+    if ($WorkPath -and (Test-Path -LiteralPath (Join-Path $WorkPath $rel))) {
+        return [pscustomobject]@{ ref = $rel; found = $true }
+    }
+    $abs = if ($ScriptsDir) { Join-Path $ScriptsDir $Name } else { '' }
+    if ($abs -and (Test-Path -LiteralPath $abs)) {
+        $p = $abs -replace '\\', '/'
+        if ($p -match '\s') { $p = '"' + $p + '"' }
+        return [pscustomobject]@{ ref = $p; found = $true }
+    }
+    return [pscustomobject]@{ ref = $rel; found = $false }
+}
+
 # The one-line first message a spawned Claude session receives. Pure -> testable.
 # -Cli is threaded (default 'claude') so Phase-2 adapters can specialize the leading
 # autonomy sentence per CLI without another signature change; Phase 1 keeps the
@@ -1402,6 +1432,10 @@ function Resolve-LaunchBrake {
 # condition. A session that merged to main was obeying its brief, not defying it. With the
 # brake on, the merge step is never emitted and the finish line moves to a reviewed PR.
 # -BriefFile is the other half: it hands the session the expert brief it was never given.
+#
+# -ScriptsDir is where the plugin scripts live; it defaults to THIS script's own folder, so a
+# briefing names scripts that exist on the machine that composed it (#480). A parameter so a test
+# can point it at a folder that lacks a script.
 function Get-SessionBriefing {
     param(
         [int]$issueNum,
@@ -1410,11 +1444,33 @@ function Get-SessionBriefing {
         [string]$workPath,
         [string]$Cli = 'claude',
         [switch]$StopAtPR,
-        [string]$BriefFile = ''
+        [string]$BriefFile = '',
+        [string]$ScriptsDir = ''
     )
+    if (-not $ScriptsDir) { $ScriptsDir = $PSScriptRoot }
+    # Every plugin script the briefing names, resolved so the session can actually run it.
+    $needed = @('Fleet-Findings', 'Fleet-Handoff', 'Fleet-Ownership', 'New-BoardPR', 'Board-ReviewGate')
+    if (-not $StopAtPR) { $needed += 'Board-Merge' }
+    $sc = @{}; $unreachable = @()
+    foreach ($n in $needed) {
+        $r = Resolve-BriefingScriptRef -Name "$n.ps1" -WorkPath $workPath -ScriptsDir $ScriptsDir
+        $sc[$n] = $r.ref
+        if (-not $r.found) { $unreachable += "$n.ps1" }
+    }
+    # An unreachable script must be REPORTED, not routed around: a session that could not find
+    # New-BoardPR.ps1 used to improvise a bare `gh pr create`, losing the identity resolution,
+    # the push-permission check and the credential helper, and skipped the review gate without
+    # anyone being told (#480). The standing sentence covers a script that exists but fails.
+    $noSubstitute = "If a script named here is missing or fails to run, STOP and report exactly which one and why - " +
+                    "do NOT replace New-BoardPR.ps1 with a bare 'gh pr create' and do NOT skip the review gate: " +
+                    "they carry the account check and the review, and a substitute drops both silently. "
+    if ($unreachable.Count -gt 0) {
+        $noSubstitute = "WARNING - these plugin scripts were NOT found on this machine: " + ($unreachable -join ', ') +
+                        ". Report that as a broken install before doing anything else. " + $noSubstitute
+    }
     # Steps after the review gate are renumbered so the brake never leaves a hole at (5).
     $mergeStep = if ($StopAtPR) { "" } else {
-        "(5) merge it (ruleset-safe): pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR <pr> ; "
+        "(5) merge it (ruleset-safe): pwsh $($sc['Board-Merge']) -PR <pr> ; "
     }
     $recordNum = if ($StopAtPR) { "(5)" } else { "(6)" }
     $closing = if ($StopAtPR) {
@@ -1435,21 +1491,22 @@ function Get-SessionBriefing {
             "Pick up GitHub issue #$issueNum in $repo. It is already In Progress and claimed, " +
             "on branch $branch in this worktree ($workPath). " +
             "FIRST load fleet coordination context so you collaborate with sibling sessions: " +
-            "read prior findings with 'pwsh plugins/agentic-board/scripts/Fleet-Findings.ps1 -List' ; " +
-            "inherit any upstream hand-off with 'pwsh plugins/agentic-board/scripts/Fleet-Handoff.ps1 -Context -Issue $issueNum' ; " +
+            "read prior findings with 'pwsh $($sc['Fleet-Findings']) -List' ; " +
+            "inherit any upstream hand-off with 'pwsh $($sc['Fleet-Handoff']) -Context -Issue $issueNum' ; " +
             "and once you know which files you will edit, claim them with " +
-            "'pwsh plugins/agentic-board/scripts/Fleet-Ownership.ps1 -Claim -Issue $issueNum -Branch $branch -Paths <files>' " +
+            "'pwsh $($sc['Fleet-Ownership']) -Claim -Issue $issueNum -Branch $branch -Paths <files>' " +
             "(if it warns of overlap with another live session, steer clear of those files). Then: " +
             "(1) read it with: gh issue view $issueNum --repo $repo ; " +
             "(2) implement it fully in this worktree and commit your changes ; " +
-            "(3) open the PR with: pwsh plugins/agentic-board/scripts/New-BoardPR.ps1 -Issue $issueNum " +
+            "(3) open the PR with: pwsh $($sc['New-BoardPR']) -Issue $issueNum " +
             "and note the PR number it prints ; " +
-            "(4) pass the review gate: pwsh plugins/agentic-board/scripts/Board-ReviewGate.ps1 -PR <pr> ; " +
+            "(4) pass the review gate: pwsh $($sc['Board-ReviewGate']) -PR <pr> ; " +
             "address any feedback and re-run until it is green ; " +
             $mergeStep +
             "$recordNum record what you learned for other sessions with " +
-            "'pwsh plugins/agentic-board/scripts/Fleet-Findings.ps1 -Add -Issue $issueNum -Status done -Files <files touched> -Decisions <key decisions> -Gotchas <pitfalls>' " +
-            "and free your files with 'pwsh plugins/agentic-board/scripts/Fleet-Ownership.ps1 -Release -Issue $issueNum' . " +
+            "'pwsh $($sc['Fleet-Findings']) -Add -Issue $issueNum -Status done -Files <files touched> -Decisions <key decisions> -Gotchas <pitfalls>' " +
+            "and free your files with 'pwsh $($sc['Fleet-Ownership']) -Release -Issue $issueNum' . " +
+            $noSubstitute +
             "Work ONLY this issue - never touch other worktrees or issues. " + $closing)
 }
 

@@ -315,7 +315,12 @@ them instead of one-by-one (each still finishes through the same step 5):
   merge — run those sequentially. The user picks which issues are safe to run together.
 - **Each spawned session finishes through step 5** (PR `Closes #<num>` → review gate → merge).
   The briefing is written to `.agentic-board/briefing-<n>.txt` and read by the session, so no
-  long prompt ever hits the command line.
+  long prompt ever hits the command line. It names the plugin scripts (PR step, review gate,
+  merge, fleet ledger) by a path the session can run in ANY repo: the repo-relative
+  `plugins/agentic-board/scripts/…` form when the session's working copy carries the plugin (this
+  repo), otherwise the absolute path of the install that composed it. A script that cannot be
+  found is listed in a `WARNING` and the session is told to stop and report it — never to replace
+  `New-BoardPR.ps1` with a bare `gh pr create` or to skip the review gate (#480).
 - **Requires Windows Terminal (`wt`)** for grouped tabs; without it each session opens in its own
   `pwsh` window (still works). Windows-only launcher.
 - **Clean up** each worktree after its PR merges: `git worktree remove ../<repo>--issue-<n>`.
