@@ -514,15 +514,25 @@ function Get-ChecksVerdict {
     $notEvalUnexcusable = @($neverRan | Where-Object { "$($_.bucket)" -notin @('fail','cancel') } | ForEach-Object { "$($_.name)" })
     $failed  = @($rest | Where-Object { "$($_.bucket)" -in @('fail','cancel') } | ForEach-Object { "$($_.name)" })
     $pending = @($rest | Where-Object { "$($_.bucket)" -eq 'pending' }          | ForEach-Object { "$($_.name)" })
+    # FAIL CLOSED on a bucket this gate does not recognise (review thread). gh documents pass / fail /
+    # pending / skipping / cancel; anything else (a new bucket, a missing or empty one) used to fall
+    # out of Failed AND Pending, so Ok came back true and the gate passed over a check it did not
+    # understand. It now blocks, named, and the reviewer-only allowance never excuses it.
+    # Over $list, not $rest (codex review): a never-ran check with an unrecognised bucket is unknown
+    # too. And NO Trim(): the Failed/Pending tests above compare the raw value, so trimming here
+    # would make ' fail ' look recognised while it matched neither list - passed over again.
+    $unknown = @($list | Where-Object { "$($_.bucket)" -notin @('pass','fail','cancel','pending','skipping') } |
+                 ForEach-Object { $n = "$($_.name)".Trim(); if ($n) { $n } else { '(sin nombre)' } })
     return @{
         Parsed       = $true
         Settled      = ($pending.Count -eq 0)
-        Ok           = ($pending.Count -eq 0 -and $failed.Count -eq 0 -and $notEval.Count -eq 0)
+        Ok           = ($pending.Count -eq 0 -and $failed.Count -eq 0 -and $notEval.Count -eq 0 -and $unknown.Count -eq 0)
         NoChecks     = $false
         Failed       = $failed
         Pending      = $pending
         NotEvaluated = $notEval
         NotEvaluatedUnexcusable = $notEvalUnexcusable
+        Unknown      = $unknown
     }
 }
 
@@ -1037,6 +1047,7 @@ $checksOk     = $true
 $ciTimedOut   = $false
 $failedChecks = @($verdictCi.Failed)
 $notEvaluatedChecks = @($verdictCi.NotEvaluated)
+$unknownChecks = @($verdictCi.Unknown)
 $checksParsed = [bool]$verdictCi.Parsed
 if ($verdictCi.NoChecks) {
     Write-Host "  (sin checks configurados - cuenta como pass, considera /board automate)" -ForegroundColor DarkGray
@@ -1051,6 +1062,9 @@ if ($verdictCi.NoChecks) {
     $checksOk = $false
     if ($failedChecks.Count -gt 0) {
         Write-Host ("  FAIL hay checks fallando: {0}" -f ($failedChecks -join ', ')) -ForegroundColor Red
+    }
+    if ($unknownChecks.Count -gt 0) {
+        Write-Host ("  FAIL checks con un estado que este gate no reconoce (se bloquea por precaucion, no como pass): {0}" -f ($unknownChecks -join ', ')) -ForegroundColor Red
     }
     if ($notEvaluatedChecks.Count -gt 0) {
         Write-Host ("  CI NO SE EVALUO (no corrio ningun paso): {0}" -f ($notEvaluatedChecks -join ', ')) -ForegroundColor Red
@@ -1133,7 +1147,7 @@ Write-Host ""
 # A reviewer job that never ran (startup_failure / no steps) is still "only the reviewer is red":
 # the allowance covers failed AND not-evaluated reviewer checks, exactly as before #481 split them.
 $redChecks = @($failedChecks) + @($notEvaluatedChecks)
-if (-not $checksOk -and $evidence.reviewed -and @($verdictCi.NotEvaluatedUnexcusable).Count -eq 0 -and (Test-OnlyReviewerChecksFailed -FailedChecks $redChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
+if (-not $checksOk -and $evidence.reviewed -and @($verdictCi.NotEvaluatedUnexcusable).Count -eq 0 -and $unknownChecks.Count -eq 0 -and (Test-OnlyReviewerChecksFailed -FailedChecks $redChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
     $checksOk = $true
     Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($redChecks -join ', ')) -ForegroundColor DarkYellow
     Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray
@@ -1147,9 +1161,11 @@ $ciNotEvaluatedOnly = $false
 if (-not $checksOk) {
     if ($ciTimedOut) {
         $blockers += "checks de CI aun pendientes tras $CiTimeoutMinutes min (limite del gate, #562)"
-    } elseif ($failedChecks.Count -eq 0 -and $notEvaluatedChecks.Count -gt 0 -and $checksParsed -and $verdictCi.Settled) {
+    } elseif ($failedChecks.Count -eq 0 -and $unknownChecks.Count -eq 0 -and $notEvaluatedChecks.Count -gt 0 -and $checksParsed -and $verdictCi.Settled) {
         $ciNotEvaluatedOnly = $true
         $blockers += "CI NO SE EVALUO: nunca corrio un paso, no es un fallo del codigo (#481)"
+    } elseif ($failedChecks.Count -eq 0 -and $unknownChecks.Count -gt 0) {
+        $blockers += "checks de CI con un estado que el gate no reconoce: $($unknownChecks -join ', ')"
     } else {
         $blockers += "checks de CI fallando"
     }

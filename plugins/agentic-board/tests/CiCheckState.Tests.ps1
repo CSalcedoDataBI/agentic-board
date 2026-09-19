@@ -166,6 +166,38 @@ Describe 'Get-ChecksVerdict - never ran is split from failed, and never becomes 
     }
 }
 
+Describe 'Get-ChecksVerdict - a bucket the gate does not recognise fails CLOSED (review thread)' {
+    It 'an unknown bucket is neither Failed nor Pending, but is NOT Ok - it is named in Unknown' {
+        $v = Get-ChecksVerdict -Checks @((script:Chk 'Pester' 'pass' 'SUCCESS'), (script:Chk 'newthing' 'brand_new' 'WEIRD')) -Parsed $true
+        $v.Ok      | Should -BeFalse
+        $v.Unknown | Should -Contain 'newthing'
+        $v.Settled | Should -BeTrue -Because 'waiting will not make an unrecognised state recognisable'
+    }
+    It 'an empty or missing bucket is unknown too, and a nameless check is still named' {
+        $v = Get-ChecksVerdict -Checks @([pscustomobject]@{ name = ''; bucket = '' }, [pscustomobject]@{ name = 'x' }) -Parsed $true
+        $v.Ok | Should -BeFalse
+        @($v.Unknown).Count | Should -Be 2
+        $v.Unknown | Should -Contain '(sin nombre)'
+    }
+    It 'a bucket with stray whitespace is unknown, never silently recognised-but-uncounted (codex review)' {
+        foreach ($b in ' fail ', ' pending ', 'fail ', ' pass') {
+            $v = Get-ChecksVerdict -Checks @((script:Chk 'x' $b)) -Parsed $true
+            $v.Ok | Should -BeFalse -Because "'$b'"
+            $v.Unknown | Should -Contain 'x' -Because "'$b'"
+        }
+    }
+    It 'a never-ran check with an unrecognised bucket is ALSO unknown (so it cannot take the exit-3 path)' {
+        $v = Get-ChecksVerdict -Checks @((script:Chk 'CI' 'brand_new' 'STARTUP_FAILURE')) -Parsed $true
+        $v.NotEvaluated | Should -Contain 'CI'
+        $v.Unknown      | Should -Contain 'CI'
+    }
+    It 'the five documented buckets are all recognised - none of them lands in Unknown' {
+        foreach ($b in 'pass', 'fail', 'pending', 'skipping', 'cancel') {
+            @((Get-ChecksVerdict -Checks @((script:Chk 'a' $b)) -Parsed $true).Unknown).Count | Should -Be 0 -Because $b
+        }
+    }
+}
+
 Describe 'Get-FailedCheckJobFacts - reads job facts for failed checks only, fails to "unknown"' {
     BeforeAll {
         $script:Calls = [System.Collections.Generic.List[string]]::new()
@@ -317,6 +349,34 @@ function gh {
                       -ChecksJson ('[{"name":"Pester","bucket":"fail","state":"FAILURE","link":"' + $script:LinkA + '"}]')
         $r.exit | Should -Be 3 -Because $r.out
         $r.out  | Should -Not -Match 'GATE PASSED'
+    }
+    It 'a check with a bucket the gate does not recognise BLOCKS (exit 1), named - it is never passed over (review thread)' {
+        $r = Run-Gate -ChecksJson '[{"name":"Pester","bucket":"pass","state":"SUCCESS","link":"x"},{"name":"newthing","bucket":"brand_new","state":"WEIRD","link":"y"}]'
+        $r.exit | Should -Be 1 -Because $r.out
+        $r.out  | Should -Match 'no reconoce'
+        $r.out  | Should -Match 'newthing'
+        $r.out  | Should -Not -Match 'GATE PASSED'
+    }
+    It 'an unrecognised REVIEWER check is not excused by a recorded review: still exit 1' {
+        $r = Run-Gate -Reviewed -ChecksJson '[{"name":"claude-review","bucket":"brand_new","state":"WEIRD","link":"y"}]'
+        $r.exit | Should -Be 1 -Because $r.out
+        $r.out  | Should -Not -Match 'GATE PASSED'
+    }
+    It 'a STARTUP_FAILURE check with an unrecognised bucket is exit 1 (unknown), not the exit-3 never-ran path (codex review)' {
+        $r = Run-Gate -ChecksJson '[{"name":"CI","bucket":"brand_new","state":"STARTUP_FAILURE","link":"y"}]'
+        $r.exit | Should -Be 1 -Because $r.out
+        $r.out  | Should -Match 'no reconoce'
+    }
+    It 'a failed REVIEWER check that IS excused (recorded review) must not drag an unrecognised check through with it: exit 1' {
+        # The allowance only looks at red names; without an explicit guard it would excuse the
+        # reviewer and leave the unknown check unexamined.
+        $r = Run-Gate -Reviewed -ChecksJson '[{"name":"claude-review","bucket":"fail","state":"FAILURE","link":"https://github.com/o/r/actions/runs/1/job/2"},{"name":"newthing","bucket":"brand_new","state":"WEIRD","link":"y"}]'
+        $r.exit | Should -Be 1 -Because $r.out
+        $r.out  | Should -Not -Match 'GATE PASSED'
+    }
+    It 'an unrecognised bucket next to a never-ran check is exit 1, not 3: there is something the run cannot classify' {
+        $r = Run-Gate -ChecksJson '[{"name":"CI","bucket":"fail","state":"STARTUP_FAILURE","link":"https://github.com/o/r/actions/runs/1/job/2"},{"name":"newthing","bucket":"brand_new","state":"WEIRD","link":"y"}]'
+        $r.exit | Should -Be 1 -Because $r.out
     }
     It 'an unreadable job read cannot turn a red check into "never ran": exit 1' {
         # FAKE_JOB is not valid JSON -> Invoke-Gh -Json throws -> no facts -> plain failure.
