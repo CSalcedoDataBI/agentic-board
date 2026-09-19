@@ -89,9 +89,9 @@ $env:GH_TOKEN = $acct.Token
 # Now safe to run gh project / gh issue commands
 ```
 
-For PAL-Devs:
+For the business account (`PesanteAnalytics`, formerly `PAL-Devs`; `-Account pal-devs` still works as an alias):
 ```powershell
-$acct = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1" -Account pal-devs
+$acct = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1" -Account pesante
 $env:GH_TOKEN = $acct.Token
 ```
 
@@ -156,10 +156,30 @@ config). Use `scripts/New-BoardPR.ps1` instead:
 ```
 
 It resolves the account **from the repo owner** (CSalcedoDataBI → `GITHUB_TOKEN_PERSONAL`,
-PAL-Devs → `GITHUB_TOKEN_BUSINESS`), verifies the login has push permission, pushes through a
+PesanteAnalytics → `GITHUB_TOKEN_BUSINESS`; the old logins `PAL-Devs` and `Support1-PAL` stay as
+aliases), verifies the login has push permission, pushes through a
 one-shot credential helper (token only ever in an env var read inside git's shell), and opens
 the PR with `Closes #<n>` — or pushes to the already-open PR on re-run. Session `GH_TOKEN` is
 deliberately ignored there: the identity must match the repo owner, not whatever ran last.
+
+---
+
+## Renamed accounts and unmapped owners (#665)
+
+The owner→token map (`scripts/Resolve-GhTokenVar.ps1`) is keyed on the owner **login**, and a login
+can change: the business account has been `Support1-PAL`, then `PAL-Devs`, and is now
+`PesanteAnalytics` — one account, one PAT, because a PAT is bound to the account ID. So:
+
+- Old logins stay in the map as aliases (a clone made before a rename keeps the old owner in its
+  remote, and once the old name is released GitHub stops redirecting it).
+- A login the map does not know is checked by **account ID** (`gh api users/<login> --jq .id`,
+  public data). An ID that belongs to a known account resolves to that account's token and says the
+  account was renamed — add the new login to the map when you see it.
+- Otherwise the owner is **unmapped**: the personal token is used, with a warning that names the
+  owner and lists the logins the map knows. That warning is about the **map**, not about permissions:
+  if a push then fails with "NO tiene permiso", the token is usually fine and the login is stale.
+  Pass `-TokenVar` or add the login. An unmapped owner is never resolved to the business token, and
+  a brake-armed run ignores the owner entirely (it only ever gets the agent identity).
 
 ---
 
