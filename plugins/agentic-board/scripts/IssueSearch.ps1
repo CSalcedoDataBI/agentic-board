@@ -134,11 +134,23 @@ function Find-IssuesMentioning {
 function Get-IssueCandidates {
     param([Parameter(Mandatory)][string]$Repo, [int]$ClosedDays = 30)
     $fields = 'number,title,body,url,state,closedAt,stateReason'
-    $open = @(Invoke-Gh -GhArgs @('issue', 'list', '--repo', $Repo, '--state', 'open', '--limit', '500', '--json', $fields) `
-                        -What "listar los issues abiertos de $Repo" -Json -Retries 1)
+    $openLimit = 500; $closedLimit = 300
     $since = (Get-Date).ToUniversalTime().AddDays(-1 * $ClosedDays)
-    $closed = @(Invoke-Gh -GhArgs @('issue', 'list', '--repo', $Repo, '--state', 'closed', '--limit', '300', '--json', $fields) `
+
+    $open = @(Invoke-Gh -GhArgs @('issue', 'list', '--repo', $Repo, '--state', 'open', '--limit', "$openLimit", '--json', $fields) `
+                        -What "listar los issues abiertos de $Repo" -Json -Retries 1)
+    # The closed list is filtered SERVER-SIDE by closing date. Without it `gh issue list` returns the
+    # newest 300 CREATED issues, and this repo has more closed issues than that: a defect closed last
+    # week but created long ago would fall off the list and read as "not filed" (found by counting -
+    # the unfiltered closed list hits its limit here).
+    $closed = @(Invoke-Gh -GhArgs @('issue', 'list', '--repo', $Repo, '--state', 'closed', '--search', ("closed:>={0:yyyy-MM-dd}" -f $since), '--limit', "$closedLimit", '--json', $fields) `
                           -What "listar los issues cerrados de $Repo" -Json -Retries 1)
+
+    # A list that FILLS its page may be missing entries. "No duplicate found" on a truncated list is a
+    # claim nobody checked, so it fails instead.
+    if ($open.Count -ge $openLimit)     { throw "la lista de issues abiertos de $Repo llego al limite ($openLimit): no puedo garantizar que este completa." }
+    if ($closed.Count -ge $closedLimit) { throw "la lista de issues cerrados de $Repo en los ultimos $ClosedDays dias llego al limite ($closedLimit): no puedo garantizar que este completa. Reduce -ClosedDays." }
+
     $recent = @($closed | Where-Object {
         if (-not $_.closedAt) { return $false }
         $d = if ($_.closedAt -is [datetime]) { $_.closedAt.ToUniversalTime() } else { [datetime]::Parse("$($_.closedAt)", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime() }

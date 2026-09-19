@@ -194,6 +194,38 @@ Describe 'Get-IssueCandidates - the live read fails LOUDLY and honours the close
         $r = @(Get-IssueCandidates -Repo 'o/r' -ClosedDays 30)
         ($r.number | Sort-Object) | Should -Be @(1, 2)
     }
+    It 'filters the closed list by closing date SERVER-SIDE (the unfiltered list is the newest 300 CREATED, and a defect created long ago but closed last week would fall off it)' {
+        $script:seenClosed = ''
+        Mock Invoke-GhRaw {
+            if ($GhArgs -contains 'closed') { $script:seenClosed = ($GhArgs -join ' ') }
+            [pscustomobject]@{ Output = @('[]'); ExitCode = 0; StdErr = '' }
+        }
+        $null = Get-IssueCandidates -Repo 'o/r' -ClosedDays 30
+        $script:seenClosed | Should -Match '--search closed:>=\d{4}-\d{2}-\d{2}'
+        $day = [regex]::Match($script:seenClosed, 'closed:>=(\d{4}-\d{2}-\d{2})').Groups[1].Value
+        ([datetime]::Parse($day) - (Get-Date).Date.AddDays(-30)).TotalDays | Should -BeIn @(-1, 0, 1)
+    }
+    It 'THROWS when the open list fills its page - "no duplicate" on a truncated list is a claim nobody checked' {
+        Mock Invoke-GhRaw {
+            if ($GhArgs -contains 'open') {
+                $items = 1..500 | ForEach-Object { @{ number = $_; title = "t$_"; body = ''; url = 'u'; state = 'OPEN'; closedAt = $null; stateReason = '' } }
+                return [pscustomobject]@{ Output = @(($items | ConvertTo-Json -Depth 4 -Compress)); ExitCode = 0; StdErr = '' }
+            }
+            [pscustomobject]@{ Output = @('[]'); ExitCode = 0; StdErr = '' }
+        }
+        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*abiertos*limite*'
+    }
+    It 'THROWS when the closed list fills its page' {
+        Mock Invoke-GhRaw {
+            if ($GhArgs -contains 'closed') {
+                $now = (Get-Date).ToUniversalTime().ToString('o')
+                $items = 1..300 | ForEach-Object { @{ number = $_; title = "t$_"; body = ''; url = 'u'; state = 'CLOSED'; closedAt = $now; stateReason = 'COMPLETED' } }
+                return [pscustomobject]@{ Output = @(($items | ConvertTo-Json -Depth 4 -Compress)); ExitCode = 0; StdErr = '' }
+            }
+            [pscustomobject]@{ Output = @('[]'); ExitCode = 0; StdErr = '' }
+        }
+        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*cerrados*limite*'
+    }
     It 'THROWS when ONLY the open-issues read fails - the closed read succeeding must not cover for it' {
         Mock Invoke-GhRaw {
             if ($GhArgs -contains 'open') { return [pscustomobject]@{ Output = @(); ExitCode = 1; StdErr = 'gh: HTTP 502' } }
