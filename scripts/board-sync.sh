@@ -209,6 +209,10 @@ ITEM_COUNT=$(printf '%s' "$ITEM_NODES" | jq 'length')
 echo "Items found: $ITEM_COUNT  ($PAGES page(s))"
 
 # ── 3. Process each item ───────────────────────────────────────────────────────
+# NOTE: the mutation below sends its variables with -f (raw string), not -F. -F turns a value made only
+# of digits into a number, and a single-select option id such as 98236657 is exactly that: GitHub then
+# rejects it for a String! variable ("Variable $opt of type String! was provided invalid value"). It only
+# showed up when an issue had to be marked Done, so the sync ran green until the first such close.
 set_status() {
   local item_id="$1" opt_id="$2"
   gh api graphql -f query='
@@ -217,7 +221,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
     projectId:$proj, itemId:$item, fieldId:$field,
     value:{singleSelectOptionId:$opt}
   }) { projectV2Item { id } }
-}' -F proj="$PROJECT_ID" -F item="$item_id" -F field="$STATUS_ID" -F opt="$opt_id" > /dev/null
+}' -f proj="$PROJECT_ID" -f item="$item_id" -f field="$STATUS_ID" -f opt="$opt_id" > /dev/null
 }
 
 assign_issue() {
