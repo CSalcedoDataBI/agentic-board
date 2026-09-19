@@ -12,20 +12,28 @@
       Bug                      -> ### Fixed
       Docs / Refactor / Chore  -> ### Changed
       (no Type) -> infer from labels: bug -> Fixed; docs/refactor/chore ->
-                   Changed; otherwise Added.
+                   Changed; enhancement/feature -> Added; otherwise the issue is
+                   NOT included and is listed for you to place (no default heading).
 
-    Which issues are included (both filters apply, so already-shipped work is
-    never re-listed):
-      1. closedAt >= -Since  (default: the date of the most recent CHANGELOG
-         entry, so only work since the last release is considered), and
-      2. the issue number is NOT already cited as (#<n>) anywhere in the
-         existing CHANGELOG.
+    Which issues are included. "Closed since the last release" is NOT the same question as "this
+    release fixed it" (#676): the fold once announced #661 - closed as a duplicate of a fix a month
+    old - as a new feature of the release. All of these must hold, and every issue left out is
+    reported with its reason, so nothing disappears silently:
+      1. it is closed and belongs to -Repo;
+      2. it was NOT closed as "not planned" (a duplicate or a won't-fix is never release content);
+      3. it was closed BY a merged pull request (closedByPullRequestsReferences), and that PR was
+         merged on/after -Since (default: the date of the most recent CHANGELOG entry). An issue
+         closed by hand, or by a commit with no PR, is listed for you to add by hand;
+      4. the issue number is not already cited in the existing CHANGELOG - as `(#<n>)` OR inside a
+         range such as `#423-#430`, which the old check missed for every number in the middle;
+      5. it has a Type (or label) that says which heading it belongs under. There is no default
+         heading: an unclassified issue is listed for you to place, never filed under `### Added`.
+
+    This repo hand-curates its [Unreleased] block; this generator only proposes candidates and must
+    not lie about them.
 
     Prints the block to stdout. With -Write it is inserted at the top of the
     CHANGELOG (just under the "# Changelog" header), ready to commit.
-
-    Linked PRs / merge state are not needed here - a Done+closed issue is what
-    "shipped" means on this board.
 
 .PARAMETER Owner
     GitHub user that owns the board. Default CSalcedoDataBI.
@@ -44,8 +52,8 @@
     ISO date for the header. Default: today.
 
 .PARAMETER Since
-    Only issues closed on/after this ISO date. Default: the date of the most
-    recent existing CHANGELOG entry (## [x] - YYYY-MM-DD).
+    Only issues whose closing PR was merged on/after this ISO date. Default: the
+    date of the most recent existing CHANGELOG entry (## [x] - YYYY-MM-DD).
 
 .PARAMETER Write
     Insert the block at the top of the CHANGELOG instead of only printing it.
@@ -169,6 +177,103 @@ function Select-PluginVersionFile {
     return $u[0]
 }
 
+# ── What belongs in this release (#676) ────────────────────────────────────────
+
+# Every issue number a CHANGELOG cites: single `#n` AND ranges written `#a-#b` / `#a–#b` (hyphen,
+# en dash, em dash, or `..`), expanded. The old check collected single numbers only, so the whole
+# middle of a cited range - #424..#429 of `#423–#430` - was invisible and got folded in again. A
+# range needs a `#` on both ends (`#12 - 30 files` is not one) and is capped at 200 numbers so a
+# typo cannot mark half the tracker as shipped. Pure. Returns int[].
+function Get-CitedIssueNumbers {
+    param([string]$Text)
+    $set = New-Object System.Collections.Generic.HashSet[int]
+    if (-not $Text) { return @() }
+    foreach ($m in [regex]::Matches($Text, '#(\d+)')) { [void]$set.Add([int]$m.Groups[1].Value) }
+    foreach ($m in [regex]::Matches($Text, '#(\d+)[ \t]*(?:-|\u2013|\u2014|\.\.\.?|\u2026)[ \t]*#(\d+)')) {
+        $a = [int]$m.Groups[1].Value; $b = [int]$m.Groups[2].Value
+        if ($b -gt $a -and ($b - $a) -le 200) { for ($i = $a; $i -le $b; $i++) { [void]$set.Add($i) } }
+    }
+    return @($set)
+}
+
+# Which heading does this issue go under? $null when neither the Type nor a label says - there is NO
+# default heading: the old fallback filed every unclassified issue under `### Added`, including a
+# bug. Pure.
+function Resolve-ChangelogSection {
+    param($Type, $Labels)
+    switch ("$Type") {
+        'Feature'  { return 'Added' }
+        'Bug'      { return 'Fixed' }
+        'Docs'     { return 'Changed' }
+        'Refactor' { return 'Changed' }
+        'Chore'    { return 'Changed' }
+    }
+    $l = @($Labels | Where-Object { $_ } | ForEach-Object { "$_".ToLower() })
+    if ($l -contains 'bug')                                               { return 'Fixed' }
+    if ($l -contains 'docs' -or $l -contains 'refactor' -or $l -contains 'chore') { return 'Changed' }
+    if ($l -contains 'enhancement' -or $l -contains 'feature')            { return 'Added' }
+    return $null
+}
+
+# Does this CLOSED issue belong in the release being folded? Pure.
+#   $Issue: { state; stateReason; closedByPullRequestsReferences = { nodes = @({ number; state; merged; mergedAt }) } }
+# Returns @{ include; reason } - reason is a short code the report prints:
+#   not-closed | not-planned | no-merged-pr | pr-before-release | ok
+function Test-IssueInRelease {
+    param($Issue, [datetime]$SinceDt = [datetime]::MinValue)
+    if ("$($Issue.state)" -ne 'CLOSED') { return @{ include = $false; reason = 'not-closed' } }
+    $sr = "$($Issue.stateReason)".ToUpperInvariant()
+    if ($sr -eq 'NOT_PLANNED' -or $sr -eq 'DUPLICATE') { return @{ include = $false; reason = 'not-planned' } }
+
+    $prs = @($Issue.closedByPullRequestsReferences.nodes | Where-Object {
+        $_ -and (("$($_.state)" -eq 'MERGED') -or ($_.merged -eq $true)) })
+    if ($prs.Count -eq 0) { return @{ include = $false; reason = 'no-merged-pr' } }
+
+    foreach ($pr in $prs) {
+        if (-not $pr.mergedAt) { continue }
+        $merged = if ($pr.mergedAt -is [datetime]) { $pr.mergedAt }
+                  else { [datetime]::Parse([string]$pr.mergedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
+        if ($merged -ge $SinceDt) { return @{ include = $true; reason = 'ok' } }
+    }
+    return @{ include = $false; reason = 'pr-before-release' }
+}
+
+# The selection loop, extracted so it can be tested without a board. $Nodes are the project items as
+# the GraphQL read returns them. Returns @{ Sections; Included; Skipped } where every issue that was
+# NOT folded appears in Skipped with its reason. Pure.
+function Select-ChangelogItems {
+    param($Nodes, [string]$Repo, $AlreadyCited, [datetime]$SinceDt = [datetime]::MinValue)
+    $sections = [ordered]@{ Added = @(); Changed = @(); Fixed = @() }
+    $skipped = @(); $included = 0
+    foreach ($n in @($Nodes)) {
+        $c = $n.content
+        if ($c.__typename -ne 'Issue') { continue }
+        if ($c.state -ne 'CLOSED') { continue }
+        $num = [int]$c.number
+        if ($c.url -notlike "*/$Repo/issues/*") { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = 'other-repo' }; continue }
+
+        # Closed before the last release: history, not a candidate. Counted, never listed - a board's
+        # whole closed backlog is not a to-do list for this release.
+        if ($c.closedAt) {
+            $closed = if ($c.closedAt -is [datetime]) { $c.closedAt }
+                      else { [datetime]::Parse([string]$c.closedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
+            if ($closed -lt $SinceDt) { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = 'older' }; continue }
+        }
+        $verdict = Test-IssueInRelease -Issue $c -SinceDt $SinceDt
+        if ($verdict.reason -eq 'not-planned') { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = 'not-planned' }; continue }
+        if ($AlreadyCited.ContainsKey($num))   { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = 'already-cited' }; continue }
+        if (-not $verdict.include)             { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = $verdict.reason }; continue }
+
+        $type   = ($n.fieldValues.nodes | Where-Object { $_.field.name -eq 'Type' }).name
+        $labels = @($c.labels.nodes.name | Where-Object { $_ })
+        $sec    = Resolve-ChangelogSection -Type $type -Labels $labels
+        if (-not $sec) { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = 'unclassified' }; continue }
+        $sections[$sec] += "- **$($c.title)** (#$num)"
+        $included++
+    }
+    return [pscustomobject]@{ Sections = $sections; Included = $included; Skipped = @($skipped) }
+}
+
 # Dot-source guard: with $env:ABIOS_CHANGELOG_DOTSOURCE set, return after defining the pure
 # helpers WITHOUT reading gh/the board — lets the tests exercise Update-ChangelogText directly.
 if ($env:ABIOS_CHANGELOG_DOTSOURCE) { return }
@@ -199,7 +304,7 @@ $alreadyCited = @{}
 $lastEntryDate = $null
 if (Test-Path $ChangelogPath) {
     $clText = Get-Content $ChangelogPath -Raw
-    foreach ($m in [regex]::Matches($clText, '#(\d+)')) { $alreadyCited[[int]$m.Groups[1].Value] = $true }
+    foreach ($num in (Get-CitedIssueNumbers -Text $clText)) { $alreadyCited[[int]$num] = $true }
     $dm = [regex]::Match($clText, '##\s*\[[^\]]+\]\s*-\s*(\d{4}-\d{2}-\d{2})')
     if ($dm.Success) { $lastEntryDate = $dm.Groups[1].Value }
 }
@@ -269,8 +374,9 @@ query(`$owner:String!, `$num:Int!, `$cursor:String) {
           content {
             __typename
             ... on Issue {
-              number title state closedAt url
+              number title state stateReason closedAt url
               labels(first:15) { nodes { name } }
+              closedByPullRequestsReferences(first:5, includeClosedPrs:true) { nodes { number state merged mergedAt } }
             }
           }
         }
@@ -292,42 +398,13 @@ query(`$owner:String!, `$num:Int!, `$cursor:String) {
 } while ($more)
 
 # ── Select + bucket ───────────────────────────────────────────────────────────
-$sections = [ordered]@{ Added = @(); Changed = @(); Fixed = @() }
-
-function Resolve-Section($type, $labels) {
-    switch ($type) {
-        'Feature'  { return 'Added' }
-        'Bug'      { return 'Fixed' }
-        'Docs'     { return 'Changed' }
-        'Refactor' { return 'Changed' }
-        'Chore'    { return 'Changed' }
-    }
-    if ($labels -contains 'bug')                                              { return 'Fixed' }
-    if ($labels -contains 'docs' -or $labels -contains 'refactor' -or $labels -contains 'chore') { return 'Changed' }
-    return 'Added'
-}
-
-$skippedRepo = 0; $skippedCited = 0; $skippedOld = 0; $included = 0
-foreach ($n in $nodes) {
-    $c = $n.content
-    if ($c.__typename -ne 'Issue') { continue }
-    if ($c.state -ne 'CLOSED') { continue }
-    if ($c.url -notlike "*/$Repo/issues/*") { $skippedRepo++; continue }
-    if ($alreadyCited.ContainsKey([int]$c.number)) { $skippedCited++; continue }
-    if ($c.closedAt) {
-        # ConvertFrom-Json already coerces the ISO string to [datetime]; only
-        # parse (invariant) if it arrived as a string.
-        $closed = if ($c.closedAt -is [datetime]) { $c.closedAt }
-                  else { [datetime]::Parse([string]$c.closedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
-        if ($closed -lt $sinceDt) { $skippedOld++; continue }
-    }
-
-    $type   = ($n.fieldValues.nodes | Where-Object { $_.field.name -eq 'Type' }).name
-    $labels = @($c.labels.nodes.name | Where-Object { $_ } | ForEach-Object { $_.ToLower() })
-    $sec    = Resolve-Section $type $labels
-    $sections[$sec] += "- **$($c.title)** (#$($c.number))"
-    $included++
-}
+$sel      = Select-ChangelogItems -Nodes $nodes -Repo $Repo -AlreadyCited $alreadyCited -SinceDt $sinceDt
+$sections = $sel.Sections
+$included = $sel.Included
+$skipCount = @{}
+foreach ($s in $sel.Skipped) { $skipCount[$s.reason] = 1 + [int]$skipCount[$s.reason] }
+function Get-SkipCount([string]$k) { [int]$skipCount[$k] }
+$skippedRepo = Get-SkipCount 'other-repo'; $skippedCited = Get-SkipCount 'already-cited'; $skippedOld = Get-SkipCount 'older'
 
 # ── Build the block ───────────────────────────────────────────────────────────
 $sb = New-Object System.Text.StringBuilder
@@ -343,8 +420,21 @@ foreach ($secName in $sections.Keys) {
 $block = $sb.ToString().TrimEnd()
 
 Write-Host "=== Board-Changelog  $Repo  board #$ProjectNum ===" -ForegroundColor Cyan
-Write-Host ("  Since: {0}  |  incluidos: {1}  |  omitidos: {2} otro-repo, {3} ya-citados, {4} anteriores" -f `
-    ($(if ($Since) { $Since } else { "(todo)" })), $included, $skippedRepo, $skippedCited, $skippedOld) -ForegroundColor DarkGray
+Write-Host ("  Since: {0}  |  incluidos: {1}  |  omitidos: {2} otro-repo, {3} ya-citados (incl. rangos), {4} anteriores, {5} no-planeados" -f `
+    ($(if ($Since) { $Since } else { "(todo)" })), $included, $skippedRepo, $skippedCited, $skippedOld, (Get-SkipCount 'not-planned')) -ForegroundColor DarkGray
+# Nothing is dropped silently: what a human may want to place by hand is named, with the reason.
+$review = @($sel.Skipped | Where-Object { $_.reason -in @('no-merged-pr', 'pr-before-release', 'unclassified') })
+if ($review.Count -gt 0) {
+    Write-Host "  Cerrados pero NO incluidos (revisa a mano si corresponden a este release):" -ForegroundColor Yellow
+    foreach ($r in $review) {
+        $why = switch ($r.reason) {
+            'no-merged-pr'      { 'no lo cerro ningun PR mergeado' }
+            'pr-before-release' { 'su PR se mergeo antes de este release' }
+            'unclassified'      { 'sin Type ni label: no se en que seccion va' }
+        }
+        Write-Host ("    #{0}  {1}  - {2}" -f $r.number, $r.title, $why) -ForegroundColor DarkYellow
+    }
+}
 Write-Host ""
 
 if ($any) {

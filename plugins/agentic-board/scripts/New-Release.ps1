@@ -21,6 +21,22 @@
          -SyncManifest it rewrites the marketplace description from plugin.json
          instead of only reporting the drift.
 
+    It also checks the CHOICE of bump against what is under `## [Unreleased]` (#676). The number
+    is supposed to say what kind of change the release contains, and the tooling used to agree
+    with anything: 0.39.0 was proposed for a batch containing only `### Fixed` entries ("big batch,
+    bigger number") and nothing objected. The minimum is mechanical:
+
+        only `### Fixed` / `### Security`                  -> patch
+        any `### Added` / `Changed` / `Deprecated` / `Removed`
+        (or a header this check does not know)             -> minor
+        a `BREAKING` marker in an entry                    -> major (minor while the version is 0.x,
+                                                              where a breaking change is by
+                                                              convention a minor bump)
+
+    A SMALLER bump than that minimum is refused (nothing is written); a LARGER one is a legitimate
+    maintainer call and only warns. The rule reads the headers and markers the maintainer wrote -
+    it does not take over the curation of the block.
+
     It then prints `git diff --stat` of what changed and STOPS. Committing,
     tagging, and pushing stay the maintainer's call (review the diff first).
 
@@ -37,7 +53,9 @@
 .PARAMETER Check
     Read-only: validate that plugin.json and marketplace.json are consistent and
     that the current version is valid semver. Changes nothing. Exit 1 on drift.
-    (Reusable by the docs-freshness gate, #203.)
+    (Reusable by the docs-freshness gate, #203.) Also reports the minimum bump implied by
+    `[Unreleased]`; when -Bump or -Version is given as well, that planned bump is checked against
+    it (smaller -> exit 1, larger -> warning).
 
 .PARAMETER SyncManifest
     When the marketplace plugin entry has drifted from plugin.json, rewrite its
@@ -156,6 +174,96 @@ function Test-ManifestConsistency {
     [pscustomobject]@{ Consistent = ($issues.Count -eq 0); Issues = $issues }
 }
 
+# ── Bump vs. what is actually in [Unreleased] (#676) ───────────────────────────
+$script:BumpRank = @{ patch = 1; minor = 2; major = 3 }
+
+# The body of the `## [Unreleased]` section, or $null when there is none. Pure.
+function Get-UnreleasedBlock {
+    param([string]$Text)
+    if (-not $Text) { return $null }
+    $m = [regex]::Match($Text, '(?ms)^##[ \t]*\[Unreleased\][ \t]*\r?\n(.*?)(?=^##[ \t]*\[|\z)')
+    if (-not $m.Success) { return $null }
+    return $m.Groups[1].Value
+}
+
+# The minimum bump the `[Unreleased]` block implies, from the `###` headers that actually contain
+# entries and from an explicit BREAKING marker. Pure.
+#
+# Returns @{ minimum = 'patch'|'minor'|'major'|$null; reasons; sections; breaking }.
+# $null = nothing under [Unreleased] to release. Only headers WITH entries count: an empty
+# `### Added` left over from a template must not raise the bar.
+function Get-MinimumBump {
+    param([string]$Block, [string]$Current = '')
+    $reasons = New-Object System.Collections.Generic.List[string]
+    $sections = @()
+    $rank = 0
+    if (-not $Block -or -not $Block.Trim()) { return @{ minimum = $null; reasons = @(); sections = @(); breaking = $false } }
+
+    $counts = [ordered]@{}
+    $cur = ''
+    foreach ($line in ($Block -split "`r?`n")) {
+        $h = [regex]::Match($line, '^###[ \t]+(.+?)[ \t]*$')
+        if ($h.Success) { $cur = $h.Groups[1].Value; if (-not $counts.Contains($cur)) { $counts[$cur] = 0 }; continue }
+        if ($cur -and $line.Trim()) { $counts[$cur] = 1 + [int]$counts[$cur] }
+    }
+    foreach ($name in $counts.Keys) {
+        if ($counts[$name] -le 0) { continue }
+        $sections += $name
+        switch -Regex ($name) {
+            '^(?i)(fixed|security)$'                     { $r = 1; $why = "### $name has entries -> at least patch" }
+            '^(?i)(added|changed|deprecated|removed)$'   { $r = 2; $why = "### $name has entries -> at least minor" }
+            default                                       { $r = 2; $why = "### $name is not a header this check can prove is only a fix -> at least minor" }
+        }
+        if ($r -gt $rank) { $rank = $r }
+        $reasons.Add($why)
+    }
+    # An explicit marker in the entries, not an inference from wording.
+    $breaking = [bool]([regex]::IsMatch($Block, '\bBREAKING\b'))
+    if ($breaking) {
+        $zeroX = ($Current -match '^0\.')
+        if ($zeroX) { if (2 -gt $rank) { $rank = 2 }; $reasons.Add('a BREAKING entry -> at least minor (version is 0.x: a breaking change is a minor bump by convention)') }
+        else        { $rank = 3; $reasons.Add('a BREAKING entry -> major') }
+    }
+    if ($rank -eq 0) { return @{ minimum = $null; reasons = @(); sections = @($sections); breaking = $breaking } }
+    $min = @('', 'patch', 'minor', 'major')[$rank]
+    return @{ minimum = $min; reasons = @($reasons); sections = @($sections); breaking = $breaking }
+}
+
+# What kind of bump is Current -> Next? 'major' | 'minor' | 'patch'; throws when Next does not move
+# forward, because a "release" that is not newer than the current version is not a release. Pure.
+function Get-BumpKind {
+    param([Parameter(Mandatory)][string]$Current, [Parameter(Mandatory)][string]$Next)
+    if ($Current -notmatch $script:SemVerRx) { throw "Version '$Current' is not strict X.Y.Z semver." }
+    $c = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    if ($Next -notmatch $script:SemVerRx) { throw "Version '$Next' is not strict X.Y.Z semver." }
+    $n = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    if ($n[0] -gt $c[0]) { return 'major' }
+    if ($n[0] -eq $c[0] -and $n[1] -gt $c[1]) { return 'minor' }
+    if ($n[0] -eq $c[0] -and $n[1] -eq $c[1] -and $n[2] -gt $c[2]) { return 'patch' }
+    throw "Version $Next is not newer than the current $Current."
+}
+
+# Judge a chosen bump against the minimum. Pure. Returns @{ ok; warn; message }:
+# smaller -> ok=$false; larger -> ok=$true, warn=$true (a maintainer call, e.g. marketing a milestone);
+# equal, or nothing to compare against -> ok, no warn.
+function Test-BumpChoice {
+    param([Parameter(Mandatory)][string]$Chosen, $Minimum)
+    if (-not $Minimum.minimum) {
+        return @{ ok = $true; warn = $false; message = 'nothing under [Unreleased] implies a minimum bump' }
+    }
+    $why = ($Minimum.reasons -join '; ')
+    $cr = $script:BumpRank[$Chosen]; $mr = $script:BumpRank[$Minimum.minimum]
+    if ($cr -lt $mr) {
+        return @{ ok = $false; warn = $false
+                  message = "a '$Chosen' bump is smaller than what [Unreleased] contains: minimum is '$($Minimum.minimum)' ($why)" }
+    }
+    if ($cr -gt $mr) {
+        return @{ ok = $true; warn = $true
+                  message = "'$Chosen' is larger than the minimum '$($Minimum.minimum)' ($why) - allowed, but the number should say what changed" }
+    }
+    return @{ ok = $true; warn = $false; message = "'$Chosen' matches the minimum implied by [Unreleased] ($why)" }
+}
+
 # Dot-source guard: with $env:ABIOS_RELEASE_DOTSOURCE set, return after defining
 # the pure helpers WITHOUT touching disk/git — lets the tests unit-test them.
 if ($env:ABIOS_RELEASE_DOTSOURCE) { return }
@@ -182,27 +290,61 @@ $current   = Get-PluginVersion -Raw $pluginRaw
 
 $consistency = Test-ManifestConsistency -Plugin $plugin -Marketplace $market
 
+# What is under [Unreleased] decides the MINIMUM bump (#676). Read before anything is written.
+$clRaw   = if (Test-Path -LiteralPath $changelog) { [System.IO.File]::ReadAllText($changelog) } else { '' }
+$minBump = Get-MinimumBump -Block (Get-UnreleasedBlock -Text $clRaw) -Current $current
+# Was a bump actually chosen, or is -Bump just its default? Only a real choice can be judged.
+$bumpChosen = $PSBoundParameters.ContainsKey('Bump') -or [bool]$Version
+
 # --- -Check: validate only, change nothing ------------------------------------
 if ($Check) {
     Write-Host "=== Release check  ($([System.IO.Path]::GetFileName($repoRoot))) ===" -ForegroundColor Cyan
     Write-Host "  Version (plugin.json): $current"
     try { Get-NextVersion -Current $current -Bump patch | Out-Null; Write-Host "  OK  version is valid semver" -ForegroundColor Green }
     catch { Write-Host "  FAIL  $($_.Exception.Message)" -ForegroundColor Red; exit 1 }
+    $checkFailed = $false
     if ($consistency.Consistent) {
         Write-Host "  OK  marketplace.json matches plugin.json (name + description)" -ForegroundColor Green
-        exit 0
+    } else {
+        Write-Host "  FAIL  manifest drift:" -ForegroundColor Red
+        $consistency.Issues | ForEach-Object { Write-Host "        - $_" -ForegroundColor Red }
+        Write-Host "        Fix marketplace.json, or re-run with -SyncManifest." -ForegroundColor DarkGray
+        $checkFailed = $true
     }
-    Write-Host "  FAIL  manifest drift:" -ForegroundColor Red
-    $consistency.Issues | ForEach-Object { Write-Host "        - $_" -ForegroundColor Red }
-    Write-Host "        Fix marketplace.json, or re-run with -SyncManifest." -ForegroundColor DarkGray
-    exit 1
+    # The bump rule (#676): report the minimum; judge a planned bump when one was given.
+    if (-not $minBump.minimum) {
+        Write-Host "  --  nothing under [Unreleased]: no minimum bump to enforce" -ForegroundColor DarkGray
+    } elseif (-not $bumpChosen) {
+        Write-Host "  --  [Unreleased] implies at least a '$($minBump.minimum)' bump ($($minBump.reasons -join '; '))" -ForegroundColor DarkGray
+    } else {
+        $plannedNext = if ($Version) { $Version } else { Get-NextVersion -Current $current -Bump $Bump }
+        try { $plannedKind = Get-BumpKind -Current $current -Next $plannedNext }
+        catch { Write-Host "  FAIL  $($_.Exception.Message)" -ForegroundColor Red; exit 1 }
+        $judge = Test-BumpChoice -Chosen $plannedKind -Minimum $minBump
+        if (-not $judge.ok)   { Write-Host "  FAIL  $($judge.message)" -ForegroundColor Red; $checkFailed = $true }
+        elseif ($judge.warn)  { Write-Host "  WARN  $($judge.message)" -ForegroundColor Yellow }
+        else                  { Write-Host "  OK  $($judge.message)" -ForegroundColor Green }
+    }
+    if ($checkFailed) { exit 1 }
+    exit 0
 }
 
 $next = if ($Version) { $Version } else { Get-NextVersion -Current $current -Bump $Bump }
 # Validate an explicit -Version too.
 Get-NextVersion -Current $next -Bump patch | Out-Null
 
+# The choice of bump against what [Unreleased] contains (#676). A smaller bump is refused before
+# anything is written - including under -DryRun, which must show the refusal, not hide it.
+$nextKind = Get-BumpKind -Current $current -Next $next
+$judge = Test-BumpChoice -Chosen $nextKind -Minimum $minBump
+if (-not $judge.ok) {
+    Write-Host "REFUSED: $($judge.message)" -ForegroundColor Red
+    Write-Host "  Pick a bump that matches the entries (-Bump $($minBump.minimum)), or change what [Unreleased] says." -ForegroundColor DarkGray
+    exit 1
+}
+
 Write-Host "=== Prepare release  $current -> $next ===" -ForegroundColor Cyan
+if ($judge.warn) { Write-Host "  WARN  $($judge.message)" -ForegroundColor Yellow }
 Write-Host "  plugin.json : $pluginJson"
 Write-Host "  marketplace : $marketJson"
 Write-Host "  changelog   : $changelog"
