@@ -23,8 +23,12 @@ See sources at the bottom.
 
 ## Safe-operations rules (enforced, not optional)
 1. **Never create a duplicate board.** Before `init`/`add`/plan, **resolve-or-reuse** the repo's
-   board with `Resolve-Board.ps1` (matches the canonical title `<repo> — Roadmap` or any board whose
-   title contains the repo name, excluding backups). Create only if none exists. Direct
+   board with `Resolve-Board.ps1`. It looks at the boards GitHub records as LINKED to the repo
+   (`repository.projectsV2`, the same lookup as `Board-Work -ListBoards -Repo`), so a board named
+   after the product is found too; only a repo with no linked board falls back to title matching
+   (`<repo> — Roadmap`, or a title containing the repo name; backups excluded). `-Title` is a selector:
+   it reuses the linked board with exactly that title or creates one, never a different board (#498,
+   #666). Create only if none exists. Direct
    `gh project create` without resolving first is a **bug** — do not do it.
 2. **Always back up before deleting.** Any `gh project delete` MUST be preceded by
    `Backup-Board.ps1` (JSON snapshot of project+fields+items **and** a restorable live clone). This
