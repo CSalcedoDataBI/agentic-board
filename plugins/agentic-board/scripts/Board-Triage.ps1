@@ -324,7 +324,7 @@ $Owner = $plan.Owner
 if ($plan.ResolveFromOrigin) {
     $resolved = & (Join-Path $PSScriptRoot 'Resolve-Board.ps1') -Owner $Owner -Repo $originRepo -CreateIfMissing $false
     if (-not $resolved) {
-        throw "El repo $originRepo no tiene board enlazado que yo pueda leer. Crealo con /board init, o pasa -Number <n> -Owner <o>."
+        throw "El repo $originRepo no tiene board enlazado que yo pueda leer. Pasa -Number <n> -Owner <o>; y antes de crear uno con /board init, confirma con /board work -ListBoards -Repo $originRepo que de verdad no existe (crear otro es como se duplican los boards)."
     }
     $Number = [int]$resolved
     Write-Host ("  Board resuelto desde origin ($originRepo): #{0} de {1}" -f $Number, $Owner) -ForegroundColor DarkGray

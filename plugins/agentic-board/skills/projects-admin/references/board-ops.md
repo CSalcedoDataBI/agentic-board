@@ -238,8 +238,13 @@ Always resolve the existing board before creating one:
 ```powershell
 $num = & "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-Board.ps1" -Owner <owner> -Repo <owner>/<repo>
 ```
-It reuses the repo's board if it exists (canonical title `<repo> — Roadmap`, or any non-backup board
-whose title contains the repo name) and only creates+links+describes a new one if none is found.
+It reuses the board GitHub has LINKED to the repo (whatever its title; `repository.projectsV2`), and
+only when the repo has none does it try title matching (canonical `<repo> — Roadmap`, or a non-backup
+board whose title contains the repo name). Only if none is found does it create+link+describe a new
+one. `-Title 'X'` selects the linked board titled exactly `X` or creates that board — it never returns
+a board with a different title (#666); a board found only by that exact title (not linked yet) is reused
+AND linked to the repo, so the next lookup finds it too. `-WhatIf` reports the create/link and does not
+perform it.
 
 ---
 
