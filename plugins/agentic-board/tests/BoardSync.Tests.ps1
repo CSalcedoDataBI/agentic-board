@@ -37,6 +37,8 @@ Describe 'board-sync.sh items load (#679)' -Skip:(-not $script:CanRun) {
         #                             real failure: a page fails as a whole, each item reads alone
         #   FAKE_POISON_TIMELINE=i    any request covering item i that asks for timelineItems fails
         #   FAKE_POISON_HARD=i        any request covering item i fails, except the minimal id-only one
+        #   FAKE_CLOSED=i             item i is a CLOSED issue (still in Backlog), so the sync must mark it Done
+        #   FAKE_DONE_ID=...          the id of the Done option (default DONE); real ids can be all digits
         #   FAKE_GARBAGE_BATCH=1      a request for more than one item answers 200 with a body that is not JSON
         #   FAKE_GARBAGE_SINGLE=1     a request for a single item answers 200 with valid JSON that is NOT a page
         #                             (no pageInfo): the case that used to end the pagination silently
@@ -53,9 +55,17 @@ done
 fail() { echo "gh: Something went wrong while executing your query" >&2; exit 1; }
 case "$q" in
   *"fields(first:30)"*)
-    echo '{"data":{"user":{"projectV2":{"id":"P1","fields":{"nodes":[{"id":"S1","name":"Status","options":[{"id":"DONE","name":"Done"},{"id":"INPROG","name":"In Progress"},{"id":"BACKLOG","name":"Backlog"}]}]}}}}}'; exit 0;;
+    echo '{"data":{"user":{"projectV2":{"id":"P1","fields":{"nodes":[{"id":"S1","name":"Status","options":[{"id":"'"${FAKE_DONE_ID:-DONE}"'","name":"Done"},{"id":"INPROG","name":"In Progress"},{"id":"BACKLOG","name":"Backlog"}]}]}}}}}'; exit 0;;
   *"updateProjectV2ItemFieldValue"*)
-    for ((i=1; i<=$#; i++)); do a="${!i}"; n=$((i+1)); v="${!n}"; [ "$a" = "-F" ] && case "$v" in opt=*) echo "${v#opt=}" >> "$state/mutations";; esac; done
+    for ((i=1; i<=$#; i++)); do
+      a="${!i}"; n=$((i+1)); v="${!n}"
+      case "$a" in -F|-f) case "$v" in opt=*)
+        val="${v#opt=}"
+        # What real gh does: -F converts a value made only of digits into a number, which GitHub then
+        # rejects for a String! variable.
+        if [ "$a" = "-F" ] && [[ "$val" =~ ^[0-9]+$ ]]; then echo 'gh: Variable $opt of type String! was provided invalid value' >&2; exit 1; fi
+        echo "$val" >> "$state/mutations";; esac;; esac
+    done
     echo '{}'; exit 0;;
   *"items(first:"*)
     n=$(cat "$state/calls" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$state/calls"
@@ -72,11 +82,11 @@ case "$q" in
     [ -n "$FAKE_GARBAGE_BATCH" ] && [ "$size" -gt 1 ] && { echo 'not json at all'; exit 0; }
     [ -n "$FAKE_GARBAGE_SINGLE" ] && [ "$size" -eq 1 ] && { echo '{"data":{"node":{"items":{"nodes":[]}}}}'; exit 0; }
     nodes=$(for ((k=start; k<=end; k++)); do
-      jq -cn --argjson i "$k" --argjson tl "$has_tl" --argjson min "$minimal" '
+      jq -cn --argjson i "$k" --argjson tl "$has_tl" --argjson min "$minimal" --arg st "$([ "$k" = "$FAKE_CLOSED" ] && echo CLOSED || echo OPEN)" '
         if $min == 1 then {id: ("I" + ($i|tostring))}
         else {id: ("I" + ($i|tostring)),
               fieldValues: {nodes: [{field: {name: "Status"}, optionId: "BACKLOG"}]},
-              content: ({number: (100 + $i), state: "OPEN", assignees: {nodes: [{login: "x"}]}}
+              content: ({number: (100 + $i), state: $st, assignees: {nodes: [{login: "x"}]}}
                         + (if $tl == 1 then {timelineItems: {nodes: [{willCloseTarget: true, source: {number: 9, state: "OPEN", merged: false}}]}} else {} end))} end'
     done | jq -cs '.')
     more=false; [ "$end" -lt "$total" ] && more=true
@@ -176,6 +186,15 @@ echo '{}'
         $r.Exit | Should -Not -Be 0
         $r.Err | Should -Match '::error::board-sync'
         $r.Out | Should -Not -Match 'Items found'
+    }
+
+    It 'marks a closed issue Done even when the Done option id is made only of digits' {
+        # 98236657 is a real option id of this board. With -F, gh sends it as a number and GitHub rejects
+        # it for a String! variable, which failed the whole sync the first time an issue had to be closed.
+        $r = script:RunSync @{ FAKE_ITEMS = 3; FAKE_CLOSED = 2; FAKE_DONE_ID = '98236657' }
+        $r.Exit | Should -Be 0
+        $r.Err | Should -Not -Match 'invalid value'
+        @($r.Mutations | Where-Object { $_ -eq '98236657' }).Count | Should -Be 1
     }
 
     It 'fails loudly when nothing can be read, instead of reporting a clean sync' {
