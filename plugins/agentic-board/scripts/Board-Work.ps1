@@ -1002,11 +1002,14 @@ function Test-SubjectCitesIssue([string]$Subject, [int]$IssueNum) {
 # A revert (#471) is the strongest evidence AGAINST integration, so a revert subject never
 # counts as landed work; it also retires the work it undoes - the commit it names
 # (`This reverts commit <sha>`) and any citing commit that is not newer than it. When the
-# order cannot be established (a missing date) the citing commit is KEPT: an unreadable
-# timestamp can only preserve the refusal, never lift it.
+# order cannot be established (a missing date, or a tie) the citing commit is KEPT: an unreadable
+# or equal timestamp can only preserve the refusal, never lift it.
+# -Truncated says the search hit its result cap: a landed commit may then be missing from $Hits
+# while its revert is present, so a revert must not be trusted to mean "nothing landed" and is
+# counted like any citing commit (the refusal the guard always gave).
 # Returns @{ commits = @({sha}); revertedAt = [datetimeoffset] or $null }.
 function Select-IssueCitingCommits {
-    param([object[]]$Hits = @(), [int]$IssueNum)
+    param([object[]]$Hits = @(), [int]$IssueNum, [switch]$Truncated)
     $landed = @(); $reverts = @(); $revertedShas = @()
     foreach ($h in @($Hits)) {
         $msg     = "$($h.commit.message)"
@@ -1020,6 +1023,7 @@ function Select-IssueCitingCommits {
         }
         if (Test-SubjectCitesIssue $subject $IssueNum) { $landed += $h }
     }
+    if ($Truncated -and $reverts.Count -gt 0) { $landed += $reverts; $reverts = @() }
 
     $newestRevert = $null
     foreach ($r in $reverts) {
@@ -1032,7 +1036,7 @@ function Select-IssueCitingCommits {
         foreach ($rs in $revertedShas) { if ($sha.StartsWith($rs)) { return $false } }
         if ($null -eq $newestRevert) { return $true }
         $d = ConvertTo-DateTimeOffset $(if ($_.commit.committer.date) { $_.commit.committer.date } else { $_.commit.author.date })
-        return ($null -eq $d -or $d -gt $newestRevert)
+        return ($null -eq $d -or $d -ge $newestRevert)
     })
     return [pscustomobject]@{
         commits    = @($kept | ForEach-Object { [pscustomobject]@{ sha = $_.sha } })
@@ -1059,7 +1063,7 @@ function Get-PriorWorkRefusal {
         if ($_.state -ne 'MERGED') { return $false }
         if ($null -eq $revertedAtDto) { return $true }
         $at = ConvertTo-DateTimeOffset $_.mergedAt
-        return ($null -eq $at -or $at -gt $revertedAtDto)
+        return ($null -eq $at -or $at -ge $revertedAtDto)
     })
     if ($merged.Count -gt 0) {
         return "ya tiene un PR MERGED (#$($merged[0].number)) - el trabajo ya esta en la rama por defecto"
@@ -1083,6 +1087,7 @@ function Get-PriorWorkRefusal {
 function Get-IssueLinkedWork {
     param([string]$Repo, [int]$IssueNum)
     $prs = @(); $commits = @(); $revertedAt = $null
+    $commitSearchLimit = 100   # one API page; the search ranks by relevance, so the cap can drop old hits
     $rp = $Repo -split '/'
     try {
         $data = Invoke-Gh -GhArgs @('api','graphql','-f','query=
@@ -1102,9 +1107,9 @@ query($o:String!,$r:String!,$n:Int!){
     # the exact issue (#12 never matches #123) and reverts are set aside - see
     # Select-IssueCitingCommits for why the body and reverts do not count.
     try {
-        $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit','20') `
+        $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit',"$commitSearchLimit") `
                           -What "buscar commits de #$IssueNum" -Json
-        $sel = Select-IssueCitingCommits -Hits @($hits) -IssueNum $IssueNum
+        $sel = Select-IssueCitingCommits -Hits @($hits) -IssueNum $IssueNum -Truncated:(@($hits).Count -ge $commitSearchLimit)
         $commits    = @($sel.commits)
         $revertedAt = $sel.revertedAt
     } catch { }

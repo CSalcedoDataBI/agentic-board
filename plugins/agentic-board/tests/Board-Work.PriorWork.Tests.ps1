@@ -141,7 +141,7 @@ Describe 'prior-work guard on a real git history (#507 #502 #471)' {
             $null = Add-FixtureCommit 'feat(work): the change, second attempt (#82) (#95)'
             @((Get-LinkedFor 82).commits).Count | Should -Be 1
         }
-        It 'git''s own `Revert "..."` form, naming the sha, retires exactly that commit' {
+        It 'git''s own `Revert "..."` form, naming the sha, is not integrated work (the sha rule itself is pinned by the undated tests below)' {
             $orig = Add-FixtureCommit 'feat(work): a change (#83) (#96)'
             $null = Add-FixtureCommit "Revert `"feat(work): a change (#83) (#96)`"`n`nThis reverts commit $orig."
             @((Get-LinkedFor 83).commits).Count | Should -Be 0
@@ -200,6 +200,39 @@ Describe 'Select-IssueCitingCommits when commit dates are missing (fail closed)'
             [pscustomobject]@{ sha = '2222222bbbb'; commit = [pscustomobject]@{ message = 'revert(x): undo a different bit (#5) (#10)' } }
         )
         @((Select-IssueCitingCommits -Hits $h -IssueNum 5).commits).Count | Should -Be 1
+    }
+}
+
+Describe 'Select-IssueCitingCommits ties and a capped search stay fail-closed' {
+    It 'a citing commit with the SAME timestamp as the revert is kept (order unknown)' {
+        $h = @(
+            [pscustomobject]@{ sha = '5555555eeee'; commit = [pscustomobject]@{ message = 'feat(x): change (#5) (#9)'; committer = [pscustomobject]@{ date = '2026-02-01T00:00:00Z' } } },
+            [pscustomobject]@{ sha = '6666666ffff'; commit = [pscustomobject]@{ message = 'revert(x): undo (#5) (#10)';  committer = [pscustomobject]@{ date = '2026-02-01T00:00:00Z' } } }
+        )
+        @((Select-IssueCitingCommits -Hits $h -IssueNum 5).commits).Count | Should -Be 1
+    }
+    It 'a MERGED PR merged at the SAME instant as the revert still refuses' {
+        $pr = @([pscustomobject]@{ number = 9; state = 'MERGED'; mergedAt = '2026-02-01T00:00:00Z' })
+        Get-PriorWorkRefusal -Prs $pr -Commits @() -RevertedAt ([datetimeoffset]'2026-02-01T00:00:00Z') | Should -Match 'PR MERGED'
+    }
+    It 'when the search hit its cap, a revert is NOT trusted to mean nothing landed' {
+        $h = @([pscustomobject]@{ sha = '7777777aaaa'; commit = [pscustomobject]@{ message = 'revert(x): undo (#5) (#10)'; committer = [pscustomobject]@{ date = '2026-02-01T00:00:00Z' } } })
+        @((Select-IssueCitingCommits -Hits $h -IssueNum 5).commits).Count             | Should -Be 0
+        @((Select-IssueCitingCommits -Hits $h -IssueNum 5 -Truncated).commits).Count  | Should -Be 1
+    }
+    It 'Get-IssueLinkedWork treats exactly 100 hits as capped (the request limit) and keeps the refusal' {
+        $hits = @(1..99 | ForEach-Object { [ordered]@{ sha = ('{0:x40}' -f $_); commit = [ordered]@{ message = "chore: noise $_"; committer = [ordered]@{ date = '2026-01-01T00:00:00Z' } } } })
+        $hits += [ordered]@{ sha = ('{0:x40}' -f 500); commit = [ordered]@{ message = 'revert(x): undo (#88) (#89)'; committer = [ordered]@{ date = '2026-01-02T00:00:00Z' } } }
+        $script:HitsJson = ConvertTo-Json $hits -Depth 6 -Compress
+        $script:PrJson   = '[]'
+        Mock Invoke-GhRaw {
+            if ($GhArgs -contains 'graphql') { return [pscustomobject]@{ ExitCode = 0; StdErr = ''; Output = '{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[]}}}}}' } }
+            return [pscustomobject]@{ ExitCode = 0; StdErr = ''; Output = $script:HitsJson }
+        }
+        @((Get-IssueLinkedWork 'o/r' 88).commits).Count | Should -Be 1
+        # ...and the same single revert, under the cap, is set aside
+        $script:HitsJson = ConvertTo-Json @($hits[99]) -Depth 6 -Compress
+        @((Get-IssueLinkedWork 'o/r' 88).commits).Count | Should -Be 0
     }
 }
 
