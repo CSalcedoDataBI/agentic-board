@@ -79,8 +79,10 @@ function Get-ReviewerProbeStatus {
     $s = "$Output"
     if ($s -match '(?i)IneligibleTier|UNSUPPORTED_CLIENT|no longer supported')          { return 'unsupported' }
     if ($s -match '(?i)not running in a trusted directory|skip-trust|TRUST_WORKSPACE')  { return 'untrusted' }
-    if ($s -match '(?i)rate.?limit|quota|resource.?exhausted|too many requests|\b429\b') { return 'no-quota' }
-    if ($s -match '(?i)not logged in|logged out|login required|unauthori[sz]ed|unauthenticated|not authenticated|please (log ?in|sign ?in)|\b401\b') { return 'auth' }
+    # Phrases, not bare words: a healthy banner can say "Quota remaining: 500" or carry "401" inside
+    # an id, and that must not read as a dead reviewer (review round 1).
+    if ($s -match '(?i)rate.?limit|quota (exceeded|exhausted|reached|limit)|(exceeded|out of|no) (your )?(quota|credits)|resource.?exhausted|too many requests|\b(http|status|error|code)[ :=]*429\b') { return 'no-quota' }
+    if ($s -match '(?i)not logged in|logged out|login required|unauthori[sz]ed|unauthenticated|not authenticated|please (log ?in|sign ?in)|\b(http|status|error|code)[ :=]*401\b') { return 'auth' }
     if ($ExitCode -ne 0)   { return 'error' }
     if (-not $s.Trim())    { return 'no-output' }
     return 'ok'
@@ -160,8 +162,17 @@ function Invoke-ReviewerProbes {
         if (-not $procs.ContainsKey($r.Name)) { continue }
         $e = $procs[$r.Name]
         $left = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+        # Two things must finish inside the deadline: the process, AND the streams we read from it.
+        # NOT the parameterless WaitForExit(): it also waits for EOF on the redirected pipes, and a
+        # launcher that exits while a child it started still holds them would block it past the
+        # deadline (review round 1). The readers are ordinary tasks, so they get the remaining budget.
+        $done = $false
         if ($e.P.WaitForExit($left)) {
-            $e.P.WaitForExit()   # flush the async readers
+            $left2 = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+            $tasks = [System.Threading.Tasks.Task[]]@($e.Out, $e.Err)
+            $done  = [System.Threading.Tasks.Task]::WaitAll($tasks, $left2)
+        }
+        if ($done) {
             # stderr first in the text: the auth error the issue quotes goes there, and the
             # classifier reads the whole thing.
             $text = "$($e.Err.Result)`n$($e.Out.Result)"

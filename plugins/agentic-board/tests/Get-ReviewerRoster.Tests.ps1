@@ -79,6 +79,16 @@ Describe 'Get-ReviewerProbeStatus - exit 0 is not a verdict (#537)' {
     It 'exit 0 that answered is ok' {
         Get-ReviewerProbeStatus -ExitCode 0 -Output 'OK' | Should -Be 'ok'
     }
+    It 'a healthy banner that merely mentions quota or carries 401/429 inside an id is still ok' {
+        Get-ReviewerProbeStatus -ExitCode 0 -Output 'Quota remaining: 500 requests' | Should -Be 'ok'
+        Get-ReviewerProbeStatus -ExitCode 0 -Output 'session a4012bc9429d ready' | Should -Be 'ok'
+        Get-ReviewerProbeStatus -ExitCode 0 -Output 'Logged in. Workspace 401 ready, 429 files indexed' | Should -Be 'ok'
+    }
+    It 'real quota / auth statuses are still recognised' {
+        Get-ReviewerProbeStatus -ExitCode 1 -Output 'HTTP 429 Too Many Requests' | Should -Be 'no-quota'
+        Get-ReviewerProbeStatus -ExitCode 1 -Output 'RESOURCE_EXHAUSTED: quota exceeded' | Should -Be 'no-quota'
+        Get-ReviewerProbeStatus -ExitCode 1 -Output 'request failed: status 401' | Should -Be 'auth'
+    }
     It "codex's logged-in banner is ok - the word 'authenticated' in a success line must not read as a failure" {
         Get-ReviewerProbeStatus -ExitCode 0 -Output 'Logged in using ChatGPT (authenticated)' | Should -Be 'ok'
     }
@@ -149,6 +159,23 @@ Describe 'Invoke-ReviewerProbes - real processes against stand-in CLIs' {
         Start-Sleep -Seconds 6
         Test-Path -LiteralPath $marker | Should -BeFalse -Because 'a probe left running past its deadline would finish its work behind the gate'
     }
+    It 'a launcher that exits while a CHILD still holds its pipes cannot hold the probe past the deadline' {
+        # Windows: `start /b` leaves ping running with our stdout; sh: a backgrounded sleep. The
+        # launcher itself exits at once. A parameterless WaitForExit() would block until the child
+        # closed the pipe (~9 s) - past a 2 s budget.
+        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+            Set-Content -LiteralPath (Join-Path $script:Bin 'rr-orphan.cmd') -Encoding ASCII -Value @('@echo off', 'start "" /b ping -n 10 127.0.0.1', 'exit /b 0')
+        } else {
+            $sh = Join-Path $script:Bin 'rr-orphan'
+            Set-Content -LiteralPath $sh -Value @('#!/bin/sh', 'sleep 9 &', 'exit 0')
+            chmod +x $sh
+        }
+        $sw  = [System.Diagnostics.Stopwatch]::StartNew()
+        $res = @(Invoke-ReviewerProbes -Roster @(Entry 'orphan' 'rr-orphan') -TimeoutSec 2)
+        $sw.Stop()
+        $res[0].Status | Should -Be 'timeout'
+        $sw.Elapsed.TotalSeconds | Should -BeLessThan 5
+    }
     It 'the deadline is SHARED: two hung reviewers cost one timeout, not two' {
         $sw  = [System.Diagnostics.Stopwatch]::StartNew()
         $res = @(Invoke-ReviewerProbes -Roster @((Entry 'slowA' 'rr-slow'), (Entry 'slowB' 'rr-slow2')) -TimeoutSec 2)
@@ -206,7 +233,9 @@ Describe 'Get-UnreviewedWayOut - the gate only recommends what is alive (#537)' 
         $t | Should -Not -Match 'NINGUN'
     }
     It 'every line carries text and a colour for the gate to print' {
-        foreach ($l in (Get-UnreviewedWayOut -Liveness @((Live 'codex' 'codex' 'ok')))) {
+        $ls = @(Get-UnreviewedWayOut -Liveness @((Live 'codex' 'codex' 'ok')))
+        $ls.Count | Should -BeGreaterThan 0 -Because 'an empty result would make the loop below pass vacuously'
+        foreach ($l in $ls) {
             $l.Text  | Should -Not -BeNullOrEmpty
             $l.Color | Should -Not -BeNullOrEmpty
         }
