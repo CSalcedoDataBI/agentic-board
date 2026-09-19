@@ -244,6 +244,402 @@ function Get-DoctorClassOrder {
     )
 }
 
+# ---------------------------------------------------------- -Fix sweep helpers (testable)
+#
+# These sit ABOVE the dot-source guard on purpose: Remove-BranchAndWorktree used to live below it,
+# inline in the script body, so the only tests it ever had were greps over its source text - which
+# is how a sweep that aborts on the first stuck worktree (#548) shipped without a failing test.
+
+# Everything the -Fix sweep declined to do, so the END of the run can name it (#548). A skip used to
+# be one DarkYellow line scrolling past in the middle of a long run, and one kind of "skip" was an
+# abort that silently took every later branch with it - the run then read as "it did nothing".
+# Process-lifetime state: each real run of this script is a fresh process, so it starts empty; anything
+# that dot-sources the script more than once in one process (the tests) must reset both first.
+$script:DoctorSkipped = @()
+$script:DoctorDeleted = 0
+function Add-DoctorSkip {
+    param([string]$Branch, [string]$Reason)
+    $script:DoctorSkipped += [pscustomobject]@{ Branch = $Branch; Reason = $Reason }
+}
+
+# Run git and NEVER let its failure become an exception of ours (#548). Under
+# $ErrorActionPreference = 'Stop', Windows PowerShell 5.1 turns a native command's stderr into a
+# TERMINATING error the moment it is redirected with 2>&1 - and PowerShell 7 does the same for any
+# non-zero exit when $PSNativeCommandUseErrorActionPreference is on. `git worktree remove --force`
+# on a tree the OS will not let go of writes to stderr, so the very first stuck worktree aborted the
+# whole sweep. Failure is data here: the caller reads ExitCode and decides (skip, keep, continue).
+# Lines keeps the raw output (porcelain needs its newlines); Output is the one-line form for messages.
+function Invoke-GitQuiet {
+    param([Parameter(Mandatory)][string[]]$GitArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $lines = @()
+    $code = -1
+    try {
+        $lines = @(& git @GitArgs 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+    } catch {
+        $lines = @("$_")
+        $code = -1
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    return [pscustomobject]@{
+        ExitCode = $code
+        Lines    = $lines
+        Output   = ($lines -join ' ').Trim()
+    }
+}
+
+# A worktree git already gave up on (`prunable`) whose DIRECTORY is still on disk (#548). This is the
+# half-removed state a failed `git worktree remove --force` leaves on Windows: git deletes the
+# worktree's `.git` link, then cannot delete the tree (a handle, a path past MAX_PATH). It is NOT the
+# ghost that `git worktree prune` cures - the folder has content - and retrying the same
+# `git worktree remove` cannot converge, so it is reported with the command that does clear it.
+function Get-HalfRemovedWorktrees {
+    param(
+        [object[]]$Records = @(),
+        [scriptblock]$PathExists = { param($p) Test-Path -LiteralPath $p }
+    )
+    return @($Records | Where-Object { $_.Prunable -and $_.Path -and (& $PathExists $_.Path) })
+}
+
+# The commands that clear a half-removed worktree. `Remove-Item -Recurse` fails past MAX_PATH and
+# `rm -rf` fails on locked node_modules; robocopy /MIR from an empty folder is the one that handles
+# long paths natively (measured in #548).
+function Get-HalfRemovedHint {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($null -eq $IsWindows -or $IsWindows) {
+        return "robocopy `"$env:TEMP\abios-empty`" `"$Path`" /MIR ; rmdir `"$Path`" ; git worktree prune   (crea antes la carpeta vacia: mkdir `"$env:TEMP\abios-empty`")"
+    }
+    return "rm -rf `"$Path`" ; git worktree prune"
+}
+
+# The end-of-run account of a -Fix pass (#548). Pure: every fact arrives as an argument, so the
+# wording that reaches the human is pinned by tests. Returns @{ Lines = string[]; HadSkips = bool }.
+function Get-DoctorFixSummary {
+    param(
+        [int]$Deleted = 0,
+        [object[]]$Skipped = @(),
+        [object[]]$HalfRemoved = @(),
+        [bool]$DryRun = $false
+    )
+    $lines = @()
+    $skipped = @($Skipped | Where-Object { $_ })
+    $half = @($HalfRemoved | Where-Object { $_ })
+    $verb = if ($DryRun) { 'se borrarian' } else { 'borradas' }
+    $lines += "Resumen: $Deleted rama(s) $verb, $($skipped.Count) omitida(s)."
+    if ($skipped.Count -gt 0) {
+        $lines += "  Omitidas (siguen ahi; el resto del barrido SI se hizo):"
+        foreach ($s in $skipped) { $lines += ("    {0,-48} {1}" -f $s.Branch, $s.Reason) }
+    }
+    if ($half.Count -gt 0) {
+        $lines += "  Worktrees a medio borrar (git ya los solto, la carpeta sigue con contenido) - reintentar 'git worktree remove' no los arregla:"
+        foreach ($h in $half) {
+            $lines += "    $($h.Path)"
+            $lines += "      -> $(Get-HalfRemovedHint -Path $h.Path)"
+        }
+    }
+    return @{ Lines = @($lines); HadSkips = ($skipped.Count -gt 0 -or $half.Count -gt 0) }
+}
+
+# Delete one branch and, when it has one, its worktree. Returns the list of things done/planned.
+# NEVER throws: a failure is recorded with Add-DoctorSkip and the sweep carries on (#548).
+function Remove-BranchAndWorktree {
+    param([object]$Row, [string]$BranchFlag)
+    $did = @()
+    try {
+        # FAIL CLOSED on uncommitted work, whatever the class says. A MERGED PR proves the
+        # BRANCH landed; it proves nothing about files still sitting dirty in the worktree, and
+        # `worktree remove --force` would silently destroy them. This is the #276/#277 rule, and
+        # it matters most exactly here: a yes-to-all over 57 merged branches must not be able to
+        # take a dirty one with it. Unreadable ('unknown') counts as dirty - never as clean.
+        if ($Row.Dirty -eq 'dirty' -or $Row.Dirty -eq 'unknown') {
+            $why = if ($Row.Dirty -eq 'dirty') { "tiene cambios sin commitear" } else { "no pude comprobar si tiene cambios [git status fallo]" }
+            Write-Host "     SKIP conservo $($Row.Branch): su worktree $why. Revisalo a mano." -ForegroundColor DarkYellow
+            Add-DoctorSkip -Branch $Row.Branch -Reason "su worktree $why"
+            return $did
+        }
+        if ($Row.WorktreePath) {
+            if ($here -and ((Resolve-Path $Row.WorktreePath -ErrorAction SilentlyContinue).Path -eq $here)) {
+                Write-Host "     SKIP es el worktree actual - no me borro a mi mismo." -ForegroundColor DarkYellow
+                Add-DoctorSkip -Branch $Row.Branch -Reason "es el worktree actual"
+                return $did
+            }
+            # Half-removed by an EARLIER run (#548): retrying the same removal cannot converge, so
+            # say what does instead of failing the same way again. Read-only, so -DryRun sees it too.
+            $pre = Invoke-GitQuiet -GitArgs @('worktree', 'list', '--porcelain')
+            if ($pre.ExitCode -eq 0) {
+                $half = @(Get-HalfRemovedWorktrees -Records (Get-WorktreeRecords -Porcelain ($pre.Lines -join "`n")) |
+                          Where-Object { $_.Branch -eq $Row.Branch -or ($_.Path -replace '\\', '/').TrimEnd('/') -eq ($Row.WorktreePath -replace '\\', '/').TrimEnd('/') })
+                if ($half.Count -gt 0) {
+                    Write-Host "     SKIP $($Row.Branch): su worktree quedo a medio borrar (git lo solto, la carpeta sigue). Vea el resumen final." -ForegroundColor DarkYellow
+                    Add-DoctorSkip -Branch $Row.Branch -Reason "worktree a medio borrar: $(Get-HalfRemovedHint -Path $Row.WorktreePath)"
+                    return $did
+                }
+            }
+            $did += "git worktree remove --force $($Row.WorktreePath)"
+            if (-not $DryRun) {
+                # Ask GIT whether the removal took, not the filesystem (#287). An empty folder left
+                # behind by an open handle is not a failed removal, and treating it as one kept a
+                # proven-merged branch and forced a second -Fix pass over the 58-branch cleanup.
+                # Resolve the path into git's own form first, while the directory still exists to
+                # resolve from - otherwise a DETACHED worktree whose path spells differently is
+                # invisible to both signals and reads as "gone" (#291). See Resolve-GitPathForm.
+                $wtPathForGit = Resolve-GitPathForm $Row.WorktreePath
+                # The exit code is deliberately ignored: the verdict is the listing below.
+                Invoke-GitQuiet -GitArgs @('worktree', 'remove', '--force', $Row.WorktreePath) | Out-Null
+                $list = Invoke-GitQuiet -GitArgs @('worktree', 'list', '--porcelain')
+                if ($list.ExitCode -ne 0) {
+                    # FAIL CLOSED: "I could not ask git" is not "it is gone" (the #277 rule).
+                    Write-Host "     FAIL no pude releer 'git worktree list' tras el remove - conservo la rama $($Row.Branch) por si acaso." -ForegroundColor Red
+                    Add-DoctorSkip -Branch $Row.Branch -Reason "no pude releer 'git worktree list' tras el remove"
+                    return $did
+                }
+                $after = ($list.Lines -join "`n")
+                if (Test-WorktreeStillRegistered -Porcelain $after -Path $wtPathForGit -Branch $Row.Branch) {
+                    $nowHalf = @(Get-HalfRemovedWorktrees -Records (Get-WorktreeRecords -Porcelain $after) |
+                                 Where-Object { $_.Branch -eq $Row.Branch })
+                    if ($nowHalf.Count -gt 0) {
+                        Write-Host "     FAIL el worktree de $($Row.Branch) quedo a medio borrar - conservo la rama. Vea el resumen final." -ForegroundColor Red
+                        Add-DoctorSkip -Branch $Row.Branch -Reason "worktree a medio borrar: $(Get-HalfRemovedHint -Path $Row.WorktreePath)"
+                    } else {
+                        Write-Host "     FAIL git sigue registrando el worktree de $($Row.Branch) (handle abierto? locked?) - conservo la rama." -ForegroundColor Red
+                        Add-DoctorSkip -Branch $Row.Branch -Reason "git sigue registrando su worktree (handle abierto? locked?)"
+                    }
+                    return $did
+                }
+                if (Test-Path $Row.WorktreePath) {
+                    # Litter, not a blocker: git let it go, so the branch is safe to delete.
+                    Write-Host "     NOTA git solto el worktree pero la carpeta sigue en disco (handle abierto?) - borro la rama igual; borra la carpeta a mano: $($Row.WorktreePath)" -ForegroundColor DarkYellow
+                }
+            }
+        }
+        $did += "git branch $BranchFlag $($Row.Branch)"
+        if (-not $DryRun) {
+            $del = Invoke-GitQuiet -GitArgs @('branch', $BranchFlag, $Row.Branch)
+            if ($del.ExitCode -ne 0) {
+                Write-Host "     WARN conservo la rama $($Row.Branch): git no la borro [$($del.Output)]" -ForegroundColor DarkYellow
+                Add-DoctorSkip -Branch $Row.Branch -Reason "git no la borro [$($del.Output)]"
+            } else {
+                $script:DoctorDeleted++
+            }
+        }
+    } catch {
+        # Whatever else goes wrong for THIS branch must not take the rest of the sweep with it.
+        $msg = "$($_.Exception.Message)".Split("`n")[0].Trim()
+        Write-Host "     FAIL $($Row.Branch): $msg - sigo con las demas." -ForegroundColor Red
+        Add-DoctorSkip -Branch $Row.Branch -Reason "error inesperado: $msg"
+    }
+    return $did
+}
+
+# --------------------------------------------- installed-plugin drift (#482) - READ-ONLY
+#
+# "Which build is actually running?" had no answer anywhere in the tool. On 2026-07-28 the installed
+# cache held scripts hand-patched with an unreleased fix while the cache and the published source
+# both said `0.27.0`: an armed safety mechanism (the brake) lived only in that hand-patched copy, and
+# a plain `claude plugin update` would have removed it without the version string moving. The rule
+# "diagnose by commit sha, never by the version string" was written down and enforced nowhere.
+#
+# So this compares CONTENT. The installed plugin records the commit it was built from
+# (installed_plugins.json -> gitCommitSha); the published tree at that commit is read from a local
+# clone that holds it (the marketplace clone, or a dev checkout), and every installed file is
+# compared with its published blob by git blob id. A version string is REPORTED, never trusted.
+#
+# It reports and never repairs: overwriting a deliberate local patch would be its own incident. And
+# it must be trustworthy in BOTH directions - a clean install must say clean, a check that cries wolf
+# is worse than none - so anything it cannot verify is `unverifiable`, never `clean`.
+
+# git's blob id for some bytes: sha1("blob <len>\0" + content). Assumes git's default SHA-1 object
+# format (a repo created with --object-format=sha256 would read as drifted/unverifiable, never clean). Lets an installed file be compared
+# with a tree entry WITHOUT shelling out to git once per file.
+function Get-GitBlobSha {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    $hdr = [System.Text.Encoding]::ASCII.GetBytes("blob $($Bytes.Length)`0")
+    $all = New-Object byte[] ($hdr.Length + $Bytes.Length)
+    [System.Array]::Copy($hdr, 0, $all, 0, $hdr.Length)
+    [System.Array]::Copy($Bytes, 0, $all, $hdr.Length, $Bytes.Length)
+    $sha1 = [System.Security.Cryptography.SHA1]::Create()
+    try { return (($sha1.ComputeHash($all) | ForEach-Object { $_.ToString('x2') }) -join '') }
+    finally { $sha1.Dispose() }
+}
+
+# Both spellings of one file's content: as found on disk (Raw) and with every CRLF folded to LF
+# (Lf). The published blobs are LF (the repo is checked in LF), but a clone made with
+# core.autocrlf=true and copied into the plugin cache carries CRLF - measured on the primary machine
+# (`i/lf w/crlf`). Matching either one is what keeps a CLEAN install from reading as drifted; a
+# file whose CONTENT differs matches neither.
+function Get-FileBlobShas {
+    param([Parameter(Mandatory)][string]$Path)
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $raw = Get-GitBlobSha -Bytes $bytes
+    $lf = $raw
+    if ([System.Array]::IndexOf($bytes, [byte]13) -ge 0) {
+        $folded = New-Object 'System.Collections.Generic.List[byte]' $bytes.Length
+        for ($i = 0; $i -lt $bytes.Length; $i++) {
+            if ($bytes[$i] -eq 13 -and ($i + 1) -lt $bytes.Length -and $bytes[$i + 1] -eq 10) { continue }
+            $folded.Add($bytes[$i])
+        }
+        $lf = Get-GitBlobSha -Bytes $folded.ToArray()
+    }
+    return @{ Raw = $raw; Lf = $lf }
+}
+
+# relative path (forward slashes) -> @{ Raw; Lf } for every file under a directory. Hidden files
+# included: the runtime markers live in a dot-directory, and so could a hand-added file.
+function Get-InstalledTreeHashes {
+    param([Parameter(Mandatory)][string]$Root)
+    $map = @{}
+    $rootFull = (Get-Item -LiteralPath $Root).FullName.TrimEnd('\', '/')
+    foreach ($f in (Get-ChildItem -LiteralPath $Root -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        $rel = $f.FullName.Substring($rootFull.Length + 1).Replace('\', '/')
+        $map[$rel] = Get-FileBlobShas -Path $f.FullName
+    }
+    return $map
+}
+
+# relative path -> blob id for a subdirectory of a commit, from a local repo. $null when git cannot
+# answer (no such commit in that clone, no such path) - the caller treats that as unverifiable.
+function Get-PublishedBlobMap {
+    param([Parameter(Mandatory)][string]$RepoPath, [Parameter(Mandatory)][string]$Sha, [Parameter(Mandatory)][string]$Subdir)
+    $r = Invoke-GitQuiet -GitArgs @('-C', $RepoPath, '-c', 'core.quotepath=off', 'ls-tree', '-r', '-z', "${Sha}:$Subdir")
+    if ($r.ExitCode -ne 0) { return $null }
+    $map = @{}
+    foreach ($e in (($r.Lines -join '') -split "`0")) {
+        if ($e -match '^\d+ \w+ ([0-9a-f]{40})\t(.+)$') { $map[$Matches[2]] = $Matches[1] }
+    }
+    if ($map.Count -eq 0) { return $null }
+    return $map
+}
+
+# PURE: what differs between an installed tree and the published one. Installed: rel -> @{Raw;Lf}.
+# Published: rel -> blob id. A file is Modified when NEITHER spelling of its content is the published
+# blob. Extra excludes -IgnorePrefix (Claude Code's own runtime markers, `.in_use/<pid>`, are not the
+# plugin's content); Missing is a published file absent from the install.
+function Compare-PluginTree {
+    param(
+        [Parameter(Mandatory)][hashtable]$Installed,
+        [Parameter(Mandatory)][hashtable]$Published,
+        [string[]]$IgnorePrefix = @('.in_use/')
+    )
+    $mod = @(); $extra = @(); $miss = @()
+    foreach ($k in ($Installed.Keys | Sort-Object)) {
+        if (@($IgnorePrefix | Where-Object { $k.StartsWith($_, [System.StringComparison]::Ordinal) }).Count -gt 0) { continue }
+        if (-not $Published.ContainsKey($k)) { $extra += $k; continue }
+        $h = $Installed[$k]
+        if ($Published[$k] -ne $h.Raw -and $Published[$k] -ne $h.Lf) { $mod += $k }
+    }
+    foreach ($k in ($Published.Keys | Sort-Object)) {
+        if (-not $Installed.ContainsKey($k)) { $miss += $k }
+    }
+    return [pscustomobject]@{ Modified = @($mod); Extra = @($extra); Missing = @($miss) }
+}
+
+# The plugin's own `version` at a commit, read from the published tree.
+function Get-PublishedVersion {
+    param([string]$RepoPath, [string]$Sha, [string]$Subdir)
+    $r = Invoke-GitQuiet -GitArgs @('-C', $RepoPath, 'show', "${Sha}:$Subdir/.claude-plugin/plugin.json")
+    if ($r.ExitCode -ne 0) { return '' }
+    try { return "$((($r.Lines -join "`n") | ConvertFrom-Json).version)" } catch { return '' }
+}
+
+# The installed record for a plugin from installed_plugins.json: { Key; InstallPath; Version; Sha }
+# or $null. When several marketplaces carry the same plugin name the FIRST entry in the file wins
+# ($PluginName may also be given as the full `<plugin>@<marketplace>` key to pick one).
+function Get-InstalledPluginRecord {
+    param([Parameter(Mandatory)][string]$InstalledJson, [Parameter(Mandatory)][string]$PluginName)
+    if (-not (Test-Path -LiteralPath $InstalledJson)) { return $null }
+    try { $doc = Get-Content -LiteralPath $InstalledJson -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+    if (-not $doc.plugins) { return $null }
+    foreach ($p in $doc.plugins.PSObject.Properties) {
+        if ($p.Name -ne $PluginName -and -not $p.Name.StartsWith("$PluginName@", [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        $entry = @($p.Value) | Select-Object -First 1
+        if (-not $entry) { continue }
+        return [pscustomobject]@{
+            Key = $p.Name; InstallPath = "$($entry.installPath)"; Version = "$($entry.version)"; Sha = "$($entry.gitCommitSha)"
+            Marketplace = ($p.Name -split '@', 2)[1]
+        }
+    }
+    return $null
+}
+
+# Compare the installed plugin with the build it claims to be. Returns one object:
+#   Status   clean | drifted | unverifiable | not-installed
+#   Reason   why, when it is not clean
+#   InstalledVersion / InstalledSha / PublishedVersion (the tree at that sha) / ChannelVersion
+#   Modified / Extra / Missing   file lists (drifted only)
+# -CandidateRepos are local git clones searched, in order, for the recorded commit.
+function Get-PluginDrift {
+    param(
+        [string]$PluginName = 'agentic-board',
+        [string]$Subdir = 'plugins/agentic-board',
+        [string]$InstalledJson = '',
+        [string[]]$CandidateRepos = @()
+    )
+    $home_ = [Environment]::GetFolderPath('UserProfile')
+    if (-not $InstalledJson) { $InstalledJson = Join-Path (Join-Path (Join-Path $home_ '.claude') 'plugins') 'installed_plugins.json' }
+    $res = [ordered]@{
+        Status = 'unverifiable'; Reason = ''; InstalledVersion = ''; InstalledSha = ''; InstalledPath = ''
+        PublishedVersion = ''; ChannelVersion = ''; Modified = @(); Extra = @(); Missing = @()
+    }
+    $rec = Get-InstalledPluginRecord -InstalledJson $InstalledJson -PluginName $PluginName
+    if (-not $rec) { $res.Status = 'not-installed'; $res.Reason = "no hay '$PluginName' en $InstalledJson"; return [pscustomobject]$res }
+    $res.InstalledVersion = $rec.Version; $res.InstalledSha = $rec.Sha; $res.InstalledPath = $rec.InstallPath
+    if (-not $rec.Sha) { $res.Reason = "la instalacion no registra gitCommitSha - no hay build publicado contra el que comparar"; return [pscustomobject]$res }
+    if (-not $rec.InstallPath -or -not (Test-Path -LiteralPath $rec.InstallPath -PathType Container)) {
+        $res.Reason = "la carpeta instalada no existe: $($rec.InstallPath)"; return [pscustomobject]$res
+    }
+    # The marketplace clone first (that is where the published build lives), then any other clone.
+    $repos = @($CandidateRepos | Where-Object { $_ })
+    $published = $null; $usedRepo = ''
+    foreach ($r in $repos) {
+        if (-not (Test-Path -LiteralPath $r)) { continue }
+        $m = Get-PublishedBlobMap -RepoPath $r -Sha $rec.Sha -Subdir $Subdir
+        if ($m) { $published = $m; $usedRepo = $r; break }
+    }
+    if (-not $published) {
+        $res.Reason = "el commit $($rec.Sha.Substring(0, [Math]::Min(7, $rec.Sha.Length))) no esta en ningun clon local ($($repos.Count) buscados). Actualiza el clon del marketplace (git -C <clon> fetch) y reintenta"
+        return [pscustomobject]$res
+    }
+    $res.PublishedVersion = Get-PublishedVersion -RepoPath $usedRepo -Sha $rec.Sha -Subdir $Subdir
+    $chan = Invoke-GitQuiet -GitArgs @('-C', $usedRepo, 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/release^{commit}')
+    if ($chan.ExitCode -eq 0 -and $chan.Output) { $res.ChannelVersion = Get-PublishedVersion -RepoPath $usedRepo -Sha $chan.Output -Subdir $Subdir }
+    $diff = Compare-PluginTree -Installed (Get-InstalledTreeHashes -Root $rec.InstallPath) -Published $published
+    $res.Modified = @($diff.Modified); $res.Extra = @($diff.Extra); $res.Missing = @($diff.Missing)
+    if ($diff.Modified.Count -eq 0 -and $diff.Extra.Count -eq 0 -and $diff.Missing.Count -eq 0) {
+        $res.Status = 'clean'
+    } else {
+        $res.Status = 'drifted'
+        $res.Reason = "$($diff.Modified.Count) archivo(s) modificado(s), $($diff.Extra.Count) de mas, $($diff.Missing.Count) ausente(s) respecto al build publicado"
+    }
+    return [pscustomobject]$res
+}
+
+# The report lines. Pure, so the wording that reaches the human is pinned by tests.
+function Format-PluginDrift {
+    param([Parameter(Mandatory)]$Drift)
+    $short = { param($s) if ($s) { $s.Substring(0, [Math]::Min(7, $s.Length)) } else { '?' } }
+    $ver = "instalado $($Drift.InstalledVersion) @ $(& $short $Drift.InstalledSha)"
+    if ($Drift.PublishedVersion) { $ver += " | publicado en ese commit: $($Drift.PublishedVersion)" }
+    if ($Drift.ChannelVersion)   { $ver += " | canal release: $($Drift.ChannelVersion)" }
+    $lines = @()
+    switch ($Drift.Status) {
+        'clean'         { $lines += "OK  el plugin instalado coincide byte a byte con el build publicado ($ver)" }
+        'not-installed' { $lines += "--  $($Drift.Reason)" }
+        'unverifiable'  { $lines += "??  no pude verificar el plugin instalado ($ver): $($Drift.Reason)" }
+        'drifted' {
+            $lines += "!!  el plugin instalado NO coincide con su build publicado ($ver): $($Drift.Reason)"
+            $lines += "    Se compara el CONTENIDO, no la version: la misma cadena de version puede esconder un parche local."
+            foreach ($f in $Drift.Modified) { $lines += "      modificado  $f" }
+            foreach ($f in $Drift.Extra)    { $lines += "      de mas      $f" }
+            foreach ($f in $Drift.Missing)  { $lines += "      ausente     $f" }
+            $lines += "    Solo informa: 'claude plugin update' sobrescribiria un parche local deliberado (podria quitar lo que solo vive en tu copia)."
+        }
+    }
+    return @($lines)
+}
+
 # Dot-source guard: with $env:ABIOS_DOCTOR_DOTSOURCE set, return after defining the pure
 # helpers WITHOUT touching disk, git, gh or the token - lets the tests unit-test them.
 if ($env:ABIOS_DOCTOR_DOTSOURCE) { return }
@@ -303,8 +699,11 @@ if ($LASTEXITCODE -ne 0) { throw "'git worktree list' fallo - sin el inventario 
 $wtRecords = Get-WorktreeRecords -Porcelain $wtPorcelain
 $wtByBranch = @{}
 foreach ($w in $wtRecords) { if ($w.Branch) { $wtByBranch[$w.Branch] = $w } }
-# Ghost worktrees: git itself flags a registered worktree whose directory is gone.
-$ghosts = @($wtRecords | Where-Object { $_.Prunable })
+# Ghost worktrees: git itself flags a registered worktree whose directory is gone. A prunable one
+# whose directory is STILL THERE is a different animal (#548): half-removed, with content, so it is
+# reported with its own remedy instead of being promised a `git worktree prune` that leaves the folder.
+$halfRemoved = @(Get-HalfRemovedWorktrees -Records $wtRecords)
+$ghosts = @($wtRecords | Where-Object { $_.Prunable -and ($halfRemoved.Path -notcontains $_.Path) })
 # The INVERSE case git cannot flag, because it no longer knows the worktree exists: the
 # directory survives under .claude/worktrees/ with a broken .git link, so it never appears in
 # the porcelain above and never becomes a record to mark prunable (#618). Reported, not fixed
@@ -380,6 +779,23 @@ try {
 
 # --- classify -----------------------------------------------------------------
 $now = Get-Date
+# Installed plugin vs the build it claims to be (#482). Read-only and best-effort: a check that
+# cannot run must never sink the branch audit, and it never repairs anything.
+$pluginDrift = $null
+try {
+    $mpClone = ''
+    try {
+        $kmPath = Join-Path (Join-Path (Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude') 'plugins') 'known_marketplaces.json'
+        if (Test-Path -LiteralPath $kmPath) {
+            $km = Get-Content -LiteralPath $kmPath -Raw | ConvertFrom-Json
+            $mpClone = "$($km.'agentic-board'.installLocation)"
+        }
+    } catch { }
+    $devClone = ''
+    try { $devClone = (Resolve-Path (Join-Path $PSScriptRoot '..' '..' '..')).Path } catch { }
+    $pluginDrift = Get-PluginDrift -CandidateRepos @($mpClone, $devClone)
+} catch { $pluginDrift = $null }
+
 $rows = @()
 foreach ($b in $branches) {
     $wt = $wtByBranch[$b.Name]
@@ -405,6 +821,8 @@ if ($Json) {
     [pscustomobject]@{
         repo = $Repo; generatedAt = $now.ToString('o'); staleDays = $StaleDays
         branches = @($rows); ghostWorktrees = @($ghosts | Select-Object Path, Prunable)
+        halfRemovedWorktrees = @($halfRemoved | Select-Object Path, Branch, Prunable)
+        pluginDrift = $pluginDrift
         orphanWorktrees = @($orphans | Select-Object Name, Path, Class, AutoRemovable)
         staleRegistryEntries = @($staleRegistry | Select-Object Name, Path)
     } | ConvertTo-Json -Depth 6
@@ -436,6 +854,22 @@ if ($ghosts.Count -gt 0) {
     Write-Host "--- Worktrees fantasma (carpeta ausente) ($($ghosts.Count)) ---" -ForegroundColor Yellow
     foreach ($g in $ghosts) { Write-Host ("   {0,-52} {1}" -f $g.Path, $g.Prunable) }
     Write-Host "    Se limpian solos al correr con -Fix (no hay trabajo que perder, git ya sabe que desaparecieron)." -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+if ($halfRemoved.Count -gt 0) {
+    Write-Host "--- Worktrees a medio borrar (git los solto, la carpeta sigue con contenido) ($($halfRemoved.Count)) ---" -ForegroundColor Red
+    foreach ($h in $halfRemoved) { Write-Host ("   {0,-52} {1}" -f $h.Branch, $h.Path) }
+    Write-Host "    Reintentar 'git worktree remove' no converge. Lo que si los limpia (long paths / node_modules):" -ForegroundColor DarkGray
+    foreach ($h in $halfRemoved) { Write-Host "      $(Get-HalfRemovedHint -Path $h.Path)" -ForegroundColor DarkGray }
+    Write-Host ""
+}
+
+# The plugin that is actually installed vs the build it says it is (#482).
+if ($pluginDrift -and $pluginDrift.Status -ne 'not-installed') {
+    $driftColor = switch ($pluginDrift.Status) { 'clean' { 'Green' } 'drifted' { 'Red' } default { 'Yellow' } }
+    Write-Host "--- Plugin instalado vs build publicado ---" -ForegroundColor $driftColor
+    foreach ($l in (Format-PluginDrift -Drift $pluginDrift)) { Write-Host "   $l" -ForegroundColor $driftColor }
     Write-Host ""
 }
 
@@ -472,7 +906,7 @@ $decide    = @($rows | Where-Object { $_.Class -in @('closed-unmerged','stale') 
 
 if (-not $Fix) {
     Write-Host "Read-only: no se cambio nada." -ForegroundColor DarkGray
-    if ($deletable.Count -gt 0 -or $ghosts.Count -gt 0 -or $decide.Count -gt 0 -or $orphans.Count -gt 0 -or $staleRegistry.Count -gt 0) {
+    if ($deletable.Count -gt 0 -or $ghosts.Count -gt 0 -or $halfRemoved.Count -gt 0 -or $decide.Count -gt 0 -or $orphans.Count -gt 0 -or $staleRegistry.Count -gt 0) {
         Write-Host "  $($deletable.Count) rama(s) mergeadas borrables, $($decide.Count) por decidir, $($ghosts.Count) worktree(s) fantasma." -ForegroundColor DarkGray
         if ($orphans.Count -gt 0 -or $staleRegistry.Count -gt 0) {
             Write-Host "  $($orphanContent.Count) huerfano(s) con contenido, $($orphanEmpty.Count) vacio(s), $($staleRegistry.Count) entrada(s) muerta(s) en el registro global." -ForegroundColor DarkGray
@@ -534,60 +968,6 @@ function Confirm-Branch {
             'q' { $script:Quit = $true; return $false }
         }
     }
-}
-
-function Remove-BranchAndWorktree {
-    param([object]$Row, [string]$BranchFlag)
-    $did = @()
-    # FAIL CLOSED on uncommitted work, whatever the class says. A MERGED PR proves the
-    # BRANCH landed; it proves nothing about files still sitting dirty in the worktree, and
-    # `worktree remove --force` would silently destroy them. This is the #276/#277 rule, and
-    # it matters most exactly here: a yes-to-all over 57 merged branches must not be able to
-    # take a dirty one with it. Unreadable ('unknown') counts as dirty - never as clean.
-    if ($Row.Dirty -eq 'dirty' -or $Row.Dirty -eq 'unknown') {
-        $why = if ($Row.Dirty -eq 'dirty') { "tiene cambios sin commitear" } else { "no pude comprobar si tiene cambios [git status fallo]" }
-        Write-Host "     SKIP conservo $($Row.Branch): su worktree $why. Revisalo a mano." -ForegroundColor DarkYellow
-        return $did
-    }
-    if ($Row.WorktreePath) {
-        if ($here -and ((Resolve-Path $Row.WorktreePath -ErrorAction SilentlyContinue).Path -eq $here)) {
-            Write-Host "     SKIP es el worktree actual - no me borro a mi mismo." -ForegroundColor DarkYellow
-            return $did
-        }
-        $did += "git worktree remove --force $($Row.WorktreePath)"
-        if (-not $DryRun) {
-            # Ask GIT whether the removal took, not the filesystem (#287). An empty folder left
-            # behind by an open handle is not a failed removal, and treating it as one kept a
-            # proven-merged branch and forced a second -Fix pass over the 58-branch cleanup.
-            # Resolve the path into git's own form first, while the directory still exists to
-            # resolve from - otherwise a DETACHED worktree whose path spells differently is
-            # invisible to both signals and reads as "gone" (#291). See Resolve-GitPathForm.
-            $wtPathForGit = Resolve-GitPathForm $Row.WorktreePath
-            git worktree remove --force $Row.WorktreePath 2>&1 | Out-Null
-            $after = (git worktree list --porcelain 2>$null) -join "`n"
-            if ($LASTEXITCODE -ne 0) {
-                # FAIL CLOSED: "I could not ask git" is not "it is gone" (the #277 rule).
-                Write-Host "     FAIL no pude releer 'git worktree list' tras el remove - conservo la rama $($Row.Branch) por si acaso." -ForegroundColor Red
-                return $did
-            }
-            if (Test-WorktreeStillRegistered -Porcelain $after -Path $wtPathForGit -Branch $Row.Branch) {
-                Write-Host "     FAIL git sigue registrando el worktree de $($Row.Branch) (handle abierto? locked?) - conservo la rama." -ForegroundColor Red
-                return $did
-            }
-            if (Test-Path $Row.WorktreePath) {
-                # Litter, not a blocker: git let it go, so the branch is safe to delete.
-                Write-Host "     NOTA git solto el worktree pero la carpeta sigue en disco (handle abierto?) - borro la rama igual; borra la carpeta a mano: $($Row.WorktreePath)" -ForegroundColor DarkYellow
-            }
-        }
-    }
-    $did += "git branch $BranchFlag $($Row.Branch)"
-    if (-not $DryRun) {
-        $why = ((git branch $BranchFlag $Row.Branch 2>&1) -join ' ').Trim()
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "     WARN conservo la rama $($Row.Branch): git no la borro [$why]" -ForegroundColor DarkYellow
-        }
-    }
-    return $did
 }
 
 # The read-only report is still honest with a broken registry (it just cannot say "active"), but
@@ -664,7 +1044,16 @@ if ($ghosts.Count -gt 0 -and -not $script:Quit) {
 }
 
 Write-Host ""
+# The account of the whole pass (#548): what was done AND what was left, by name. A sweep that
+# skipped things used to end with the same reassuring line as one that skipped nothing.
+if (-not $DryRun) {
+    $sum = Get-DoctorFixSummary -Deleted $script:DoctorDeleted -Skipped @($script:DoctorSkipped) -HalfRemoved @($halfRemoved)
+    $sumColor = if ($sum.HadSkips) { 'Yellow' } else { 'Green' }
+    foreach ($l in $sum.Lines) { Write-Host $l -ForegroundColor $sumColor }
+    Write-Host ""
+}
 if ($script:Quit) { Write-Host "Cancelado - el resto queda intacto." -ForegroundColor DarkGray }
 elseif ($DryRun)  { Write-Host "DRY-RUN: nada se cambio. Quita -DryRun para ejecutarlo." -ForegroundColor Yellow }
+elseif (@($script:DoctorSkipped).Count -gt 0 -or $halfRemoved.Count -gt 0) { Write-Host "Listo, con elementos omitidos (ver el resumen de arriba). Vuelve a correr sin -Fix para ver el inventario." -ForegroundColor Yellow }
 else              { Write-Host "Listo. Vuelve a correr sin -Fix para ver el inventario limpio." -ForegroundColor Green }
 Write-Host ""
