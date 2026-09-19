@@ -85,15 +85,18 @@ function New-ExpertConfig {
     [CmdletBinding()]
     param(
         [string]$PlanText, [string]$PlanGoal, [string[]]$Inventory = @(), [hashtable]$Catalog,
-        [bool]$PreferCodexRescue = $false, [string[]]$InstalledPlugins = @()
+        [bool]$PreferCodexRescue = $false, [string[]]$InstalledPlugins = @(),
+        # (#475) Does the repo have a semantic model? Decides whether the DoD carries the model-only
+        # gates (bpa, tmdlBreaking). Defaults to $true (keep every gate) for a caller that never looked.
+        [bool]$HasSemanticModel = $true
     )
     if (-not $Catalog) { $Catalog = Get-ExpertRoles }
     $domain  = Get-DomainFromPlan -Text $PlanText -Catalog $Catalog
     $role    = @($Catalog.roles) | Where-Object { $_.name -eq $domain } | Select-Object -First 1
     $hooked  = Get-HookedSkills -Domain $domain -Inventory $Inventory -Catalog $Catalog
     $persona = if ($role) { Resolve-RolePersona -Role $role } else { '' }
-    $c = New-ExpertContract
-    $c.role        = Format-RoleObjective -Domain $domain -HookedSkills $hooked -PlanGoal $PlanGoal -Persona $persona
+    $c = New-ExpertContract -HasSemanticModel $HasSemanticModel
+    $c.role       = Format-RoleObjective -Domain $domain -HookedSkills $hooked -PlanGoal $PlanGoal -Persona $persona
     $c.roleMatched = ($domain -ne 'generic')
     if ($role -and $role.agent) { $c.roleAgent = [string]$role.agent }
 
@@ -123,7 +126,8 @@ if (-not $myInstalledPluginsSet) {
 }
 
 $contract = New-ExpertConfig -PlanText $myPlanText -PlanGoal $myPlanGoal -Inventory $inventory `
-                              -PreferCodexRescue $myPreferCodexRescue -InstalledPlugins $myInstalledPlugins
+                              -PreferCodexRescue $myPreferCodexRescue -InstalledPlugins $myInstalledPlugins `
+                              -HasSemanticModel (Test-RepoHasSemanticModel)
 $target = if ($myPath) { $myPath } else { Get-ExpertContractPath }
 
 Write-Host "=== /board expert config ===" -ForegroundColor Cyan
@@ -140,6 +144,10 @@ if (-not $contract.roleMatched) {
 $written = Write-ExpertContract -Contract $contract -Path $target
 Write-Host "  OK  contract written -> $written" -ForegroundColor Green
 Write-Host "      autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
+Write-Host "      definition of done: $((@($contract.dod.Keys | Sort-Object)) -join ', ')" -ForegroundColor DarkGray
+if (-not $contract.dod.ContainsKey('bpa')) {
+    Write-Host "      (no semantic model in this repo - bpa / tmdlBreaking left out of the DoD)" -ForegroundColor DarkGray
+}
 Write-Host "      evidence -> PR + issue comment + versioned file" -ForegroundColor DarkGray
 # (#646) State the review-independence choice as plainly as the autonomy brakes above it - this
 # is the one line meant to make the codex-rescue path discoverable to a human BEFORE launch,

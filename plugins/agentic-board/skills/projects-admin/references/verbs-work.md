@@ -123,8 +123,13 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         BPA violation blocks). Both skip safely when there is no model / no BPA rules / no Tabular
         Editor, so a non-BI repo is unaffected. It then waits for CI checks, waits for the review,
         and prints decision + feedback + unresolved threads. **Exit 0 = passed; 1 = blocked;
-        2 = nobody reviewed.** Address printed feedback with new commits, push, and RE-RUN the gate
-        until it passes.
+        2 = nobody reviewed; 3 = CI never ran (#481).** Address printed feedback with new commits,
+        push, and RE-RUN the gate until it passes.
+        **Exit 3 — "CI NO SE EVALUO" (#481)** means the only blocker is that CI never executed a
+        step (`startup_failure`, or a job GitHub refused to start — exhausted Actions minutes, a
+        spending limit, no runner). It is still a block, never a pass, but no code change can clear
+        it: **do not re-push**. Tell the user the CI could not run (quota / billing / workflow) and
+        let them decide; a real failing check keeps exit 1.
         **Exit 2 — "GATE SIN REVISAR" (#510)** means the checks are green but no one read the code:
         a `claude-review` check can report a PASS having left zero reviews, and that used to print
         the same `GATE PASSED` as a genuinely clean review. **Never merge on exit 2.** Clear it by

@@ -125,6 +125,30 @@ After each verify phase the run writes a structured `[abios-evidence]` block
 (`Expert-Evidence.Format-EvidenceBlock`) to the PR body, a durable issue comment, and a versioned
 `evidence/<issue>.md` file — so it is always provable that the tests ran and how they turned out.
 
+A row is not only PASS or FAIL. There are four honest outcomes (`Expert-Evidence.Get-EvidenceState`),
+counted separately in the summary line and never folded into `passed`:
+
+| Result | Means | Example |
+|---|---|---|
+| `PASS` | the gate ran and passed | `tests` |
+| `FAIL` | the gate ran and failed — the change is broken, keep working | a red `Pester` step |
+| `N/A` | **not applicable** — nothing in this change triggers the gate (#475) | `bpa` on a diff with no `.tmdl` |
+| `NOT-EVALUATED` | applies, but **could not be evaluated** — CI never executed (#481) | a workflow that ends in `startup_failure`, or a job GitHub refused to start (exhausted Actions minutes, spending limit, no runner) |
+
+`N/A` is a statement about the *change*; `NOT-EVALUATED` is a statement about the *environment*, and
+it is never a pass. `Get-NotApplicableGateRows` builds the `N/A` rows for the gates the contract
+enabled but the diff does not owe (`Expert-WorkClass.ps1` prints the same split); `Get-CiEvidenceRow`
+turns a CI state into its row.
+
+**CI that never ran.** A red check has two unrelated causes. `Board-ReviewGate.ps1` tells them apart
+(`CiCheckState.ps1`) from positive evidence only: a `STARTUP_FAILURE` state, or a failed check whose
+job executed zero steps (`steps: []`, `runner_id: 0` — measured on a real quota-blocked run). When
+the ONLY blocker is that CI never ran, the gate still blocks (a never-ran CI is not a pass) but exits
+**3** instead of 1 and says so. On exit 3: **do not push again** — no code change can turn that CI
+green and re-pushing only spends the iteration budget. Record the `ci` gate as `NOT-EVALUATED`,
+finish everything else, and tell the human plainly (quota, billing or workflow). A genuinely failing
+check, or any other blocker next to it, keeps exit 1 and the run keeps working on it.
+
 ## Building blocks (reused, not reinvented)
 
 `ExpertContractIo.ps1` · `Expert-RoleSynthesis.ps1` · `Expert-Evidence.ps1` · `Expert-Autonomy.ps1`

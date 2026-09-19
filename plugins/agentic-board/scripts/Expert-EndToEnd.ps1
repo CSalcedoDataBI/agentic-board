@@ -53,6 +53,9 @@ $env:ABIOS_WORKCLASS_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Expert-WorkClass.ps1')
 $env:ABIOS_WORKCLASS_DOTSOURCE = $prevWc
 
+# "CI failed" vs "CI never ran" (#481) - pure, defines functions only.
+. (Join-Path $PSScriptRoot 'CiCheckState.ps1')
+
 # ── Pure core ───────────────────────────────────────────────────────────────────
 
 <#
@@ -183,25 +186,33 @@ function Get-CiEvidence {
         # PowerShell, so a transient `gh pr checks` failure returns empty stdout and looks exactly
         # like "this project has no CI" - which, under a dod.tests=false contract, was a merge.
         # Absent (0) keeps every existing caller on the previous behaviour.
-        [int]$ExitCode = 0
+        [int]$ExitCode = 0,
+        # check link -> @{ stepCount = <int> } for failed checks (see CiCheckState.ps1, #481).
+        [hashtable]$JobFacts = @{}
     )
     # Empty stdout from a FAILED command means we could not read the checks, not that there are
     # none. Unreadable is present-and-not-green; only a clean run reporting nothing is "no CI".
+    # `state` (#481) is the finer answer the two booleans cannot give: 'passed' / 'failed' /
+    # 'not-evaluated' (CI never executed) / 'pending' / 'none' / 'unreadable'. `passed` stays true
+    # ONLY for 'passed', so a never-ran CI can never satisfy the tests requirement.
     if ([string]::IsNullOrWhiteSpace($ChecksJson) -and $ExitCode -ne 0) {
-        return @{ present = $true; passed = $false }
+        return @{ present = $true; passed = $false; state = 'unreadable' }
     }
     if ([string]::IsNullOrWhiteSpace($ChecksJson)) {
-        return @{ present = $false; passed = $false }
+        return @{ present = $false; passed = $false; state = 'none' }
     }
     try {
         $arr = @($ChecksJson | ConvertFrom-Json -ErrorAction Stop)
     } catch {
-        return @{ present = $true; passed = $false }
+        return @{ present = $true; passed = $false; state = 'unreadable' }
     }
-    if ($arr.Count -eq 0) { return @{ present = $false; passed = $false } }
-    $bad    = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
-    $passed = @($arr | Where-Object { "$($_.bucket)" -eq 'pass' })
-    return @{ present = $true; passed = ($passed.Count -gt 0 -and $bad.Count -eq 0) }
+    if ($arr.Count -eq 0) { return @{ present = $false; passed = $false; state = 'none' } }
+    $ci = Get-CiState -Checks $arr -Parsed $true -JobFacts $JobFacts
+    # `passed` comes from the CLASSIFIED state, not from the buckets alone (review thread): a payload
+    # like { bucket: 'pass', state: 'STARTUP_FAILURE' } is 'not-evaluated' and must not satisfy a
+    # caller that reads only `passed`. For every other input the two agree (state 'passed' means at
+    # least one pass and nothing failed, pending, unknown or never-ran).
+    return @{ present = $true; passed = ($ci.state -eq 'passed'); state = $ci.state }
 }
 
 # Render the decision for a human. Kept next to the decision so the refusal and its wording cannot
