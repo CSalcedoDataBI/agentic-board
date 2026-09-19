@@ -267,6 +267,12 @@ Notes:
   an **OPEN PR**, or a default-branch **commit citing `(#n)`** — even with NO `[abios-claim]`
   comment and the shared bot owner (a session can land work on `main` without posting a formal
   claim). This stops a second session from clobbering already-merged work. `-TakeOver` overrides.
+  What counts as a citation: only the commit's **subject line** — `(#n)` or a closing keyword
+  (`closes|fixes|resolves #n`). A `(#n)` in the body, a bare `#n` and `Refs #n` are
+  cross-references and never count. A **revert** (`revert(scope): …` / `Revert "…"`) is not landed
+  work: it retires the commits it undoes and a MERGED PR older than it, so a deliberate restart
+  of a reverted issue is not refused. When the order of two commits cannot be read (a missing
+  date) the refusal is kept.
 - **Explicit lock (`-Lock <n>` / `-Unlock <n>`)**: mark an issue owned-elsewhere in ONE step —
   posts the `[abios-claim]` LOCK fingerprint AND moves Status to In Progress — WITHOUT starting or
   branching it locally (needs `-ProjectNum`). Symmetric `-Unlock <n>` posts an UNLOCK claim and
