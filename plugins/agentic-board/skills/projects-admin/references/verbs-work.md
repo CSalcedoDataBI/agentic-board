@@ -281,7 +281,11 @@ Notes:
 - **Session registry**: every successful `-Start` records `{issue, branch, workPath, sessionPid,
   host, started}` in `.agentic-board/sessions.json` next to the MAIN clone (shared across
   worktrees, gitignored). The pending list shows live local sessions; entries with dead PIDs are
-  pruned automatically on read.
+  pruned automatically on read. "Alive" is not just "a process with that PID exists" (#520): the
+  process must also have started no later than the entry's `started` stamp, so a recycled PID
+  cannot keep a dead session alive. A Windows Terminal (`wt`) session records its OWN tab shell
+  (the `pwsh` running `launch-<n>.ps1`), never the launching shell's parent, and an entry whose
+  PID is unusable is found again through that launch script (#557).
 - **Compaction-survival (long single-session queues)**: when you work a queue of issues tied to an
   **epic** in ONE session, keep a durable run-ledger so the run survives auto-compaction. Three
   touch-points (see [references/compact-survival.md](references/compact-survival.md)):
