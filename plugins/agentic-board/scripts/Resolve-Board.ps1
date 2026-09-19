@@ -8,7 +8,7 @@
     the board's TITLE. Matching by title made a board named after the PRODUCT (not the repo slug)
     invisible, and the not-found path then pointed the user at `/board init`, i.e. at creating the
     DUPLICATE this script exists to prevent.
-      * no -Title  : the repo's linked board (the canonical '<repo> - Roadmap' one when several are
+      * no -Title  : the repo's linked board (the canonical '<repo> EM-DASH Roadmap' one - U+2014, not a hyphen - when several are
                      linked, else the lowest number, with a warning naming the others). Only when the
                      repo has NO linked board does it fall back to the old title heuristics.
       * -Title 'X' : -Title is a SELECTOR, not a decoration. The linked board titled exactly 'X' is

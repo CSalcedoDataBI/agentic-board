@@ -82,6 +82,16 @@ Describe '#498 - the board is found through the repository link, not its title' 
             $r.Value | Should -Be 9
             $r.Text  | Should -Match '2 boards vinculados'
         }
+        It 'the canonical title uses an EM-DASH (U+2014): a hyphenated "<repo> - Roadmap" is NOT canonical (review of #689)' {
+            Mock gh {
+                $global:LASTEXITCODE = 0
+                if (($args -join ' ') -match 'graphql') { '{"data":{"repository":{"projectsV2":{"nodes":[' +
+                    '{"number":4,"title":"Ideas","closed":false,"owner":{"login":"X"}},' +
+                    '{"number":9,"title":"widget - Roadmap","closed":false,"owner":{"login":"X"}}]}}}}' } else { '' }
+            }
+            # With a hyphen counted as canonical this would pick #9; under the real rule it falls to the lowest number.
+            (Invoke-Resolve @{ Owner = 'X'; Repo = 'X/widget'; CreateIfMissing = $false }).Value | Should -Be 4
+        }
         It 'with several linked and no canonical one, takes the lowest number' {
             Mock gh {
                 $global:LASTEXITCODE = 0
