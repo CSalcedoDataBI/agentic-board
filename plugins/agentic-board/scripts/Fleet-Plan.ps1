@@ -53,6 +53,8 @@ $ErrorActionPreference = "Stop"
 # gh must fail closed on the board read (#303/#316): a graphql failure that read as an empty board
 # would be written to the plan as "nothing pending" - a misread driving a wrong plan (#86 class).
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# Field names (Type/Task Type/Tipo, Size/..., Priority/...) resolve through the shared vocabulary (#671).
+. (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
 
 # ------------------------------------------------------------------ pure planner core
 function Split-CsvArg {
@@ -158,6 +160,23 @@ function Get-AllPages {
     return $all
 }
 
+# The planner's four fields of one board item, read from its single-select field values through the
+# field vocabulary: the type field is 'Type', 'Task Type' or 'Tipo' depending on the board, and its
+# option is normalised to the canonical name the routing rules key on (a Spanish board's 'Tarea' is
+# 'Chore'). Missing fields come back $null. Pure (#671).
+function Read-ItemFields {
+    param([object[]]$FieldValueNodes)
+    $byName = @{}
+    foreach ($fv in @($FieldValueNodes)) { if ($fv -and $fv.field.name) { $byName[$fv.field.name] = $fv.name } }
+    $type = Get-ValueByFieldKey -ByName $byName -Key 'Type'
+    [pscustomobject]@{
+        Status   = Get-ValueByFieldKey -ByName $byName -Key 'Status'
+        Size     = Get-ValueByFieldKey -ByName $byName -Key 'Size'
+        Type     = $(if ($type) { Get-CanonicalSynonym 'Type' $type } else { $null })
+        Priority = Get-ValueByFieldKey -ByName $byName -Key 'Priority'
+    }
+}
+
 # Read the board's PENDING issues (Status Backlog or empty, OPEN) with labels/size/type,
 # and best-effort blocked-by numbers from the issue dependencies API.
 function Get-PendingBoardIssues {
@@ -201,9 +220,8 @@ query(`$o:String!, `$n:Int!, `$cursor:String) {
     $out = @()
     foreach ($it in $nodes) {
         if ($it.content.__typename -ne 'Issue' -or $it.content.state -ne 'OPEN') { continue }
-        $fields = @{}
-        foreach ($fv in @($it.fieldValues.nodes)) { if ($fv.field.name) { $fields[$fv.field.name] = $fv.name } }
-        $status = $fields['Status']
+        $fields = Read-ItemFields $it.fieldValues.nodes
+        $status = $fields.Status
         if ($status -and $status -ne 'Backlog') { continue }   # only pending
         $repo = $it.content.repository.nameWithOwner
         $blockedBy = @()
@@ -215,9 +233,9 @@ query(`$o:String!, `$n:Int!, `$cursor:String) {
             number    = [int]$it.content.number
             title     = $it.content.title
             labels    = @($it.content.labels.nodes.name)
-            size      = $fields['Size']
-            type      = $fields['Type']
-            priority  = $fields['Priority']
+            size      = $fields.Size
+            type      = $fields.Type
+            priority  = $fields.Priority
             repo      = $repo
             blockedBy = $blockedBy
         }

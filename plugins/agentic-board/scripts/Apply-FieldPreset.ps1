@@ -282,7 +282,10 @@ function Set-OptionColors($fieldName, $presetOptions) {
 # Show what would change BEFORE touching anything: field creations, plus (with
 # -Migrate) the in-place renames. Renames hit every item assigned to the option at
 # once, so they are never executed without the user seeing this list.
-$toCreate = @($preset.fields | Where-Object { $existing -notcontains $_.name })
+# "Exists" means the preset's field OR another name of the same field (#671): a preset 'Task Type' is
+# already satisfied by a board's 'Type', and the Spanish 'Estado' by the 'Status' every board is born
+# with. Creating those would put a second type/status axis beside the first.
+$toCreate = @($preset.fields | Where-Object { -not (Resolve-PresetFieldName $_.name @($existing)) })
 $renames  = @()
 $merges   = @()
 if ($Migrate) {
@@ -364,6 +367,14 @@ if ($Migrate -and ($willRename -or $willMerge) -and -not $Yes) {
 # ── Apply ─────────────────────────────────────────────────────────────────────
 $failedFields = @()
 foreach ($f in $preset.fields) {
+  $liveName = Resolve-PresetFieldName $f.name @($existing)
+  if ($liveName -and $liveName -ne $f.name) {
+    # The board already has this field under another accepted name. Left ENTIRELY alone - no create,
+    # no colors, no renames: the preset's options belong to the preset's own field, and reconciling
+    # them onto a differently-named one (Spanish options onto 'Status') would mint duplicates.
+    Write-Host "skip (exists as '$liveName'): $($f.name)"
+    continue
+  }
   if ($existing -contains $f.name) {
     Write-Host "skip (exists): $($f.name)"
   } else {
