@@ -54,6 +54,20 @@ Describe 'Get-GroupingSetting: the value a user types, and where it came from' {
         $a = Get-GroupingSetting @{ preferGroupedPRs = 'auto' }
         $a.value | Should -Be 'auto'; $a.source | Should -Be 'config'
     }
+    It 'an UNRECOGNISED stored value is the default, never "config del repo" (intent must not be reported as fact)' {
+        foreach ($garbage in @('quizas', 42, 0, 1, @{ a = 1 }, @(1, 2), '', ' ')) {
+            $s = Get-GroupingSetting @{ preferGroupedPRs = $garbage }
+            $s.value   | Should -Be 'auto'    -Because "'$garbage' is not a decision, so the value in force is auto"
+            $s.posture | Should -Be 'auto'
+            $s.source  | Should -Be 'default' -Because "'$garbage' was never a decision the repo made"
+            Format-GroupingSettingLabel $s | Should -Be 'auto (por defecto)'
+        }
+    }
+    It 'a recognised string is still a recorded decision, whatever its case or padding' {
+        (Get-GroupingSetting @{ preferGroupedPRs = ' TRUE ' }).source | Should -Be 'config'
+        (Get-GroupingSetting @{ preferGroupedPRs = 'False'  }).source | Should -Be 'config'
+        (Get-GroupingSetting @{ preferGroupedPRs = 'Auto'   }).source | Should -Be 'config'
+    }
     It 'keeps the internal posture alongside, so nothing downstream has to re-derive it' {
         (Get-GroupingSetting @{ preferGroupedPRs = $true  }).posture | Should -Be 'always'
         (Get-GroupingSetting @{ preferGroupedPRs = $false }).posture | Should -Be 'never'
@@ -126,6 +140,14 @@ Describe 'Board-Work.ps1 -PreferGroupedPRs show (read-only, no token)' {
         $r = Invoke-Setting $plain 'show'
         $r.code | Should -Be 0
         $r.out  | Should -Match 'PRs agrupados: auto \(por defecto\)'
+    }
+    It 'a garbage stored value shows as the default end to end, not as a repo decision' {
+        $repo = New-ThrowawayRepo 'show-garbage'
+        New-Item -ItemType Directory -Path (Join-Path $repo '.agentic-board') -Force | Out-Null
+        '{"preferGroupedPRs": 42}' | Set-Content (Join-Path $repo '.agentic-board' 'config.json')
+        $r = Invoke-Setting $repo 'show'
+        $r.out | Should -Match 'PRs agrupados: auto \(por defecto\)'
+        $r.out | Should -Not -Match 'config del repo'
     }
     It 'a corrupt config still yields a first line with the value in force, and says it could not read it' {
         $repo = New-ThrowawayRepo 'show-corrupt'
