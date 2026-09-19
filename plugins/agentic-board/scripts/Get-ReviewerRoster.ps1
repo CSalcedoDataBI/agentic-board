@@ -43,6 +43,10 @@
 # cheapest invocation that exercises AUTH (not just `--version`, which passes for a logged-out
 # CLI). The probes match the ones /board work -Fleet already uses, so a verdict here and there
 # cannot disagree about the same CLI.
+#
+# This is a COPY of the command + probe arguments in Board-Work.ps1's Get-CliAdapters (that file cannot
+# be dot-sourced from here). It is kept honest by a test that reads the fleet's definition and fails
+# when the two differ - Get-ReviewerRoster.Tests.ps1, "The roster agrees with the fleet adapters".
 function Get-ReviewerRoster {
     return @(
         [pscustomobject]@{

@@ -270,3 +270,35 @@ Describe 'Board-ReviewGate is wired to the probe, and the verdict is untouched (
         $tail | Should -Match '-AllowUnreviewed'
     }
 }
+
+Describe 'The roster agrees with the fleet adapters it copies (#537, review thread)' {
+    # Get-ReviewerRoster repeats the command + probe arguments that Board-Work's Get-CliAdapters uses
+    # for the same two CLIs. Board-Work.ps1 cannot be dot-sourced at runtime from the gate (it has a
+    # param block and is thousands of lines), so the two definitions are pinned EQUAL here instead:
+    # change either and this goes red, which is the only way a second copy stays honest.
+    BeforeAll {
+        $script:Fleet = @{}
+        $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
+        . (Join-Path $script:ScriptDir 'Board-Work.ps1')
+        $env:ABIOS_BOARDWORK_DOTSOURCE = ''
+        foreach ($a in (Get-CliAdapters)) {
+            # The probe is a scriptblock calling Invoke-CliProbe @('exe', 'arg', ...): read the literal
+            # argument array from its AST rather than running the CLI.
+            $call = $a.Probe.Ast.Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-CliProbe' }, $true)
+            if (-not $call) { continue }
+            $argv = @($call.CommandElements[1].FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true) | ForEach-Object { $_.Value })
+            $script:Fleet[$a.Name] = @{ Command = $a.Command; Argv = $argv }
+        }
+    }
+    It 'the fleet defines a probe for every roster reviewer (else there is nothing to compare against)' {
+        foreach ($r in (Get-ReviewerRoster)) { $script:Fleet.ContainsKey($r.Name) | Should -BeTrue -Because $r.Name }
+    }
+    It 'each roster entry has the same executable and the same probe arguments as its fleet adapter' {
+        foreach ($r in (Get-ReviewerRoster)) {
+            $f = $script:Fleet[$r.Name]
+            $f.Command | Should -Be $r.Command -Because "$($r.Name): executable"
+            $f.Argv[0] | Should -Be $r.Command -Because "$($r.Name): the probe runs the same executable"
+            (@($f.Argv | Select-Object -Skip 1)) | Should -Be @($r.ProbeArgs) -Because "$($r.Name): probe arguments"
+        }
+    }
+}
