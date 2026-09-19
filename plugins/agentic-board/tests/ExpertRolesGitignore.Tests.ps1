@@ -86,6 +86,17 @@ Describe 'Repair-RolesGitignore makes roles.json genuinely trackable (#470)' {
         Test-GitAccepts $r '.agentic-board/roles.json' | Should -BeTrue
         Test-GitAccepts $r 'sub/.agentic-board/sessions.json' | Should -BeFalse   # still ignored
     }
+    It 'keeps an already anchored nested rule anchored (roles.json in a sub-project directory)' {
+        $r = New-Repo @('sub/.agentic-board/')
+        New-Item -ItemType Directory -Path "$r/sub/.agentic-board", "$r/other/sub/.agentic-board" -Force | Out-Null
+        Set-Content -LiteralPath "$r/sub/.agentic-board/roles.json" -Value '{}'
+        Set-Content -LiteralPath "$r/other/sub/.agentic-board/sessions.json" -Value '{}'
+        Test-GitAccepts $r 'other/sub/.agentic-board/sessions.json' | Should -BeTrue    # not covered by the anchored rule
+        $res = Repair-RolesGitignore -RolesPath "$r/sub/.agentic-board/roles.json"
+        $res.Status | Should -Be 'Repaired'
+        Test-GitAccepts $r 'sub/.agentic-board/roles.json' | Should -BeTrue
+        Test-GitAccepts $r 'other/sub/.agentic-board/sessions.json' | Should -BeTrue    # scope did not widen
+    }
     It 'never leaves the directory-level negation in the file it writes' {
         $r = New-Repo @('.agentic-board/', '!.agentic-board/roles.json')
         Repair-RolesGitignore -RolesPath "$r/.agentic-board/roles.json" | Out-Null

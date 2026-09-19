@@ -201,7 +201,8 @@ function Repair-RolesGitignore {
             # slash in the middle (`.agentic-board/*`) is anchored to this .gitignore's directory.
             # Keep the reach: `**/` keeps ignoring nested state dirs (a monorepo sub-project's own
             # .agentic-board/), and the negation below re-includes only this repository's file.
-            $lines[$i] = if ($lead) { "$lead$stateDir/*" } else { "**/$stateDir/*" }
+            # A state dir that is itself a nested path (`sub/.agentic-board`) was already anchored.
+            $lines[$i] = if ($lead -or $stateDir.Contains('/')) { "$lead$stateDir/*" } else { "**/$stateDir/*" }
         }
     }
     # Drop any earlier negation of this file (it may sit before the rewritten rule and lose to it,
