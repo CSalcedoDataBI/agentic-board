@@ -48,8 +48,9 @@ text>"` explains which keyword in which role decided a match. Schema and merge r
 `references/roles.md`.
 
 ### auto — run it
-`scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`:
-1. Reads the contract; composes the autonomous brief.
+`scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd] [-Owner <account>] [-Repo <owner/name>] [-TakeOver] [-IgnoreBlocked]`:
+1. Reads the contract; composes the autonomous brief — the issue's description **plus its bounded
+   comment thread** (#473), where what was tried and decided since the report lives.
 2. Launches a dedicated Claude session in an isolated worktree (reuses the fleet/launch pattern).
 3. Prints the monitor command: `/board work -Sessions -Watch`.
 
@@ -60,6 +61,17 @@ the contract's brake and budget. It is **idempotent**: after the human merges a 
 re-running the same command dispatches the next wave; done and in-flight sub-issues are never
 re-dispatched, and a sub-issue whose PR state could not be read counts as in-flight (never
 dispatch a possible duplicate). One command per wave replaces one human launch per sub-issue.
+
+**Other accounts and refused starts.** `-Owner <account>` (with `-Repo <owner/name>` when the clone
+is not the target) drives a board on a second account (#499): both are forwarded to Board-Work,
+and without `-TokenVar` the token variable comes from the suite's one owner→variable map — an owner
+the map does not know is refused when the script has to choose a token itself (pass `-TokenVar` to
+name it; with `GH_TOKEN` already set it only warns), and inside a brake-armed worktree only the agent
+identity is accepted.
+`-TakeOver` / `-IgnoreBlocked` (#472) are forwarded to Board-Work's batch-start, so the advice its
+refusal prints ("Re-ejecuta con -TakeOver") can be followed through this command. Both are per-run
+and explicit: pass them only when the human said so, and never infer them from a previous run.
+The end-of-run board link is read from the board itself, so it is right for `/orgs/` boards too.
 
 Pass `-EndToEnd` **only** when the human ordered the finish in that instruction ("de punta a
 punta", "llévalo hasta el final", "ciérralo tú"). It is an order, not a setting: never carry it
@@ -75,7 +87,7 @@ The auto-expert does NOT improvise its own tooling — it dogfoods agentic-board
 | Research / prior-art | `/knowledge add` + `/knowledge harvest` |
 | Acquire / verify skills | `/skills bootstrap`, `/skills audit`, `/skills freshness` |
 | Discover latent work | `/scan` |
-| Record work / findings | `/board` issue, `/board plan`, `/board triage` |
+| Record work / findings | `/board issue`, `/board plan`, `/board triage` |
 | Report progress / evidence | `/board update`, `/board changelog`, `[abios-evidence]` comments |
 | Survive budget / interruption | `/board handoff -Save` |
 | Clean up | `/board doctor`, `/board cerrar-ciclo` |
@@ -112,6 +124,30 @@ what stops it reading its own refusal as a failure to work around.
 After each verify phase the run writes a structured `[abios-evidence]` block
 (`Expert-Evidence.Format-EvidenceBlock`) to the PR body, a durable issue comment, and a versioned
 `evidence/<issue>.md` file — so it is always provable that the tests ran and how they turned out.
+
+A row is not only PASS or FAIL. There are four honest outcomes (`Expert-Evidence.Get-EvidenceState`),
+counted separately in the summary line and never folded into `passed`:
+
+| Result | Means | Example |
+|---|---|---|
+| `PASS` | the gate ran and passed | `tests` |
+| `FAIL` | the gate ran and failed — the change is broken, keep working | a red `Pester` step |
+| `N/A` | **not applicable** — nothing in this change triggers the gate (#475) | `bpa` on a diff with no `.tmdl` |
+| `NOT-EVALUATED` | applies, but **could not be evaluated** — CI never executed (#481) | a workflow that ends in `startup_failure`, or a job GitHub refused to start (exhausted Actions minutes, spending limit, no runner) |
+
+`N/A` is a statement about the *change*; `NOT-EVALUATED` is a statement about the *environment*, and
+it is never a pass. `Get-NotApplicableGateRows` builds the `N/A` rows for the gates the contract
+enabled but the diff does not owe (`Expert-WorkClass.ps1` prints the same split); `Get-CiEvidenceRow`
+turns a CI state into its row.
+
+**CI that never ran.** A red check has two unrelated causes. `Board-ReviewGate.ps1` tells them apart
+(`CiCheckState.ps1`) from positive evidence only: a `STARTUP_FAILURE` state, or a failed check whose
+job executed zero steps (`steps: []`, `runner_id: 0` — measured on a real quota-blocked run). When
+the ONLY blocker is that CI never ran, the gate still blocks (a never-ran CI is not a pass) but exits
+**3** instead of 1 and says so. On exit 3: **do not push again** — no code change can turn that CI
+green and re-pushing only spends the iteration budget. Record the `ci` gate as `NOT-EVALUATED`,
+finish everything else, and tell the human plainly (quota, billing or workflow). A genuinely failing
+check, or any other blocker next to it, keeps exit 1 and the run keeps working on it.
 
 ## Building blocks (reused, not reinvented)
 

@@ -147,7 +147,11 @@ param(
     # the operator's head and being restated every time (#662). 'on' = always propose one PR
     # for the batch; 'off' = never propose grouping (each issue gets its own reviewable PR);
     # 'auto' = the default, propose it only where there is evidence the issues overlap.
-    [ValidateSet('on', 'off', 'auto')]
+    # 'show' only READS the current value and where it came from (writes no preference, needs no
+    # token) - it is what the /board menu runs so the menu can state the repo's setting (#681). Like
+    # every call that resolves the state dir it may perform that resolver's one-time silent rename of
+    # a legacy `.agentic-bi-ops/` folder; it never touches config.json.
+    [ValidateSet('on', 'off', 'auto', 'show')]
     [string] $PreferGroupedPRs = '',
     [switch]$Launch,
     [switch]$Fleet,
@@ -524,12 +528,21 @@ function Get-RepoTrackedFiles {
 # actually pays (review rounds and merge confirmations, not "PRs"), names the evidence for
 # every group, and ends with the exact selection to accept - so saying yes is one answer, not
 # a research task.
+function Format-GroupingSettingLabel {
+    param($Setting)
+    $where = if ($Setting.source -eq 'config') { 'config del repo' } else { 'por defecto' }
+    return "$($Setting.value) ($where)"
+}
+
 function Show-GroupingOffer {
     [CmdletBinding()]
     param(
         [object[]] $Suggestions,
         [string]   $Posture = 'auto',
         [string]   $CurrentRepo = '',
+        # 'auto (por defecto)' / 'on (config del repo)': the setting that produced these proposals
+        # and where its value came from (#681). Empty = say nothing about it (older callers).
+        [string]   $SettingLabel = '',
         # Twelve groups is a wall, not an offer. Show the biggest savings and COUNT the rest -
         # the user is choosing where to start, not reading an inventory.
         [int]      $MaxShown = 5
@@ -567,6 +580,9 @@ function Show-GroupingOffer {
                   else                      { "los $(@($s.issues).Count) estan en la misma area del board ($($s.evidence))" }
         Write-Host ("  {0}  ->  un solo PR" -f $nums) -ForegroundColor Yellow
         Write-Host ("        porque {0}" -f $porque) -ForegroundColor DarkGray
+        if ($SettingLabel) {
+            Write-Host ("        propuesta de PR agrupado - ajuste 'PRs agrupados': {0}" -f $SettingLabel) -ForegroundColor DarkGray
+        }
         # On a board holding several repos, WHICH repo the batch lands in is part of the offer:
         # the PR can only be opened where the issues live.
         if ($CurrentRepo -and $s.repo -and $s.repo -ne $CurrentRepo) {
@@ -589,6 +605,9 @@ function Show-GroupingOffer {
         Write-Host "Este repo ya pidio juntar lo que se solape, asi que es lo que hare salvo que digas otra cosa." -ForegroundColor DarkGray
     } else {
         Write-Host "Separalos solo si alguno tiene riesgo propio o alguien debe poder aprobarlo o rechazarlo aparte." -ForegroundColor DarkGray
+    }
+    if ($SettingLabel) {
+        Write-Host ("Ajuste 'PRs agrupados' de este repo: {0}. Cambiarlo: /board work -PreferGroupedPRs on|off|auto" -f $SettingLabel) -ForegroundColor DarkGray
     }
 }
 
@@ -1317,6 +1336,15 @@ function Resolve-IssueBaseRef([string]$repo = "", [switch]$NoFetch) {
     return ""
 }
 
+# How many commits HEAD has that $baseRef does not. -1 = cannot be told (no base ref, or git
+# refused), which callers must read as "unknown", never as "none".
+function Get-UnintegratedCommitCount([string]$baseRef) {
+    if (-not $baseRef) { return -1 }
+    $n = git rev-list --count "$baseRef..HEAD" 2>$null
+    if ($LASTEXITCODE -ne 0 -or "$n" -notmatch '^\d+$') { return -1 }
+    return [int]$n
+}
+
 # Check out the issue branch in the CURRENT working copy (the non-worktree path: the
 # tree is clean and not parked on another issue-*). Same base discipline as the worktree
 # path (#294) - a clean working copy parked on a feature branch is not dirty and does not
@@ -1437,15 +1465,23 @@ function New-IssueWorkspace {
         } | Select-Object -First 1
     }
     $liveConflict = [bool]$conflictEntry
+    # A CLEAN tree on a feature branch that carries commits the base does not have is live
+    # work just like a dirty one: switching it in place strands that branch with no checkout
+    # (#670). Only a KNOWN count forces isolation - with no base to compare against (-BaseCurrent
+    # or an unresolvable default) the answer is unknown and the classic behaviour stands.
+    $ahead = if ($curBranch -ne $branchName) { Get-UnintegratedCommitCount $baseRef } else { 0 }
+    $carriesWork = ($ahead -gt 0)
     # Batch (-PreferWorktree) always isolates. Single start keeps the classic
     # dirty-tree / other-issue-branch guard: never switch a busy working copy.
-    $needWorktree = $PreferWorktree -or $liveConflict -or `
+    $needWorktree = $PreferWorktree -or $liveConflict -or $carriesWork -or `
                     ($dirty.Count -gt 0 -and $curBranch -ne $branchName) -or `
                     ($curBranch -and $curBranch -match '^issue-\d+' -and $curBranch -ne $branchName)
     if ($needWorktree) {
         if (-not $PreferWorktree) {
             $reason = if ($liveConflict) {
                 "otra sesion viva (issue #$($conflictEntry.issue), PID $($conflictEntry.sessionPid)) usa este mismo directorio de trabajo"
+            } elseif ($carriesWork -and $dirty.Count -eq 0 -and -not ($curBranch -match '^issue-\d+')) {
+                "la rama actual ($(if ($curBranch) { $curBranch } else { 'HEAD suelto' })) tiene $ahead commit(s) que $baseRef no tiene - es trabajo en curso"
             } else { "working tree ocupado (rama actual: $curBranch)" }
             Write-Host "  OCUPADO: $reason - uso un worktree aislado:" -ForegroundColor Yellow
         }
@@ -1750,6 +1786,9 @@ function Get-SessionBriefing {
             "task end-to-end WITHOUT stopping to ask for confirmation. " +
             "Pick up GitHub issue #$issueNum in $repo. It is already In Progress and claimed, " +
             "on branch $branch in this worktree ($workPath). " +
+            "COMMIT WITH AN EXPLICIT PATHSPEC - 'git commit -m <message> -- <paths>' - never a bare 'git commit' after 'git add': " +
+            "a bare commit takes whatever else is staged in the index, and if another session ever touches this folder your branch " +
+            "ends up carrying its files under your message. " +
             "FIRST load fleet coordination context so you collaborate with sibling sessions: " +
             "read prior findings with 'pwsh $($sc['Fleet-Findings']) -List' ; " +
             "inherit any upstream hand-off with 'pwsh $($sc['Fleet-Handoff']) -Context -Issue $issueNum' ; " +
@@ -2600,6 +2639,31 @@ function Resolve-GitPathForm {
     try { return (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName } catch { return $Path }
 }
 
+# Was this session's run brake-armed, and does its contract brake on MERGE? (#518) Read from the
+# marker in the session's worktree - which lives IN the thing the teardown destroys, so it has to be
+# read BEFORE any teardown step. Returns { Armed; BrakesMerge; Unreadable; Issue }.
+# FAIL DIRECTION is toward "armed": a marker file that is present but cannot be parsed, or a guard
+# that cannot be loaded, is treated as armed and braking on merge - refusing a teardown only ever
+# keeps things, while guessing "not armed" would destroy the evidence the brake exists to leave.
+function Get-SessionBrakeVerdict {
+    param([string]$WorkPath)
+    $none = [pscustomobject]@{ Armed = $false; BrakesMerge = $false; Unreadable = $false; Issue = 0 }
+    if (-not $WorkPath) { return $none }
+    $markerFile = Join-Path (Join-Path $WorkPath '.agentic-board') 'brake-armed.json'
+    if (-not (Test-Path -LiteralPath $markerFile)) { return $none }
+    try {
+        . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
+        $m = Read-BrakeMarkerAt -WorkPath $WorkPath
+        if (-not $m) { return [pscustomobject]@{ Armed = $true; BrakesMerge = $true; Unreadable = $true; Issue = 0 } }
+        return [pscustomobject]@{
+            Armed = $true; BrakesMerge = (Test-BrakeMarkerBrakesMerge -Marker $m)
+            Unreadable = [bool]$m.unreadable; Issue = [int]$m.issue
+        }
+    } catch {
+        return [pscustomobject]@{ Armed = $true; BrakesMerge = $true; Unreadable = $true; Issue = 0 }
+    }
+}
+
 # Is this folder the MAIN working copy (or a folder inside it) rather than a linked worktree? (#555)
 # Answered by git, not by comparing path strings: in a main working tree the git dir IS the common
 # dir, while in a linked worktree it is <common>/worktrees/<name>. A folder inside the main copy
@@ -2631,6 +2695,21 @@ function Test-IsMainWorkingCopy {
 function Invoke-SessionCleanup {
     param([object]$Session, [switch]$DryRun, [switch]$ForceDeleteBranch, [switch]$ForceRemoveWorktree, [switch]$PrMerged)
     $actions = @()
+    # A BRAKE-ARMED RUN WHOSE PR ENDED UP MERGED IS NOT ROUTINE CLEANUP (#518). The brake exists so a
+    # run stops at "PR ready" and a human merges; a merged PR under an armed marker is either that
+    # human merge (expected) or the run merging itself past the brake (the #440 failure) - and this
+    # function cannot tell which. What it CAN do is not destroy the evidence: the marker, the denial
+    # log and the worktree all live in the directory the teardown removes. So it refuses, BEFORE any
+    # teardown step (the shell kill included), and says why. The human, having checked who merged,
+    # passes -ForceRemoveWorktree - the deliberate "discard this worktree" switch - to proceed.
+    # This ADDS a refusal and never removes one, and it is read-only, so it also runs under -DryRun.
+    if ($PrMerged -and $Session.workPath -and -not $ForceRemoveWorktree) {
+        $brake = Get-SessionBrakeVerdict -WorkPath $Session.workPath
+        if ($brake.Armed -and $brake.BrakesMerge) {
+            $actions += "WARN conservo TODO de #$($Session.issue) ($($Session.workPath)): su PR quedo MERGEADO y esa corrida tenia el FRENO armado (merge = irreversible). O mergeaste tu tras revisar (esperado) o la corrida se salto el freno; el worktree guarda la evidencia (brake-armed.json, denials.jsonl). Verifica quien mergeo y, si esta bien, reintenta con -ForceRemoveWorktree"
+            return $actions
+        }
+    }
     # Kill ONLY a session whose tracked PID is genuinely its own spawned shell: a standalone
     # `pwsh` window (via='pwsh') records $spawn.process.Id, so killing that releases the
     # worktree handle. An in-place -Start records the HOST PID, and a `wt` entry's stored PID
@@ -3004,6 +3083,20 @@ if ($Relaunch -gt 0) {
 # answer about grouped PRs (#662) and stop. It is a decision, not a run: writing it
 # and then also listing the board would bury the confirmation the user needs to see.
 # ==============================================================================
+if ($PreferGroupedPRs -eq 'show') {
+    # Read-only. Outside a git repo there is no config to read, and that is a normal answer, not an
+    # error: the default applies. An unreadable file is said out loud, never read as "no preference"
+    # in silence - but the first line still carries the value the tool will actually use.
+    $read    = Read-BoardConfig -Path (Get-BoardConfigPath)
+    $setting = Get-GroupingSetting $read.config
+    Write-Host ("PRs agrupados: " + (Format-GroupingSettingLabel $setting))
+    if (-not $read.ok) {
+        Write-Host "  No pude leer la preferencia del repo ($($read.error)); se usa el criterio por defecto." -ForegroundColor Yellow
+    }
+    Write-Host "  on = juntar en un solo PR lo que se solape, sin preguntar | off = un PR por issue | auto = proponerlo y decides tu" -ForegroundColor DarkGray
+    Write-Host "  Cambiarlo: /board work -PreferGroupedPRs on|off|auto" -ForegroundColor DarkGray
+    exit 0
+}
 if ($PreferGroupedPRs) {
     $cfgPath = Get-BoardConfigPath
     if (-not $cfgPath) {
@@ -3535,7 +3628,8 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     # kill the listing AFTER printing it, over a feature that is only ever an offer.
     $hereRepo = try { Get-RepoFromOrigin } catch { '' }
     $groups  = @(Get-GroupingSuggestions -Pending $pending -RepoFiles (Get-RepoTrackedFiles) -CurrentRepo $hereRepo)
-    Show-GroupingOffer -Suggestions $groups -Posture $posture -CurrentRepo $hereRepo
+    Show-GroupingOffer -Suggestions $groups -Posture $posture -CurrentRepo $hereRepo `
+                       -SettingLabel (Format-GroupingSettingLabel (Get-GroupingSetting $cfgRead.config))
 
     Write-Host ""
     $startable = if ($posture -ne 'never') { Select-StartableGroup -Suggestions $groups -CurrentRepo $hereRepo } else { $null }

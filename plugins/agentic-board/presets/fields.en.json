@@ -1,6 +1,6 @@
 {
   "lang": "en",
-  "description": "Standard engineering governance fields for a GitHub Projects board. Single-select options may be a plain string or {name,color}; colors are the canonical palette applied by Apply-FieldPreset (gh cannot set option colors on create).",
+  "description": "Standard engineering governance fields for a GitHub Projects board. Single-select options may be a plain string or {name,color}; colors are the canonical palette applied by Apply-FieldPreset (gh cannot set option colors on create). The type field is 'Task Type' because GitHub reserves the name 'Type' (createProjectV2Field: 'Name cannot have a reserved value'); the suite reads it through Get-BoardVocabulary.ps1 and still accepts a legacy 'Type' field on boards that already have one.",
   "fields": [
     { "name": "Status",   "type": "SINGLE_SELECT", "options": [
       { "name": "Backlog",     "color": "GRAY" },
@@ -22,7 +22,7 @@
       { "name": "L",  "color": "ORANGE" },
       { "name": "XL", "color": "RED" }
     ] },
-    { "name": "Type",     "type": "SINGLE_SELECT", "options": ["Bug", "Feature", "Improvement", "Chore", "Docs", "Spike"] },
+    { "name": "Task Type", "type": "SINGLE_SELECT", "options": ["Bug", "Feature", "Improvement", "Chore", "Docs", "Spike"] },
     { "name": "Area",     "type": "TEXT" },
     { "name": "Estimate", "type": "NUMBER" },
     { "name": "Target",   "type": "TEXT" }

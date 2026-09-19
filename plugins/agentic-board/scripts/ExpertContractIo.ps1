@@ -23,9 +23,49 @@ $ErrorActionPreference = "Stop"
 
 # ── Pure core ───────────────────────────────────────────────────────────────────
 
+# Does this repo have a semantic model (a .tmdl / .bim / .pbism file)? (#475)
+#
+# `bpa` (Best Practice Analyzer) and `tmdlBreaking` are semantic-model gates; in a repo with no
+# model they have nothing to run against and every evidence block listed them anyway - a
+# checklist with permanently inapplicable rows is one people stop reading. The default DoD is
+# therefore derived from what the repo contains instead of being one fixed set.
+#
+# FAIL DIRECTION: "I could not look" answers YES (keep the gates). A model repo that lost its
+# BPA gate to a failed scan would be a silent waiver; a non-model repo that keeps two inert
+# rows is only noise, and Get-ApplicableDodGates still skips them per diff.
+function Test-RepoHasSemanticModel {
+    param([string]$Root = '')
+    $haveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
+    if (-not $Root) {
+        $top = if ($haveGit) { & git rev-parse --show-toplevel 2>$null } else { $null }
+        $Root = if ($haveGit -and $LASTEXITCODE -eq 0 -and $top) { "$top".Trim() } else { (Get-Location).Path }
+    }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return $true }
+    # git first: tracked AND untracked-but-not-ignored, so a model added this session counts and
+    # node_modules (ignored) is never walked. Exit 128 = not a repo -> fall through to the walk.
+    if ($haveGit) {
+        $found = @(& git -C $Root ls-files --cached --others --exclude-standard -- '*.tmdl' '*.bim' '*.pbism' 2>$null)
+        if ($LASTEXITCODE -eq 0) { return [bool](@($found | Where-Object { "$_".Trim() }).Count) }
+    }
+    try {
+        $hit = Get-ChildItem -LiteralPath $Root -Recurse -File -ErrorAction Stop |
+            Where-Object { $_.Extension -in @('.tmdl', '.bim', '.pbism') -and $_.FullName -notmatch '[\\/](node_modules|\.git)[\\/]' } |
+            Select-Object -First 1
+        return [bool]$hit
+    } catch {
+        return $true
+    }
+}
+
 function New-ExpertContract {
     # The default contract. Autonomy brakes ONLY on the irreversible; everything else the
     # auto-expert does on its own and records.
+    #
+    # $HasSemanticModel gates the two model-only DoD gates (#475). It defaults to $true so a
+    # caller that never looked keeps the full set: the safe direction (see Test-RepoHasSemanticModel).
+    param([bool]$HasSemanticModel = $true)
+    $dod = @{ ci = $true; build = $true; lint = $true; tests = $true }
+    if ($HasSemanticModel) { $dod.bpa = $true; $dod.tmdlBreaking = $true }
     @{
         role     = ""
         autonomy = @{ irreversible = @('merge','deploy','refresh','publish','delete') }
@@ -34,7 +74,7 @@ function New-ExpertContract {
         # list cannot say that. Empty lists here mean "use the defaults" (Expert-WorkClass), so a
         # project only writes the patterns that are actually special about it.
         workClass = @{ visualPatterns = @(); humanApproves = @('visual') }
-        dod      = @{ ci = $true; build = $true; lint = $true; tests = $true; bpa = $true; tmdlBreaking = $true }
+        dod      = $dod
         evidence = @{ pr = $true; issueComment = $true; file = $true }
         # (#646) Off by default: an unsupervised run uses the CI-bot fallback unless the human
         # opted into the stricter codex-rescue path in `config` (see Board-ReviewGate.ps1's
@@ -69,9 +109,11 @@ function Merge-ContractDefaults {
 }
 
 function Read-ExpertContract {
-    param([string]$Path)
+    param([string]$Path, [string]$Root = '')
     if (-not $Path) { $Path = Get-ExpertContractPath }
-    $defaults = New-ExpertContract
+    # The defaults a missing key falls back to are repo-derived (#475): without this, a contract
+    # that omitted bpa/tmdlBreaking had them silently re-added on every read.
+    $defaults = New-ExpertContract -HasSemanticModel (Test-RepoHasSemanticModel -Root $Root)
     if (-not $Path -or -not (Test-Path $Path)) { return $defaults }
     try {
         $onDisk = Get-Content -Raw -Path $Path | ConvertFrom-Json -AsHashtable

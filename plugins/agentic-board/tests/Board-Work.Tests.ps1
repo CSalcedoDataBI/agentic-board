@@ -300,10 +300,23 @@ Describe 'New-IssueWorkspace picks the base itself (the #294 wiring)' {
     }
 
     It 'does NOT inherit the current branch commits - via the in-place path (clean tree)' {
+        # A clean tree on a branch that carries commits main lacks is isolated in a worktree
+        # (#670), so the in-place path is reached from a branch with NOTHING unmerged. Park on
+        # a STALE local main so the base choice stays observable: the new branch must be cut
+        # from the freshly fetched origin/main, not from this HEAD.
+        git checkout -q main
+        $pusher = Join-Path $TestDrive ('P' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        git clone -q ('file:///' + ($script:Origin4 -replace '\\', '/')) $pusher 2>&1 | Out-Null
+        'upstream' | Set-Content (Join-Path $pusher 'upstream.txt')
+        git -C $pusher add -A 2>&1 | Out-Null
+        git -C $pusher -c user.email=t@t -c user.name=t commit -q -m upstream
+        git -C $pusher push -q origin main 2>&1 | Out-Null
+
         $wp = New-IssueWorkspace -repo $script:Repo4 -issueNum 61 -branchName 'issue-61-fix'
         $wp | Should -Be $script:Clone4
         (git branch --show-current) | Should -Be 'issue-61-fix'
-        (Test-Path (Join-Path $script:Clone4 'foreign.txt')) | Should -BeFalse
+        (Test-Path (Join-Path $script:Clone4 'upstream.txt')) | Should -BeTrue
+        (Test-Path (Join-Path $script:Clone4 'foreign.txt'))  | Should -BeFalse
     }
 
     It '-BaseCurrent opts back in to the current HEAD' {

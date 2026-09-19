@@ -1,6 +1,6 @@
 {
   "lang": "es",
-  "description": "Campos estándar de governance de ingeniería para un board de GitHub Projects (en español). Nota: el campo 'Status' por defecto de GitHub no se puede renombrar por CLI; este preset crea 'Estado' como campo nuevo. Las opciones single-select pueden ser string o {name,color}; los colores son la paleta canónica aplicada por Apply-FieldPreset (gh no puede setear color de opción en el create).",
+  "description": "Campos estándar de governance de ingeniería para un board de GitHub Projects (en español). Nota: el campo 'Status' por defecto de GitHub no se puede renombrar por CLI; Apply-FieldPreset NO crea 'Estado' al lado de un 'Status' existente (el suite lee ambos nombres mediante Get-BoardVocabulary.ps1), asi que 'Estado' solo se crea en un board que no tenga 'Status'. Las opciones single-select pueden ser string o {name,color}; los colores son la paleta canónica aplicada por Apply-FieldPreset (gh no puede setear color de opción en el create).",
   "fields": [
     { "name": "Estado",    "type": "SINGLE_SELECT", "options": [
       { "name": "Por hacer",   "color": "GRAY" },

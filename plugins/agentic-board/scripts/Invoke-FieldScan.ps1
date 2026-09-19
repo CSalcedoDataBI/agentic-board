@@ -11,10 +11,29 @@
     outside any repo — the local record cannot be committed by construction. Nothing is filed to
     GitHub here: this produces candidates for a human to judge.
 
+.PARAMETER MatchFiled
+    Recurrence matching (#476): after the sweep, join each script that had incidents (a failed
+    invocation or any signal) to the issues already filed about it - open ones and those closed in
+    the last -ClosedDays - by its NAME. The output then separates RECURRENCE (already filed; here is
+    how many more incidents the sweep saw) from NEW CANDIDATES (no filed issue names the script).
+    Reads GitHub (read-only); nothing is filed. A failed read is reported and the sweep result is
+    still printed - it never turns into "nothing is filed".
+
+.PARAMETER Repo
+    owner/name whose issues are matched. Default CSalcedoDataBI/agentic-board.
+
+.PARAMETER ClosedDays
+    With -MatchFiled: also match issues closed within this many days. Default 90.
+
+.PARAMETER CandidatesFile
+    With -MatchFiled: match against this JSON file (an array of { number, title, body, url, state,
+    stateReason }) instead of asking GitHub - offline use, and what the tests feed it.
+
 .EXAMPLE
     Invoke-FieldScan.ps1                 # sweep whatever is new
     Invoke-FieldScan.ps1 -WhatIf         # show what would be read, touch nothing
     Invoke-FieldScan.ps1 -Limit 20       # bound a first run
+    Invoke-FieldScan.ps1 -MatchFiled     # also say which incidents are already filed
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -22,11 +41,21 @@ param(
     [string]$ProjectsRoot,
     [int]$Window = 6,
     [int]$Limit = 0,
-    [switch]$Json
+    [switch]$Json,
+    [switch]$MatchFiled,
+    [string]$Repo = 'CSalcedoDataBI/agentic-board',
+    [int]$ClosedDays = 90,
+    [string]$CandidatesFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
+# Dot-sourcing runs each file's own param() block IN THIS SCOPE and resets any parameter that shares a
+# name with it: Get-FieldLedger declares -FieldRoot/-ProjectsRoot/-Json and Get-FieldEpisodes declares
+# -Window/-Json, so -FieldRoot and -ProjectsRoot passed to THIS script were silently dropped and the
+# sweep read (and wrote the ledger of) the user's real store no matter what was asked. Caught while
+# testing -MatchFiled against a synthetic store; replayed after the loads, like Board-Merge (#536).
+$callerParams = @{ FieldRoot = $FieldRoot; ProjectsRoot = $ProjectsRoot; Window = $Window; Json = $Json }
 $prevL = $env:ABIOS_FIELDLEDGER_DOTSOURCE
 $prevE = $env:ABIOS_FIELDEPISODES_DOTSOURCE
 $env:ABIOS_FIELDLEDGER_DOTSOURCE   = '1'
@@ -35,6 +64,8 @@ $env:ABIOS_FIELDEPISODES_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Get-FieldEpisodes.ps1')
 $env:ABIOS_FIELDLEDGER_DOTSOURCE   = $prevL
 $env:ABIOS_FIELDEPISODES_DOTSOURCE = $prevE
+$FieldRoot = $callerParams.FieldRoot; $ProjectsRoot = $callerParams.ProjectsRoot
+$Window    = $callerParams.Window;    $Json         = $callerParams.Json
 
 $root       = Get-FieldRoot -Override $FieldRoot
 $transcript = Get-TranscriptRoot -Override $ProjectsRoot
@@ -74,6 +105,8 @@ foreach ($d in $disk) { $byPath["$($d.project)/$($d.sessionId)"] = $d }
 $totalEpisodes = 0
 $signalTally   = @{}
 $toolTally     = @{}
+$incidentTally = @{}   # episodes that failed OR raised any signal - what recurrence matching joins on
+$failTally     = @{}
 $withTool      = 0
 $n = 0
 
@@ -134,6 +167,8 @@ foreach ($p in $pending) {
         $totalEpisodes += $episodes.Count
         foreach ($e in $episodes) {
             $toolTally[$e.tool] = 1 + [int]$toolTally[$e.tool]
+            if ($e.failed) { $failTally[$e.tool] = 1 + [int]$failTally[$e.tool] }
+            if ($e.failed -or @($e.signals).Count -gt 0) { $incidentTally[$e.tool] = 1 + [int]$incidentTally[$e.tool] }
             foreach ($s in $e.signals) { $signalTally[$s] = 1 + [int]$signalTally[$s] }
         }
         # Per-session record, redacted. Traceable back to the transcript by event index; carries
@@ -161,11 +196,45 @@ Write-Progress -Activity "Escaneando sesiones" -Completed
 
 Write-FieldLedger -Path $ledgerPath -Ledger $ledger | Out-Null
 
+# Recurrence matching (#476): which of these incidents is a defect somebody already filed? Shares the
+# issue-search logic with the pre-filing duplicate check (IssueSearch.ps1 - no param block, so this
+# dot-source cannot clobber -Repo / -Json / -ClosedDays above).
+$recurrence     = @()
+$recurrenceNote = ''
+if ($MatchFiled) {
+    . (Join-Path $PSScriptRoot 'IssueSearch.ps1')
+    try {
+        if ($CandidatesFile) {
+            if (-not (Test-Path -LiteralPath $CandidatesFile)) { throw "no existe -CandidatesFile '$CandidatesFile'" }
+            $cands = @(Get-Content -LiteralPath $CandidatesFile -Raw | ConvertFrom-Json)
+        } else {
+            # Same identity rule as everything else that talks to GitHub: the owner's account, or the
+            # agent's inside a braked run - never a fallback to a broader token.
+            $prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
+            $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
+            . (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
+            $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
+            $ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner (($Repo -split '/')[0])
+            $env:GH_TOKEN = $ctx.token
+            $cands = @(Get-IssueCandidates -Repo $Repo -ClosedDays $ClosedDays)
+        }
+        $stats = @($toolTally.Keys | ForEach-Object {
+            [pscustomobject]@{ tool = $_; invocations = [int]$toolTally[$_]; incidents = [int]$incidentTally[$_]; failures = [int]$failTally[$_] } })
+        $recurrence = @(Get-ToolRecurrence -Stats $stats -Candidates $cands)
+    } catch {
+        $recurrenceNote = "no se pudo cotejar con los issues archivados: $($_.Exception.Message)"
+        Write-Warning $recurrenceNote
+    }
+}
+
 $summary = [pscustomobject]@{
     scanned        = $n
     sessionsWithTool = $withTool
     episodes       = $totalEpisodes
     signals        = $signalTally
+    matchFiled     = [bool]$MatchFiled
+    recurrence     = $recurrence
+    recurrenceNote = $recurrenceNote
     topTools       = ($toolTally.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 8 |
                       ForEach-Object { "$($_.Key) x$($_.Value)" })
     ledger         = $ledgerPath
@@ -189,6 +258,22 @@ if ($toolTally.Count) {
     foreach ($k in ($toolTally.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 8)) {
         Write-Host ("    {0,-28} {1}" -f $k.Key, $k.Value)
     }
+}
+if ($MatchFiled -and -not $recurrenceNote) {
+    $rec = @($recurrence | Where-Object status -eq 'recurrence')
+    $new = @($recurrence | Where-Object status -eq 'new-candidate')
+    Write-Host "`n  reincidencia (ya archivado):" -ForegroundColor Yellow
+    if (-not $rec.Count) { Write-Host '    ninguna' -ForegroundColor DarkGray }
+    foreach ($r in $rec) {
+        Write-Host ("    {0,-28} {1} incidente(s), {2} fallo(s)" -f $r.tool, $r.incidents, $r.failures)
+        foreach ($f in $r.filed) {
+            $st = if ($f.state -eq 'OPEN') { 'abierto' } else { "cerrado $($f.stateReason)".Trim() }
+            Write-Host ("      #{0} [{1}] {2}" -f $f.number, $st, $f.title) -ForegroundColor DarkGray
+        }
+    }
+    Write-Host "`n  candidatos NUEVOS (ningun issue archivado nombra el script):" -ForegroundColor Yellow
+    if (-not $new.Count) { Write-Host '    ninguno' -ForegroundColor DarkGray }
+    foreach ($r in $new) { Write-Host ("    {0,-28} {1} incidente(s), {2} fallo(s)" -f $r.tool, $r.incidents, $r.failures) }
 }
 Write-Host "`n  ledger  : $ledgerPath"
 Write-Host "  registro: $recordDir"

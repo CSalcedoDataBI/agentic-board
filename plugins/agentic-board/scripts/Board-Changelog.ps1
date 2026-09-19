@@ -282,7 +282,7 @@ function Select-ChangelogItems {
         if ($AlreadyCited.ContainsKey($num))   { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = 'already-cited' }; continue }
         if (-not $verdict.include)             { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = $verdict.reason }; continue }
 
-        $type   = ($n.fieldValues.nodes | Where-Object { $_.field.name -eq 'Type' }).name
+        $type   = Get-ItemTypeName $n.fieldValues.nodes   # vocabulary-aware: 'Type', 'Task Type', 'Tipo' (#671)
         $labels = @($c.labels.nodes.name | Where-Object { $_ })
         $sec    = Resolve-ChangelogSection -Type $type -Labels $labels
         if (-not $sec) { $skipped += [pscustomobject]@{ number = $num; title = "$($c.title)"; reason = 'unclassified' }; continue }
@@ -290,6 +290,23 @@ function Select-ChangelogItems {
         $included++
     }
     return [pscustomobject]@{ Sections = $sections; Included = $included; Skipped = @($skipped) }
+}
+
+
+# The field names come from the shared vocabulary (#671): the board's type field is 'Type' on older
+# boards, 'Task Type' on ones the English preset made (GitHub reserves 'Type'), 'Tipo' in Spanish.
+. (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
+
+# The changelog TYPE of one board item, read from its single-select field values whatever the board
+# calls the type field, and normalised to the canonical option name (a Spanish board's 'Funcionalidad'
+# is 'Feature'). $null when the item has no type. Pure (#671).
+function Get-ItemTypeName {
+    param([object[]]$FieldValueNodes)
+    foreach ($name in (Get-BoardFieldNames 'Type')) {
+        $fv = @($FieldValueNodes) | Where-Object { $_ -and $_.field.name -eq $name } | Select-Object -First 1
+        if ($fv -and $fv.name) { return (Get-CanonicalSynonym 'Type' $fv.name) }
+    }
+    return $null
 }
 
 # Dot-source guard: with $env:ABIOS_CHANGELOG_DOTSOURCE set, return after defining the pure

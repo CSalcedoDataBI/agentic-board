@@ -13,8 +13,20 @@ Presets live at `presets/fields.<lang>.json` (`en` default, `es` available). All
 & "${CLAUDE_PLUGIN_ROOT}/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Lang es
 ```
 
-Standard set (EN): **Status, Priority, Size, Type, Area, Estimate, Target**.
+Standard set (EN): **Status, Priority, Size, Task Type, Area, Estimate, Target**.
 Standard set (ES): **Estado, Prioridad, Tamaño, Tipo, Área, Estimado, Objetivo**.
+
+> **`Task Type`, not `Type` (#671).** GitHub reserves the field name `Type` — `field-create` answers
+> "Name cannot have a reserved value" — so the English preset names its type field `Task Type`.
+> Boards created before the reservation keep their working `Type` field and are left alone.
+> **Field names are never spelled by hand in a script**: `scripts/Get-BoardVocabulary.ps1` maps each
+> key (`Status`, `Priority`, `Size`, `Type`, `Area`, `Estimate`, `Target`) to every name a board may use
+> for it (`Type` → `Type` / `Task Type` / `Tipo`, in that preference order), and `Board-Fill`,
+> `Board-Triage`, `Board-Changelog`, `Fleet-Plan` and `Apply-FieldPreset` all resolve through it. A
+> preset field is skipped when the board already has the same key under another name (a preset
+> `Task Type` on a board with `Type`, the Spanish `Estado` on the `Status` every board is born with),
+> so applying either preset to a board made with the other adds nothing on top. A script that finds
+> none (or only some) of its fields on a board says so loudly instead of reporting a clean run.
 
 A rename touches every item assigned to the option at once, so the plan is **printed and confirmed**
 first. Answering `n` skips the standardizing and applies the rest of the preset.
@@ -60,13 +72,15 @@ conflict and points you here rather than destroying anything unasked.
 > point. A board created through `Resolve-Board.ps1` never reaches this state — it is born on the
 > canonical vocabulary (#299), so the conflict only exists on boards made before that.
 
-Everything below `Status`/`Priority`/`Size` is out of the vocabulary's scope — the ES preset's `Estado`
-is a different FIELD, so `-Migrate` does not touch ES boards.
+The option renames above cover `Status`/`Priority`/`Size` only. Spanish OPTION names (`Funcionalidad`,
+`Mejora`, `Tarea`) are understood for lookups (`Board-Fill`, `Board-Triage`, `Board-Changelog`,
+`Fleet-Plan` map them to `Feature`, `Improvement`, `Chore`) but are never renamed: `-Migrate` does not
+touch Spanish options.
 
 ## Create a single custom field by hand
 ```bash
 # single-select with values
-gh project field-create <num> --owner <owner> --name "Type" \
+gh project field-create <num> --owner <owner> --name "Task Type" \
   --data-type SINGLE_SELECT --single-select-options "Bug,Feature,Improvement,Chore,Docs,Spike"
 # free text / number / date
 gh project field-create <num> --owner <owner> --name "Area"     --data-type TEXT
@@ -86,7 +100,7 @@ language per board for consistency.
 | Apply a whole preset idempotently | ✅ | `Apply-FieldPreset.ps1` |
 | Rename a single-select field's **options** (e.g. `Todo`→`Backlog`) | ✅ | `Apply-FieldPreset.ps1` (default) — `updateProjectV2Field` with the option's existing id; item assignments survive |
 | **Merge** a `Todo`+`Backlog` duplicate (move items, delete the spare) | ✅ | `Apply-FieldPreset.ps1 -MergeConflicts` — moves items by id, verifies, then deletes the legacy option (opt-in; it deletes an option) |
-| **Rename the built-in `Status` FIELD itself** | ❌ | UI only — the ES preset adds `Estado` as a NEW field instead of renaming `Status` |
+| **Rename the built-in `Status` FIELD itself** | ❌ | UI only — the ES preset does NOT add `Estado` beside it: the built-in `Status` serves as the state axis (`Estado` is only created on a board that has no `Status` at all) |
 | **Which fields are VISIBLE in a view** (show/hide, order) | ❌ | view config is UI/GraphQL-only; do it once in the UI |
 | **Group-by / layout (Board vs Table)** | ❌ | UI only |
 

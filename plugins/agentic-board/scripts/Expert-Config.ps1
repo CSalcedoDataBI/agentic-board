@@ -85,15 +85,18 @@ function New-ExpertConfig {
     [CmdletBinding()]
     param(
         [string]$PlanText, [string]$PlanGoal, [string[]]$Inventory = @(), [hashtable]$Catalog,
-        [bool]$PreferCodexRescue = $false, [string[]]$InstalledPlugins = @()
+        [bool]$PreferCodexRescue = $false, [string[]]$InstalledPlugins = @(),
+        # (#475) Does the repo have a semantic model? Decides whether the DoD carries the model-only
+        # gates (bpa, tmdlBreaking). Defaults to $true (keep every gate) for a caller that never looked.
+        [bool]$HasSemanticModel = $true
     )
     if (-not $Catalog) { $Catalog = Get-ExpertRoles }
     $domain  = Get-DomainFromPlan -Text $PlanText -Catalog $Catalog
     $role    = @($Catalog.roles) | Where-Object { $_.name -eq $domain } | Select-Object -First 1
     $hooked  = Get-HookedSkills -Domain $domain -Inventory $Inventory -Catalog $Catalog
     $persona = if ($role) { Resolve-RolePersona -Role $role } else { '' }
-    $c = New-ExpertContract
-    $c.role        = Format-RoleObjective -Domain $domain -HookedSkills $hooked -PlanGoal $PlanGoal -Persona $persona
+    $c = New-ExpertContract -HasSemanticModel $HasSemanticModel
+    $c.role       = Format-RoleObjective -Domain $domain -HookedSkills $hooked -PlanGoal $PlanGoal -Persona $persona
     $c.roleMatched = ($domain -ne 'generic')
     if ($role -and $role.agent) { $c.roleAgent = [string]$role.agent }
 
@@ -112,6 +115,9 @@ function New-ExpertConfig {
 if ($env:ABIOS_EXPERTCONFIG_DOTSOURCE) { return }
 
 # ── CLI ─────────────────────────────────────────────────────────────────────────
+# Say what is happening BEFORE the scan: a script that prints nothing for a minute is
+# indistinguishable from a deadlock (#609). Write-Host, so it never lands in the output data.
+Write-Host "Scanning installed skills (usually a few seconds)..." -ForegroundColor DarkGray
 $inventory = Resolve-SkillInventory
 
 if (-not $myInstalledPluginsSet) {
@@ -120,7 +126,8 @@ if (-not $myInstalledPluginsSet) {
 }
 
 $contract = New-ExpertConfig -PlanText $myPlanText -PlanGoal $myPlanGoal -Inventory $inventory `
-                              -PreferCodexRescue $myPreferCodexRescue -InstalledPlugins $myInstalledPlugins
+                              -PreferCodexRescue $myPreferCodexRescue -InstalledPlugins $myInstalledPlugins `
+                              -HasSemanticModel (Test-RepoHasSemanticModel)
 $target = if ($myPath) { $myPath } else { Get-ExpertContractPath }
 
 Write-Host "=== /board expert config ===" -ForegroundColor Cyan
@@ -132,11 +139,29 @@ if (-not $contract.roleMatched) {
     Write-Host "  NO ROLE MATCHED this plan - the expert would run as 'generic', with no domain toolset." -ForegroundColor Yellow
     Write-Host "  Research the plan's domain, propose a role to the user in plain language, and only" -ForegroundColor DarkGray
     Write-Host "  persist it once they confirm - it changes how every future plan is classified." -ForegroundColor DarkGray
+    # (#470) Persisting also makes the file shareable by itself (Add-ExpertRole repairs and
+    # verifies the project's .gitignore). Never ask the user about git, and never hand them a command.
+    Write-Host "  Persisting with Add-ExpertRole also takes care of .gitignore - do not ask the user about it." -ForegroundColor DarkGray
     Write-Host ""
 }
 $written = Write-ExpertContract -Contract $contract -Path $target
 Write-Host "  OK  contract written -> $written" -ForegroundColor Green
+# (#470) A roles.json that already exists but that git ignores is a role the team will never get,
+# and the fix people reach for does nothing. Repair it here and say what was done in plain words:
+# nothing for the user to run, nothing to decide in git terms.
+$localRoles = Get-ExpertRoleLocalPath
+if ($localRoles -and (Test-Path -LiteralPath $localRoles -PathType Leaf)) {
+    $fix = Repair-RolesGitignore -RolesPath $localRoles
+    if ($fix.Status -in 'Repaired', 'CannotRepair') {
+        Write-Host ""
+        Write-Host $fix.Message -ForegroundColor $(if ($fix.Status -eq 'Repaired') { 'Green' } else { 'Yellow' })
+    }
+}
 Write-Host "      autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
+Write-Host "      definition of done: $((@($contract.dod.Keys | Sort-Object)) -join ', ')" -ForegroundColor DarkGray
+if (-not $contract.dod.ContainsKey('bpa')) {
+    Write-Host "      (no semantic model in this repo - bpa / tmdlBreaking left out of the DoD)" -ForegroundColor DarkGray
+}
 Write-Host "      evidence -> PR + issue comment + versioned file" -ForegroundColor DarkGray
 # (#646) State the review-independence choice as plainly as the autonomy brakes above it - this
 # is the one line meant to make the codex-rescue path discoverable to a human BEFORE launch,

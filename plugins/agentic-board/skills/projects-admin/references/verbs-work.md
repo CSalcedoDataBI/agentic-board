@@ -59,6 +59,12 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      decide. **Ask once, then record it** — a preference the user has to restate every session is
      not a preference. Recording it needs no GitHub token: it is a local decision, so it works on
      a machine with no PAT configured.
+     **Seeing it.** `Board-Work.ps1 -PreferGroupedPRs show` prints the current setting and where
+     it came from — `PRs agrupados: on (config del repo)`, or `auto (por defecto)` when the repo
+     recorded nothing (a recorded `auto` is stored as "no decision", so it also reads `por
+     defecto`). It writes no preference and needs no token, and outside a git repo it answers `auto
+     (por defecto)`. The `/board` menu runs it to show the value under `work`, and every group the
+     pending list proposes says which setting produced it and how to change it (#681).
 
      Note what `on` does NOT mean: it never invents a group out of issues that share nothing.
      There is no honest way to batch two unrelated issues, and a group with no reason behind it
@@ -77,8 +83,10 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
        from the current HEAD, which would drag the commits of whatever branch you were standing
        on into this issue's PR. For work that genuinely builds on the current branch, opt in with
        `-BaseCurrent` (or `-Base <ref>` for an explicit base).
-     - **Busy working copy?** If the folder has uncommitted changes or sits on another
-       `issue-*` branch (another session active), `-Branch` does NOT switch — it creates an
+     - **Busy working copy?** If the folder has uncommitted changes, sits on another
+       `issue-*` branch (another session active), or is CLEAN but stands on a feature branch that
+       carries commits the default branch lacks (live work is as busy as a dirty tree — #670),
+       `-Branch` does NOT switch — it creates an
        isolated **git worktree** `../<repo>--issue-<n>` automatically (the official
        parallel-sessions pattern) and prints `cd <path>`: CONTINUE THE WORK THERE. After the
        PR merges, clean it with `git worktree remove <path>`.
@@ -98,7 +106,13 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
        a field filled after the work is over can no longer inform a decision.
   5. **Finish with a PR + review gate — MANDATORY.** What is mandatory is that the work lands
      through a PR and a gate, NOT that each issue gets its own: a batch started at step 3b
-     finishes through one PR carrying one `Closes #<n>` per issue. When the work is done:
+     finishes through one PR carrying one `Closes #<n>` per issue. **Commit with an explicit
+     pathspec** — `git commit -m "<msg>" -- <paths>` — never `git add <paths>` followed by a bare
+     `git commit`: the bare form takes whatever else is staged in the index, so if another session
+     ever touches the same folder your commit carries its files under your message (#547).
+     `New-BoardPR.ps1` also refuses to push a branch other than the one a live session registered
+     for the issue in this working copy (`-AllowBranchMismatch` overrides on purpose). When the
+     work is done:
      a. Run `scripts/New-BoardPR.ps1 -Issue <issueNum>` — the cross-account push+PR step:
         it resolves the RIGHT account from the repo OWNER (CSalcedoDataBI → personal PAT,
         PAL-Devs → business PAT; `-TokenVar` forces one), verifies push permission, pushes
@@ -123,8 +137,13 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         BPA violation blocks). Both skip safely when there is no model / no BPA rules / no Tabular
         Editor, so a non-BI repo is unaffected. It then waits for CI checks, waits for the review,
         and prints decision + feedback + unresolved threads. **Exit 0 = passed; 1 = blocked;
-        2 = nobody reviewed.** Address printed feedback with new commits, push, and RE-RUN the gate
-        until it passes.
+        2 = nobody reviewed; 3 = CI never ran (#481).** Address printed feedback with new commits,
+        push, and RE-RUN the gate until it passes.
+        **Exit 3 — "CI NO SE EVALUO" (#481)** means the only blocker is that CI never executed a
+        step (`startup_failure`, or a job GitHub refused to start — exhausted Actions minutes, a
+        spending limit, no runner). It is still a block, never a pass, but no code change can clear
+        it: **do not re-push**. Tell the user the CI could not run (quota / billing / workflow) and
+        let them decide; a real failing check keeps exit 1.
         **Exit 2 — "GATE SIN REVISAR" (#510)** means the checks are green but no one read the code:
         a `claude-review` check can report a PASS having left zero reviews, and that used to print
         the same `GATE PASSED` as a genuinely clean review. **Never merge on exit 2.** Clear it by
@@ -202,7 +221,7 @@ and wait for; never assume the account or the scope:
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
 | 3b. Choose the PR shape | (read the offer printed under the pending list) | **Grouped is the default when the issues overlap (#662)**: the listing names each group, the evidence behind it (same repo file named in both issues, or a shared board Area), what it saves in review rounds, and what it held back to keep the PR reviewable (cap 4). One PR per issue is the case that needs a reason — independent risk, or a separate approver |
-| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide. `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
+| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` (or `show` to read the current value and its source without changing anything) | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide. `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
 | 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, for a group chosen at 3b (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch, so all of them close through ONE PR/gate/merge |
 | 5. Finish it | push branch → PR with `Closes #<num>` (or `New-BoardPR.ps1 -Issue <n1,n2,...>` for a batch — one `Closes #<n>` line per issue) → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → merge-confirmation summary → user confirms → `Board-Merge.ps1 -PR <n>` only on exit 0 AND confirmation | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. On exit 0, present the mandatory merge-confirmation summary (#630/#631, four parts, above) and WAIT for the user's answer before merging — gate green is a precondition for asking, never a reason to skip asking. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself for every closed issue |
 
@@ -299,7 +318,8 @@ Notes:
   the session re-grounds and resumes the queue unattended. Opt-in per run and a **strict no-op**
   otherwise — no marker means the hook stays silent. Keep entries lightweight (a decision, a
   gotcha, the next step); the board remains the source of truth for per-issue **status**.
-- **Worktree mode**: when the working copy is busy (dirty tree or another `issue-*` branch),
+- **Worktree mode**: when the working copy is busy (dirty tree, another `issue-*` branch, or a
+  clean feature branch carrying commits the default branch lacks),
   `-Branch` creates/reuses an isolated worktree `../<repo>--issue-<n>` instead of switching —
   the agent must continue the work in the printed path and `git worktree remove` it after the
   merge. Same-issue re-entry in the main clone stays a plain checkout.
@@ -319,7 +339,7 @@ them instead of one-by-one (each still finishes through the same step 5):
 | `... -Parallel <nums> -Launch` | After starting, spawn ONE visible Claude session per worktree, each briefed to take its issue through step 5. Windows Terminal tab (grouped in one named window) when `wt` is on PATH; otherwise a standalone `pwsh` window per worktree |
 | `... -Parallel <nums> [-Launch] -DryRun` | Plan the whole batch (and, with `-Launch`, preview the exact launch commands) without mutating the board, touching git, or spawning anything |
 | `Board-Work.ps1 -Sessions` | Monitor the LIVE fleet from `sessions.json` (branch, worktree, launch method `via`, and the PR opened per branch). Dead-PID entries pruned on read; needs no `-ProjectNum` |
-| `Board-Work.ps1 -Sessions -Watch [-AutoClean]` | BLOCK polling each session until it finishes (PR MERGED / issue CLOSED / host PID dead), printing progress every `-WatchPollSec` (default 30s) up to `-WatchTimeoutSec` (default 1800s). With `-AutoClean`, tear each finished session down as it completes: kill the tab shell FIRST (the `pwsh -NoExit` left cwd'd in the worktree holds a handle → `git worktree remove` would fail), then `git worktree remove --force` + the branch delete + prune its `sessions.json` entry. The branch delete is merge-safe (#273): a session whose PR **MERGED** is force-deleted as before (the work is on the default branch; local ancestry can't prove this because the flow squash-merges), but one that finished **without** a merged PR (gate blocked, PR closed, agent crashed) is deleted with the safe `git branch -d` — git refuses it, the branch SURVIVES, and the teardown WARNs (in yellow) naming branch + issue instead of destroying the commits silently. Pass `-ForceDeleteBranch` to discard such a branch on purpose. The worktree removal is guarded the same way (#276): an unmerged session whose worktree still holds uncommitted/untracked files is NOT removed — the teardown WARNs with the file count and keeps worktree + branch + registry entry so a later run can retry; `-ForceRemoveWorktree` discards it on purpose. A merged session is torn down as before (its work landed). Also runs after `-Parallel <nums> -Launch/-Fleet -Watch`. `-DryRun` prints the teardown plan without touching git or killing anything (#135) |
+| `Board-Work.ps1 -Sessions -Watch [-AutoClean]` | BLOCK polling each session until it finishes (PR MERGED / issue CLOSED / host PID dead), printing progress every `-WatchPollSec` (default 30s) up to `-WatchTimeoutSec` (default 1800s). With `-AutoClean`, tear each finished session down as it completes: kill the tab shell FIRST (the `pwsh -NoExit` left cwd'd in the worktree holds a handle → `git worktree remove` would fail), then `git worktree remove --force` + the branch delete + prune its `sessions.json` entry. The branch delete is merge-safe (#273): a session whose PR **MERGED** is force-deleted as before (the work is on the default branch; local ancestry can't prove this because the flow squash-merges), but one that finished **without** a merged PR (gate blocked, PR closed, agent crashed) is deleted with the safe `git branch -d` — git refuses it, the branch SURVIVES, and the teardown WARNs (in yellow) naming branch + issue instead of destroying the commits silently. Pass `-ForceDeleteBranch` to discard such a branch on purpose. The worktree removal is guarded the same way (#276): an unmerged session whose worktree still holds uncommitted/untracked files is NOT removed — the teardown WARNs with the file count and keeps worktree + branch + registry entry so a later run can retry; `-ForceRemoveWorktree` discards it on purpose. A merged session is torn down as before (its work landed) - EXCEPT a run that was brake-armed (`.agentic-board/brake-armed.json` in its worktree, merge on its contract): a merged PR there is either the human merge after review or the run merging past the brake (#440), and the marker + denial log the evidence would need live in the worktree the teardown deletes, so auto-clean refuses (#518), keeping worktree, branch and registry entry, and names why. Check who merged, then `-ForceRemoveWorktree` proceeds. `scripts/Fleet-Supervisor.ps1 -Check` reports the same situation from the record (marker + PR, with who merged and when) instead of asking the agent to self-report (#517). Also runs after `-Parallel <nums> -Launch/-Fleet -Watch`. `-DryRun` prints the teardown plan without touching git or killing anything (#135) |
 
 - **Only for INDEPENDENT issues.** Never parallelize a chain where one depends on another's
   merge — run those sequentially. The user picks which issues are safe to run together.

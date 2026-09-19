@@ -162,5 +162,38 @@ function Resolve-GroupingPosture {
             default { return 'auto' }
         }
     }
-    if ([bool]$v) { 'always' } else { 'never' }
+    # Only a real boolean is a decision here. `[bool]` on anything else is truthiness (0 -> a silent
+    # 'never', 42 -> 'always', an object -> 'always'): a hand edit the tool cannot read must fall
+    # back to auto like the unreadable strings above, not be read as an answer.
+    if ($v -is [bool]) { if ($v) { return 'always' } else { return 'never' } }
+    return 'auto'
+}
+
+# What a user sees and types for the grouped-PR setting, and WHERE its value came from (#681).
+# `posture` (always/never/auto) is the internal decision; the setting is what
+# `-PreferGroupedPRs on|off|auto` accepts, so the menu and every proposal can name the same word the
+# user would type to change it. `source` says whether the repo recorded an answer ('config': a
+# non-null preferGroupedPRs in .agentic-board/config.json) or nothing was decided and the tool's
+# default applies ('default'). A recorded `auto` is stored as null, so "auto" from the default and
+# "auto" chosen on purpose are the same to the tool and are reported as 'default'.
+function Get-GroupingSetting {
+    [CmdletBinding()]
+    param($Config)
+
+    $posture  = Resolve-GroupingPosture $Config
+    # 'config' only when the stored value is one Resolve-GroupingPosture actually understands.
+    # A garbage value (a hand edit: 42, "maybe", an object) falls back to auto INSIDE the resolver,
+    # so calling it "config del repo" would report a decision the repo never made - intent stated as
+    # fact. The value in force is the default, and the source says so.
+    $recorded = $false
+    if ($null -ne $Config -and $null -ne $Config['preferGroupedPRs']) {
+        $v = $Config['preferGroupedPRs']
+        $recorded = ($v -is [bool]) -or
+                    (($v -is [string]) -and (@('true', 'false', 'auto') -contains $v.Trim().ToLowerInvariant()))
+    }
+    [pscustomobject]@{
+        value   = switch ($posture) { 'always' { 'on' } 'never' { 'off' } default { 'auto' } }
+        posture = $posture
+        source  = $(if ($recorded) { 'config' } else { 'default' })
+    }
 }

@@ -26,17 +26,39 @@
       ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Type Bug -Area scripts -Estimate 3
       ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 42 -Repo owner/repo -Type Bug -Area scripts -Estimate 3
 
+      # 2b. Batch (#605): the board is read ONCE for the whole batch, however many issues it lists.
+      #     Same values for every issue:
+      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issues 42,43,44 -Type Bug -Area scripts
+      #     Per-issue values from a JSON array [{"issue":42,"type":"Bug","area":"scripts","estimate":3,
+      #     "priority":"P2","rationale":"..."}, ...] (only "issue" is required):
+      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -BatchFile triage.json
+      #     Every entry is validated before the first write; a target that cannot be resolved is
+      #     reported at the end (with the list to retry) instead of aborting the rest of the batch.
+
       # 3. Priority — proposal only (prints, writes nothing) unless -ConfirmPriority:
       ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Priority P1 -Rationale 'blocks the release'
       ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Priority P1 -Rationale '...' -ConfirmPriority
 #>
 [CmdletBinding()]
 param(
+  # -ProjectNum is the name every other board script of the suite takes; Apply-FieldPreset got the
+  # same alias in #297 and this one was missed (#511). Existing -Number callers are unaffected.
+  [Alias('ProjectNum')]
   [int]   $Number     = 13,
   [string]$Owner      = 'CSalcedoDataBI',
   # Accept bare number ("42") or qualified "owner/repo#42"; use -Repo to disambiguate bare numbers
   # on multi-repo boards (#506). Empty string = -Pending / batch-view mode.
   [string]$Issue      = '',
+  # Batch (#605): several issues in ONE invocation, so the board is read ONCE instead of once per
+  # issue. Refs are bare numbers or 'owner/repo#n', comma- or space-separated (a `pwsh -File`
+  # call delivers `-Issues 1,2,3` as the single string "1,2,3"). The -Type/-Area/-Estimate/
+  # -Priority/-Rationale given alongside apply to EVERY listed issue.
+  [string[]]$Issues   = @(),
+  # Batch with per-issue values (#605): a JSON array of
+  #   { "issue": 42, "repo": "o/r", "type": "Bug", "area": "scripts", "estimate": 3,
+  #     "priority": "P2", "rationale": "..." }
+  # (all keys but "issue" optional). A key on an entry beats the same flag on the command line.
+  [string]$BatchFile  = '',
   # Explicit repo qualifier. Combined with a bare -Issue number it produces a qualified ref that
   # targets exactly one item even when the same number exists in several repos (#506).
   [string]$Repo       = '',
@@ -165,6 +187,96 @@ function Format-ItemRef {
     return "#$num"
 }
 
+# Flatten the refs given to -Issues into a plain list. `pwsh -File script.ps1 -Issues 1,2,3` hands
+# the script the single string "1,2,3", so a comma (or whitespace) inside an element is a separator
+# too; without this the batch flag would work from an interactive prompt and break from the launcher.
+# Pure (#605).
+function ConvertTo-TriageRefList {
+    param([string[]]$Refs)
+    $out = @()
+    foreach ($r in @($Refs)) {
+        foreach ($piece in ("$r" -split '[,\s]+')) {
+            if ($piece.Trim()) { $out += $piece.Trim() }
+        }
+    }
+    return $out
+}
+
+# Build the list of triage targets of ONE invocation (#605): the single -Issue, the -Issues list and
+# the -BatchFile entries, each carrying the values to write. The command-line values are the
+# DEFAULTS of every target; a key present on a batch-file entry beats them. Returns a plain array of
+# { Issue; Repo; Type; Area; Estimate; Priority; Rationale }. Empty = the caller is in -Pending mode.
+# Reads -BatchFile when given (the only side effect); throws on a file it cannot use, because a
+# batch that silently dropped its entries would report success over untriaged work.
+function Get-TriageEntries {
+    param(
+        [string]   $Issue      = '',
+        [string[]] $Issues     = @(),
+        [string]   $BatchFile  = '',
+        [hashtable]$Defaults   = @{}
+    )
+    $def = { param($k) if ($Defaults.ContainsKey($k) -and $null -ne $Defaults[$k]) { "$($Defaults[$k])" } else { '' } }
+    $mk = {
+        param($ref, $repo, $type, $area, $est, $prio, $why)
+        [pscustomobject]@{
+            Issue = "$ref".Trim(); Repo = "$repo".Trim(); Type = "$type"; Area = "$area"
+            Estimate = "$est"; Priority = "$prio"; Rationale = "$why"
+        }
+    }
+    $entries = @()
+    $refs = @()
+    if ("$Issue".Trim()) { $refs += "$Issue".Trim() }
+    $refs += @(ConvertTo-TriageRefList $Issues)
+    foreach ($r in $refs) {
+        $entries += & $mk $r (& $def 'Repo') (& $def 'Type') (& $def 'Area') (& $def 'Estimate') (& $def 'Priority') (& $def 'Rationale')
+    }
+
+    if ("$BatchFile".Trim()) {
+        if (-not (Test-Path -LiteralPath $BatchFile)) { throw "-BatchFile '$BatchFile' no existe." }
+        $raw = Get-Content -LiteralPath $BatchFile -Raw -Encoding UTF8
+        if (-not "$raw".Trim()) { throw "-BatchFile '$BatchFile' esta vacio." }
+        try { $rows = @($raw | ConvertFrom-Json) }
+        catch { throw "-BatchFile '$BatchFile' no es JSON valido: $($_.Exception.Message)" }
+        if (-not $rows.Count) { throw "-BatchFile '$BatchFile' no trae ninguna entrada." }
+        $n = 0
+        foreach ($row in $rows) {
+            $n++
+            $prop = { param($name) $p = $row.PSObject.Properties | Where-Object { $_.Name -ieq $name } | Select-Object -First 1
+                                   if ($p -and $null -ne $p.Value -and "$($p.Value)" -ne '') { "$($p.Value)" } else { $null } }
+            $ref = & $prop 'issue'
+            if (-not $ref) { throw "-BatchFile entrada #${n}: falta la clave 'issue'." }
+            $pick = { param($name) $v = & $prop $name; if ($null -ne $v) { $v } else { & $def $name } }
+            $entries += & $mk $ref (& $pick 'repo') (& $pick 'type') (& $pick 'area') (& $pick 'estimate') (& $pick 'priority') (& $pick 'rationale')
+        }
+    }
+    return @($entries)
+}
+
+# Validate ONE target BEFORE anything is written, so a batch with a bad row 40 of 45 is refused
+# whole instead of leaving the board half-triaged (#605). Same rules the single-issue path always
+# had: an Estimate is numeric, a Priority is P0-P3 and carries its rationale (#306). Returns $null
+# when valid, else the message. Pure.
+function Test-TriageEntry {
+    param([Parameter(Mandatory)][object]$Entry)
+    $label = if ($Entry.Repo -and $Entry.Issue -notmatch '#') { "$($Entry.Repo)#$($Entry.Issue)" } else { "$($Entry.Issue)" }
+    if ($Entry.Estimate -and ($Entry.Estimate -notmatch '^\d+(\.\d+)?$')) {
+        return "${label}: -Estimate debe ser numerico (recibi '$($Entry.Estimate)')."
+    }
+    if ($Entry.Priority -and ($Entry.Priority -notin @('P0','P1','P2','P3'))) {
+        return "${label}: Priority debe ser P0, P1, P2 o P3 (recibi '$($Entry.Priority)')."
+    }
+    $bad = Test-PriorityRequest -Priority $Entry.Priority -Rationale $Entry.Rationale
+    if ($bad) { return "${label}: $bad" }
+    # The optional repo qualifier must be owner/name: Resolve-IssueRef treats ANY non-empty repo as a
+    # qualified target, so a typo would only surface after the board reads, as "not on the board".
+    if ($Entry.Repo -and ($Entry.Repo -notmatch '^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$')) {
+        return "${label}: repo debe ser owner/name (recibi '$($Entry.Repo)')."
+    }
+    try { $null = Resolve-IssueRef -IssueArg $Entry.Issue -ExplicitRepo $Entry.Repo }
+    catch { return "${label}: $($_.Exception.Message)" }
+    return $null
+}
+
 # Dot-source guard: tests set $env:ABIOS_TRIAGE_DOTSOURCE to load the pure helpers only.
 if ($env:ABIOS_TRIAGE_DOTSOURCE) { return }
 
@@ -180,6 +292,19 @@ trap {
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 # Board reads that report their own truncation (#484).
 . (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
+# Field names (Type/Task Type/Tipo, Area/...) resolve through the vocabulary, not literals (#671).
+. (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
+
+# Early input check — refuse an un-rationalised Priority before any read. Every target of a
+# batch is validated HERE, all of them, before the first gh call of ANY kind (board resolution from
+# origin included) and before the first write (#605).
+$badPriority = Test-PriorityRequest -Priority $Priority -Rationale $Rationale
+if ($badPriority) { throw $badPriority }
+if ($Estimate -and ($Estimate -notmatch '^\d+(\.\d+)?$')) { throw "-Estimate debe ser numerico (recibi '$Estimate')." }
+$entries = @(Get-TriageEntries -Issue $Issue -Issues $Issues -BatchFile $BatchFile -Defaults @{
+    Repo = $Repo; Type = $Type; Area = $Area; Estimate = $Estimate; Priority = $Priority; Rationale = $Rationale })
+$entryErrors = @($entries | ForEach-Object { Test-TriageEntry $_ } | Where-Object { $_ })
+if ($entryErrors.Count) { throw ("Batch rechazado, no escribi nada:`n  " + ($entryErrors -join "`n  ")) }
 
 if (-not $env:GH_TOKEN) {
     $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
@@ -201,17 +326,13 @@ $Owner = $plan.Owner
 if ($plan.ResolveFromOrigin) {
     $resolved = & (Join-Path $PSScriptRoot 'Resolve-Board.ps1') -Owner $Owner -Repo $originRepo -CreateIfMissing $false
     if (-not $resolved) {
-        throw "El repo $originRepo no tiene board enlazado que yo pueda leer. Crealo con /board init, o pasa -Number <n> -Owner <o>."
+        throw "El repo $originRepo no tiene board enlazado que yo pueda leer. Pasa -Number <n> -Owner <o>; y antes de crear uno con /board init, confirma con /board work -ListBoards -Repo $originRepo que de verdad no existe (crear otro es como se duplican los boards)."
     }
     $Number = [int]$resolved
     Write-Host ("  Board resuelto desde origin ($originRepo): #{0} de {1}" -f $Number, $Owner) -ForegroundColor DarkGray
 }
 
 $boardUrl = "https://github.com/users/$Owner/projects/$Number"
-
-# Early input check — refuse an un-rationalised Priority before any read.
-$badPriority = Test-PriorityRequest -Priority $Priority -Rationale $Rationale
-if ($badPriority) { throw $badPriority }
 
 # Fields (types + option maps) and items, both fail-closed.
 $fields = (Invoke-Gh -GhArgs @('project','field-list',"$Number",'--owner',$Owner,'--format','json') `
@@ -224,18 +345,37 @@ $itemRead = Get-BoardItems -Number $Number -Owner $Owner `
                            -What "listar los items del board #$Number"
 $items    = $itemRead.Items
 
-function Get-FieldDef([string]$name) { $fields | Where-Object { $_.name -eq $name } | Select-Object -First 1 }
-function Get-FieldKey([string]$name) { ($name -replace '[^A-Za-z0-9]','').ToLower() }   # how item-list surfaces the value
+# The live field of THIS board for a key ('Type') or any name a board may use for it ('Task Type',
+# 'Tipo'): the field names come from Get-BoardVocabulary.ps1, never from a literal here (#671).
+function Get-FieldDef([string]$name) {
+    $key = Get-BoardFieldKey $name
+    if ($key) { return Find-BoardField -Key $key -Fields $fields }
+    $fields | Where-Object { $_.name -eq $name } | Select-Object -First 1
+}
 
-# Read one item's current triage values into a display-name-keyed hashtable.
+# Read one item's current triage values into a key-named hashtable. The row is read through the
+# vocabulary and a name-rewrite-proof lookup: the old `$item.<lowercased-stripped name>` could not
+# see 'Task Type' (gh keys the row 'task type').
 function Get-ItemTriageValues($item) {
     $h = @{}
-    foreach ($f in @('Type','Area','Estimate','Priority')) { $h[$f] = "$($item.($(Get-FieldKey $f)))" }
+    foreach ($f in @('Type','Area','Estimate','Priority')) {
+        $def = Get-FieldDef $f
+        $h[$f] = "$(Get-ItemFieldValue $item $(if ($def) { $def.name } else { $f }))"
+    }
     return $h
 }
 
+# Say it out loud when the board has none (or only some) of the triage fields, instead of letting
+# every write below print a one-line skip and the run end reading like a success (#509, #671).
+$triageCoverage = Get-BoardFieldCoverage -Keys @('Type','Area','Estimate','Priority') -Fields $fields
+if ($triageCoverage.NoneFound) {
+    Write-Host ("  ATENCION: el board #{0} no tiene NINGUNO de los campos de triage (Type/Task Type/Tipo, Area, Estimate, Priority; tambien en espanol). No se puede escribir nada: corre /board field apply -Number {0} -Owner {1}." -f $Number, $Owner) -ForegroundColor Red
+} elseif ($triageCoverage.Missing.Count) {
+    Write-Host ("  WARN el board no tiene: {0}. Esos campos se omiten (aplica /board field apply)." -f ($triageCoverage.Missing -join ', ')) -ForegroundColor DarkYellow
+}
+
 # ── Mode 1: batch view of the pending items and their triage gaps ─────────────
-if (-not $Issue.Trim()) {
+if (-not $entries.Count) {
     $pendingStatuses = @('Backlog', 'In Progress', 'Todo', 'To Do')   # legacy names included
     $pend = @($items | Where-Object { $pendingStatuses -contains "$($_.status)" -and $_.content.number })
     Write-Host "=== Triage: pendientes del board #$Number de $Owner ===" -ForegroundColor Cyan
@@ -272,41 +412,22 @@ if (-not $Issue.Trim()) {
     exit 0
 }
 
-# ── Mode 2/3: one issue — write evidence fields, propose/confirm Priority ──────
-
-# Resolve the -Issue string (bare or qualified) and find the matching board item(s) (#506).
-$issueRef    = Resolve-IssueRef -IssueArg $Issue -ExplicitRepo $Repo
-$itemMatches = Find-TriageItems -Ref $issueRef -Items $items
-
-if (-not $itemMatches) {
-    $refStr = if ($issueRef.Repo) { "$($issueRef.Repo)#$($issueRef.Number)" } else { "#$($issueRef.Number)" }
-    throw "El issue $refStr no esta en el board #$Number (agregalo con /board add, o /board fill)."
-}
-
-if ($itemMatches.Count -gt 1) {
-    # Number collision across repos — refuse and list the ambiguous candidates so the operator
-    # can qualify the target with 'owner/repo#n' or -Repo (#506 symptom 2).
-    $candidateList = ($itemMatches | ForEach-Object {
-        "    $(Format-ItemRef $_): $($_.content.title)"
-    }) -join "`n"
-    throw (
-        "Numero ambiguo: #{0} existe en {1} repos del board. Califica el target con 'owner/repo#{0}' o -Repo:`n{2}" -f
-        $issueRef.Number, $itemMatches.Count, $candidateList
-    )
-}
-
-$item = $itemMatches[0]
-Write-Host ("=== Triage {0}: {1} ===" -f (Format-ItemRef $item), $item.content.title) -ForegroundColor Cyan
+# ── Mode 2/3: one or more issues — write evidence fields, propose/confirm Priority ──
+# The board was read ONCE above ($items); every target below resolves against that one read (#605).
 
 # Set one field on this item, picking the write flag from the field's type. Fails loud.
-function Set-ItemField([string]$name, [string]$value) {
+function Set-ItemField($item, [string]$name, [string]$value) {
     $fdef = Get-FieldDef $name
-    if (-not $fdef) { Write-Host ("  WARN el board no tiene el campo '{0}' - lo omito (aplica /board field apply)." -f $name) -ForegroundColor DarkYellow; return $false }
-    if ($DryRun) { Write-Host ("  DRY-RUN: {0} -> {1}" -f $name, $value) -ForegroundColor Yellow; return $true }
+    if (-not $fdef) {
+        $tried = @(Get-BoardFieldNames (Get-BoardFieldKey $name)); if (-not $tried.Count) { $tried = @($name) }
+        Write-Host ("  WARN el board no tiene el campo '{0}' (busque: {1}) - lo omito (aplica /board field apply)." -f $name, ($tried -join ', ')) -ForegroundColor DarkYellow
+        return $false
+    }
+    if ($DryRun) { Write-Host ("  DRY-RUN: {0} -> {1}" -f $fdef.name, $value) -ForegroundColor Yellow; return $true }
     $editArgs = @('project','item-edit','--project-id',$proj,'--id',$item.id,'--field-id',$fdef.id)
     if ($fdef.options) {                                   # single-select: resolve the option id
-        $opt = $fdef.options | Where-Object { $_.name -eq $value } | Select-Object -First 1
-        if (-not $opt) { Write-Host ("  WARN '{0}' no tiene la opcion '{1}' - la omito." -f $name, $value) -ForegroundColor DarkYellow; return $false }
+        $opt = Find-FieldOption -Options $fdef.options -Key (Get-BoardFieldKey $name) -Value $value
+        if (-not $opt) { Write-Host ("  WARN '{0}' no tiene la opcion '{1}' (tiene: {2}) - la omito." -f $fdef.name, $value, (($fdef.options | ForEach-Object { $_.name }) -join ', ')) -ForegroundColor DarkYellow; return $false }
         $editArgs += @('--single-select-option-id', $opt.id)
     } elseif ($fdef.dataType -eq 'NUMBER' -or $name -eq 'Estimate') {
         $editArgs += @('--number', $value)
@@ -314,35 +435,101 @@ function Set-ItemField([string]$name, [string]$value) {
         $editArgs += @('--text', $value)
     }
     $null = Invoke-Gh -GhArgs $editArgs -What "escribir $name en $(Format-ItemRef $item)" -Retries 3
-    Write-Host ("  OK  {0} -> {1}" -f $name, $value) -ForegroundColor Green
+    Write-Host ("  OK  {0} -> {1}" -f $fdef.name, $value) -ForegroundColor Green
     return $true
 }
 
-if ($Estimate -and ($Estimate -notmatch '^\d+(\.\d+)?$')) { throw "-Estimate debe ser numerico (recibi '$Estimate')." }
+# Triage ONE target against the already-read board. Throws on an unresolvable target; the caller
+# decides whether that ends the run (a single -Issue) or is recorded and skipped (a batch).
+function Invoke-TriageEntry($entry) {
+    $script:TriagePhase = 'resolve'
+    # Resolve the ref (bare or qualified) and find the matching board item(s) (#506).
+    $issueRef    = Resolve-IssueRef -IssueArg $entry.Issue -ExplicitRepo $entry.Repo
+    $itemMatches = Find-TriageItems -Ref $issueRef -Items $items
 
-$wroteEvidence = $false
-if ($Type)     { $wroteEvidence = (Set-ItemField 'Type' $Type)     -or $wroteEvidence }
-if ($Area)     { $wroteEvidence = (Set-ItemField 'Area' $Area)     -or $wroteEvidence }
-if ($Estimate) { $wroteEvidence = (Set-ItemField 'Estimate' $Estimate) -or $wroteEvidence }
+    if (-not $itemMatches) {
+        $refStr = if ($issueRef.Repo) { "$($issueRef.Repo)#$($issueRef.Number)" } else { "#$($issueRef.Number)" }
+        throw "El issue $refStr no esta en el board #$Number (agregalo con /board add, o /board fill)."
+    }
 
-# Priority: propose (print) always; write ONLY with -ConfirmPriority.
-if ($Priority) {
-    Write-Host ""
-    Write-Host "  Propuesta de Priority (juicio de negocio - requiere confirmacion):" -ForegroundColor Yellow
-    Write-Host (Format-PriorityProposal -IssueNum $issueRef.Number -Priority $Priority -Rationale $Rationale)
-    if ($ConfirmPriority) {
-        $ok = Set-ItemField 'Priority' $Priority
-        if ($ok -and -not $DryRun) { Write-Host "  OK  Priority confirmada y escrita." -ForegroundColor Green }
-    } else {
-        Write-Host "  (no escrita) Confirma con -ConfirmPriority, o corrige la propuesta." -ForegroundColor DarkGray
+    if ($itemMatches.Count -gt 1) {
+        # Number collision across repos — refuse and list the ambiguous candidates so the operator
+        # can qualify the target with 'owner/repo#n' or -Repo (#506 symptom 2).
+        $candidateList = ($itemMatches | ForEach-Object {
+            "    $(Format-ItemRef $_): $($_.content.title)"
+        }) -join "`n"
+        throw (
+            "Numero ambiguo: #{0} existe en {1} repos del board. Califica el target con 'owner/repo#{0}' o -Repo:`n{2}" -f
+            $issueRef.Number, $itemMatches.Count, $candidateList
+        )
+    }
+
+    $item = $itemMatches[0]
+    $script:TriagePhase = 'write'      # from here on a throw is a failed board write, not an unresolvable target
+    Write-Host ("=== Triage {0}: {1} ===" -f (Format-ItemRef $item), $item.content.title) -ForegroundColor Cyan
+
+    if ($entry.Type)     { $null = Set-ItemField $item 'Type' $entry.Type }
+    if ($entry.Area)     { $null = Set-ItemField $item 'Area' $entry.Area }
+    if ($entry.Estimate) { $null = Set-ItemField $item 'Estimate' $entry.Estimate }
+
+    # Priority: propose (print) always; write ONLY with -ConfirmPriority.
+    if ($entry.Priority) {
+        Write-Host ""
+        Write-Host "  Propuesta de Priority (juicio de negocio - requiere confirmacion):" -ForegroundColor Yellow
+        Write-Host (Format-PriorityProposal -IssueNum $issueRef.Number -Priority $entry.Priority -Rationale $entry.Rationale)
+        if ($ConfirmPriority) {
+            $ok = Set-ItemField $item 'Priority' $entry.Priority
+            if ($ok -and -not $DryRun) { Write-Host "  OK  Priority confirmada y escrita." -ForegroundColor Green }
+        } else {
+            Write-Host "  (no escrita) Confirma con -ConfirmPriority, o corrige la propuesta." -ForegroundColor DarkGray
+        }
+    }
+
+    if (-not $entry.Type -and -not $entry.Area -and -not $entry.Estimate -and -not $entry.Priority) {
+        $v = Get-ItemTriageValues $item
+        $gaps = Get-TriageGaps $v
+        Write-Host ("  Valores actuales: Type=[{0}] Area=[{1}] Estimate=[{2}] Priority=[{3}]" -f $v['Type'], $v['Area'], $v['Estimate'], $v['Priority'])
+        if ($gaps.Count) { Write-Host ("  Faltan (evidence): {0}. Pasa -Type/-Area/-Estimate para llenarlos." -f ($gaps -join ', ')) -ForegroundColor DarkYellow }
     }
 }
 
-if (-not $Type -and -not $Area -and -not $Estimate -and -not $Priority) {
-    $v = Get-ItemTriageValues $item
-    $gaps = Get-TriageGaps $v
-    Write-Host ("  Valores actuales: Type=[{0}] Area=[{1}] Estimate=[{2}] Priority=[{3}]" -f $v['Type'], $v['Area'], $v['Estimate'], $v['Priority'])
-    if ($gaps.Count) { Write-Host ("  Faltan (evidence): {0}. Pasa -Type/-Area/-Estimate para llenarlos." -f ($gaps -join ', ')) -ForegroundColor DarkYellow }
+# "Batch" is decided by what the caller ASKED for, not by how many targets it produced: a one-row
+# -BatchFile or `-Issues 42` is still a batch and owes the retry list when its target fails.
+$batchMode = ("$BatchFile".Trim() -ne '') -or (@(ConvertTo-TriageRefList $Issues).Count -gt 0)
+if (-not $batchMode -and $entries.Count -eq 1) {
+    # One target: a failure IS the run's failure, exactly as before batching existed.
+    Invoke-TriageEntry $entries[0]
+} else {
+    # A batch: one unresolvable target must not abandon the rest of a 45-issue sweep, and the caller
+    # needs the list of what did not get done to resume from (#605). A failed WRITE is different: it
+    # is an API/auth/quota failure that every remaining write would repeat (each with its own
+    # retries), so the batch stops there and lists everything not yet done.
+    $failed = @()
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        $e   = $entries[$i]
+        $ref = if ($e.Repo -and $e.Issue -notmatch '#') { "$($e.Repo)#$($e.Issue)" } else { $e.Issue }
+        try { Invoke-TriageEntry $e }
+        catch {
+            $failed += [pscustomobject]@{ Ref = $ref; Why = $_.Exception.Message }
+            Write-Host ("  FALLO {0}: {1}" -f $ref, $_.Exception.Message) -ForegroundColor Red
+            if ($script:TriagePhase -eq 'write') {
+                Write-Host "  Una escritura fallo: detengo el lote en vez de repetir el mismo fallo en los que quedan." -ForegroundColor Red
+                for ($j = $i + 1; $j -lt $entries.Count; $j++) {
+                    $r2 = if ($entries[$j].Repo -and $entries[$j].Issue -notmatch '#') { "$($entries[$j].Repo)#$($entries[$j].Issue)" } else { $entries[$j].Issue }
+                    $failed += [pscustomobject]@{ Ref = $r2; Why = 'no procesado: el lote se detuvo por el error de escritura' }
+                }
+                break
+            }
+        }
+    }
+    Write-Host ""
+    Write-Host ("=== Batch: {0} de {1} issue(s) sin error; el board se leyo 1 vez ===" -f ($entries.Count - $failed.Count), $entries.Count) -ForegroundColor Cyan
+    if ($failed.Count) {
+        Write-Host "  Pendientes para reintentar:" -ForegroundColor Yellow
+        foreach ($f in $failed) { Write-Host ("    {0}  ({1})" -f $f.Ref, $f.Why) -ForegroundColor Yellow }
+        Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+        exit 1
+    }
 }
 
 Write-Host "Board: $boardUrl" -ForegroundColor Cyan
