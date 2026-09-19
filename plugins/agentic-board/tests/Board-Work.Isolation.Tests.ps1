@@ -28,10 +28,11 @@ Describe 'New-IssueWorkspace isolates a clean feature branch that carries work (
         # bare origin lives at .../o/r and is reached over a file:/// URL - no network involved.
         $script:Repo   = 'o/r'
         $root          = Join-Path $TestDrive ('W' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-        $origin        = Join-Path $root 'o\r'
+        # Segment by segment: a `\` inside one Join-Path argument is only a separator on Windows.
+        $origin        = Join-Path (Join-Path $root 'o') 'r'
         New-Item -ItemType Directory -Path $origin -Force | Out-Null
         git init -q --bare -b main $origin
-        $url = 'file:///' + ($origin -replace '\\', '/')
+        $url = ([uri]$origin).AbsoluteUri     # file:///C:/... on Windows, file:///tmp/... elsewhere
 
         $seed = Join-Path $root 'seed'
         git clone -q $url $seed 2>&1 | Out-Null

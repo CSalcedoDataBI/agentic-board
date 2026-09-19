@@ -124,10 +124,10 @@ function Format-ClosesBody {
 }
 
 # A path in a form two spellings of the same folder compare equal in: full, forward slashes,
-# no trailing separator, case-folded (Windows). Registry paths and `git rev-parse --show-toplevel`
-# spell the same worktree differently (`C:\r\wt` vs `C:/r/wt`).
+# no trailing separator (roots excepted), case-folded unless -CaseSensitive. Registry paths and
+# `git rev-parse --show-toplevel` spell the same worktree differently (`C:\r\wt` vs `C:/r/wt`).
 function ConvertTo-ComparablePath {
-    param([string]$Path)
+    param([string]$Path, [switch]$CaseSensitive)
     if (-not $Path) { return '' }
     try { $full = [System.IO.Path]::GetFullPath($Path) } catch { $full = $Path }
     # An 8.3 short name (`C:\Users\CRISTO~1\...`) is the same folder as its long spelling, and if the
@@ -139,7 +139,23 @@ function ConvertTo-ComparablePath {
     try {
         if (Test-Path -LiteralPath $full) { $full = (Get-Item -LiteralPath $full -Force -ErrorAction Stop).FullName }
     } catch { }
-    return $full.Replace('\', '/').TrimEnd('/').ToLowerInvariant()
+    $p = $full.Replace('\', '/')
+    # Trim the trailing separator, but never off a ROOT: `/` would become '' (an empty path reads as
+    # "no working copy" and silently skips the check) and `C:/` would become the drive-relative `c:`.
+    if ($p -ne '/' -and $p -notmatch '^[A-Za-z]:/$') { $p = $p.TrimEnd('/') }
+    # Windows and macOS volumes are case-insensitive, so two spellings differing only by case are one
+    # folder; a Linux filesystem is case-sensitive and folding there could merge two distinct folders.
+    if (-not $CaseSensitive) { $p = $p.ToLowerInvariant() }
+    return $p
+}
+
+# A registry PID as a positive int, or 0 when it is not one. `[int]$x` THROWS on "abc" or an overflow,
+# and a throw inside a Where-Object filter aborts the whole run instead of skipping one bad row.
+function ConvertTo-PositiveInt {
+    param($Value)
+    $n = 0
+    if ([int]::TryParse("$Value", [ref]$n) -and $n -gt 0) { return $n }
+    return 0
 }
 
 # The sessions of sessions.json whose process is still alive. A dead PID is a session that ended
@@ -149,7 +165,11 @@ function Get-LiveSessionEntries {
     param([string]$Path)
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return @() }
     try { $all = @(Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json) } catch { return @() }
-    return @($all | Where-Object { $_ -and $_.sessionPid -and (Get-Process -Id ([int]$_.sessionPid) -ErrorAction SilentlyContinue) })
+    # A row whose PID is not a positive int (hand edit, partial write) is NOT a live session: skip it
+    # rather than let the cast abort the whole check.
+    return @($all | Where-Object {
+        $_ -and ($procId = ConvertTo-PositiveInt $_.sessionPid) -gt 0 -and (Get-Process -Id $procId -ErrorAction SilentlyContinue)
+    })
 }
 
 # #547: two agent sessions sharing one working copy can leave a commit on the wrong branch, and
@@ -164,15 +184,17 @@ function Get-RegisteredBranchMismatch {
         [string]  $Repo = '',
         [int[]]   $Issues = @(),
         [string]  $WorkPath = '',
-        [string]  $Branch = ''
+        [string]  $Branch = '',
+        # Linux paths are case-sensitive; the caller decides (see the call site). Default: fold case.
+        [switch]  $CaseSensitive
     )
-    $here = ConvertTo-ComparablePath $WorkPath
+    $here = ConvertTo-ComparablePath $WorkPath -CaseSensitive:$CaseSensitive
     if (-not $here -or -not $Branch) { return '' }
     $mine = @($Entries | Where-Object {
         $_ -and $_.branch -and
-        (@($Issues) -contains [int]$_.issue) -and
+        (@($Issues) -contains (ConvertTo-PositiveInt $_.issue)) -and
         -not ($_.repo -and $Repo -and ("$($_.repo)" -ne $Repo)) -and
-        ((ConvertTo-ComparablePath "$($_.workPath)") -eq $here)
+        ((ConvertTo-ComparablePath "$($_.workPath)" -CaseSensitive:$CaseSensitive) -ceq $here)
     })
     if ($mine.Count -eq 0) { return '' }
     # Several rows can name the same issue and folder (a restart under a new branch name); the
@@ -221,6 +243,7 @@ if ($stateDir -and $pushBranch -and $pushBranch -ne 'HEAD') {
         -Repo     $Repo `
         -Issues   @(Get-IssueNumbers $Issue) `
         -WorkPath ("$(git rev-parse --show-toplevel 2>$null)".Trim()) `
+        -CaseSensitive:([bool]$IsLinux) `
         -Branch   $pushBranch
     if ($mismatch -and -not $AllowBranchMismatch) { throw $mismatch }
     if ($mismatch) { Write-Host "AVISO: $mismatch" -ForegroundColor Yellow }

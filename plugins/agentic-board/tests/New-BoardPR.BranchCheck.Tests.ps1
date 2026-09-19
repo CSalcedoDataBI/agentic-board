@@ -46,7 +46,12 @@ Describe 'Get-RegisteredBranchMismatch (pure)' {
         Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' 'C:\r\wt' 'x/y') -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'other' | Should -Be ''
     }
     It 'several rows for the same issue and folder (a restart under a new branch name): matching ANY of them is fine' {
-        $rows = @(New-Entry 5 'issue-5-old' 'C:\r\wt'), @(New-Entry 5 'issue-5-new' 'C:\r\wt')
+        # A FLAT array of entries. `@(a), @(b)` would nest an array inside the array and the helper
+        # would only see the rows through member enumeration - assert the shape the test relies on.
+        $rows = @((New-Entry 5 'issue-5-old' 'C:\r\wt'), (New-Entry 5 'issue-5-new' 'C:\r\wt'))
+        $rows.Count           | Should -Be 2
+        $rows[0].branch       | Should -BeOfType [string]
+        $rows[0]              | Should -BeOfType [pscustomobject]
         Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'issue-5-new' | Should -Be ''
         Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'issue-5-old' | Should -Be ''
         Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'stranger'    | Should -Match 'se registro en la rama'
@@ -58,6 +63,64 @@ Describe 'Get-RegisteredBranchMismatch (pure)' {
         Get-RegisteredBranchMismatch -Entries @() -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'b' | Should -Be ''
         Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' 'C:\r\wt') -Repo 'o/r' -Issues @(5) -WorkPath '' -Branch 'b' | Should -Be ''
         Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' 'C:\r\wt') -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch '' | Should -Be ''
+    }
+}
+
+Describe 'ConvertTo-ComparablePath keeps a filesystem root and folds case only where the FS does' {
+    It 'never turns a root into an empty (or drive-relative) path' {
+        (ConvertTo-ComparablePath '/')   | Should -Not -BeNullOrEmpty
+        $drive = ConvertTo-ComparablePath 'C:\'
+        $drive | Should -Not -BeNullOrEmpty
+        $drive | Should -Not -Match '^[a-z]:$' -Because 'c: is drive-relative, c:/ is the root'
+        ConvertTo-ComparablePath 'C:/' | Should -Be $drive
+    }
+    It 'a working copy that IS a root is still checked, not silently skipped' {
+        $m = Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' 'C:/') -Repo 'o/r' -Issues @(5) -WorkPath 'C:\' -Branch 'other'
+        $m | Should -Match 'se registro en la rama'
+    }
+    It 'still trims an ordinary trailing separator' {
+        ConvertTo-ComparablePath 'C:\Repo\WT\' | Should -Be (ConvertTo-ComparablePath 'C:/repo/wt')
+    }
+    It 'folds case by default (Windows/macOS) and NOT under -CaseSensitive (Linux)' {
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' '/r/Foo') -Repo 'o/r' -Issues @(5) -WorkPath '/r/foo' -Branch 'other' | Should -Match 'se registro en la rama'
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' '/r/Foo') -Repo 'o/r' -Issues @(5) -WorkPath '/r/foo' -Branch 'other' -CaseSensitive | Should -Be ''
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' '/r/Foo') -Repo 'o/r' -Issues @(5) -WorkPath '/r/Foo' -Branch 'other' -CaseSensitive | Should -Match 'se registro en la rama'
+    }
+}
+
+Describe 'the script asks for case-sensitive paths on Linux (wiring - not observable on a Windows runner)' {
+    It 'passes -CaseSensitive:$IsLinux to Get-RegisteredBranchMismatch' {
+        (Get-Content -LiteralPath $script:Script -Raw) | Should -Match '(?s)Get-RegisteredBranchMismatch\s*`.*-CaseSensitive:\(\[bool\]\$IsLinux\)'
+    }
+}
+
+Describe 'a malformed registry row is skipped, never fatal' {
+    BeforeAll { $script:EAP = $ErrorActionPreference }
+    It 'Get-LiveSessionEntries skips a non-numeric, overflowing, zero, negative or missing sessionPid (the script runs with ErrorActionPreference=Stop)' {
+        $p = Join-Path $TestDrive 'bad-pids.json'
+        $rows = @(
+            [pscustomobject]@{ issue = 1; branch = 'a'; sessionPid = 'abc' },
+            [pscustomobject]@{ issue = 2; branch = 'b'; sessionPid = '99999999999999999999' },
+            [pscustomobject]@{ issue = 3; branch = 'c'; sessionPid = 0 },
+            [pscustomobject]@{ issue = 4; branch = 'd'; sessionPid = -5 },
+            [pscustomobject]@{ issue = 5; branch = 'e' },
+            [pscustomobject]@{ issue = 6; branch = 'f'; sessionPid = $null },
+            [pscustomobject]@{ issue = 7; branch = 'g'; sessionPid = $PID }
+        )
+        $rows | ConvertTo-Json -AsArray | Set-Content $p
+        $ErrorActionPreference = 'Stop'
+        try { $live = @(Get-LiveSessionEntries $p) } finally { $ErrorActionPreference = $script:EAP }
+        $live.Count    | Should -Be 1
+        $live[0].issue | Should -Be 7
+    }
+    It 'Get-RegisteredBranchMismatch skips a row whose issue is not a number instead of throwing' {
+        $rows = @(
+            [pscustomobject]@{ issue = 'abc'; repo = 'o/r'; branch = 'x'; workPath = 'C:\r\wt'; sessionPid = $PID },
+            (New-Entry 5 'issue-5-x' 'C:\r\wt')
+        )
+        $ErrorActionPreference = 'Stop'
+        try { $m = Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'other' } finally { $ErrorActionPreference = $script:EAP }
+        $m | Should -Match 'se registro en la rama ''issue-5-x'''
     }
 }
 
@@ -220,6 +283,15 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         $r = Invoke-Pr
         $r.Out | Should -Not -Match 'se registro en la rama'
         $r.Out | Should -Match 'no esta en el entorno USER'
+    }
+    It 'a row with a garbage sessionPid next to a real one does not take the run down: the real row still refuses' {
+        Set-Head 'other-branch'
+        $bad = [pscustomobject]@{ issue = 5; repo = 'o/r'; branch = 'issue-5-old'; workPath = $script:Repo; sessionPid = 'abc' }
+        Set-Registry @($bad, (New-Entry 5 'issue-5-x' $script:Repo))
+        $r = Invoke-Pr
+        $r.Code | Should -Be 1
+        $r.Out  | Should -Match 'se registro en la rama ''issue-5-x'''
+        $r.Out  | Should -Not -Match 'Cannot convert'
     }
     It 'no registry at all changes nothing' {
         Set-Head 'other-branch'
