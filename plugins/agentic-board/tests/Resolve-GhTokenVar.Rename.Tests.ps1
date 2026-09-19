@@ -73,7 +73,8 @@ Describe 'an unmapped owner is reported as a MAP problem, not a permissions prob
     }
     It 'never resolves an unknown owner to BUSINESS, whatever it is called' {
         foreach ($o in @('x','PAL-Devs2','Support1','PesanteAnalytic','', $null)) {
-            (Resolve-OwnerTokenVar -Owner $o).var | Should -Not -Be 'GITHUB_TOKEN_BUSINESS' -Because "'$o' is not the business account"
+            # Positive assertion: `$null | Should -Not -Be` would also pass if the call threw or returned nothing.
+            (Resolve-OwnerTokenVar -Owner $o).var | Should -Be 'GITHUB_TOKEN_PERSONAL' -Because "'$o' is not the business account"
         }
     }
 }
