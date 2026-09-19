@@ -235,6 +235,16 @@ $ErrorActionPreference = "Stop"
 
 function Get-BoardUrl([int]$num) { "https://github.com/users/$Owner/projects/$num" }
 
+# The title to SHOW for a pending item. GitHub snapshots the Projects item title (`.title`)
+# when the item joins the board and never refreshes it when the issue is renamed, so for an
+# issue or PR the live title is `.content.title`; renaming usually means the scope was
+# renegotiated, which is exactly when reading the old title misleads (#522). A draft note has
+# no content of its own, so its item title is the real one and stays the source there.
+function Get-PendingItemTitle($item) {
+    if ($item.content -and $item.content.title) { return "$($item.content.title)" }
+    return "$($item.title)"
+}
+
 # An item is PENDING when it has no Status yet, or its Status MEANS Backlog - in the
 # canonical vocabulary or in a legacy one (GitHub's default template calls it 'Todo').
 # Before #278 this compared to the literal "Backlog", so every item of a default-template
@@ -1105,6 +1115,89 @@ function Format-ClaimFingerprint {
     return "[abios-claim] $Note por sesion Claude en $Computer (PID $ProcessId) - $Date$tail"
 }
 
+# A timestamp from gh JSON as a DateTimeOffset, or $null when it cannot be read.
+# ConvertFrom-Json turns ISO-8601 strings into [datetime] on PowerShell 7, so all three
+# shapes (already-typed, string, absent) have to be accepted.
+function ConvertTo-DateTimeOffset([object]$Value) {
+    if ($null -eq $Value -or "$Value" -eq '') { return $null }
+    if ($Value -is [datetimeoffset]) { return $Value }
+    if ($Value -is [datetime])       { return [datetimeoffset]$Value }
+    $out = [datetimeoffset]::MinValue
+    if ([datetimeoffset]::TryParse("$Value", [Globalization.CultureInfo]::InvariantCulture,
+                                   [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$out)) { return $out }
+    return $null
+}
+
+# The first line of a commit message: the only part a squash-merge convention gives meaning to.
+function Get-CommitSubject([string]$Message) {
+    if (-not $Message) { return '' }
+    return (($Message -split "\r?\n")[0]).Trim()
+}
+
+# `revert(scope): ...` (conventional) or `Revert "..."` (git's own).
+function Test-RevertSubject([string]$Subject) {
+    return [bool]($Subject -match '(?i)^revert(\([^)]*\))?!?:' -or $Subject -match '^Revert\s+"')
+}
+
+# Does a commit SUBJECT cite issue $IssueNum? Two shapes count: the parenthesised `(#n)` that
+# a subject carries when the commit is about that issue, and a GitHub closing keyword
+# (`closes|fixes|resolves #n`). A bare `#n`, `Refs #n` or `Part of #n` is a cross-reference,
+# not a claim that the issue was worked, so it never counts (#502).
+function Test-SubjectCitesIssue([string]$Subject, [int]$IssueNum) {
+    if ($Subject -match "\(#$IssueNum\)") { return $true }
+    return [bool]($Subject -match "(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#$IssueNum(?!\d)")
+}
+
+# From `gh search commits` hits, the commits that really LANDED work for issue $IssueNum,
+# plus when (if ever) that work was reverted. Pure -> unit-testable against a real git log.
+#
+# Only the SUBJECT counts (#507/#502): a `(#n)` in a commit BODY is prose - a changelog list,
+# a "deferred" note, a Co-authored trailer - and a squash-merge body is full of them.
+# A revert (#471) is the strongest evidence AGAINST integration, so a revert subject never
+# counts as landed work; it also retires the work it undoes - the commit it names
+# (`This reverts commit <sha>`) and any citing commit that is not newer than it. When the
+# order cannot be established (a missing date, or a tie) the citing commit is KEPT: an unreadable
+# or equal timestamp can only preserve the refusal, never lift it.
+# -Truncated says the search hit its result cap: a landed commit may then be missing from $Hits
+# while its revert is present, so a revert must not be trusted to mean "nothing landed" and is
+# counted like any citing commit (the refusal the guard always gave).
+# Returns @{ commits = @({sha}); revertedAt = [datetimeoffset] or $null }.
+function Select-IssueCitingCommits {
+    param([object[]]$Hits = @(), [int]$IssueNum, [switch]$Truncated)
+    $landed = @(); $reverts = @(); $revertedShas = @()
+    foreach ($h in @($Hits)) {
+        $msg     = "$($h.commit.message)"
+        $subject = Get-CommitSubject $msg
+        if (Test-RevertSubject $subject) {
+            foreach ($m in [regex]::Matches($msg, '(?i)this reverts commit ([0-9a-f]{7,40})')) {
+                $revertedShas += $m.Groups[1].Value.ToLowerInvariant()
+            }
+            if (Test-SubjectCitesIssue $subject $IssueNum) { $reverts += $h }
+            continue
+        }
+        if (Test-SubjectCitesIssue $subject $IssueNum) { $landed += $h }
+    }
+    if ($Truncated -and $reverts.Count -gt 0) { $landed += $reverts; $reverts = @() }
+
+    $newestRevert = $null
+    foreach ($r in $reverts) {
+        $d = ConvertTo-DateTimeOffset $(if ($r.commit.committer.date) { $r.commit.committer.date } else { $r.commit.author.date })
+        if ($null -ne $d -and ($null -eq $newestRevert -or $d -gt $newestRevert)) { $newestRevert = $d }
+    }
+
+    $kept = @($landed | Where-Object {
+        $sha = "$($_.sha)".ToLowerInvariant()
+        foreach ($rs in $revertedShas) { if ($sha.StartsWith($rs)) { return $false } }
+        if ($null -eq $newestRevert) { return $true }
+        $d = ConvertTo-DateTimeOffset $(if ($_.commit.committer.date) { $_.commit.committer.date } else { $_.commit.author.date })
+        return ($null -eq $d -or $d -ge $newestRevert)
+    })
+    return [pscustomobject]@{
+        commits    = @($kept | ForEach-Object { [pscustomobject]@{ sha = $_.sha } })
+        revertedAt = $newestRevert
+    }
+}
+
 # Decide whether an issue already has landed/active work that -Start should refuse,
 # EVEN with no [abios-claim] comment (issue #236: a session can merge to main without
 # posting a formal claim, and the assignee is always the shared bot owner). Pure ->
@@ -1114,8 +1207,18 @@ function Format-ClaimFingerprint {
 # integrated commit means the work is DONE; an OPEN PR means a session is mid-flight.
 # CLOSED-unmerged PRs are ignored so an abandoned attempt never blocks a fresh start.
 function Get-PriorWorkRefusal {
-    param([object[]]$Prs = @(), [object[]]$Commits = @())
-    $merged = @($Prs | Where-Object { $_.state -eq 'MERGED' })
+    param([object[]]$Prs = @(), [object[]]$Commits = @(), [object]$RevertedAt = $null)
+    # A MERGED PR whose merge a later revert commit (citing the issue) undid is not landed
+    # work any more (#471). Only a PR with a KNOWN mergedAt older than the revert is set
+    # aside; a PR with no timestamp still counts, so an unreadable date can only keep the
+    # refusal, never lift it.
+    $revertedAtDto = ConvertTo-DateTimeOffset $RevertedAt
+    $merged = @($Prs | Where-Object {
+        if ($_.state -ne 'MERGED') { return $false }
+        if ($null -eq $revertedAtDto) { return $true }
+        $at = ConvertTo-DateTimeOffset $_.mergedAt
+        return ($null -eq $at -or $at -ge $revertedAtDto)
+    })
     if ($merged.Count -gt 0) {
         return "ya tiene un PR MERGED (#$($merged[0].number)) - el trabajo ya esta en la rama por defecto"
     }
@@ -1137,7 +1240,8 @@ function Get-PriorWorkRefusal {
 # Wrapped so Invoke-IssueStart's PR/commit-aware refusal is unit-testable via a mock.
 function Get-IssueLinkedWork {
     param([string]$Repo, [int]$IssueNum)
-    $prs = @(); $commits = @()
+    $prs = @(); $commits = @(); $revertedAt = $null
+    $commitSearchLimit = 100   # one API page; the search ranks by relevance, so the cap can drop old hits
     $rp = $Repo -split '/'
     try {
         $data = Invoke-Gh -GhArgs @('api','graphql','-f','query=
@@ -1145,23 +1249,25 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){
     issue(number:$n){
       closedByPullRequestsReferences(first:10, includeClosedPrs:true){
-        nodes { number state }
+        nodes { number state mergedAt }
       }
     }
   }
 }','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$IssueNum") -What "leer los PRs de #$IssueNum" -Graphql
         $prs = @($data.data.repository.issue.closedByPullRequestsReferences.nodes)
     } catch { }
-    # GitHub commit search indexes the DEFAULT branch. Filter to the exact (#n) token
-    # so #12 never matches #123 (substring search would).
+    # GitHub commit search indexes the DEFAULT branch. The search matches the number
+    # anywhere in the message, so the hits are filtered to the ones whose SUBJECT cites
+    # the exact issue (#12 never matches #123) and reverts are set aside - see
+    # Select-IssueCitingCommits for why the body and reverts do not count.
     try {
-        $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit','20') `
+        $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit',"$commitSearchLimit") `
                           -What "buscar commits de #$IssueNum" -Json
-        $rx = "\(#$IssueNum\)"
-        $commits = @($hits | Where-Object { $_.commit.message -match $rx } |
-                     ForEach-Object { [pscustomobject]@{ sha = $_.sha } })
+        $sel = Select-IssueCitingCommits -Hits @($hits) -IssueNum $IssueNum -Truncated:(@($hits).Count -ge $commitSearchLimit)
+        $commits    = @($sel.commits)
+        $revertedAt = $sel.revertedAt
     } catch { }
-    return [pscustomobject]@{ prs = $prs; commits = $commits }
+    return [pscustomobject]@{ prs = $prs; commits = $commits; revertedAt = $revertedAt }
 }
 
 # Where an issue's worktree lives: <parent>/<repo>--worktrees/issue-<n>. Pure ->
@@ -1416,7 +1522,7 @@ function Invoke-IssueStart {
     # issue is already worked - refuse so a second session cannot clobber landed work.
     if (-not $TakeOver) {
         $linked = Get-IssueLinkedWork $repo $IssueNum
-        $priorReason = Get-PriorWorkRefusal -Prs $linked.prs -Commits $linked.commits
+        $priorReason = Get-PriorWorkRefusal -Prs $linked.prs -Commits $linked.commits -RevertedAt $linked.revertedAt
         if ($priorReason) {
             $result.skipped = "YA TRABAJADO: $priorReason"
             Write-Host "  SKIP #${IssueNum}: $($result.skipped)" -ForegroundColor Red
@@ -1545,6 +1651,36 @@ function Resolve-LaunchBrake {
     return $true    # default: brake for every fleet/launch session (#598)
 }
 
+# How the session briefing NAMES a plugin script so the session can run it (#480).
+# The briefing used to hard-code `plugins/agentic-board/scripts/<name>`, a path relative to the
+# session's working directory that exists in exactly one repository - this one. In every
+# consumer project the four commands pointed at nothing, the session improvised a bare
+# `gh pr create`, and the review gate never ran.
+#   1. The session's own working copy carries the plugin (this repo, or one that vendors it):
+#      keep the relative form. It resolves from the session's cwd exactly as before and runs
+#      the branch's own copy of the script.
+#   2. Anywhere else: the copy of the script sitting next to the one that is composing the
+#      briefing - the same install, so it exists by construction. Forward slashes (safe for pwsh
+#      on Windows), quoted only when the path has whitespace.
+#   3. Neither exists: say so (found = $false) so the briefing can report it instead of naming a
+#      path that leads nowhere.
+# The absolute form embeds the install's directory, which is version-pinned for a marketplace
+# install; that directory stays on disk while the session that was handed it runs.
+function Resolve-BriefingScriptRef {
+    param([string]$Name, [string]$WorkPath, [string]$ScriptsDir)
+    $rel = "plugins/agentic-board/scripts/$Name"
+    if ($WorkPath -and (Test-Path -LiteralPath (Join-Path $WorkPath $rel))) {
+        return [pscustomobject]@{ ref = $rel; found = $true }
+    }
+    $abs = if ($ScriptsDir) { Join-Path $ScriptsDir $Name } else { '' }
+    if ($abs -and (Test-Path -LiteralPath $abs)) {
+        $p = $abs -replace '\\', '/'
+        if ($p -match '\s') { $p = '"' + $p + '"' }
+        return [pscustomobject]@{ ref = $p; found = $true }
+    }
+    return [pscustomobject]@{ ref = $rel; found = $false }
+}
+
 # The one-line first message a spawned Claude session receives. Pure -> testable.
 # -Cli is threaded (default 'claude') so Phase-2 adapters can specialize the leading
 # autonomy sentence per CLI without another signature change; Phase 1 keeps the
@@ -1556,6 +1692,10 @@ function Resolve-LaunchBrake {
 # condition. A session that merged to main was obeying its brief, not defying it. With the
 # brake on, the merge step is never emitted and the finish line moves to a reviewed PR.
 # -BriefFile is the other half: it hands the session the expert brief it was never given.
+#
+# -ScriptsDir is where the plugin scripts live; it defaults to THIS script's own folder, so a
+# briefing names scripts that exist on the machine that composed it (#480). A parameter so a test
+# can point it at a folder that lacks a script.
 function Get-SessionBriefing {
     param(
         [int]$issueNum,
@@ -1564,11 +1704,33 @@ function Get-SessionBriefing {
         [string]$workPath,
         [string]$Cli = 'claude',
         [switch]$StopAtPR,
-        [string]$BriefFile = ''
+        [string]$BriefFile = '',
+        [string]$ScriptsDir = ''
     )
+    if (-not $ScriptsDir) { $ScriptsDir = $PSScriptRoot }
+    # Every plugin script the briefing names, resolved so the session can actually run it.
+    $needed = @('Fleet-Findings', 'Fleet-Handoff', 'Fleet-Ownership', 'New-BoardPR', 'Board-ReviewGate')
+    if (-not $StopAtPR) { $needed += 'Board-Merge' }
+    $sc = @{}; $unreachable = @()
+    foreach ($n in $needed) {
+        $r = Resolve-BriefingScriptRef -Name "$n.ps1" -WorkPath $workPath -ScriptsDir $ScriptsDir
+        $sc[$n] = $r.ref
+        if (-not $r.found) { $unreachable += "$n.ps1" }
+    }
+    # An unreachable script must be REPORTED, not routed around: a session that could not find
+    # New-BoardPR.ps1 used to improvise a bare `gh pr create`, losing the identity resolution,
+    # the push-permission check and the credential helper, and skipped the review gate without
+    # anyone being told (#480). The standing sentence covers a script that exists but fails.
+    $noSubstitute = "If a script named here is missing or fails to run, STOP and report exactly which one and why - " +
+                    "do NOT replace New-BoardPR.ps1 with a bare 'gh pr create' and do NOT skip the review gate: " +
+                    "they carry the account check and the review, and a substitute drops both silently. "
+    if ($unreachable.Count -gt 0) {
+        $noSubstitute = "WARNING - these plugin scripts were NOT found on this machine: " + ($unreachable -join ', ') +
+                        ". Report that as a broken install before doing anything else. " + $noSubstitute
+    }
     # Steps after the review gate are renumbered so the brake never leaves a hole at (5).
     $mergeStep = if ($StopAtPR) { "" } else {
-        "(5) merge it (ruleset-safe): pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR <pr> ; "
+        "(5) merge it (ruleset-safe): pwsh $($sc['Board-Merge']) -PR <pr> ; "
     }
     $recordNum = if ($StopAtPR) { "(5)" } else { "(6)" }
     $closing = if ($StopAtPR) {
@@ -1589,21 +1751,22 @@ function Get-SessionBriefing {
             "Pick up GitHub issue #$issueNum in $repo. It is already In Progress and claimed, " +
             "on branch $branch in this worktree ($workPath). " +
             "FIRST load fleet coordination context so you collaborate with sibling sessions: " +
-            "read prior findings with 'pwsh plugins/agentic-board/scripts/Fleet-Findings.ps1 -List' ; " +
-            "inherit any upstream hand-off with 'pwsh plugins/agentic-board/scripts/Fleet-Handoff.ps1 -Context -Issue $issueNum' ; " +
+            "read prior findings with 'pwsh $($sc['Fleet-Findings']) -List' ; " +
+            "inherit any upstream hand-off with 'pwsh $($sc['Fleet-Handoff']) -Context -Issue $issueNum' ; " +
             "and once you know which files you will edit, claim them with " +
-            "'pwsh plugins/agentic-board/scripts/Fleet-Ownership.ps1 -Claim -Issue $issueNum -Branch $branch -Paths <files>' " +
+            "'pwsh $($sc['Fleet-Ownership']) -Claim -Issue $issueNum -Branch $branch -Paths <files>' " +
             "(if it warns of overlap with another live session, steer clear of those files). Then: " +
             "(1) read it with: gh issue view $issueNum --repo $repo ; " +
             "(2) implement it fully in this worktree and commit your changes ; " +
-            "(3) open the PR with: pwsh plugins/agentic-board/scripts/New-BoardPR.ps1 -Issue $issueNum " +
+            "(3) open the PR with: pwsh $($sc['New-BoardPR']) -Issue $issueNum " +
             "and note the PR number it prints ; " +
-            "(4) pass the review gate: pwsh plugins/agentic-board/scripts/Board-ReviewGate.ps1 -PR <pr> ; " +
+            "(4) pass the review gate: pwsh $($sc['Board-ReviewGate']) -PR <pr> ; " +
             "address any feedback and re-run until it is green ; " +
             $mergeStep +
             "$recordNum record what you learned for other sessions with " +
-            "'pwsh plugins/agentic-board/scripts/Fleet-Findings.ps1 -Add -Issue $issueNum -Status done -Files <files touched> -Decisions <key decisions> -Gotchas <pitfalls>' " +
-            "and free your files with 'pwsh plugins/agentic-board/scripts/Fleet-Ownership.ps1 -Release -Issue $issueNum' . " +
+            "'pwsh $($sc['Fleet-Findings']) -Add -Issue $issueNum -Status done -Files <files touched> -Decisions <key decisions> -Gotchas <pitfalls>' " +
+            "and free your files with 'pwsh $($sc['Fleet-Ownership']) -Release -Issue $issueNum' . " +
+            $noSubstitute +
             "Work ONLY this issue - never touch other worktrees or issues. " + $closing)
 }
 
@@ -3288,11 +3451,11 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
             Write-Host ("  [draft]  {0}" -f $p.title) -ForegroundColor DarkYellow
             Write-Host  "           (nota draft - conviertela a issue real con /board fill antes de trabajarla)" -ForegroundColor DarkGray
         } elseif (@($p.labels) -contains "blocked") {
-            Write-Host ("  #{0,-4} [BLOCKED] {1}" -f $p.content.number, $p.title) -ForegroundColor Red
+            Write-Host ("  #{0,-4} [BLOCKED] {1}" -f $p.content.number, (Get-PendingItemTitle $p)) -ForegroundColor Red
             Write-Host  "        bloqueado por una dependencia - no se puede empezar (quita el label 'blocked' al desbloquearse)" -ForegroundColor DarkGray
         } else {
             $repo = $p.content.repository
-            Write-Host ("  #{0,-4} {1}" -f $p.content.number, $p.title) -ForegroundColor Yellow
+            Write-Host ("  #{0,-4} {1}" -f $p.content.number, (Get-PendingItemTitle $p)) -ForegroundColor Yellow
             Write-Host ("        {0} | Size {1} | {2} | {3}" -f $prio, $size, $type, $repo) -ForegroundColor DarkGray
         }
     }
