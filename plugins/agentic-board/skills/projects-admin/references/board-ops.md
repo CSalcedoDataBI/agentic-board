@@ -65,7 +65,8 @@ on create — the preset script fixes them afterward via GraphQL, preserving opt
 **Language rule:** board artifacts (Status/Type/labels) are in **English** by default —
 universal, GitHub-native, and consistent with the commits-in-English convention. The
 conversation with the user stays in their language. Use `-Lang es` only when the user
-explicitly wants a Spanish board (it creates `Estado` etc. as new fields).
+explicitly wants a Spanish board (it creates `Prioridad`, `Tamaño`, `Tipo`, … and reuses the built-in
+`Status` instead of adding `Estado` beside it; the whole suite reads either vocabulary).
 
 **Status** (order + colors) — a change flows left to right; Blocked is a side state:
 

@@ -169,6 +169,22 @@ function Select-PluginVersionFile {
     return $u[0]
 }
 
+# The field names come from the shared vocabulary (#671): the board's type field is 'Type' on older
+# boards, 'Task Type' on ones the English preset made (GitHub reserves 'Type'), 'Tipo' in Spanish.
+. (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
+
+# The changelog TYPE of one board item, read from its single-select field values whatever the board
+# calls the type field, and normalised to the canonical option name (a Spanish board's 'Funcionalidad'
+# is 'Feature'). $null when the item has no type. Pure (#671).
+function Get-ItemTypeName {
+    param([object[]]$FieldValueNodes)
+    foreach ($name in (Get-BoardFieldNames 'Type')) {
+        $fv = @($FieldValueNodes) | Where-Object { $_ -and $_.field.name -eq $name } | Select-Object -First 1
+        if ($fv -and $fv.name) { return (Get-CanonicalSynonym 'Type' $fv.name) }
+    }
+    return $null
+}
+
 # Dot-source guard: with $env:ABIOS_CHANGELOG_DOTSOURCE set, return after defining the pure
 # helpers WITHOUT reading gh/the board — lets the tests exercise Update-ChangelogText directly.
 if ($env:ABIOS_CHANGELOG_DOTSOURCE) { return }
@@ -322,7 +338,7 @@ foreach ($n in $nodes) {
         if ($closed -lt $sinceDt) { $skippedOld++; continue }
     }
 
-    $type   = ($n.fieldValues.nodes | Where-Object { $_.field.name -eq 'Type' }).name
+    $type   = Get-ItemTypeName $n.fieldValues.nodes
     $labels = @($c.labels.nodes.name | Where-Object { $_ } | ForEach-Object { $_.ToLower() })
     $sec    = Resolve-Section $type $labels
     $sections[$sec] += "- **$($c.title)** (#$($c.number))"

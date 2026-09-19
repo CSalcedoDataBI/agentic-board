@@ -143,6 +143,26 @@ query($owner:String!, $num:Int!) {
 function Get-Field($name) { $allFields | Where-Object { $_.name -eq $name } }
 function Get-Opt($field, $optName) { ($field.options | Where-Object { $_.name -eq $optName }).id }
 
+# The board's fields this script writes, resolved through the field vocabulary (#671): 'Type' may be
+# called 'Task Type' (what the English preset creates, GitHub reserving 'Type') or 'Tipo', and a board
+# born from the Spanish preset calls all of them something else. A field the board does not have comes
+# back $null - and is REPORTED by the caller, never skipped in silence. Pure.
+function Get-FillFields {
+    param([object[]]$AllFields)
+    $map = [ordered]@{}
+    foreach ($k in @('Status', 'Priority', 'Size', 'Type')) { $map[$k] = Find-BoardField -Key $k -Fields $AllFields }
+    return $map
+}
+
+# One item's value of a resolved field: the field-value node whose field is THIS board's field, or
+# $null. Matching by the live field name (not a literal 'Type') is what lets 'Task Type' and 'Tipo'
+# read as the type. Pure.
+function Get-FillFieldValue {
+    param([object[]]$FieldValues, [object]$Node)
+    if (-not $Node) { return $null }
+    return @($FieldValues) | Where-Object { $_ -and $_.field.name -eq $Node.name } | Select-Object -First 1
+}
+
 # Resolve a CANONICAL option to whatever the board actually calls it: the canonical
 # name first, then its legacy aliases (issue #278). Before this, each lookup hard-coded
 # one literal name and the two vocabularies were mixed in one script - Status wanted
@@ -320,7 +340,17 @@ $allFields = $projNode.fields.nodes | Where-Object { $_.name }
 
 # Every option is resolved by its CANONICAL name with a legacy fallback (Resolve-Opt),
 # so a canonical board AND a default-template one ('Todo', 'P2 Medium') both fill.
-$statusNode = Get-Field "Status"
+$fillFields = Get-FillFields $allFields
+$fillCoverage = Get-BoardFieldCoverage -Keys @('Status', 'Priority', 'Size', 'Type') -Fields $allFields
+if ($fillCoverage.NoneFound) {
+    # The false all-clear #509 reported: a board whose fields carry other names made this run print
+    # only the assignee gap and read like "almost complete".
+    Write-Host ("ATENCION: el board #{0} no tiene NINGUNO de los campos que lleno (Status/Estado, Priority/Prioridad, Size/Tamano, Type/Task Type/Tipo). NO puedo llenar ni verificar Status, Priority, Size ni Type: corre /board field apply -Number {0} -Owner {1}." -f $ProjectNum, $Owner) -ForegroundColor Red
+} elseif ($fillCoverage.Missing.Count) {
+    Write-Host ("WARN el board no tiene: {0}. Esos campos no se llenan ni se verifican." -f ($fillCoverage.Missing -join ', ')) -ForegroundColor DarkYellow
+}
+
+$statusNode = $fillFields.Status
 $statusId   = $statusNode.id
 $doneId     = (Resolve-Opt $statusNode "Status" "Done").id
 $inProgId   = (Resolve-Opt $statusNode "Status" "In Progress").id
@@ -328,17 +358,17 @@ $backlogOpt = Resolve-Opt $statusNode "Status" "Backlog"        # 'Backlog', or 
 $backlogId  = $backlogOpt.id
 $reviewId   = (Resolve-Opt $statusNode "Status" "In Review").id # optional (from the field preset); falls back to In Progress
 
-$prioNode   = Get-Field "Priority"
+$prioNode   = $fillFields.Priority
 $prioId     = $prioNode.id
 $prioMedOpt = Resolve-Opt $prioNode "Priority" "P2"             # 'P2', or a template board's 'P2 Medium'
 $prioMedId  = $prioMedOpt.id
 
-$sizeNode   = Get-Field "Size"
+$sizeNode   = $fillFields.Size
 $sizeId     = $sizeNode.id
 $sizeMOpt   = Resolve-Opt $sizeNode "Size" "M"
 $sizeMId    = $sizeMOpt.id
 
-$typeNode   = Get-Field "Type"
+$typeNode   = $fillFields.Type                                  # 'Type', 'Task Type' or 'Tipo' - whichever the board has
 $typeId     = $typeNode.id
 
 # ── 1.5. Resolve repo ID (needed for draft conversion) ────────────────────────
@@ -400,11 +430,11 @@ foreach ($item in $items) {
 
     $fv = $item.fieldValues.nodes
     $assigneeCount  = $c.assignees.nodes.Count
-    $currentStatus  = ($fv | Where-Object { $_.field.name -eq "Status"   }).optionId
-    $currentPrio    = ($fv | Where-Object { $_.field.name -eq "Priority" }).optionId
-    $currentSize    = ($fv | Where-Object { $_.field.name -eq "Size"     }).optionId
-    $currentType    = ($fv | Where-Object { $_.field.name -eq "Type"     }).optionId
-    $currentStatusN = ($fv | Where-Object { $_.field.name -eq "Status"   }).name
+    $currentStatus  = (Get-FillFieldValue $fv $statusNode).optionId
+    $currentPrio    = (Get-FillFieldValue $fv $prioNode).optionId
+    $currentSize    = (Get-FillFieldValue $fv $sizeNode).optionId
+    $currentType    = (Get-FillFieldValue $fv $typeNode).optionId
+    $currentStatusN = (Get-FillFieldValue $fv $statusNode).name
 
     # Only CLOSING references count (willCloseTarget). A textual "#<n>" mention in a PR body is
     # also a CROSS_REFERENCED_EVENT — counting those falsely moved untouched issues to Done, and
@@ -432,15 +462,15 @@ foreach ($item in $items) {
     }
     elseif (-not $currentStatus -and $backlogId)                       { $targetStatus=$backlogId; $targetStatusN="$($backlogOpt.name) (sin PR)" }
     if ($targetStatus) {
-        $changes += [PSCustomObject]@{ Type="single"; FieldId=$statusId; TargetId=$targetStatus; Display="Status [$currentStatusN] -> $targetStatusN" }
+        $changes += [PSCustomObject]@{ Type="single"; FieldId=$statusId; TargetId=$targetStatus; Display="$($statusNode.name) [$currentStatusN] -> $targetStatusN" }
     }
 
     if (-not $currentPrio -and $prioMedId) {
-        $changes += [PSCustomObject]@{ Type="single"; FieldId=$prioId; TargetId=$prioMedId; Display="Priority vacio -> $($prioMedOpt.name)" }
+        $changes += [PSCustomObject]@{ Type="single"; FieldId=$prioId; TargetId=$prioMedId; Display="$($prioNode.name) vacio -> $($prioMedOpt.name)" }
     }
 
     if (-not $currentSize -and $sizeMId) {
-        $changes += [PSCustomObject]@{ Type="single"; FieldId=$sizeId; TargetId=$sizeMId; Display="Size vacio -> $($sizeMOpt.name)" }
+        $changes += [PSCustomObject]@{ Type="single"; FieldId=$sizeId; TargetId=$sizeMId; Display="$($sizeNode.name) vacio -> $($sizeMOpt.name)" }
     }
 
     if (-not $currentType -and $typeId) {
@@ -449,9 +479,10 @@ foreach ($item in $items) {
         elseif ($labels -contains "docs")     { $detectedType = "Docs" }
         elseif ($labels -contains "refactor") { $detectedType = "Refactor" }
         elseif ($labels -contains "chore")    { $detectedType = "Chore" }
-        $typeOptId = Get-Opt $typeNode $detectedType
+        $typeOpt = Find-FieldOption -Options $typeNode.options -Key 'Type' -Value $detectedType   # 'Feature', or a Spanish board's 'Funcionalidad'
+        $typeOptId = $typeOpt.id
         if ($typeOptId) {
-            $changes += [PSCustomObject]@{ Type="single"; FieldId=$typeId; TargetId=$typeOptId; Display="Type vacio -> $detectedType" }
+            $changes += [PSCustomObject]@{ Type="single"; FieldId=$typeId; TargetId=$typeOptId; Display="$($typeNode.name) vacio -> $($typeOpt.name)" }
         }
     }
 
@@ -469,7 +500,12 @@ foreach ($item in $items) {
 
 # ── 5. Print plan ─────────────────────────────────────────────────────────────
 if ($plan.Count -eq 0) {
-    Write-Host "Board completo. Sin gaps detectados." -ForegroundColor Green
+    if ($fillCoverage.Missing.Count) {
+        # Not "complete": the fields the board does not have were never checked (#509).
+        Write-Host ("Sin gaps en los campos que pude leer, pero NO verifique: {0} (el board no los tiene)." -f ($fillCoverage.Missing -join ', ')) -ForegroundColor Yellow
+    } else {
+        Write-Host "Board completo. Sin gaps detectados." -ForegroundColor Green
+    }
     Write-Host "NOTA: Linked PRs y Sub-issues progress son columnas del sistema, no escribibles via API."
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan

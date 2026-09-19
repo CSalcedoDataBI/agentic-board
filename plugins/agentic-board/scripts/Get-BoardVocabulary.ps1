@@ -152,3 +152,166 @@ function Get-LegacyOptionMerges {
         }
     }
 }
+
+# ── Field NAMES (#671) ────────────────────────────────────────────────────────
+# The option map above answers "what does this OPTION mean". This answers the question one level up,
+# which had no single answer: "what is this FIELD called on THIS board". Every script spelled the
+# name by hand ('Type' in five of them), so:
+#   - GitHub now RESERVES the field name 'Type' ("Name cannot have a reserved value"): the English
+#     preset could not create it on a fresh board, and the preset alone cannot be renamed without
+#     the five scripts losing the field;
+#   - a board made with the Spanish preset (Estado/Prioridad/Tamano/Tipo/Area/Estimado/Objetivo) was
+#     invisible to Board-Fill and Board-Triage, which then "succeeded" over blank columns (#509);
+#   - a board created before the reservation still has a working 'Type' field that must keep working.
+# So callers ask for a KEY ('Type') and the board answers with whatever it calls it. Names are listed
+# in PREFERENCE order: when a board carries two, the first wins, and an existing 'Type' outranks the
+# 'Task Type' the English preset now creates. Accented names are built from code points so this file
+# parses the same on Windows PowerShell 5.1 whatever its encoding.
+$script:AbiosFieldNames = [ordered]@{
+    Status   = @('Status', 'Estado')
+    Priority = @('Priority', 'Prioridad')
+    Size     = @('Size', ('Tama' + [char]0x00F1 + 'o'), 'Tamano')
+    Type     = @('Type', 'Task Type', 'Tipo')
+    Area     = @('Area', ([string][char]0x00C1 + 'rea'))
+    Estimate = @('Estimate', 'Estimado')
+    Target   = @('Target', 'Objetivo')
+}
+
+# The field-name KEYS the suite knows, in a stable order.
+function Get-BoardFieldKeys { @($script:AbiosFieldNames.Keys) }
+
+# Every name a key may carry on a board, in preference order; @() for a key this tool has no opinion about.
+function Get-BoardFieldNames([string]$Key) {
+    if ($Key -and $script:AbiosFieldNames.Contains($Key)) { @($script:AbiosFieldNames[$Key]) } else { @() }
+}
+
+# The key a field NAME belongs to ('Tipo' -> 'Type'), or $null for a name that is not part of the
+# vocabulary. Case-insensitive.
+function Get-BoardFieldKey([string]$Name) {
+    if (-not $Name) { return $null }
+    foreach ($k in $script:AbiosFieldNames.Keys) {
+        if (@($script:AbiosFieldNames[$k]) -contains $Name) { return $k }
+    }
+    return $null
+}
+
+# The name THIS board uses for a key: the first accepted name present in $Available (the board's field
+# names), or $null when it has none of them. A key outside the vocabulary is looked up by its own name.
+function Resolve-BoardFieldName {
+    param([string]$Key, [string[]]$Available)
+    $names = @(Get-BoardFieldNames $Key)
+    if ($names.Count -eq 0) { $names = @($Key) }
+    foreach ($n in $names) {
+        if (@($Available) -contains $n) { return @($Available) | Where-Object { $_ -eq $n } | Select-Object -First 1 }
+    }
+    return $null
+}
+
+# The live field OBJECT (anything with a .name) that carries a key on this board, or $null.
+function Find-BoardField {
+    param([string]$Key, [object[]]$Fields)
+    $live = Resolve-BoardFieldName -Key $Key -Available @(@($Fields) | Where-Object { $_ } | ForEach-Object { $_.name })
+    if (-not $live) { return $null }
+    return @($Fields) | Where-Object { $_ -and $_.name -eq $live } | Select-Object -First 1
+}
+
+# Which of the given keys resolve on this board, and which do not. Callers use the second list to
+# WARN: a script that silently finds none of its fields and reports a clean run is the #509 failure.
+function Get-BoardFieldCoverage {
+    param([string[]]$Keys, [object[]]$Fields)
+    $found = @(); $missing = @()
+    foreach ($k in $Keys) { if (Find-BoardField -Key $k -Fields $Fields) { $found += $k } else { $missing += $k } }
+    [pscustomobject]@{ Found = @($found); Missing = @($missing); NoneFound = ($found.Count -eq 0 -and @($Keys).Count -gt 0) }
+}
+
+# A comparison key that survives every way a field name gets rewritten on its way to a JSON property:
+# accents folded, everything but letters and digits dropped, lower-cased. 'Task Type', 'task type' and
+# 'taskType' all become 'tasktype'; 'Area' with an accent becomes 'area'.
+function ConvertTo-FieldMatchKey([string]$Name) {
+    if (-not $Name) { return '' }
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $Name.Normalize([System.Text.NormalizationForm]::FormD).ToCharArray()) {
+        if ([System.Globalization.CharUnicodeInfo]::GetUnicodeCategory($ch) -ne [System.Globalization.UnicodeCategory]::NonSpacingMark) { [void]$sb.Append($ch) }
+    }
+    return ($sb.ToString() -replace '[^A-Za-z0-9]', '').ToLowerInvariant()
+}
+
+# Read one field's value off a `gh project item-list` row. gh keys the row by a rewrite of the field
+# name (lower-cased, spaces kept: 'linked pull requests'), and the old lookup assumed a different
+# rewrite (spaces stripped), which would have missed 'Task Type'. Comparing by ConvertTo-FieldMatchKey
+# makes the read independent of the rewrite. $null when the item has no such property.
+function Get-ItemFieldValue {
+    param([object]$Item, [string]$FieldName)
+    if (-not $Item -or -not $FieldName) { return $null }
+    $want = ConvertTo-FieldMatchKey $FieldName
+    foreach ($p in $Item.PSObject.Properties) {
+        if ((ConvertTo-FieldMatchKey $p.Name) -eq $want) { return $p.Value }
+    }
+    return $null
+}
+
+# The value of a KEY out of a { field name -> value } table (what Fleet-Plan builds from an item's
+# field values), whatever the board calls the field.
+function Get-ValueByFieldKey {
+    param([hashtable]$ByName, [string]$Key)
+    $live = Resolve-BoardFieldName -Key $Key -Available @($ByName.Keys)
+    if ($live) { return $ByName[$live] }
+    return $null
+}
+
+# Option SYNONYMS for lookups only (Fill/Triage/Changelog resolving a name to an option). Deliberately a
+# separate table from $script:AbiosOptionAliases: those aliases drive RENAMES and MERGES, and nothing
+# here may make Apply-FieldPreset rewrite a Spanish board's options into English ones.
+$script:AbiosOptionSynonyms = @{
+    Type = @{
+        Feature     = @('Funcionalidad')
+        Improvement = @('Mejora')
+        Chore       = @('Tarea')
+    }
+}
+
+# The names a canonical option may carry on a board: the canonical name first, then its synonyms.
+function Get-OptionSynonymNames([string]$Key, [string]$Canonical) {
+    $names = @($Canonical)
+    if ($script:AbiosOptionSynonyms.ContainsKey($Key) -and $script:AbiosOptionSynonyms[$Key].ContainsKey($Canonical)) {
+        $names += @($script:AbiosOptionSynonyms[$Key][$Canonical])
+    }
+    @($names)
+}
+
+# The canonical name an option name stands for ('Funcionalidad' -> 'Feature'); the name itself when it
+# is not a known synonym, so an unknown option passes through unchanged rather than being guessed at.
+function Get-CanonicalSynonym([string]$Key, [string]$Name) {
+    if ($Key -and $Name -and $script:AbiosOptionSynonyms.ContainsKey($Key)) {
+        foreach ($canon in $script:AbiosOptionSynonyms[$Key].Keys) {
+            if ($canon -eq $Name -or @($script:AbiosOptionSynonyms[$Key][$canon]) -contains $Name) { return $canon }
+        }
+    }
+    return $Name
+}
+
+# Find the option of a single-select field that a value stands for: the exact name first, then any
+# synonym of its canonical name. $Options = objects with .id / .name. $null when none fits.
+function Find-FieldOption {
+    param([object[]]$Options, [string]$Key, [string]$Value)
+    if (-not $Value) { return $null }
+    $exact = @($Options) | Where-Object { $_ -and $_.name -eq $Value } | Select-Object -First 1
+    if ($exact) { return $exact }
+    foreach ($n in (Get-OptionSynonymNames $Key (Get-CanonicalSynonym $Key $Value))) {
+        $o = @($Options) | Where-Object { $_ -and $_.name -eq $n } | Select-Object -First 1
+        if ($o) { return $o }
+    }
+    return $null
+}
+
+# The name a PRESET field already has on a board, or $null when it has to be created. The exact name
+# counts, and so does any other name of the same key: a preset that asks for 'Task Type' is satisfied
+# by a board's existing 'Type' (creating a second type field beside it is the duplicate this exists to
+# prevent), and the Spanish preset's 'Estado' by the 'Status' every board is born with.
+function Resolve-PresetFieldName {
+    param([string]$PresetName, [string[]]$Existing)
+    if (@($Existing) -contains $PresetName) { return @($Existing) | Where-Object { $_ -eq $PresetName } | Select-Object -First 1 }
+    $key = Get-BoardFieldKey $PresetName
+    if (-not $key) { return $null }
+    return Resolve-BoardFieldName -Key $key -Available @($Existing)
+}

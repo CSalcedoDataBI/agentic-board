@@ -180,6 +180,8 @@ trap {
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 # Board reads that report their own truncation (#484).
 . (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
+# Field names (Type/Task Type/Tipo, Area/...) resolve through the vocabulary, not literals (#671).
+. (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
 
 if (-not $env:GH_TOKEN) {
     $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
@@ -224,14 +226,33 @@ $itemRead = Get-BoardItems -Number $Number -Owner $Owner `
                            -What "listar los items del board #$Number"
 $items    = $itemRead.Items
 
-function Get-FieldDef([string]$name) { $fields | Where-Object { $_.name -eq $name } | Select-Object -First 1 }
-function Get-FieldKey([string]$name) { ($name -replace '[^A-Za-z0-9]','').ToLower() }   # how item-list surfaces the value
+# The live field of THIS board for a key ('Type') or any name a board may use for it ('Task Type',
+# 'Tipo'): the field names come from Get-BoardVocabulary.ps1, never from a literal here (#671).
+function Get-FieldDef([string]$name) {
+    $key = Get-BoardFieldKey $name
+    if ($key) { return Find-BoardField -Key $key -Fields $fields }
+    $fields | Where-Object { $_.name -eq $name } | Select-Object -First 1
+}
 
-# Read one item's current triage values into a display-name-keyed hashtable.
+# Read one item's current triage values into a key-named hashtable. The row is read through the
+# vocabulary and a name-rewrite-proof lookup: the old `$item.<lowercased-stripped name>` could not
+# see 'Task Type' (gh keys the row 'task type').
 function Get-ItemTriageValues($item) {
     $h = @{}
-    foreach ($f in @('Type','Area','Estimate','Priority')) { $h[$f] = "$($item.($(Get-FieldKey $f)))" }
+    foreach ($f in @('Type','Area','Estimate','Priority')) {
+        $def = Get-FieldDef $f
+        $h[$f] = "$(Get-ItemFieldValue $item $(if ($def) { $def.name } else { $f }))"
+    }
     return $h
+}
+
+# Say it out loud when the board has none (or only some) of the triage fields, instead of letting
+# every write below print a one-line skip and the run end reading like a success (#509, #671).
+$triageCoverage = Get-BoardFieldCoverage -Keys @('Type','Area','Estimate','Priority') -Fields $fields
+if ($triageCoverage.NoneFound) {
+    Write-Host ("  ATENCION: el board #{0} no tiene NINGUNO de los campos de triage (Type/Task Type/Tipo, Area, Estimate, Priority; tambien en espanol). No se puede escribir nada: corre /board field apply -Number {0} -Owner {1}." -f $Number, $Owner) -ForegroundColor Red
+} elseif ($triageCoverage.Missing.Count) {
+    Write-Host ("  WARN el board no tiene: {0}. Esos campos se omiten (aplica /board field apply)." -f ($triageCoverage.Missing -join ', ')) -ForegroundColor DarkYellow
 }
 
 # ── Mode 1: batch view of the pending items and their triage gaps ─────────────
@@ -301,12 +322,16 @@ Write-Host ("=== Triage {0}: {1} ===" -f (Format-ItemRef $item), $item.content.t
 # Set one field on this item, picking the write flag from the field's type. Fails loud.
 function Set-ItemField([string]$name, [string]$value) {
     $fdef = Get-FieldDef $name
-    if (-not $fdef) { Write-Host ("  WARN el board no tiene el campo '{0}' - lo omito (aplica /board field apply)." -f $name) -ForegroundColor DarkYellow; return $false }
-    if ($DryRun) { Write-Host ("  DRY-RUN: {0} -> {1}" -f $name, $value) -ForegroundColor Yellow; return $true }
+    if (-not $fdef) {
+        $tried = @(Get-BoardFieldNames (Get-BoardFieldKey $name)); if (-not $tried.Count) { $tried = @($name) }
+        Write-Host ("  WARN el board no tiene el campo '{0}' (busque: {1}) - lo omito (aplica /board field apply)." -f $name, ($tried -join ', ')) -ForegroundColor DarkYellow
+        return $false
+    }
+    if ($DryRun) { Write-Host ("  DRY-RUN: {0} -> {1}" -f $fdef.name, $value) -ForegroundColor Yellow; return $true }
     $editArgs = @('project','item-edit','--project-id',$proj,'--id',$item.id,'--field-id',$fdef.id)
     if ($fdef.options) {                                   # single-select: resolve the option id
-        $opt = $fdef.options | Where-Object { $_.name -eq $value } | Select-Object -First 1
-        if (-not $opt) { Write-Host ("  WARN '{0}' no tiene la opcion '{1}' - la omito." -f $name, $value) -ForegroundColor DarkYellow; return $false }
+        $opt = Find-FieldOption -Options $fdef.options -Key (Get-BoardFieldKey $name) -Value $value
+        if (-not $opt) { Write-Host ("  WARN '{0}' no tiene la opcion '{1}' (tiene: {2}) - la omito." -f $fdef.name, $value, (($fdef.options | ForEach-Object { $_.name }) -join ', ')) -ForegroundColor DarkYellow; return $false }
         $editArgs += @('--single-select-option-id', $opt.id)
     } elseif ($fdef.dataType -eq 'NUMBER' -or $name -eq 'Estimate') {
         $editArgs += @('--number', $value)
@@ -314,7 +339,7 @@ function Set-ItemField([string]$name, [string]$value) {
         $editArgs += @('--text', $value)
     }
     $null = Invoke-Gh -GhArgs $editArgs -What "escribir $name en $(Format-ItemRef $item)" -Retries 3
-    Write-Host ("  OK  {0} -> {1}" -f $name, $value) -ForegroundColor Green
+    Write-Host ("  OK  {0} -> {1}" -f $fdef.name, $value) -ForegroundColor Green
     return $true
 }
 

@@ -93,12 +93,13 @@ Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
     }
 
     It 'does NOT print "created:" for a field the API refused' {
-        script:Get-RunOutput -LogDir $TestDrive | Should -Not -Match 'created:\s*Type'
+        # 'Task Type' is what the English preset now names its type field (#671: GitHub reserves 'Type').
+        script:Get-RunOutput -LogDir $TestDrive | Should -Not -Match 'created:\s*Task Type'
     }
 
     It 'prints a FAILED line naming the field and the reason' {
         $out = script:Get-RunOutput -LogDir $TestDrive
-        $out | Should -Match 'FAILED:\s*Type'
+        $out | Should -Match 'FAILED:\s*Task Type'
         $out | Should -Match 'reserved value'
     }
 
@@ -108,7 +109,7 @@ Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
         # behaviour. The terminating error is the real contract, and it is what makes
         # Resolve-Board warn instead of printing "preset applied" over a half-built board.
         { & $script:Script -Number 13 -Owner 'X' -Lang en -Yes *> (Join-Path $TestDrive 'throw.log') } |
-            Should -Throw -ExpectedMessage '*NO se crearon*Type*'
+            Should -Throw -ExpectedMessage '*NO se crearon*Task Type*'
     }
 
     It 'never reads $failedFields before the line that declares it (review of #672)' {
