@@ -2176,7 +2176,10 @@ function Remove-SessionRegistryEntry {
             Add-Content -LiteralPath $histPath -Encoding UTF8 -Value (([pscustomobject]$row) | ConvertTo-Json -Compress -Depth 4)
         }
     } catch { }
-    $kept | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p
+    # An EMPTY list must be written explicitly: piping @() into ConvertTo-Json emits nothing, so
+    # Set-Content never ran and the LAST entry of the registry could never be pruned (#555 - the
+    # legacy entries that finally drain are exactly the ones that used to sit there forever).
+    if (@($kept).Count -eq 0) { Set-Content -LiteralPath $p -Value '[]' } else { $kept | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p }
 }
 
 # Parse `git worktree list --porcelain` into objects. The porcelain format is a blank-line
