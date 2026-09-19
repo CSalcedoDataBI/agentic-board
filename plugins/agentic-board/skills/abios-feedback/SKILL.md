@@ -39,6 +39,22 @@ Describe ONLY the public tool — which skill/script/recipe is wrong and the cor
 - ✅ the public file (`skills/…`, `scripts/…`, `references/…`), the wrong command/flag, the right
   one, and a generic repro (e.g. "on any repo, `gh project delete` has no `--yes`").
 
+## Step 2a — Search first: is this defect already filed? (#675)
+The same defect was filed three times in a row (#654, #658, #667) and once as a month-old duplicate
+(#661). Before creating anything, run the duplicate check on the **sanitized** title and body:
+```bash
+pwsh -NoProfile -File "<plugin-root>/scripts/Find-DuplicateIssue.ps1" -Title "<sanitized title>" -Body "<sanitized body>"
+```
+It searches the tool's open issues plus those closed in the last 30 days (a recently closed twin is a
+recurrence, not a new defect) and acts on its exit code:
+- **exit 3 — probable duplicate.** Do **not** file. Show the user the listed issues; if it is the
+  same defect, add the new evidence (sanitized) as a comment on the existing one — or reopen it when it
+  was closed — after the user agrees. Only file a new issue if the user says it is genuinely different.
+- **exit 0 — nothing likely.** Go on to step 2. Issues listed as `relacionado` are worth a glance:
+  same script, different symptom.
+- **exit 2 — the search could not run.** That is **not** "no duplicates". Tell the user the check was
+  unavailable and ask before filing.
+
 ## Step 2 — Capture as a sanitized issue on the tool's own board (PRIMARY, path-independent)
 ```bash
 tok=$(powershell.exe -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL','User')" | tr -d '\r')
