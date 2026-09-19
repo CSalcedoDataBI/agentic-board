@@ -1057,6 +1057,15 @@ function Resolve-IssueBaseRef([string]$repo = "", [switch]$NoFetch) {
     return ""
 }
 
+# How many commits HEAD has that $baseRef does not. -1 = cannot be told (no base ref, or git
+# refused), which callers must read as "unknown", never as "none".
+function Get-UnintegratedCommitCount([string]$baseRef) {
+    if (-not $baseRef) { return -1 }
+    $n = git rev-list --count "$baseRef..HEAD" 2>$null
+    if ($LASTEXITCODE -ne 0 -or "$n" -notmatch '^\d+$') { return -1 }
+    return [int]$n
+}
+
 # Check out the issue branch in the CURRENT working copy (the non-worktree path: the
 # tree is clean and not parked on another issue-*). Same base discipline as the worktree
 # path (#294) - a clean working copy parked on a feature branch is not dirty and does not
@@ -1177,15 +1186,23 @@ function New-IssueWorkspace {
         } | Select-Object -First 1
     }
     $liveConflict = [bool]$conflictEntry
+    # A CLEAN tree on a feature branch that carries commits the base does not have is live
+    # work just like a dirty one: switching it in place strands that branch with no checkout
+    # (#670). Only a KNOWN count forces isolation - with no base to compare against (-BaseCurrent
+    # or an unresolvable default) the answer is unknown and the classic behaviour stands.
+    $ahead = if ($curBranch -ne $branchName) { Get-UnintegratedCommitCount $baseRef } else { 0 }
+    $carriesWork = ($ahead -gt 0)
     # Batch (-PreferWorktree) always isolates. Single start keeps the classic
     # dirty-tree / other-issue-branch guard: never switch a busy working copy.
-    $needWorktree = $PreferWorktree -or $liveConflict -or `
+    $needWorktree = $PreferWorktree -or $liveConflict -or $carriesWork -or `
                     ($dirty.Count -gt 0 -and $curBranch -ne $branchName) -or `
                     ($curBranch -and $curBranch -match '^issue-\d+' -and $curBranch -ne $branchName)
     if ($needWorktree) {
         if (-not $PreferWorktree) {
             $reason = if ($liveConflict) {
                 "otra sesion viva (issue #$($conflictEntry.issue), PID $($conflictEntry.sessionPid)) usa este mismo directorio de trabajo"
+            } elseif ($carriesWork -and $dirty.Count -eq 0 -and -not ($curBranch -match '^issue-\d+')) {
+                "la rama actual ($(if ($curBranch) { $curBranch } else { 'HEAD suelto' })) tiene $ahead commit(s) que $baseRef no tiene - es trabajo en curso"
             } else { "working tree ocupado (rama actual: $curBranch)" }
             Write-Host "  OCUPADO: $reason - uso un worktree aislado:" -ForegroundColor Yellow
         }
@@ -1434,6 +1451,9 @@ function Get-SessionBriefing {
             "task end-to-end WITHOUT stopping to ask for confirmation. " +
             "Pick up GitHub issue #$issueNum in $repo. It is already In Progress and claimed, " +
             "on branch $branch in this worktree ($workPath). " +
+            "COMMIT WITH AN EXPLICIT PATHSPEC - 'git commit -m <message> -- <paths>' - never a bare 'git commit' after 'git add': " +
+            "a bare commit takes whatever else is staged in the index, and if another session ever touches this folder your branch " +
+            "ends up carrying its files under your message. " +
             "FIRST load fleet coordination context so you collaborate with sibling sessions: " +
             "read prior findings with 'pwsh plugins/agentic-board/scripts/Fleet-Findings.ps1 -List' ; " +
             "inherit any upstream hand-off with 'pwsh plugins/agentic-board/scripts/Fleet-Handoff.ps1 -Context -Issue $issueNum' ; " +

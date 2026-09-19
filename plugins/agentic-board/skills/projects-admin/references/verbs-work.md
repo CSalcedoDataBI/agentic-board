@@ -77,8 +77,10 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
        from the current HEAD, which would drag the commits of whatever branch you were standing
        on into this issue's PR. For work that genuinely builds on the current branch, opt in with
        `-BaseCurrent` (or `-Base <ref>` for an explicit base).
-     - **Busy working copy?** If the folder has uncommitted changes or sits on another
-       `issue-*` branch (another session active), `-Branch` does NOT switch — it creates an
+     - **Busy working copy?** If the folder has uncommitted changes, sits on another
+       `issue-*` branch (another session active), or is CLEAN but stands on a feature branch that
+       carries commits the default branch lacks (live work is as busy as a dirty tree — #670),
+       `-Branch` does NOT switch — it creates an
        isolated **git worktree** `../<repo>--issue-<n>` automatically (the official
        parallel-sessions pattern) and prints `cd <path>`: CONTINUE THE WORK THERE. After the
        PR merges, clean it with `git worktree remove <path>`.
@@ -98,7 +100,13 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
        a field filled after the work is over can no longer inform a decision.
   5. **Finish with a PR + review gate — MANDATORY.** What is mandatory is that the work lands
      through a PR and a gate, NOT that each issue gets its own: a batch started at step 3b
-     finishes through one PR carrying one `Closes #<n>` per issue. When the work is done:
+     finishes through one PR carrying one `Closes #<n>` per issue. **Commit with an explicit
+     pathspec** — `git commit -m "<msg>" -- <paths>` — never `git add <paths>` followed by a bare
+     `git commit`: the bare form takes whatever else is staged in the index, so if another session
+     ever touches the same folder your commit carries its files under your message (#547).
+     `New-BoardPR.ps1` also refuses to push a branch other than the one a live session registered
+     for the issue in this working copy (`-AllowBranchMismatch` overrides on purpose). When the
+     work is done:
      a. Run `scripts/New-BoardPR.ps1 -Issue <issueNum>` — the cross-account push+PR step:
         it resolves the RIGHT account from the repo OWNER (CSalcedoDataBI → personal PAT,
         PAL-Devs → business PAT; `-TokenVar` forces one), verifies push permission, pushes
@@ -289,7 +297,8 @@ Notes:
   the session re-grounds and resumes the queue unattended. Opt-in per run and a **strict no-op**
   otherwise — no marker means the hook stays silent. Keep entries lightweight (a decision, a
   gotcha, the next step); the board remains the source of truth for per-issue **status**.
-- **Worktree mode**: when the working copy is busy (dirty tree or another `issue-*` branch),
+- **Worktree mode**: when the working copy is busy (dirty tree, another `issue-*` branch, or a
+  clean feature branch carrying commits the default branch lacks),
   `-Branch` creates/reuses an isolated worktree `../<repo>--issue-<n>` instead of switching —
   the agent must continue the work in the printed path and `git worktree remove` it after the
   merge. Same-issue re-entry in the main clone stays a plain checkout.

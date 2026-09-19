@@ -59,6 +59,12 @@
     Windows USER env var holding the PAT. Default: auto-resolved from the repo
     owner (see above). Set explicitly to force an account.
 
+.PARAMETER AllowBranchMismatch
+    Skip the check that the branch being pushed is the one a LIVE session registered for
+    these issue(s) in THIS working copy (#547). Without it a mismatch stops the run: it means
+    another session switched the branch under this one, and whatever was committed since may
+    sit on the wrong branch.
+
 .EXAMPLE
     .\New-BoardPR.ps1 -Issue 13
     .\New-BoardPR.ps1 -Issue 42 -Repo PAL-Devs/fabric-reports -Draft
@@ -75,7 +81,8 @@ param(
     [string]$Body     = "",
     [switch]$Draft,
     [switch]$DryRun,
-    [string]$TokenVar = ""
+    [string]$TokenVar = "",
+    [switch]$AllowBranchMismatch
 )
 
 $ErrorActionPreference = "Stop"
@@ -116,6 +123,57 @@ function Format-ClosesBody {
     return $closes
 }
 
+# A path in a form two spellings of the same folder compare equal in: full, forward slashes,
+# no trailing separator, case-folded (Windows). Registry paths and `git rev-parse --show-toplevel`
+# spell the same worktree differently (`C:\r\wt` vs `C:/r/wt`).
+function ConvertTo-ComparablePath {
+    param([string]$Path)
+    if (-not $Path) { return '' }
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { $full = $Path }
+    return $full.Replace('\', '/').TrimEnd('/').ToLowerInvariant()
+}
+
+# The sessions of sessions.json whose process is still alive. A dead PID is a session that ended
+# (or crashed): its entry says nothing about who holds the working copy NOW, and treating it as
+# live would make the check below fire on stale rows (#547 asks that dead PIDs never count).
+function Get-LiveSessionEntries {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return @() }
+    try { $all = @(Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json) } catch { return @() }
+    return @($all | Where-Object { $_ -and $_.sessionPid -and (Get-Process -Id ([int]$_.sessionPid) -ErrorAction SilentlyContinue) })
+}
+
+# #547: two agent sessions sharing one working copy can leave a commit on the wrong branch, and
+# nothing said so until the PR. The session that started the issue REGISTERED the branch it was
+# given; if the branch about to be pushed is a different one, someone switched it under that
+# session. Returns the refusal text, or '' when there is nothing to object to. Pure over its
+# inputs. Only an entry that matches on ISSUE, REPO (when both are known) and WORKING COPY counts,
+# so a session working the same issue elsewhere - a worktree - never trips it.
+function Get-RegisteredBranchMismatch {
+    param(
+        [object[]]$Entries = @(),
+        [string]  $Repo = '',
+        [int[]]   $Issues = @(),
+        [string]  $WorkPath = '',
+        [string]  $Branch = ''
+    )
+    $here = ConvertTo-ComparablePath $WorkPath
+    if (-not $here -or -not $Branch) { return '' }
+    foreach ($e in @($Entries)) {
+        if (-not $e -or -not $e.branch) { continue }
+        if (@($Issues) -notcontains [int]$e.issue) { continue }
+        if ($e.repo -and $Repo -and ("$($e.repo)" -ne $Repo)) { continue }
+        if ((ConvertTo-ComparablePath "$($e.workPath)") -ne $here) { continue }
+        if ("$($e.branch)" -ne $Branch) {
+            return "el issue #$($e.issue) se registro en la rama '$($e.branch)' de esta copia de trabajo, pero se va a empujar '$Branch'. " +
+                   "Otra sesion pudo cambiar la rama de esta carpeta, y lo commiteado desde entonces puede estar en la rama equivocada. " +
+                   "Revisa con 'git log' y vuelve a '$($e.branch)' (git checkout $($e.branch), o pasa -Branch $($e.branch)); " +
+                   "-AllowBranchMismatch lo omite a proposito."
+        }
+    }
+    return ''
+}
+
 # Dot-source guard: tests set $env:ABIOS_NEWBOARDPR_DOTSOURCE to load the pure helper only.
 if ($env:ABIOS_NEWBOARDPR_DOTSOURCE) { return }
 
@@ -139,6 +197,23 @@ trap {
 if (-not $Repo) { $Repo = Get-RepoFromOrigin }
 if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi '$Repo')." }
 $owner = ($Repo -split '/')[0]
+
+# -- 1b. Is the branch about to be pushed the one this working copy's session registered? (#547)
+# Local-only (no gh, no token), so it runs BEFORE the identity work and fails fast. It can only
+# ADD a refusal; -AllowBranchMismatch restores the old behaviour on purpose.
+. (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
+$pushBranch = if ($Branch) { $Branch } else { "$(git rev-parse --abbrev-ref HEAD 2>$null)".Trim() }
+$stateDir   = Get-AbiosStateDir -NoCreate
+if ($stateDir -and $pushBranch -and $pushBranch -ne 'HEAD') {
+    $mismatch = Get-RegisteredBranchMismatch `
+        -Entries  (Get-LiveSessionEntries (Join-Path $stateDir 'sessions.json')) `
+        -Repo     $Repo `
+        -Issues   @(Get-IssueNumbers $Issue) `
+        -WorkPath ("$(git rev-parse --show-toplevel 2>$null)".Trim()) `
+        -Branch   $pushBranch
+    if ($mismatch -and -not $AllowBranchMismatch) { throw $mismatch }
+    if ($mismatch) { Write-Host "AVISO: $mismatch" -ForegroundColor Yellow }
+}
 
 # -- 2. Identity: the OWNER's account, or the AGENT's inside a braked run (#550) ----
 # This is the script a braked run reaches for when it pushes its branch and opens the PR, so it is
