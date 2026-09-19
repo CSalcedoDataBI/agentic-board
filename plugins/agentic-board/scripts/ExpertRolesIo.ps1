@@ -113,6 +113,9 @@ function Get-RolesGitContext {
     # Windows 8.3 short names and symlinks cannot make the relative path wrong.
     param([string]$RolesPath)
     if (-not $RolesPath) { return $null }
+    # No git on PATH: `& git` would throw under $ErrorActionPreference = 'Stop' (and never update
+    # $LASTEXITCODE), and persisting a role must not fail because the repair cannot run.
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
     $dir = Split-Path -Path $RolesPath -Parent
     if (-not $dir -or -not (Test-Path -LiteralPath $dir -PathType Container)) { return $null }
     $top = & git -C $dir rev-parse --show-toplevel 2>$null
@@ -127,6 +130,7 @@ function Test-GitPathIgnored {
     # not tell. NOT `-v`: `-v` also exits 0 and prints the rule when that rule is a `!` negation
     # that UN-ignores the path, so it cannot answer "would git accept this file".
     param([string]$Top, [string]$Rel)
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
     & git -C $Top check-ignore -q -- $Rel 2>$null
     switch ($LASTEXITCODE) { 0 { $true } 1 { $false } default { $null } }
 }
@@ -191,7 +195,14 @@ function Repair-RolesGitignore {
     $lead    = ''
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $m = [regex]::Match($lines[$i], $dirRule)
-        if ($m.Success) { $lead = $m.Groups[1].Value; $lines[$i] = "$lead$stateDir/*" }
+        if ($m.Success) {
+            $lead = $m.Groups[1].Value
+            # An unanchored rule (`.agentic-board/`) matches at ANY depth; a rule that contains a
+            # slash in the middle (`.agentic-board/*`) is anchored to this .gitignore's directory.
+            # Keep the reach: `**/` keeps ignoring nested state dirs (a monorepo sub-project's own
+            # .agentic-board/), and the negation below re-includes only this repository's file.
+            $lines[$i] = if ($lead) { "$lead$stateDir/*" } else { "**/$stateDir/*" }
+        }
     }
     # Drop any earlier negation of this file (it may sit before the rewritten rule and lose to it,
     # or be the dead directory-level form), then state it once, last: the last matching rule wins.

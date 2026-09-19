@@ -72,6 +72,20 @@ Describe 'Repair-RolesGitignore makes roles.json genuinely trackable (#470)' {
         Test-GitAccepts $r '.agentic-board/sessions.json' | Should -BeFalse
         Test-GitAccepts $r '.agentic-board/expert.json'   | Should -BeFalse
     }
+    It 'keeps a NESTED state directory ignored: an unanchored rule matched at any depth, the fix must too' -ForEach @(
+        @{ Lines = @('.agentic-board/') }
+        @{ Lines = @('.agentic-board') }
+    ) {
+        # A monorepo sub-project has its own .agentic-board/ with its own local state. Rewriting
+        # `.agentic-board/` to the anchored `.agentic-board/*` would start exposing that state.
+        $r = New-Repo $Lines
+        New-Item -ItemType Directory -Path "$r/sub/.agentic-board" -Force | Out-Null
+        Set-Content -LiteralPath "$r/sub/.agentic-board/sessions.json" -Value '{}'
+        Test-GitAccepts $r 'sub/.agentic-board/sessions.json' | Should -BeFalse   # ignored before
+        Repair-RolesGitignore -RolesPath "$r/.agentic-board/roles.json" | Out-Null
+        Test-GitAccepts $r '.agentic-board/roles.json' | Should -BeTrue
+        Test-GitAccepts $r 'sub/.agentic-board/sessions.json' | Should -BeFalse   # still ignored
+    }
     It 'never leaves the directory-level negation in the file it writes' {
         $r = New-Repo @('.agentic-board/', '!.agentic-board/roles.json')
         Repair-RolesGitignore -RolesPath "$r/.agentic-board/roles.json" | Out-Null
@@ -155,6 +169,27 @@ Describe 'Repair-RolesGitignore leaves things alone when it should (#470)' {
         Add-Content -LiteralPath "$r/.git/info/exclude" -Value '.agentic-board/'
         (Repair-RolesGitignore -RolesPath "$r/.agentic-board/roles.json").Status | Should -Be 'CannotRepair'
         Test-Path "$r/.gitignore" | Should -BeFalse
+    }
+}
+
+Describe 'when git is not installed (#470)' {
+    It 'reports NotARepo instead of throwing, so persisting a role never fails because the repair cannot run' {
+        $d = Join-Path ([System.IO.Path]::GetTempPath()) ("gi-nogit-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path "$d/.agentic-board" -Force | Out-Null
+        $script:Dirs.Add($d)
+        $child = Join-Path $d 'child.ps1'
+        Set-Content -LiteralPath $child -Value @"
+`$env:ABIOS_EXPERTROLES_DOTSOURCE = '1'
+. '$($script:Scripts)/ExpertRolesIo.ps1'
+`$r = Repair-RolesGitignore -RolesPath '$d/.agentic-board/roles.json'
+Write-Output "STATUS:`$(`$r.Status)"
+"@
+        # A PATH holding only pwsh's own directory: no git.
+        $pwshExe = (Get-Process -Id $PID).MainModule.FileName
+        $prevPath = $env:PATH
+        $env:PATH = [System.IO.Path]::GetDirectoryName($pwshExe)
+        try { $out = & $pwshExe -NoProfile -File $child 2>&1 | Out-String } finally { $env:PATH = $prevPath }
+        $out | Should -Match 'STATUS:NotARepo'
     }
 }
 

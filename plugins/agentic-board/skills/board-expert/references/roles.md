@@ -27,7 +27,9 @@ committed into a project — it is not under any repo's `.git` at all.
 > file) whether `roles.json` is now accepted while the rest of `.agentic-board/` stays ignored,
 > and restores the original `.gitignore` byte for byte if git still refuses. It runs when a role
 > is persisted with `Add-ExpertRole` (default path) and on every `/board expert config`; `roles`
-> only reports (read-only). It never emits the directory-level negation.
+> only reports (read-only). It never emits the directory-level negation. An unanchored
+> `.agentic-board/` becomes `**/.agentic-board/*`, so a nested sub-project's own state directory
+> stays ignored too.
 >
 > **How to talk about it.** Report the outcome in the tool's own plain words ("fixed — the role
 > file will now be shared with the team"). Do not ask the user a git question ("apply and commit,
