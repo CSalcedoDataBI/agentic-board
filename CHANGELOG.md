@@ -1,20 +1,99 @@
 # Changelog
 
-## [Unreleased]
+## [0.39.0] - 2026-09-19
+A large part of the backlog closed in one pass - every fix with tests that were mutation-checked and
+an external review - plus the CI that had been red for eleven days.
+### Added
+- **`Board-Depend.ps1` writes native blocked-by dependencies safely (#521).** The raw endpoint takes
+  the issue's database id, and a number does not fail: it links whatever issue anywhere on GitHub has
+  that id. The script resolves number -> id, refuses blockers outside the repo, reads the list back
+  and exits 1 if the link did not stick or a stranger appeared, also between two writes of a batch.
+- **Pre-filing duplicate check and recurrence matching (#675, #476).** `Find-DuplicateIssue.ps1`
+  searches open and recently closed issues for the same defect before one is filed (the same defect
+  had been filed three times in a row); the feedback skill runs it first, passes report text through
+  files (never inside shell quotes), and a failed search is never read as "no duplicates".
+  `Invoke-FieldScan -MatchFiled` joins each script that had incidents to the issues already filed
+  about it. `Invoke-FieldScan` also now honours `-FieldRoot`, `-ProjectsRoot`, `-Window` and `-Json`:
+  the files it dot-sources reset them, so the sweep always read and wrote the real store.
+- **`Board-Triage` batches (#605, #511).** `-Issues 1,2,3` or `-BatchFile triage.json` triage a set in
+  one call: the board is read once instead of once per issue (a per-issue sweep exhausted the GraphQL
+  quota after ~8 issues), every entry is validated before anything is written, and targets that could
+  not be resolved are listed for retry. It also accepts `-ProjectNum` like the rest of the suite.
+- **`/board doctor` detects a drifted install (#482).** It compares the installed plugin with its
+  published build by content, not by version string, read-only.
+- **The fleet supervisor reports a brake-armed run whose PR merged (#517)**, with who merged and when,
+  detected from the marker and the PR instead of the agent's own report.
+- **The `/board` menu shows the grouped-PR setting (#681)** under `work`, with whether it comes from
+  the repo config or the default, and every proposed group states the setting behind it.
+### Changed
+- **Auto-clean refuses to tear down a brake-armed session whose PR merged (#518)**, so the marker and
+  the denial log survive; check who merged, then `-ForceRemoveWorktree` proceeds. A session's PR is
+  now chosen by branch tip / creation time, so an old merged PR on a reused branch name is not read
+  as the new run's.
+- **The review gate tells "CI failed" from "CI never ran" (#481).** A `startup_failure`, or a job
+  GitHub refused to start (no steps: exhausted quota, billing), still blocks but exits **3** instead
+  of 1, so an autonomous run stops re-pushing at a CI no code change can fix. A check bucket the gate
+  does not recognise now blocks instead of passing. And it only recommends reviewers that are alive
+  (#537): antigravity and codex are probed (installed, authenticated, bounded), and it says plainly
+  when none answers.
+- **Expert mode records evidence honestly (#475).** The default definition of done no longer carries
+  `bpa`/`tmdlBreaking` into a repo with no semantic model, and the evidence block gained `N/A` (the
+  gate does not apply) and `NOT-EVALUATED` (CI never ran), counted apart from `passed`. The brief the
+  launched agent receives tells it to record them and to stop on gate exit 3.
+- **`/board expert auto` (#472, #499, #473, #554).** It forwards `-TakeOver` and `-IgnoreBlocked`,
+  accepts `-Owner` / `-Repo` (an unknown owner needs `-TokenVar`) and prints the board's real link
+  (user or org); the brief includes the issue's comment thread (bounded, oldest first) and its
+  capability map is tested against `auto-loop.md` and `SKILL.md`.
+- **Field names live in one vocabulary (#671, #509).** The English preset names its type field
+  `Task Type`, because GitHub reserves `Type` and the preset could not create it on a fresh board;
+  boards that already have `Type` keep it. `Board-Fill`, `Board-Triage`, `Board-Changelog`,
+  `Fleet-Plan` and `Apply-FieldPreset` resolve through it, so a Spanish board is filled and triaged
+  end to end, the Spanish preset no longer adds `Estado` beside `Status`, and Fill/Triage warn loudly
+  when none of their fields exist instead of reporting a clean run.
+- **`Resolve-Board` finds a repo's board through the repository's Projects link (#498, #666)** instead
+  of guessing from the title, so a board named after the product is found and no duplicate is created;
+  `-Title` is a selector that never returns a differently named board.
+- **The release cut stops agreeing with a wrong bump or a wrong fold (#676).** `New-Release` computes
+  the minimum bump from `[Unreleased]` and refuses a smaller one; `Board-Changelog` folds an issue only
+  when a merged PR of this release closed it (never one closed as not planned/duplicate), understands
+  cited ranges like `#423-#430`, and lists unclassified issues instead of filing them under `Added`.
 ### Fixed
 - **Board Sync works again after 11 days red, and no longer mishandles a `Backlog` board (#679).**
-  The workflow failed on every run since 2026-09-07 with a bare "Something went wrong while
-  executing your query". Running experiments inside CI showed what the cause is and is not: not
-  transient, not a bad selection, not the runner's `gh`. The same query that read page 1 failed on a
-  later page, yet every item of that page read fine on its own — the server rejects certain groups of
+  The workflow failed on every run since 2026-09-07 with a bare "Something went wrong while executing
+  your query". Experiments run inside CI showed the cause: the same query that read page 1 failed on a
+  later page, yet every item of that page read fine on its own - the server rejects certain groups of
   board items as a whole. The script now reads the board in pages of 10, retries a page three times,
-  and when a page keeps failing re-reads it one item at a time. An item that only fails with its
-  linked PRs is kept without them and reported by number; one that cannot be read at all is skipped
-  with a warning that names it; and if nothing can be read the run fails with an error instead of
-  reporting a clean sync. Separately, a board whose not-started option is `Backlog` (the plugin's
-  own presets) compared against an empty id, so an issue with an open PR was never moved to In
-  Progress; it now falls back from `Todo` to `Backlog`. Covered by six tests that drive the real
-  script with a fake `gh`, each mutation-checked.
+  and when a page keeps failing re-reads it one item at a time; an item that only fails with its linked
+  PRs is kept without them and reported by number, one that cannot be read at all is skipped with a
+  warning that names it, and if nothing can be read the run fails instead of reporting a clean sync.
+  A second defect, hidden until an issue had to be marked Done, is fixed too: it sent option ids with
+  `gh -F`, which turns an all-digit id (this board's Done is `98236657`) into a number GitHub rejects.
+  A board whose not-started option is `Backlog` used to compare against an empty id, so an issue with
+  an open PR never moved to In Progress; it now falls back from `Todo` to `Backlog`.
+- **The autonomy brake no longer reports `git push origin fine & echo --delete` as a delete (#546).**
+  The narrowing applies only to plain commands: any command with quotes, escapes, `$( )`, backticks,
+  globs or other syntax keeps the previous, stricter verdict, so no real delete becomes allowed (three
+  review rounds found holes in the first designs; the sibling patterns are tracked in #707).
+- **`board work -Start` no longer refuses an untouched issue (#507, #502, #471).** Only a commit
+  subject `(#n)` or a closing keyword counts as prior work, not a mention in a body; a revert retires
+  the work it undoes so a reopened issue can be restarted. The pending list shows the live issue title
+  (#522).
+- **`board work -Branch` no longer switches a clean working copy in place (#670, #547)** when it stands
+  on a feature branch with unmerged commits: it creates an isolated worktree. The briefing tells agents
+  to commit with an explicit pathspec, and `New-BoardPR` refuses to push a branch other than the one a
+  live session registered for the issue (`-AllowBranchMismatch` overrides).
+- **The session briefing names plugin scripts by a path that exists in any repo (#480)**, and a script
+  that cannot be found is reported instead of the session falling back to a bare `gh pr create`.
+- **Session liveness no longer trusts a bare PID (#520, #557).** A recycled PID no longer keeps a dead
+  session alive, and `wt`-launched sessions record their own tab shell, so closing the launcher no
+  longer makes the whole fleet vanish from `-Sessions -Watch`.
+- **`/board doctor -Fix -Auto` keeps sweeping past a stuck worktree (#548)** and ends with a summary of
+  what it skipped. Auto-clean never treats the main working copy, or a folder inside it, as a worktree
+  to tear down (#555) - such a legacy registry entry could delete a folder from the clone.
+- **`roles` / `config` no longer take 40-80 seconds with no output (#609, #505)**, a role's `agent:`
+  resolves for `<name>.agent.md` files and renamed agents (#469), a partial scan is reported as
+  unknown instead of "not installed", and the `.gitignore` rule for `roles.json` is repaired and
+  verified with git instead of emitting a dead negation (#470).
 
 ## [0.38.4] - 2026-09-18
 ### Fixed
