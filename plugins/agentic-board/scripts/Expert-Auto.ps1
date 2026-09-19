@@ -259,14 +259,21 @@ are the method.
    (a docs fix does not pay a model migration's toll; an unreadable diff owes every gate). Record
    the evidence ONCE (#570): the full structured ``[abios-evidence]`` block goes to
    ``evidence/<issue>.md`` — the single source of truth — and the PR body and a durable issue
-   comment each get the LINK STUB (marker + summary + link to the file), not a copy. If green ->
+   comment each get the LINK STUB (marker + summary + link to the file), not a copy. Record a
+   gate your diff does not owe as ``N/A`` (never ``PASS``) and a CI that never executed as
+   ``NOT-EVALUATED`` (never ``FAIL``) - ``Expert-Evidence.ps1`` builds those rows
+   (``Get-NotApplicableGateRows``, ``Get-CiEvidenceRow``); an untruthful PASS is the one thing this
+   block must never contain. If green ->
    open the PR + run the review gate — with ``-RequireIndependentReviewer`` (see "Independent
    review" below; it is mandatory for this unsupervised run, not optional).
 5. **Self-heal + auto-drive the board**: when you hit an error, a fork, or an unexpected state —
    apply the **decision protocol** (research → register → decide); do NOT act first.
    Then act on what you decided: an in-scope problem → fix it in the loop and continue;
    an out-of-scope finding → file a sanitized 'discovered' issue on the board and keep going.
-6. **Loop until done or budget**: keep iterating until the DoD is green — then leave the PR ready
+6. **Loop until done or budget**: never loop on a CI that did not run - if the review gate exits **3**
+   (``CI NO SE EVALUO``) no code change can turn that CI green: stop re-pushing, record the ``ci`` gate
+   as ``NOT-EVALUATED``, finish the rest and report it plainly (exit 1, a real failure, is what the loop
+   is for). Otherwise keep iterating until the DoD is green — then leave the PR ready
    and STOP before merge — or the budget is spent -> ``/board handoff -Save``. $budgetSentence
 7. **Report** — before you report anything, run ``/board expert verify`` for this issue and its PR.
    It reads the three evidence artifacts and answers COMPLETE or INCOMPLETE, naming what is missing.
