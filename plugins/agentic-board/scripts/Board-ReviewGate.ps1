@@ -1106,8 +1106,18 @@ if ($blockers.Count -eq 0) {
         Write-Host "  Un check verde de un reviewer que no dejo review no es evidencia de nada (#510)." -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "  Salidas legitimas, en orden de preferencia:" -ForegroundColor Cyan
-        Write-Host "   1. Que alguien revise de verdad - el revisor externo (second-opinion) sirve," -ForegroundColor Cyan
-        Write-Host "      y se registra con -RecordReview -Reviewer <quien> -Summary <que encontro>." -ForegroundColor DarkGray
+        # Way #1 names only reviewers that ANSWER right now (#537). It used to recommend the
+        # external reviewer unconditionally, and with every external CLI dead (Gemini auth fails
+        # and still exits 0) the only visible exit was -AllowUnreviewed - the gate pushed the user
+        # toward the escape hatch it exists to discourage. Probing happens only on this path, never
+        # on a pass; the verdict and the exit code below are not affected by the result.
+        . (Join-Path $PSScriptRoot 'Get-ReviewerRoster.ps1')
+        $reviewerLiveness = $null
+        try { $reviewerLiveness = @(Invoke-ReviewerProbes -Roster (Get-ReviewerRoster) -TimeoutSec 30) }
+        catch { $reviewerLiveness = $null }   # could not probe: say "unverified", never "nothing is alive"
+        foreach ($wl in (Get-UnreviewedWayOut -Liveness $reviewerLiveness)) {
+            Write-Host $wl.Text -ForegroundColor $wl.Color
+        }
         Write-Host "   2. Si de verdad no amerita revision (typo, archivo generado): -AllowUnreviewed." -ForegroundColor DarkGray
         Write-Host ""
         exit 2
