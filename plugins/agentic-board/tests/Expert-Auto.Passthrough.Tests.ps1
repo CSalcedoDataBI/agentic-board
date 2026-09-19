@@ -63,15 +63,35 @@ Describe 'Format-IssueComments - the thread the body no longer tells (#473)' {
     }
     It 'cuts an over-long comment and says so' {
         $t = Format-IssueComments -Comments @(script:C 'u' ('x' * 500)) -MaxCommentChars 100
-        $t | Should -Match 'comment truncated: 400 more characters'
-        $t | Should -Not -Match ('x' * 101)
+        $t | Should -Match 'comment truncated: 460 more characters'
+        $t | Should -Not -Match ('x' * 41)
+    }
+    It 'the per-comment cap INCLUDES the truncation marker (a cut comment never exceeds -MaxCommentChars)' {
+        $t = Format-IssueComments -Comments @(script:C 'u' ('x' * 5000)) -MaxCommentChars 200
+        # the entry is "### u - date" + the cut body; everything after that heading line is the body
+        $bodyText = ($t -split "(?m)^### u - .*\r?\n", 2)[1].TrimEnd()
+        $bodyText.Length | Should -BeLessOrEqual 200
+        $bodyText | Should -Match 'comment truncated'
+    }
+    It 'the total cap bounds the ASSEMBLED section - headings, note and markers included, not just comment text' -ForEach @(
+        @{ Cap = 12000 }, @{ Cap = 6000 }, @{ Cap = 3000 }
+    ) {
+        # Swept over body sizes: overhead per entry (heading + newlines) and the fixed head/note only
+        # decide the outcome for SOME sizes, and a single size can pass by luck either way.
+        foreach ($len in 300..2600 | Where-Object { $_ % 37 -eq 0 }) {
+            $cs = 1..15 | ForEach-Object { script:C 'someone-with-a-long-login' ('w' * $len) ("2026-08-{0:00}T00:00:00Z" -f $_) }
+            $t = Format-IssueComments -Comments $cs -MaxTotalChars $Cap -IssueNum 12
+            $t.Length | Should -BeLessOrEqual $Cap -Because "15 comments of $len chars under a $Cap cap gave $($t.Length)"
+        }
+        $big = 1..15 | ForEach-Object { script:C 'u' ('w' * 2600) ("2026-08-{0:00}T00:00:00Z" -f $_) }
+        (Format-IssueComments -Comments $big -MaxTotalChars $Cap -IssueNum 12) | Should -Match 'earlier comment\(s\) omitted'
     }
     It 'spends the total budget from the NEWEST comment backwards, so recency survives' {
         $cs = @(
             (script:C 'u' ('old-' + ('a' * 300)) '2026-08-01T00:00:00Z'),
             (script:C 'u' ('mid-' + ('b' * 300)) '2026-08-02T00:00:00Z'),
             (script:C 'u' ('new-' + ('c' * 300)) '2026-08-03T00:00:00Z'))
-        $t = Format-IssueComments -Comments $cs -MaxTotalChars 700
+        $t = Format-IssueComments -Comments $cs -MaxTotalChars 1300
         $t | Should -Match 'new-'
         $t | Should -Match 'mid-'
         $t | Should -Not -Match 'old-'
@@ -122,13 +142,13 @@ Describe 'Resolve-AutoTokenVar - the account follows the owner, never a wider on
         $r.explicit | Should -BeFalse
     }
     It 'a mapped second-account owner resolves through the suite''s one owner map' {
-        $r = Resolve-AutoTokenVar -TokenVar 'GITHUB_TOKEN_PERSONAL' -TokenVarExplicit $false -Owner 'PAL-Devs'
-        $r.var | Should -Be (Get-OwnerTokenVar -Owner 'PAL-Devs')
+        $r = Resolve-AutoTokenVar -TokenVar 'GITHUB_TOKEN_PERSONAL' -TokenVarExplicit $false -Owner 'PesanteAnalytics'
+        $r.var | Should -Be (Get-OwnerTokenVar -Owner 'PesanteAnalytics')
         $r.var | Should -Be 'GITHUB_TOKEN_BUSINESS'
         $r.mapped | Should -BeTrue
     }
     It 'an explicit -TokenVar always wins over the owner map' {
-        $r = Resolve-AutoTokenVar -TokenVar 'MY_OWN_VAR' -TokenVarExplicit $true -Owner 'PAL-Devs'
+        $r = Resolve-AutoTokenVar -TokenVar 'MY_OWN_VAR' -TokenVarExplicit $true -Owner 'PesanteAnalytics'
         $r.var | Should -Be 'MY_OWN_VAR'
         $r.explicit | Should -BeTrue
     }
@@ -379,14 +399,14 @@ exit 1
     }
 
     It '#499: forwards -Owner and -Repo, and resolves the token variable FROM the owner' {
-        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PAL-Devs -Repo acme/widgets'
-        $r.Calls[0].Owner | Should -Be 'PAL-Devs'
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PesanteAnalytics -Repo acme/widgets'
+        $r.Calls[0].Owner | Should -Be 'PesanteAnalytics'
         $r.Calls[0].Repo | Should -Be 'acme/widgets'
         $r.Calls[0].TokenVar | Should -Be 'GITHUB_TOKEN_BUSINESS'
     }
 
     It '#499: an explicit -TokenVar beats the owner map; an unmapped owner warns and keeps the default variable' {
-        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PAL-Devs -TokenVar MY_SECOND_TOKEN'
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PesanteAnalytics -TokenVar MY_SECOND_TOKEN'
         $r.Calls[0].TokenVar | Should -Be 'MY_SECOND_TOKEN'
         $u = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner someone-new'
         $u.Calls[0].TokenVar | Should -Be 'GITHUB_TOKEN_PERSONAL'
@@ -427,7 +447,7 @@ exit 1
         $armed = Join-Path $script:Root 'armed'
         New-Item -ItemType Directory -Path (Join-Path $armed '.agentic-board') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $armed '.agentic-board/brake-armed.json') -Value '{}'
-        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PAL-Devs -Repo acme/widgets' $armed -NoToken
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PesanteAnalytics -Repo acme/widgets' $armed -NoToken
         $r.Calls.Count | Should -Be 0
         $r.Out | Should -Match 'Run FRENADO'
         $r.Out | Should -Match 'GITHUB_TOKEN_AGENT'
@@ -463,9 +483,9 @@ exit 1
     }
 
     It '#499: the -DryRun launch line shows the overrides so it can be pasted as-is' {
-        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PAL-Devs -Repo acme/widgets -TakeOver -IgnoreBlocked -DryRun'
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PesanteAnalytics -Repo acme/widgets -TakeOver -IgnoreBlocked -DryRun'
         $r.Calls.Count | Should -Be 0
-        $r.Out | Should -Match '/board work .*-Owner PAL-Devs -TokenVar GITHUB_TOKEN_BUSINESS'
+        $r.Out | Should -Match '/board work .*-Owner PesanteAnalytics -TokenVar GITHUB_TOKEN_BUSINESS'
         $r.Out | Should -Match '-Repo acme/widgets'
         $r.Out | Should -Match '-TakeOver'
         $r.Out | Should -Match '-IgnoreBlocked'
@@ -480,8 +500,8 @@ exit 1
     }
 
     It '#499: when the board cannot be read the link falls back to the user-board shape for the named owner' {
-        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PAL-Devs -Repo acme/widgets -DryRun'
-        $r.Out | Should -Match 'Board: https://github.com/users/PAL-Devs/projects/13'
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PesanteAnalytics -Repo acme/widgets -DryRun'
+        $r.Out | Should -Match 'Board: https://github.com/users/PesanteAnalytics/projects/13'
     }
 
     It '#473: the single-issue brief carries the comment thread, in order, after the body' {
@@ -503,10 +523,10 @@ exit 1
     }
 
     It '#472 + #473 in the epic walker: overrides reach every child launch and both threads reach each brief' {
-        $r = script:Invoke-Auto '-Epic 100 -ProjectNum 13 -Owner PAL-Devs -Repo acme/widgets -TakeOver -IgnoreBlocked'
+        $r = script:Invoke-Auto '-Epic 100 -ProjectNum 13 -Owner PesanteAnalytics -Repo acme/widgets -TakeOver -IgnoreBlocked'
         $r.Calls.Count | Should -Be 2
         foreach ($c in $r.Calls) {
-            $c.Owner | Should -Be 'PAL-Devs'
+            $c.Owner | Should -Be 'PesanteAnalytics'
             $c.Repo | Should -Be 'acme/widgets'
             $c.TokenVar | Should -Be 'GITHUB_TOKEN_BUSINESS'
             $c.TakeOver | Should -BeTrue
@@ -517,6 +537,15 @@ exit 1
         $b1 | Should -Match 'sub-level dead end: do not use the cache'
         $b1 | Should -Match 'SUB ONE BODY'
         (script:Get-Brief 102) | Should -Not -Match 'sub-level dead end'
+    }
+
+    It 'epic -DryRun previews the EXACT child command, overrides included, and launches nothing' {
+        $r = script:Invoke-Auto '-Epic 100 -ProjectNum 13 -Owner PesanteAnalytics -Repo acme/widgets -TakeOver -IgnoreBlocked -DryRun'
+        $r.Calls.Count | Should -Be 0
+        foreach ($n in 101, 102) {
+            $r.Out | Should -Match "(?s)#$n.*would run: pwsh -NoProfile -Command .*-Parallel $n -Launch .*-Owner 'PesanteAnalytics' -Repo 'acme/widgets' -TakeOver -IgnoreBlocked"
+        }
+        $r.Out | Should -Match "-TokenVar 'GITHUB_TOKEN_BUSINESS'"
     }
 
     It 'epic walker without overrides forwards none of them' {
