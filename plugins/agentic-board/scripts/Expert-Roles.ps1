@@ -16,7 +16,7 @@
     .\Expert-Roles.ps1 -Why "Build a Deneb bar chart"
 #>
 [CmdletBinding()]
-param([switch]$List, [string]$Why = "")
+param([switch]$List, [string]$Why = "", [double]$AgentScanSeconds = 30)
 
 $ErrorActionPreference = "Stop"
 
@@ -36,6 +36,7 @@ $env:ABIOS_EXPERTROLE_DOTSOURCE = $prevSyn
 # named differently — re-read them here so the CLI below cannot be surprised by a future clash.
 $myList = $List
 $myWhy  = $Why
+$myAgentScan = $AgentScanSeconds
 
 # ── Pure core ───────────────────────────────────────────────────────────────────
 function Get-RoleSource {
@@ -129,24 +130,28 @@ $inventory = Resolve-SkillInventory
 # definitions, so the table can say which role lost its persona.
 $agentIndex = $null
 if (@($catalog.roles | Where-Object { $_.agent }).Count -gt 0) {
-    $agentIndex = Get-AgentDefinitionIndex -SearchRoots (Get-DefaultAgentRoots)
+    $agentIndex = Get-AgentDefinitionIndex -SearchRoots (Get-DefaultAgentRoots) -TimeoutSeconds $myAgentScan
 }
 
 Write-Host "=== /board expert roles ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host ("  {0,-22} {1,-26} {2,8} {3,7} {4,8}" -f 'ROLE','SOURCE','KEYWORDS','HOOKS','AGENT') -ForegroundColor DarkGray
-$agentMissing = @()
+$agentMissing = @(); $agentUnknown = @()
 foreach ($role in @($catalog.roles)) {
     $hooks  = @(Get-HookedSkills -Domain $role.name -Inventory $inventory -Catalog $catalog).Count
     $agentState = '-'
     if ($role.agent) {
         if (Find-AgentDefinition -Name $role.agent -Index $agentIndex) { $agentState = 'ok' }
+        elseif ($agentIndex.partial) { $agentState = 'UNKNOWN'; $agentUnknown += $role }   # scan timed out: absence is unproven
         else { $agentState = 'MISSING'; $agentMissing += $role }
     }
-    $colour = if (($hooks -eq 0 -and @($role.keywords).Count -gt 0) -or $agentState -eq 'MISSING') { 'Yellow' } else { 'Gray' }
+    $colour = if (($hooks -eq 0 -and @($role.keywords).Count -gt 0) -or $agentState -in 'MISSING', 'UNKNOWN') { 'Yellow' } else { 'Gray' }
     Write-Host ("  {0,-22} {1,-26} {2,8} {3,7} {4,8}" -f `
         $role.name, (Get-RoleSource -Role $role -Factory $factory -Global $global -Local $local), `
         @($role.keywords).Count, $hooks, $agentState) -ForegroundColor $colour
+}
+foreach ($u in $agentUnknown) {
+    Write-Host "  role '$($u.name)' names agent '$($u.agent)': the scan ran out of time, so it could not be checked." -ForegroundColor Yellow
 }
 foreach ($m in $agentMissing) {
     Write-Host "  role '$($m.name)' names agent '$($m.agent)', which is not installed - it falls back to its standards." -ForegroundColor Yellow

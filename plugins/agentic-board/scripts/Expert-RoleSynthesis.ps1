@@ -106,6 +106,7 @@ function Get-AgentDefinitionIndex {
     param([string[]]$SearchRoots, [double]$TimeoutSeconds = 30)
     $deadline = if ($TimeoutSeconds -gt 0) { [datetime]::UtcNow.AddSeconds($TimeoutSeconds) } else { [datetime]::MaxValue }
     $byName = @{}; $byStem = @{}
+    $walk = @{ Partial = $false }
     $add = {
         param($Table, [string]$Key, [string]$Path)
         if (-not $Key) { return }
@@ -115,14 +116,16 @@ function Get-AgentDefinitionIndex {
     }
     foreach ($root in @($SearchRoots)) {
         if (-not $root) { continue }
-        foreach ($file in @(Find-FilesPruned -Root $root -Filter '*.md' -UnderDirNamed 'agents' -Deadline $deadline)) {
+        foreach ($file in @(Find-FilesPruned -Root $root -Filter '*.md' -UnderDirNamed 'agents' -Deadline $deadline -State $walk)) {
             $stem = [System.IO.Path]::GetFileName($file) -replace '\.md$', ''
             & $add $byStem $stem $file
             if ($stem -match '\.agent$') { & $add $byStem ($stem -replace '\.agent$', '') $file }
             & $add $byName (Get-AgentFrontmatterName -Path $file) $file
         }
     }
-    @{ byName = $byName; byStem = $byStem }
+    # `partial` = the budget ran out before every root was fully read, so a MISS in this index means
+    # "not found in what was scanned", never "not installed". Callers must not report it as absent.
+    @{ byName = $byName; byStem = $byStem; partial = [bool]$walk.Partial }
 }
 
 function Find-AgentDefinition {
@@ -168,16 +171,22 @@ function Resolve-RolePersona {
     # A role's persona comes from an existing agent definition rather than restating one.
     # Inline standards are the shortcut for when no definition is worth creating.
     [CmdletBinding()]
-    param([hashtable]$Role, [string[]]$SearchRoots)
+    param([hashtable]$Role, [string[]]$SearchRoots, [hashtable]$Index)
     if (-not $SearchRoots) { $SearchRoots = Get-DefaultAgentRoots }
     if ($Role.agent) {
-        $path = Find-AgentDefinition -Name $Role.agent -SearchRoots $SearchRoots
+        $index = if ($Index) { $Index } else { Get-AgentDefinitionIndex -SearchRoots $SearchRoots }
+        $path = Find-AgentDefinition -Name $Role.agent -Index $index
         if ($path) {
             # Drop the frontmatter block; the body is the persona.
             $raw = Get-Content -Raw -LiteralPath $path
             return ($raw -replace '(?s)^\s*---.*?---\s*', '').Trim()
         }
-        Write-Warning "roles: role '$($Role.name)' names agent '$($Role.agent)', which is not installed - install it with /tools, or the role falls back to its standards."
+        if ($index.partial) {
+            # A timed-out scan cannot prove absence: say so, and never point the user at /tools.
+            Write-Warning "roles: role '$($Role.name)' names agent '$($Role.agent)', but the scan of installed agents ran out of time before it was found - it may be installed. The role falls back to its standards for now."
+        } else {
+            Write-Warning "roles: role '$($Role.name)' names agent '$($Role.agent)', which is not installed - install it with /tools, or the role falls back to its standards."
+        }
     }
     if ($Role.standards) { return (@($Role.standards) -join "`n") }
     ''

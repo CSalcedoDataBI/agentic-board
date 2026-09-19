@@ -120,6 +120,26 @@ Describe 'Find-AgentDefinition resolves what the Agent tool lists (#469)' {
         $idx.byStem.Count | Should -Be 0
         (@($w) -join ' ') | Should -Match 'PARTIAL'
     }
+    It 'flags the index as partial when the budget ran out, and complete otherwise' {
+        (Get-AgentDefinitionIndex -SearchRoots $script:Roots).partial | Should -BeFalse
+        (Get-AgentDefinitionIndex -SearchRoots $script:Roots -TimeoutSeconds 0.0001 -WarningAction SilentlyContinue).partial | Should -BeTrue
+    }
+    It 'Resolve-RolePersona does not call an agent "not installed" when the scan was partial' {
+        $idx = Get-AgentDefinitionIndex -SearchRoots $script:Roots -TimeoutSeconds 0.0001 -WarningAction SilentlyContinue
+        $w = @()
+        $p = Resolve-RolePersona -Role @{ name='r'; agent='deneb-reviewer'; standards=@('FALLBACK') } -Index $idx `
+                                 -WarningVariable w -WarningAction SilentlyContinue
+        $p | Should -Match 'FALLBACK'                        # still degrades safely
+        (@($w) -join ' ') | Should -Match 'ran out of time'
+        (@($w) -join ' ') | Should -Not -Match 'is not installed'
+        (@($w) -join ' ') | Should -Not -Match '/tools'
+    }
+    It 'Resolve-RolePersona still says "not installed" when the scan was complete' {
+        $idx = Get-AgentDefinitionIndex -SearchRoots $script:Roots
+        $w = @()
+        Resolve-RolePersona -Role @{ name='r'; agent='ghost' } -Index $idx -WarningVariable w -WarningAction SilentlyContinue | Out-Null
+        (@($w) -join ' ') | Should -Match 'is not installed'
+    }
     It 'can be handed a prebuilt index, so many lookups walk the roots once' {
         $idx = Get-AgentDefinitionIndex -SearchRoots $script:Roots
         # Remove the tree: a lookup that re-walked would now fail; one served by the index does not.
@@ -181,6 +201,41 @@ Describe 'Find-FilesPruned never enters an excluded directory (#609)' {
         $r = @(Find-FilesPruned -Root $root -Filter '*.md' -Deadline ([datetime]::UtcNow.AddSeconds(-5)) -WarningVariable w -WarningAction SilentlyContinue)
         $r.Count | Should -Be 0
         (@($w) -join ' ') | Should -Match 'PARTIAL'
+    }
+    It 'sets State.Partial when the budget runs out, and leaves it alone on a complete walk' {
+        $root = New-Tracked 'prune-state'
+        Set-Content -LiteralPath (Join-Path $root 'x.md') -Value 'x'
+        $done = @{ Partial = $false }
+        @(Find-FilesPruned -Root $root -Filter '*.md' -State $done).Count | Should -Be 1
+        $done.Partial | Should -BeFalse
+        $cut = @{ Partial = $false }
+        @(Find-FilesPruned -Root $root -Filter '*.md' -Deadline ([datetime]::UtcNow.AddSeconds(-5)) -State $cut -WarningAction SilentlyContinue) | Out-Null
+        $cut.Partial | Should -BeTrue
+    }
+    It 'honours the budget INSIDE one huge directory, not only between directories (files)' {
+        # 50 matching files in ONE directory. The clock is inside the budget for the per-directory
+        # check and past it from the first per-entry check on: a walker that only looked between
+        # directories would return all 50.
+        $root = New-Tracked 'prune-bigdir-files'
+        1..50 | ForEach-Object { Set-Content -LiteralPath (Join-Path $root "f$_.md") -Value 'x' }
+        $calls = @{ n = 0 }
+        $clock = { $calls.n++; if ($calls.n -le 1) { [datetime]::UtcNow.AddHours(-1) } else { [datetime]::UtcNow.AddHours(1) } }.GetNewClosure()
+        $st = @{ Partial = $false }
+        $r = @(Find-FilesPruned -Root $root -Filter '*.md' -Deadline ([datetime]::UtcNow) -CheckEvery 1 -Clock $clock -State $st -WarningAction SilentlyContinue)
+        $r.Count | Should -BeLessThan 50
+        $st.Partial | Should -BeTrue
+    }
+    It 'honours the budget INSIDE one huge directory, not only between directories (subdirectories)' {
+        $root = New-Tracked 'prune-bigdir-dirs'
+        1..50 | ForEach-Object { New-Item -ItemType Directory -Path (Join-Path $root "d$_") -Force | Out-Null; Set-Content -LiteralPath (Join-Path $root "d$_/x.md") -Value 'x' }
+        $calls = @{ n = 0 }
+        $clock = { $calls.n++; if ($calls.n -le 3) { [datetime]::UtcNow.AddHours(-1) } else { [datetime]::UtcNow.AddHours(1) } }.GetNewClosure()
+        $st = @{ Partial = $false }
+        $r = @(Find-FilesPruned -Root $root -Filter '*.md' -Deadline ([datetime]::UtcNow) -CheckEvery 1 -Clock $clock -State $st -WarningAction SilentlyContinue)
+        # Expires on the 3rd entry of the ROOT listing: nothing may be pushed. A walker that only checks
+        # per directory would still have entered d1 (count 1) before noticing.
+        $r.Count | Should -Be 0
+        $st.Partial | Should -BeTrue
     }
     It 'does not descend below -MaxDepth' {
         $root = New-Tracked 'prune-depth'
@@ -341,6 +396,17 @@ Describe 'Expert-Roles.ps1 -List (CLI, #609 / #469)' {
         }
     }
 
+    It 'reports UNKNOWN, not MISSING, when the agent scan ran out of time (absence is unproven)' {
+        $prevHome = $env:HOME; $prevProf = $env:USERPROFILE
+        $env:HOME = $script:FakeHome; $env:USERPROFILE = $script:FakeHome
+        Push-Location $script:Repo
+        try { $out = & pwsh -NoProfile -File (Join-Path $script:Scripts 'Expert-Roles.ps1') -List -AgentScanSeconds 0.0001 2>&1 | Out-String }
+        finally { Pop-Location; $env:HOME = $prevHome; $env:USERPROFILE = $prevProf }
+        $out | Should -Match '(?m)^\s+has-agent\b.*\bUNKNOWN\s*$'
+        $out | Should -Match '(?m)^\s+missing-agent\b.*\bUNKNOWN\s*$'
+        $out | Should -Not -MatchExactly '\bMISSING\b'
+        $out | Should -Match 'ran out of time'
+    }
     It 'tells the user it is scanning BEFORE it prints the table' {
         $iScan  = $script:Out.IndexOf('Scanning installed skills')
         $iTable = $script:Out.IndexOf('=== /board expert roles ===')
