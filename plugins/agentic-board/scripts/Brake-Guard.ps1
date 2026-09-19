@@ -73,6 +73,22 @@ $script:BrakeMarkerName = 'brake-armed.json'
 # is an argument, not a measurement. Time it.
 $script:GitCmd = '\bgit\s+(?:-[^\s;|&]*\s+(?:[^\s;|&-][^\s;|&]*\s+)?)*'
 
+# `git push ... --delete`. Defined on its own because it is evaluated TWICE: over the normalized
+# command like every pattern, and once more over a quote-masked copy (see Test-IsBrakedCommand, #546).
+#
+# The gap stops at a background `&` (#546), as the three git-push patterns below do since #542
+# round 6 - `git push origin fine & echo --delete` deletes nothing, and `.*` walked over the `&`
+# into a different command. It is NOT the sibling patterns' `[^;&|<>]*`, and the difference is
+# deliberate: that class also stops at `<`, `>` and the `&` of `2>&1`, which would let
+# `git push origin 2>&1 --delete feature` through - a command the old pattern DENIED. This fix
+# may only remove a false positive, never a deny, so a redirection stays inside the gap: `&`
+# is a boundary unless it belongs to a redirection (`>&`, `<&`, `&>`: a `&` right after `<`/`>`,
+# or right before `>`). The two `&` alternatives are mutually exclusive, so every character has
+# exactly one reading and the scan stays linear (see the timing tests).
+$script:PushDeleteFlagPattern = $script:GitCmd + 'push\b(?:[^;&|]|(?<=[<>])&|(?<![<>])&(?=>))*--delete\b'
+# The pre-#546 pattern, kept for the ambiguous-`&` fallback in Test-IsBrakedCommand.
+$script:PushDeleteUnboundedPattern = $script:GitCmd + 'push\b.*--delete\b'
+
 # Command patterns that REACH an irreversible action, grouped by the contract's action vocabulary
 # (the same words Expert-Autonomy uses, so one contract drives both).
 #
@@ -162,7 +178,7 @@ $script:BrakePatterns = @(
     @{ action = 'delete';  pattern = '\bgh\s+(issue|release)\s+delete\b' }
     # Every spelling gh accepts for the same DELETE request, not just the long one.
     @{ action = 'delete';  pattern = '\bgh\s+api\b.*(--method[=\s]+delete\b|-x\s+delete\b)' }
-    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b.*--delete\b' }
+    @{ action = 'delete';  pattern = $script:PushDeleteFlagPattern }
     # git's other remote-branch deletion syntax: `git push origin :branch`. The leading whitespace
     # in the lookbehind keeps `HEAD:main` (an ordinary push refspec) out of it.
     @{ action = 'delete';  pattern = $script:GitCmd + 'push\b[^;&|<>]*\s:\S' }
@@ -282,6 +298,26 @@ function Test-IsBrakedCommand {
         foreach ($p in $script:BrakePatterns) {
             if ($irr -notcontains $p.action) { continue }
             if ($seg -match $p.pattern) { return $p.action }
+        }
+    }
+
+    # An AMBIGUOUS `&` (#546). The narrowed --delete gap (see $script:PushDeleteFlagPattern) reads a `&`
+    # between `push` and `--delete` as a background operator, which is only safe when it plainly is
+    # one. A shell can make it an argument character in ways a text classifier cannot enumerate - quotes,
+    # backslash or caret or PowerShell-backtick escapes, `$( )` nested to any depth, extglob `@(a&b)`,
+    # heredocs, brace expansion: three reviews each found one more, and every fix invited the next.
+    # So the rule is inverted and fails closed BY CONSTRUCTION: the narrowing applies ONLY to a command
+    # made entirely of plain characters (letters, digits, blanks and a few separators/redirections),
+    # where a `&` cannot be anything but an operator. Any other character anywhere in the command and
+    # the delete flag is judged by the pre-#546 unbounded pattern, exactly as before. That can only ADD
+    # a `delete` verdict, never remove one.
+    if ($irr -contains 'delete' -and "$Command".Contains('&') -and "$Command" -notmatch '^[A-Za-z0-9_./:=,+@ \t&|;<>-]+\z') {
+        foreach ($segment in ((ConvertTo-NormalizedCommand $Command) -split $script:SegmentSeparator)) {
+            $seg = $segment.Trim()
+            if (-not $seg) { continue }
+            if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
+            if (Test-IsGenuinePreview -Segment $seg) { continue }
+            if ($seg -match $script:PushDeleteUnboundedPattern) { return 'delete' }
         }
     }
     return ''
