@@ -63,6 +63,11 @@ Describe 'Get-CheckJobId / Get-JobStepCount' {
         Get-JobStepCount -Job $null | Should -Be -1
         Get-JobStepCount -Job ([pscustomobject]@{ id = 1; conclusion = 'failure' }) | Should -Be -1
     }
+    It 'returns -1 for `steps: null` (a member that exists but says nothing); only an empty ARRAY is zero' {
+        Get-JobStepCount -Job ([pscustomobject]@{ id = 1; steps = $null }) | Should -Be -1
+        Get-JobStepCount -Job @{ id = 1; steps = $null } | Should -Be -1
+        Get-JobStepCount -Job ([pscustomobject]@{ id = 1; steps = @() }) | Should -Be 0
+    }
 }
 
 Describe 'Test-CheckNeverExecuted - positive evidence only' {

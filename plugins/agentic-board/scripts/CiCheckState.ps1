@@ -73,7 +73,12 @@ function Get-JobStepCount {
     if ($null -eq $Job) { return -1 }
     if (-not ($Job.PSObject.Properties.Name -contains 'steps') -and
         -not (($Job -is [hashtable]) -and $Job.ContainsKey('steps'))) { return -1 }
-    return @($Job.steps | Where-Object { $_ }).Count
+    # `steps: null` is a member that exists but says nothing: as unknown as a missing one. Only an
+    # empty ARRAY is the fingerprint of a job GitHub refused to start (external review on #693).
+    # (Plain assignments on purpose: `$x = if (...) { @() }` unrolls an empty array to $null.)
+    if ($Job -is [hashtable]) { $steps = $Job['steps'] } else { $steps = $Job.steps }
+    if ($null -eq $steps) { return -1 }
+    return @($steps | Where-Object { $_ }).Count
 }
 
 <#
