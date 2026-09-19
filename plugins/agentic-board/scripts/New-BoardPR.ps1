@@ -159,19 +159,21 @@ function Get-RegisteredBranchMismatch {
     )
     $here = ConvertTo-ComparablePath $WorkPath
     if (-not $here -or -not $Branch) { return '' }
-    foreach ($e in @($Entries)) {
-        if (-not $e -or -not $e.branch) { continue }
-        if (@($Issues) -notcontains [int]$e.issue) { continue }
-        if ($e.repo -and $Repo -and ("$($e.repo)" -ne $Repo)) { continue }
-        if ((ConvertTo-ComparablePath "$($e.workPath)") -ne $here) { continue }
-        if ("$($e.branch)" -ne $Branch) {
-            return "el issue #$($e.issue) se registro en la rama '$($e.branch)' de esta copia de trabajo, pero se va a empujar '$Branch'. " +
-                   "Otra sesion pudo cambiar la rama de esta carpeta, y lo commiteado desde entonces puede estar en la rama equivocada. " +
-                   "Revisa con 'git log' y vuelve a '$($e.branch)' (git checkout $($e.branch), o pasa -Branch $($e.branch)); " +
-                   "-AllowBranchMismatch lo omite a proposito."
-        }
-    }
-    return ''
+    $mine = @($Entries | Where-Object {
+        $_ -and $_.branch -and
+        (@($Issues) -contains [int]$_.issue) -and
+        -not ($_.repo -and $Repo -and ("$($_.repo)" -ne $Repo)) -and
+        ((ConvertTo-ComparablePath "$($_.workPath)") -eq $here)
+    })
+    if ($mine.Count -eq 0) { return '' }
+    # Several rows can name the same issue and folder (a restart under a new branch name); the
+    # branch being pushed only has to be one the folder legitimately registered.
+    if (@($mine | Where-Object { "$($_.branch)" -eq $Branch }).Count -gt 0) { return '' }
+    $e = $mine[0]
+    return "el issue #$($e.issue) se registro en la rama '$($e.branch)' de esta copia de trabajo, pero se va a empujar '$Branch'. " +
+           "Otra sesion pudo cambiar la rama de esta carpeta, y lo commiteado desde entonces puede estar en la rama equivocada. " +
+           "Revisa con 'git log' y vuelve a '$($e.branch)' (git checkout $($e.branch), o pasa -Branch $($e.branch)); " +
+           "-AllowBranchMismatch lo omite a proposito."
 }
 
 # Dot-source guard: tests set $env:ABIOS_NEWBOARDPR_DOTSOURCE to load the pure helper only.

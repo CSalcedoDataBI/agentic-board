@@ -45,6 +45,12 @@ Describe 'Get-RegisteredBranchMismatch (pure)' {
         Get-RegisteredBranchMismatch -Entries @(New-Entry 6 'issue-6-x' 'C:\r\wt') -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'other' | Should -Be ''
         Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' 'C:\r\wt' 'x/y') -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'other' | Should -Be ''
     }
+    It 'several rows for the same issue and folder (a restart under a new branch name): matching ANY of them is fine' {
+        $rows = @(New-Entry 5 'issue-5-old' 'C:\r\wt'), @(New-Entry 5 'issue-5-new' 'C:\r\wt')
+        Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'issue-5-new' | Should -Be ''
+        Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'issue-5-old' | Should -Be ''
+        Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'stranger'    | Should -Match 'se registro en la rama'
+    }
     It 'checks every issue of a batch PR' {
         Get-RegisteredBranchMismatch -Entries @(New-Entry 7 'issue-7-x' 'C:\r\wt') -Repo 'o/r' -Issues @(5, 7) -WorkPath 'C:/r/wt' -Branch 'other' | Should -Match 'issue-7-x'
     }
