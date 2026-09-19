@@ -2276,6 +2276,31 @@ function Resolve-GitPathForm {
     try { return (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName } catch { return $Path }
 }
 
+# Was this session's run brake-armed, and does its contract brake on MERGE? (#518) Read from the
+# marker in the session's worktree - which lives IN the thing the teardown destroys, so it has to be
+# read BEFORE any teardown step. Returns { Armed; BrakesMerge; Unreadable; Issue }.
+# FAIL DIRECTION is toward "armed": a marker file that is present but cannot be parsed, or a guard
+# that cannot be loaded, is treated as armed and braking on merge - refusing a teardown only ever
+# keeps things, while guessing "not armed" would destroy the evidence the brake exists to leave.
+function Get-SessionBrakeVerdict {
+    param([string]$WorkPath)
+    $none = [pscustomobject]@{ Armed = $false; BrakesMerge = $false; Unreadable = $false; Issue = 0 }
+    if (-not $WorkPath) { return $none }
+    $markerFile = Join-Path (Join-Path $WorkPath '.agentic-board') 'brake-armed.json'
+    if (-not (Test-Path -LiteralPath $markerFile)) { return $none }
+    try {
+        . (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
+        $m = Read-BrakeMarkerAt -WorkPath $WorkPath
+        if (-not $m) { return [pscustomobject]@{ Armed = $true; BrakesMerge = $true; Unreadable = $true; Issue = 0 } }
+        return [pscustomobject]@{
+            Armed = $true; BrakesMerge = (Test-BrakeMarkerBrakesMerge -Marker $m)
+            Unreadable = [bool]$m.unreadable; Issue = [int]$m.issue
+        }
+    } catch {
+        return [pscustomobject]@{ Armed = $true; BrakesMerge = $true; Unreadable = $true; Issue = 0 }
+    }
+}
+
 # Tear down a finished session: kill the tab shell FIRST (the `pwsh -NoExit` left cwd'd
 # inside the worktree keeps a handle -> `git worktree remove` fails with Permission denied),
 # then remove the worktree, delete the local branch, and prune the registry entry. Returns
@@ -2285,6 +2310,21 @@ function Resolve-GitPathForm {
 function Invoke-SessionCleanup {
     param([object]$Session, [switch]$DryRun, [switch]$ForceDeleteBranch, [switch]$ForceRemoveWorktree, [switch]$PrMerged)
     $actions = @()
+    # A BRAKE-ARMED RUN WHOSE PR ENDED UP MERGED IS NOT ROUTINE CLEANUP (#518). The brake exists so a
+    # run stops at "PR ready" and a human merges; a merged PR under an armed marker is either that
+    # human merge (expected) or the run merging itself past the brake (the #440 failure) - and this
+    # function cannot tell which. What it CAN do is not destroy the evidence: the marker, the denial
+    # log and the worktree all live in the directory the teardown removes. So it refuses, BEFORE any
+    # teardown step (the shell kill included), and says why. The human, having checked who merged,
+    # passes -ForceRemoveWorktree - the deliberate "discard this worktree" switch - to proceed.
+    # This ADDS a refusal and never removes one, and it is read-only, so it also runs under -DryRun.
+    if ($PrMerged -and $Session.workPath -and -not $ForceRemoveWorktree) {
+        $brake = Get-SessionBrakeVerdict -WorkPath $Session.workPath
+        if ($brake.Armed -and $brake.BrakesMerge) {
+            $actions += "WARN conservo TODO de #$($Session.issue) ($($Session.workPath)): su PR quedo MERGEADO y esa corrida tenia el FRENO armado (merge = irreversible). O mergeaste tu tras revisar (esperado) o la corrida se salto el freno; el worktree guarda la evidencia (brake-armed.json, denials.jsonl). Verifica quien mergeo y, si esta bien, reintenta con -ForceRemoveWorktree"
+            return $actions
+        }
+    }
     # Kill ONLY a session whose tracked PID is genuinely its own spawned shell: a standalone
     # `pwsh` window (via='pwsh') records $spawn.process.Id, so killing that releases the
     # worktree handle. A `wt` tab and an in-place -Start record the HOST/launcher PID (the

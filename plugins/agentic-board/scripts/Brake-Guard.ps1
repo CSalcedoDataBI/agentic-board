@@ -361,6 +361,31 @@ function Read-BrakeMarker {
 }
 
 <#
+    The marker of EXACTLY this worktree, or $null (#517/#518).
+
+    Read-BrakeMarker walks UP to the filesystem root, which is right for the hook (it fires wherever
+    the session's cwd is, and any marker above it governs that session). The supervisor and the
+    teardown ask a different question - "was THIS worktree's run armed?" - and a marker found in an
+    ANCESTOR belongs to another run, so it must not be attributed here. A present marker always means
+    armed; an unreadable one is armed with the full vocabulary (Read-BrakeMarker's own rule).
+    ADDITIVE: nothing in the hook's path calls this.
+#>
+function Read-BrakeMarkerAt {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$WorkPath)
+    if (-not $WorkPath) { return $null }
+    if (-not (Test-Path -LiteralPath (Get-BrakeMarkerPath -WorkPath $WorkPath))) { return $null }
+    return (Read-BrakeMarker -StartDir $WorkPath)
+}
+
+# Does this run's contract brake on MERGE? A marker with an explicit list that omits `merge`, or a
+# budget-only marker (empty list by the contract's own choice), says merging was allowed. Pure.
+function Test-BrakeMarkerBrakesMerge {
+    param($Marker)
+    if (-not $Marker) { return $false }
+    return (@($Marker.irreversible | ForEach-Object { "$_".Trim().ToLowerInvariant() }) -contains 'merge')
+}
+
+<#
     Build the marker a brake-armed run drops in its worktree.
 
     Kept pure (returns the JSON string; the caller writes it) so the armed contents are testable
