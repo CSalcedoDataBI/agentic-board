@@ -115,6 +115,70 @@ Describe 'Fleet supervisor detects a brake-armed run whose PR merged (#517)' {
     }
 }
 
+Describe 'the supervisor attributes a PR to THIS session, not to the branch name (Copilot review of #701)' {
+    # -TakeOver reuses issue-<n>-<slug>, so two PRs can share one branch name. The OLD merged one must not
+    # be reported as this run's PR: that raised a false brake violation for a relaunch with no PR yet.
+    BeforeAll {
+        $script:Started = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        $script:OldPr = [pscustomobject]@{ number = 100; state = 'MERGED'; headRefOid = ('a' * 40); createdAt = (Get-Date).AddDays(-3).ToUniversalTime().ToString('o') }
+        $script:NewPr = [pscustomobject]@{ number = 200; state = 'OPEN';   headRefOid = ('b' * 40); createdAt = (Get-Date).AddMinutes(5).ToUniversalTime().ToString('o') }
+    }
+    It 'a relaunch with NO PR yet does not adopt the old merged PR (the reported false violation)' {
+        Select-SessionPr -Prs @($script:OldPr) -Tip ('c' * 40) -StartedAt $script:Started | Should -BeNullOrEmpty
+    }
+    It 'the PR whose head is this session''s branch tip wins, even against a newer number' {
+        (Select-SessionPr -Prs @($script:NewPr, $script:OldPr) -Tip ('a' * 40) -StartedAt $script:Started).number | Should -Be 100
+    }
+    It 'with two PRs on the name and a moved branch, the one created after the session started is chosen' {
+        (Select-SessionPr -Prs @($script:OldPr, $script:NewPr) -Tip ('c' * 40) -StartedAt $script:Started).number | Should -Be 200
+    }
+    It 'an unparseable session stamp adopts nothing it cannot prove (never an older run''s PR)' {
+        Select-SessionPr -Prs @($script:OldPr) -Tip '' -StartedAt 'garbage' | Should -BeNullOrEmpty
+    }
+    It 'accepts the older minute-granular stamp' {
+        (Select-SessionPr -Prs @($script:NewPr) -Tip '' -StartedAt (Get-Date).ToString('yyyy-MM-dd HH:mm')).number | Should -Be 200
+    }
+    It 'end to end: no violation is raised for a relaunch whose only PR is the old merged one' {
+        $mine = Select-SessionPr -Prs @($script:OldPr) -Tip ('c' * 40) -StartedAt $script:Started
+        $row = [pscustomobject]@{ issue = 5; pr = $(if ($mine) { "#$($mine.number)" } else { '' }); merged = [bool]($mine -and $mine.state -eq 'MERGED'); brakesMerge = $true }
+        @(Get-BrakeViolations @($row)).Count | Should -Be 0
+    }
+    It 'Resolve-LiveSessions (real code path, a fake gh on PATH) ignores the old merged PR of a reused branch name' {
+        $bin = Join-Path $TestDrive 'fakebin'; New-Item -ItemType Directory -Path $bin | Out-Null
+        $json = Join-Path $bin 'prs.json'
+        @(@{ number = 100; state = 'MERGED'; headRefOid = ('a' * 40); createdAt = (Get-Date).AddDays(-3).ToUniversalTime().ToString('o'); mergedBy = @{ login = 'old' }; mergedAt = (Get-Date).AddDays(-3).ToUniversalTime().ToString('o') }) |
+            ConvertTo-Json -Depth 5 -AsArray | Set-Content $json
+        "@type ""$json""" | Set-Content (Join-Path $bin 'gh.cmd') -Encoding ASCII
+        $state = Join-Path $TestDrive 'fakestate'; New-Item -ItemType Directory -Path $state | Out-Null
+        $wt = Join-Path $TestDrive 'fakewt'; New-Item -ItemType Directory -Path $wt | Out-Null
+        Set-BrakeArmedState -WorkPath $wt -Armed $true -Issue 5 -Irreversible @('merge') -ArmedAt '2026-09-18 10:00:00' | Out-Null
+        @([pscustomobject]@{ issue = 5; repo = 'o/r'; branch = 'issue-5-x'; workPath = $wt; sessionPid = 0; started = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') }) |
+            ConvertTo-Json -Depth 4 -AsArray | Set-Content (Join-Path $state 'sessions.json')
+        $regFile = Join-Path $state 'sessions.json'
+        Mock Get-SessionsFile -MockWith ([scriptblock]::Create("'$regFile'"))   # only WHERE the registry is; Resolve-LiveSessions runs for real
+        $oldPath = $env:PATH; $env:PATH = "$bin;$oldPath"
+        try { $rows = @(Resolve-LiveSessions) } finally { $env:PATH = $oldPath }
+        $rows.Count | Should -Be 1
+        $rows[0].prKnown | Should -BeTrue          # gh answered
+        $rows[0].pr      | Should -Be ''           # ...and the old PR was NOT adopted
+        $rows[0].merged  | Should -BeFalse
+        @(Get-BrakeViolations $rows).Count | Should -Be 0
+    }
+    It 'Get-SessionBranchTip reads the tip from the session''s own worktree, and is empty when it cannot' {
+        $repo = Join-Path $TestDrive 'tiprepo'; New-Item -ItemType Directory -Path $repo | Out-Null
+        Push-Location $repo
+        try {
+            git init -q -b main 2>&1 | Out-Null
+            'x' | Set-Content a.txt; git add -A 2>&1 | Out-Null
+            git -c user.email=t@t -c user.name=t commit -q -m base 2>&1 | Out-Null
+            git branch issue-5-x 2>&1 | Out-Null
+            $expected = (git rev-parse issue-5-x)
+        } finally { Pop-Location }
+        Get-SessionBranchTip -WorkPath $repo -Branch 'issue-5-x' | Should -Be $expected
+        Get-SessionBranchTip -WorkPath $repo -Branch 'no-such-branch' | Should -Be ''
+        Get-SessionBranchTip -WorkPath (Join-Path $TestDrive 'missing') -Branch 'issue-5-x' | Should -Be ''
+    }
+}
 Describe 'auto-clean refuses to tear down a brake-armed session whose PR merged (#518)' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ('bk' + [guid]::NewGuid().ToString('N').Substring(0, 8))

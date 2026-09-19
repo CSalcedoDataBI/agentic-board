@@ -170,6 +170,48 @@ function Read-FleetSessions {
     try { return @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return @() }
 }
 
+# Which PR belongs to THIS session? A branch NAME is not an identity: `-TakeOver` reuses
+# `issue-<n>-<slug>`, so `gh pr list --head <branch>` can return an OLD merged PR from a previous run,
+# and reporting it as this session's PR would raise a false brake violation (and read the fleet as
+# complete) for a relaunch that has no PR yet - the same reason Get-SessionLiveStatus / Select-BranchPr
+# refuse "the newest one". Pure. In order of trust:
+#   1. the PR whose head IS this session's branch tip ($Tip);
+#   2. otherwise the newest PR CREATED at or after the session started (the branch may have moved past
+#      the pushed head; a PR opened before this run began cannot be this run's);
+#   3. otherwise none - never an older run's PR.
+# $Prs items need number, state, headRefOid, createdAt (UTC ISO). $StartedAt is the registry's local
+# stamp; both stamp formats (seconds, and the older minutes) parse. An unparseable stamp disables rule 2
+# (rule 3 applies): unknown must not adopt somebody else's PR.
+function Select-SessionPr {
+    param([object[]]$Prs = @(), [string]$Tip = '', [string]$StartedAt = '')
+    $all = @($Prs | Where-Object { $null -ne $_ })
+    if ($Tip) {
+        $byTip = @($all | Where-Object { "$($_.headRefOid)" -eq $Tip }) | Select-Object -First 1
+        if ($byTip) { return $byTip }
+    }
+    $start = $null
+    foreach ($fmt in @('yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd HH:mm')) {
+        try { $start = [datetime]::ParseExact($StartedAt, $fmt, [cultureinfo]::InvariantCulture); break } catch { }
+    }
+    if (-not $start) { return $null }
+    $floor = $start.AddSeconds(-60)
+    $later = @($all | Where-Object {
+        $c = $null
+        try { $c = ([datetimeoffset]::Parse("$($_.createdAt)", [cultureinfo]::InvariantCulture)).LocalDateTime } catch { }
+        $c -and $c -ge $floor
+    } | Sort-Object { [int]$_.number } -Descending) | Select-Object -First 1
+    return $later
+}
+
+# The tip of a session's branch, from ITS worktree ('' when it cannot be read).
+function Get-SessionBranchTip {
+    param([string]$WorkPath, [string]$Branch)
+    if (-not $WorkPath -or -not $Branch -or -not (Test-Path -LiteralPath $WorkPath)) { return '' }
+    $out = @(git -C $WorkPath rev-parse --verify "$Branch^{commit}" 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $out.Count -eq 0) { return '' }
+    return "$($out[0])".Trim()
+}
+
 # Enrich raw registry entries with ageMin (from `started`) + pr/merged (from gh).
 function Resolve-LiveSessions {
     $out = @()
@@ -186,14 +228,14 @@ function Resolve-LiveSessions {
         $pr = ''; $merged = $false; $prKnown = $false; $mergedBy = ''; $mergedAt = ''
         if ($e.repo -and $e.branch) {
             try {
-                $raw = gh pr list --repo $e.repo --head $e.branch --state all --json number,state,mergedBy,mergedAt --limit 1 2>$null
+                $raw = gh pr list --repo $e.repo --head $e.branch --state all --json number,state,headRefOid,createdAt,mergedBy,mergedAt --limit 20 2>$null
                 if ($LASTEXITCODE -eq 0 -and $null -ne $raw) {
                     $prKnown = $true
-                    $found = @($raw | ConvertFrom-Json)
-                    if ($found.Count -gt 0) {
-                        $pr = "#$($found[0].number)"; $merged = ($found[0].state -eq 'MERGED')
-                        if ($found[0].mergedBy) { $mergedBy = "$($found[0].mergedBy.login)" }
-                        if ($found[0].mergedAt) { $mergedAt = "$($found[0].mergedAt)" }
+                    $mine = Select-SessionPr -Prs @($raw | ConvertFrom-Json) -Tip (Get-SessionBranchTip -WorkPath "$($e.workPath)" -Branch "$($e.branch)") -StartedAt "$($e.started)"
+                    if ($mine) {
+                        $pr = "#$($mine.number)"; $merged = ($mine.state -eq 'MERGED')
+                        if ($mine.mergedBy) { $mergedBy = "$($mine.mergedBy.login)" }
+                        if ($mine.mergedAt) { $mergedAt = "$($mine.mergedAt)" }
                     }
                 }
             } catch { $prKnown = $false }
