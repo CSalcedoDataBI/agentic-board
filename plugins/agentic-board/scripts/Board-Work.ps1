@@ -2276,6 +2276,28 @@ function Resolve-GitPathForm {
     try { return (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName } catch { return $Path }
 }
 
+# Is this folder the MAIN working copy (or a folder inside it) rather than a linked worktree? (#555)
+# Answered by git, not by comparing path strings: in a main working tree the git dir IS the common
+# dir, while in a linked worktree it is <common>/worktrees/<name>. A folder inside the main copy
+# (a legacy session registered from `plugins/<x>` instead of the clone root) answers the same as the
+# clone itself, which is exactly the point - none of them is a worktree, so none may be torn down.
+# The registry can name such a path: sessions from before the worktree flow ran `-Start` in the clone
+# and recorded the clone as the "worktree". Unreadable (no such folder, not a repo, git failed)
+# returns $false: the caller's own guards (dirty check, git's refusal) still apply to that case.
+function Test-IsMainWorkingCopy {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+    $gitDir = @(git -C $Path rev-parse --absolute-git-dir 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $gitDir.Count -eq 0 -or -not "$($gitDir[0])".Trim()) { return $false }
+    $commonDir = @(git -C $Path rev-parse --git-common-dir 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $commonDir.Count -eq 0 -or -not "$($commonDir[0])".Trim()) { return $false }
+    $common = "$($commonDir[0])".Trim()
+    # --git-common-dir is relative to the folder git ran in when it is not absolute.
+    if (-not [System.IO.Path]::IsPathRooted($common)) { $common = Join-Path (Resolve-GitPathForm $Path) $common }
+    $norm = { param($p) ((Resolve-GitPathForm ([System.IO.Path]::GetFullPath($p))) -replace '\\', '/').TrimEnd('/') }
+    return ((& $norm "$($gitDir[0])".Trim()) -ieq (& $norm $common))
+}
+
 # Tear down a finished session: kill the tab shell FIRST (the `pwsh -NoExit` left cwd'd
 # inside the worktree keeps a handle -> `git worktree remove` fails with Permission denied),
 # then remove the worktree, delete the local branch, and prune the registry entry. Returns
@@ -2316,7 +2338,18 @@ function Invoke-SessionCleanup {
     # refuse and keep everything for a later retry. A merged session is torn down as usual: its
     # work landed, so what remains is scratch. -ForceRemoveWorktree is the deliberate discard.
     # The check is read-only, so it also runs under -DryRun and makes the plan predictive.
-    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and (Test-Path -LiteralPath $Session.workPath)) {
+    #
+    # THE MAIN WORKING COPY IS NEVER A TEARDOWN TARGET (#555). A session from before the worktree
+    # flow recorded the clone itself (or a folder inside it) as its workPath. There is no worktree to
+    # remove, and asking git to remove one is not a safe no-op: git refuses the clone root, but a
+    # folder INSIDE the clone is "not a working tree" too, git no longer lists it, and the litter
+    # cleanup below then took that as licence to `Remove-Item -Recurse` the folder - measured: it
+    # deleted `plugins/agentic-board` out of the clone. Decided FIRST, before the dirty check, because
+    # a clone with uncommitted files (the normal state of somebody's clone) would otherwise return
+    # early and the entry would never drain. -ForceRemoveWorktree does NOT override this: it means
+    # "discard the uncommitted files of a real worktree", not "delete the primary checkout".
+    $isMainCopy = [bool]($Session.workPath -and (Test-IsMainWorkingCopy $Session.workPath))
+    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and -not $isMainCopy -and (Test-Path -LiteralPath $Session.workPath)) {
         $out = @(git -C $Session.workPath status --porcelain 2>&1)
         # FAIL CLOSED: an unreadable worktree (corrupt metadata, index lock, no git) yields no
         # output, which must NOT be read as "clean" - that would hand the --force exactly the
@@ -2346,7 +2379,9 @@ function Invoke-SessionCleanup {
     # comes from `git worktree list`; workPath here comes from the registry, so nothing self-heals.
     # This is the designed case for a `wt` session, whose shell is deliberately never killed above.
     $worktreeGone = $true
-    if ($Session.workPath) {
+    if ($isMainCopy) {
+        $actions += "SKIP no toco $($Session.workPath) (#$($Session.issue)): es el working copy principal (o una carpeta dentro de el), no un worktree enlazado - nunca se borra. Sesion anterior al flujo de worktrees: solo se poda su registro"
+    } elseif ($Session.workPath) {
         $actions += "git worktree remove --force $($Session.workPath)"
         if (-not $DryRun) {
             # Resolve BEFORE the removal, while the directory still exists to be resolved: after a
