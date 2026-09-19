@@ -82,6 +82,22 @@ branch already proven merged by its PR (#273/PR #275). The proof is the PR, not 
   headRefOid == tip) rather than judged. Under `-Auto` the unmerged classes are listed and
   **skipped entirely**, never deleted: "cannot ask" resolves to keep. The dirty-worktree and
   current-worktree guards still apply.
+- **One stuck worktree never strands the rest of the sweep (#548).** Every git call in the
+  removal runs through a wrapper that turns failure into data (Windows PowerShell 5.1 makes native
+  stderr a terminating error under `$ErrorActionPreference = 'Stop'`, which used to abort the
+  whole `-Fix -Auto` walk at the first worktree the OS would not release). A branch that cannot
+  be removed is kept, the walk continues, and the run ends with a **summary that names every
+  skipped branch and why**. A worktree left *half-removed* (git dropped it - `prunable` - but the
+  folder is still on disk) is detected, listed with its own section, and skipped with the command
+  that does clear it (`robocopy <empty> <path> /MIR`, `rmdir`, `git worktree prune`) instead of
+  retrying the same `git worktree remove`.
+- **Installed-plugin drift (#482), read-only.** The audit also compares the installed plugin
+  (`installed_plugins.json` -> `gitCommitSha`) with the published tree at that commit, read from the
+  local marketplace clone, file by file by git blob id (CRLF-tolerant). It reports `clean`, or
+  `drifted` naming the modified / extra / missing files, or `unverifiable` (never `clean`) when no
+  local clone holds the commit. The key is CONTENT: a hand-patched cache reports drift even when
+  both sides say the same version. It never repairs anything - `claude plugin update` would
+  overwrite a deliberate local patch.
 
 ## State-dir garbage collection (#574)
 

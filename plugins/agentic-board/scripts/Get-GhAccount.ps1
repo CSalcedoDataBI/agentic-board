@@ -1,9 +1,10 @@
 ﻿<#  Get-GhAccount.ps1 — resolve GitHub account + token for agentic-board.
-    Default account: CSalcedoDataBI. Override: -Account pal-devs.
+    Default account: CSalcedoDataBI. Override: -Account pesante (alias pal-devs, kept: the business
+    account was renamed PAL-Devs -> PesanteAnalytics on 2026-08-14, same account, same PAT).
     Reads the PAT from the Windows USER registry (not $env:, which can be stale).
     Verifies the 'project' scope. Emits an object with .Token to set $env:GH_TOKEN.  #>
 [CmdletBinding()]
-param([ValidateSet('csalcedo','pal-devs')][string]$Account = 'csalcedo')
+param([ValidateSet('csalcedo','pesante','pal-devs')][string]$Account = 'csalcedo')
 
 # The CLI ALIAS -> user map is this script's own business. The user -> TOKEN VARIABLE map is not:
 # it lived here, in Board-Merge, in New-BoardPR and in Publish-DocsWiki, four copies of one rule
@@ -13,8 +14,10 @@ $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
 $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
 
-$aliasUser = @{ 'csalcedo' = 'CSalcedoDataBI'; 'pal-devs' = 'PAL-Devs' }
-$user  = $aliasUser[$Account]
+# The alias -> login map lives in Resolve-GhTokenVar now too (#665): this was a second copy of it,
+# documented as "kept in one place", and it is the copy a rename left stale.
+$user  = Get-AccountForAlias -Alias $Account
+if (-not $user) { Write-Error "Alias de cuenta desconocido '$Account'. Validos: $((Get-KnownAccountAliases) -join ', ')."; exit 1 }
 $sel   = @{ User = $user; Var = (Get-OwnerTokenVar -Owner $user) }
 $token = [System.Environment]::GetEnvironmentVariable($sel.Var, 'User')
 if ([string]::IsNullOrWhiteSpace($token)) {
