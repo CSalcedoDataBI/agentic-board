@@ -588,6 +588,11 @@ if ($env:ABIOS_EXPERTAUTO_DOTSOURCE) { return }
 # ── CLI ─────────────────────────────────────────────────────────────────────────
 if ($Issue -le 0 -and $Epic -le 0) { throw "Expert-Auto: -Issue <n> or -Epic <n> is required." }
 if ($Issue -gt 0 -and $Epic -gt 0) { throw "Expert-Auto: -Issue and -Epic are mutually exclusive - pick one." }
+# These values are interpolated into the epic walker's `pwsh -Command` line and into gh calls, so
+# refuse anything that is not shaped like what it names BEFORE it travels (#499): a GitHub login,
+# an owner/name, an environment-variable identifier. Refusals only - nothing valid is rejected.
+if ($Owner -and $Owner -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$') { throw "Expert-Auto: -Owner must be a GitHub account name (letters, digits, hyphen), got '$Owner'." }
+if ($PSBoundParameters.ContainsKey('TokenVar') -and $TokenVar -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { throw "Expert-Auto: -TokenVar must be an environment-variable name, got '$TokenVar'." }
 
 # ── Token scope guard (#440 footgun 1) ──────────────────────────────────────────
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
@@ -638,11 +643,15 @@ $contract = Read-ExpertContract
 
 # Pull the plan body from the issue (single-issue mode; the epic walker reads per sub-issue).
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
-if ($Repo) {
+# PowerShell variables are case-INsensitive: `$repo` below IS the -Repo parameter, so once the repo
+# is derived from origin, `if ($Repo)` no longer means "the human passed -Repo". Freeze what was
+# actually passed BEFORE assigning, and use this for every "forward only when given" decision.
+$repoGiven = "$Repo"
+if ($repoGiven) {
     # Explicit -Repo (#499) - validated, never guessed at: a malformed one would send every gh
     # call below at the wrong repository.
-    if ($Repo -notmatch '^[^/\s]+/[^/\s]+$') { throw "Expert-Auto: -Repo must be owner/name (got '$Repo')." }
-    $repo = $Repo
+    if ($repoGiven -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$') { throw "Expert-Auto: -Repo must be owner/name (got '$repoGiven')." }
+    $repo = $repoGiven
 } else {
     $repo = Get-RepoFromOriginUrl (git remote get-url origin 2>$null)
 }
@@ -847,7 +856,11 @@ query($o:String!,$r:String!,$n:Int!){
             # flattened -Irreversible list would arm a brake whose vocabulary matches nothing.
             # Single-quoted values with doubled quotes so paths survive verbatim. A launch
             # failure warns and the wave continues - the sub-issues are independent.
-            $sq = { param($v) "'" + ("$v" -replace "'", "''") + "'" }
+            # Every character the PowerShell tokenizer reads as a single quote is doubled, not only
+            # the ASCII one: U+2018/U+2019/U+201A/U+201B are quote characters to it too, so a path
+            # like C:\Users\O'Brien (typographic apostrophe) would end the literal early and run
+            # whatever follows it as a command.
+            $sq = { param($v) "'" + ("$v" -replace "(['\u2018\u2019\u201A\u201B])", '$1$1') + "'" }
             $irrLiteral = (@($contract.autonomy.irreversible) | ForEach-Object { & $sq $_ }) -join ','
             if (-not $irrLiteral) { $irrLiteral = "" }
             $bwCmd = "& $(& $sq (Join-Path $PSScriptRoot 'Board-Work.ps1')) -ProjectNum $ProjectNum -Parallel $($s.number) -Launch " +
@@ -856,7 +869,7 @@ query($o:String!,$r:String!,$n:Int!){
                      $(if ($stopAtPR) { ' -StopAtPR' } else { '' }) +
                      $(if ($EndToEnd) { ' -EndToEnd' } else { '' }) +
                      $(if ($Owner) { " -Owner $(& $sq $Owner)" } else { '' }) +
-                     $(if ($Repo) { " -Repo $(& $sq $Repo)" } else { '' }) +
+                     $(if ($repoGiven) { " -Repo $(& $sq $repoGiven)" } else { '' }) +
                      $(if ($TakeOver) { ' -TakeOver' } else { '' }) +
                      $(if ($IgnoreBlocked) { ' -IgnoreBlocked' } else { '' })
             & pwsh -NoProfile -Command $bwCmd
@@ -911,7 +924,7 @@ Write-Host ""
 
 $launchArgs = "-ProjectNum $ProjectNum -Parallel $Issue -Launch" + $(if ($stopAtPR) { " -StopAtPR -BriefFile `"$briefPath`"" } else { "" }) +
     $(if ($Owner) { " -Owner $Owner -TokenVar $TokenVar" } else { "" }) +
-    $(if ($Repo) { " -Repo $Repo" } else { "" }) +
+    $(if ($repoGiven) { " -Repo $repoGiven" } else { "" }) +
     $(if ($TakeOver) { " -TakeOver" } else { "" }) +
     $(if ($IgnoreBlocked) { " -IgnoreBlocked" } else { "" })
 if ($DryRun) {
@@ -928,7 +941,7 @@ if ($DryRun) {
         EndToEnd = [bool]$EndToEnd; BudgetMinutes = (Get-ContractBudgetMinutes -Contract $contract)
     }
     if ($Owner)         { $bwArgs.Owner = $Owner }
-    if ($Repo)          { $bwArgs.Repo = $Repo }
+    if ($repoGiven)     { $bwArgs.Repo = $repoGiven }
     if ($TakeOver)      { $bwArgs.TakeOver = $true }
     if ($IgnoreBlocked) { $bwArgs.IgnoreBlocked = $true }
     & (Join-Path $PSScriptRoot 'Board-Work.ps1') @bwArgs

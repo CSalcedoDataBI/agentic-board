@@ -209,7 +209,7 @@ param(
     [switch]$EndToEnd, [int]$BudgetMinutes = 0, [string]$TokenVar = "GITHUB_TOKEN_PERSONAL",
     [switch]$TakeOver, [switch]$IgnoreBlocked
 )
-$rec = [ordered]@{ _line = $MyInvocation.Line }
+$rec = [ordered]@{}
 foreach ($k in $PSBoundParameters.Keys) {
     $v = $PSBoundParameters[$k]
     $rec[$k] = if ($v -is [System.Management.Automation.SwitchParameter]) { [bool]$v } else { $v }
@@ -281,11 +281,15 @@ exit 1
         $env:FAKE_GH_LOG = Join-Path $script:Root 'gh.log'
 
         # Run the REAL Expert-Auto.ps1 (from the scratch copy) with `gh` shadowed by a function.
-        function script:Invoke-Auto([string]$ArgText) {
+        function script:Invoke-Auto([string]$ArgText, [string]$Cwd = '') {
+            if (-not $Cwd) { $Cwd = $script:Clone }
             Remove-Item -LiteralPath $env:FAKE_BW_LOG, $env:FAKE_GH_LOG -Force -ErrorAction SilentlyContinue
             $ea   = Join-Path $script:Scripts 'Expert-Auto.ps1'
             $gh   = Join-Path $script:Fix 'gh-fake.ps1'
-            $cmd  = "function gh { & '$gh' @args }; Set-Location '$($script:Clone)'; & '$ea' $ArgText"
+            # $Cwd goes in single-quoted: a typographic apostrophe in it is the point of one test,
+            # so it is doubled the way the tokenizer wants (all four quote characters).
+            $cwdLit = $Cwd -replace "(['‘’‚‛])", '$1$1'
+            $cmd  = "function gh { & '$gh' @args }; Set-Location '$cwdLit'; & '$ea' $ArgText"
             $out  = (& pwsh -NoProfile -Command $cmd 2>&1 | Out-String)
             $calls = @()
             if (Test-Path $env:FAKE_BW_LOG) { $calls = @(Get-Content -LiteralPath $env:FAKE_BW_LOG | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json -AsHashtable }) }
@@ -317,6 +321,30 @@ exit 1
         $r.Calls[0].Keys | Should -Not -Contain 'IgnoreBlocked'
         $r.Calls[0].TokenVar | Should -Be 'GITHUB_TOKEN_PERSONAL'
         $r.Calls[0].Parallel | Should -Be '8'
+    }
+
+    It '#499: a repo DERIVED from origin is used for reads but is NOT forwarded as if the human had passed -Repo' {
+        # `$repo` (derived) and `$Repo` (the parameter) are the same PowerShell variable; forwarding
+        # on `if ($Repo)` after the derivation would silently pass -Repo on every run.
+        Push-Location $script:Clone
+        try {
+            git config http.proxy http://127.0.0.1:9      # `git fetch origin` then fails at once, offline
+            git remote add origin https://github.com/acme/widgets.git
+        } finally { Pop-Location }
+        try {
+            $s = script:Invoke-Auto '-Issue 8 -ProjectNum 13'
+            $s.Calls.Count | Should -Be 1
+            $s.Calls[0].Keys | Should -Not -Contain 'Repo'
+            (Get-Content -Raw -LiteralPath $env:FAKE_GH_LOG) | Should -Match 'issue view 8 --repo acme/widgets'
+            $e = script:Invoke-Auto '-Epic 100 -ProjectNum 13'
+            $e.Calls.Count | Should -Be 2
+            foreach ($c in $e.Calls) { $c.Keys | Should -Not -Contain 'Repo' }
+            $d = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -DryRun'
+            $d.Out | Should -Not -Match '-Repo '
+        } finally {
+            Push-Location $script:Clone
+            try { git remote remove origin 2>$null } finally { Pop-Location }
+        }
     }
 
     It '#472: forwards -TakeOver and -IgnoreBlocked to Board-Work when the human passed them' {
@@ -351,6 +379,31 @@ exit 1
         $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Repo not-a-repo'
         $r.Calls.Count | Should -Be 0
         $r.Out | Should -Match '-Repo must be owner/name'
+    }
+
+    It '#499: an -Owner, -Repo or -TokenVar that is not shaped like what it names is refused before anything travels' -ForEach @(
+        @{ Bad = "-Owner 'x; Write-Host pwn'" }
+        @{ Bad = "-Owner ""x$([char]0x2019); Write-Host pwn; #""" }
+        @{ Bad = "-Repo 'a/b; Write-Host pwn'" }
+        @{ Bad = '-Repo "a/b''c"' }
+        @{ Bad = "-TokenVar 'A B'" }
+    ) {
+        $r = script:Invoke-Auto "-Issue 8 -ProjectNum 13 $Bad"
+        $r.Calls.Count | Should -Be 0
+        $r.Out | Should -Match 'Expert-Auto: -(Owner|Repo|TokenVar) must be'
+    }
+
+    It 'the epic walker survives a clone path holding a typographic apostrophe (no injection into its child command)' {
+        # U+2019 is a single-quote character to the PowerShell tokenizer; a naive '-doubling leaves
+        # it live, so the rest of this directory NAME would run as a command in the child.
+        $evil = Join-Path $script:Root ("o$([char]0x2019); New-Item -ItemType File -Name injected-marker.txt; #")
+        New-Item -ItemType Directory -Path $evil -Force | Out-Null
+        Push-Location $evil
+        try { git init -q 2>$null | Out-Null } finally { Pop-Location }
+        $r = script:Invoke-Auto '-Epic 100 -ProjectNum 13 -Repo acme/widgets' $evil
+        $r.Calls.Count | Should -Be 2
+        $r.Calls[0].BriefFile | Should -BeLike "*o$([char]0x2019); New-Item -ItemType File -Name injected-marker.txt; #*expert-brief-101.md"
+        Test-Path -LiteralPath (Join-Path $evil 'injected-marker.txt') | Should -BeFalse
     }
 
     It '#499: the -DryRun launch line shows the overrides so it can be pasted as-is' {
@@ -400,7 +453,7 @@ exit 1
             $c.Owner | Should -Be 'PAL-Devs'
             $c.Repo | Should -Be 'acme/widgets'
             $c.TokenVar | Should -Be 'GITHUB_TOKEN_BUSINESS'
-            $c.TakeOver | Should -BeTrue -Because ("calls: " + ($r.Calls | ConvertTo-Json -Compress -Depth 4) + " out: " + $r.Out)
+            $c.TakeOver | Should -BeTrue
             $c.IgnoreBlocked | Should -BeTrue
         }
         $b1 = script:Get-Brief 101

@@ -50,7 +50,7 @@ guiding principle: **total self-use of agentic-board — never improvise your ow
 | Survive budget / interruption | `/board handoff -Save` |
 | Clean up | `/board doctor`, `/board cerrar-ciclo` |
 
-The rendered brief (`Format-AutoBrief`) carries this exact table, and `Expert-Auto.Tests.ps1` fails
+The rendered brief (`Format-AutoBrief`) carries this exact table, and `Expert-Auto.Passthrough.Tests.ps1` fails
 whenever the two disagree — in either direction — so a capability added here without the brief
 (#554: four were missing) or the other way round cannot drift again. Change both together.
 
