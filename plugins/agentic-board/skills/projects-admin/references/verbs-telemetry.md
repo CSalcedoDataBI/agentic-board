@@ -21,3 +21,13 @@ Loaded on demand by /board (#573).
     OUTSIDE any repo, so the local record cannot be committed. **Nothing is filed automatically** —
     it produces candidates for a human to judge.
   - `-WhatIf` shows what would be read without touching anything; `-Limit <n>` bounds a first run.
+  - **`-MatchFiled` — recurrence vs new (#476).** After the sweep, each script that had incidents (a
+    failed invocation or any signal) is joined, by name, to the issues already filed about it on
+    `-Repo` (default the tool's own; open ones plus those closed in the last `-ClosedDays`, default
+    90). The report then separates **reincidencia (ya archivado)** - the defect is known, here is how
+    many more incidents the sweep saw and which issues name it - from **candidatos NUEVOS** - nothing
+    filed names that script. It reads GitHub (read-only) and files nothing; a failed read is reported
+    and the sweep result is still printed. `-CandidatesFile <json>` matches against a local list
+    instead (offline). The matching is the same code the feedback skill uses before filing
+    (`scripts/IssueSearch.ps1`). Only sessions swept in THIS run count: a second run that finds
+    nothing new has no recurrence to report.
