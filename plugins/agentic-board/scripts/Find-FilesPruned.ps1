@@ -80,19 +80,22 @@ function Find-FilesPruned {
         }
 
         if ($depth -ge $MaxDepth) { continue }
+        $subs = [System.Collections.Generic.List[object]]::new()
         try {
-            $subs = [System.Collections.Generic.List[object]]::new()
-            foreach ($sub in [System.IO.Directory]::EnumerateDirectories($dir)) {
-                $leaf = [System.IO.Path]::GetFileName($sub)
+            # DirectoryInfo carries the attributes from the listing itself, so there is no second
+            # per-entry call that could throw and abandon the siblings already collected.
+            foreach ($di in [System.IO.DirectoryInfo]::new($dir).EnumerateDirectories()) {
+                $leaf = $di.Name
                 if ($skip.Contains($leaf)) { continue }
-                if (([System.IO.File]::GetAttributes($sub) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-                $subs.Add(@($sub, ($depth + 1), ($under -or ($UnderDirNamed -and $leaf -eq $UnderDirNamed))))
+                if (($di.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                $subs.Add(@($di.FullName, ($depth + 1), ($under -or ($UnderDirNamed -and $leaf -eq $UnderDirNamed))))
             }
-            # Pushed in reverse so the first subdirectory is popped first: the same pre-order
-            # (a directory's files, then each subdirectory in turn) Get-ChildItem -Recurse gives,
-            # so results keep the order callers already saw.
-            for ($k = $subs.Count - 1; $k -ge 0; $k--) { $stack.Push($subs[$k]) }
-        } catch { <# unreadable directory: skip it, keep walking #> }
+        } catch { <# unreadable directory: keep whatever was listed before the failure #> }
+        # Pushed in reverse so the first subdirectory is popped first: the same pre-order
+        # (a directory's files, then each subdirectory in turn) Get-ChildItem -Recurse gives,
+        # so results keep the order callers already saw. Outside the try: a listing that fails
+        # part-way still descends into the subdirectories it did return.
+        for ($k = $subs.Count - 1; $k -ge 0; $k--) { $stack.Push($subs[$k]) }
     }
 
     if ($timedOut) {
