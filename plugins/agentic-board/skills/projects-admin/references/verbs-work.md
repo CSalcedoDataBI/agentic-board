@@ -267,6 +267,12 @@ Notes:
   an **OPEN PR**, or a default-branch **commit citing `(#n)`** — even with NO `[abios-claim]`
   comment and the shared bot owner (a session can land work on `main` without posting a formal
   claim). This stops a second session from clobbering already-merged work. `-TakeOver` overrides.
+  What counts as a citation: only the commit's **subject line** — `(#n)` or a closing keyword
+  (`closes|fixes|resolves #n`). A `(#n)` in the body, a bare `#n` and `Refs #n` are
+  cross-references and never count. A **revert** (`revert(scope): …` / `Revert "…"`) is not landed
+  work: it retires the commits it undoes and a MERGED PR older than it, so a deliberate restart
+  of a reverted issue is not refused. When the order of two commits cannot be read (a missing
+  date) the refusal is kept.
 - **Explicit lock (`-Lock <n>` / `-Unlock <n>`)**: mark an issue owned-elsewhere in ONE step —
   posts the `[abios-claim]` LOCK fingerprint AND moves Status to In Progress — WITHOUT starting or
   branching it locally (needs `-ProjectNum`). Symmetric `-Unlock <n>` posts an UNLOCK claim and
@@ -275,7 +281,11 @@ Notes:
 - **Session registry**: every successful `-Start` records `{issue, branch, workPath, sessionPid,
   host, started}` in `.agentic-board/sessions.json` next to the MAIN clone (shared across
   worktrees, gitignored). The pending list shows live local sessions; entries with dead PIDs are
-  pruned automatically on read.
+  pruned automatically on read. "Alive" is not just "a process with that PID exists" (#520): the
+  process must also have started no later than the entry's `started` stamp, so a recycled PID
+  cannot keep a dead session alive. A Windows Terminal (`wt`) session records its OWN tab shell
+  (the `pwsh` running `launch-<n>.ps1`), never the launching shell's parent, and an entry whose
+  PID is unusable is found again through that launch script (#557).
 - **Compaction-survival (long single-session queues)**: when you work a queue of issues tied to an
   **epic** in ONE session, keep a durable run-ledger so the run survives auto-compaction. Three
   touch-points (see [references/compact-survival.md](references/compact-survival.md)):
@@ -315,7 +325,12 @@ them instead of one-by-one (each still finishes through the same step 5):
   merge — run those sequentially. The user picks which issues are safe to run together.
 - **Each spawned session finishes through step 5** (PR `Closes #<num>` → review gate → merge).
   The briefing is written to `.agentic-board/briefing-<n>.txt` and read by the session, so no
-  long prompt ever hits the command line.
+  long prompt ever hits the command line. It names the plugin scripts (PR step, review gate,
+  merge, fleet ledger) by a path the session can run in ANY repo: the repo-relative
+  `plugins/agentic-board/scripts/…` form when the session's working copy carries the plugin (this
+  repo), otherwise the absolute path of the install that composed it. A script that cannot be
+  found is listed in a `WARNING` and the session is told to stop and report it — never to replace
+  `New-BoardPR.ps1` with a bare `gh pr create` or to skip the review gate (#480).
 - **Requires Windows Terminal (`wt`)** for grouped tabs; without it each session opens in its own
   `pwsh` window (still works). Windows-only launcher.
 - **Clean up** each worktree after its PR merges: `git worktree remove ../<repo>--issue-<n>`.
