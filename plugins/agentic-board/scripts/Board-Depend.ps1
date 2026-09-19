@@ -27,7 +27,9 @@
          blocker must have appeared with the right number AND the right repository, and NOTHING
          else may have appeared. A link that did not stick, or a stranger that did, is an error
          (exit 1), never a success. It stops at the first failure: after an unexplained link,
-         more writes would only compound it.
+         more writes would only compound it. The baseline is kept for the WHOLE batch (ids present
+         at the start + the ones this run linked), so a link someone else adds between two blockers
+         is caught on the next read instead of being absorbed as the new "before".
       4. Is idempotent: a blocker that is already linked is reported as such (and its repository
          is still checked) without another POST.
 
@@ -205,12 +207,31 @@ function Invoke-BoardDepend {
     foreach ($n in $numbers) { $targets += (Get-DependencyIssue -Repo $Repo -Number $n) }
 
     # 3. Write one at a time, verifying each against a before/after read.
+    #    $allowed is the BATCH-level baseline: the ids present when this invocation started plus the
+    #    ones it linked itself. A per-blocker "before" alone is not enough (review thread): a link
+    #    that someone else added in the gap between two blockers would become part of the next
+    #    blocker's baseline and be treated as if it had always been there, so the batch could exit 0
+    #    with a stranger still linked. Anything outside $allowed, seen on ANY read, is a failure.
     $results = @()
     $failed  = $false
+    $allowed = $null
     foreach ($t in $targets) {
         $ref = "#$($t.number)"
         if ($failed) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'skipped'; Message = 'no se intento: un enlace anterior fallo' }; continue }
         $before = Get-BlockedByList -Repo $Repo -Issue $Issue
+        if ($null -eq $allowed) {
+            $allowed = New-Object System.Collections.Generic.HashSet[long]
+            foreach ($b in $before) { [void]$allowed.Add([long]$b.id) }
+        } else {
+            $gap = @($before | Where-Object { -not $allowed.Contains([long]$_.id) })
+            if ($gap.Count -gt 0) {
+                $names = ($gap | ForEach-Object { "$(if ($_.repo) { $_.repo } else { '?' })#$($_.number)" }) -join ', '
+                $failed = $true
+                $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'FAILED'
+                    Message = "entre dos escrituras aparecio un bloqueador que NO se pidio: $names. No se escribio nada mas." }
+                continue
+            }
+        }
         if (@($before | Where-Object { $_.id -eq $t.id }).Count -gt 0) {
             $chk = Test-DependencyLanded -Before $before -After $before -Target $t
             if ($chk.ok) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'already'; Message = 'ya estaba enlazado' } }
@@ -226,7 +247,7 @@ function Invoke-BoardDepend {
                               -StdIn $body -What "enlazar $Repo#$($t.number) como bloqueador de #$Issue"
             $after = Get-BlockedByList -Repo $Repo -Issue $Issue
             $chk = Test-DependencyLanded -Before $before -After $after -Target $t
-            if ($chk.ok) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'linked'; Message = 'enlazado y verificado' } }
+            if ($chk.ok) { [void]$allowed.Add([long]$t.id); $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'linked'; Message = 'enlazado y verificado' } }
             else         { $failed = $true; $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'FAILED'; Message = $chk.reason } }
         } catch {
             $failed = $true

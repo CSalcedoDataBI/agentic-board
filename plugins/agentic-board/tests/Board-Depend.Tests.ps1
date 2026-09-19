@@ -21,7 +21,7 @@ BeforeAll {
     # so "number sent as id" can never accidentally equal the right issue; and the low ids 17 / 5
     # belong to STRANGERS in other repositories, like the real incident.
     function script:New-World {
-        $w = @{ Posts = @(); Links = @{}; ById = @{}; ByKey = @{}; Mode = 'normal' }
+        $w = @{ Posts = @(); Links = @{}; ById = @{}; ByKey = @{}; Mode = 'normal'; Reads = 0; InjectOnRead = 0 }
         foreach ($n in 1..60) {
             $e = @{ id = 90000 + $n; number = $n; repo = 'me/proj'; state = 'open'; title = "task $n"; pr = $false }
             $w.ById[[long]$e.id] = $e; $w.ByKey["me/proj#$n"] = $e
@@ -61,6 +61,12 @@ BeforeAll {
         if ($path -match '^repos/([^/]+/[^/]+)/issues/(\d+)/dependencies/blocked_by') {
             $key = "$($Matches[1])/issues/$($Matches[2])"
             $rk  = "$($Matches[1])#$($Matches[2])"
+            # A third party links a stranger between two of the script's own calls.
+            $w.Reads++
+            if ($w.InjectOnRead -gt 0 -and $w.Reads -eq $w.InjectOnRead) {
+                if (-not $w.Links.ContainsKey($key)) { $w.Links[$key] = @() }
+                $w.Links[$key] += [long]17
+            }
             $ids = @($w.Links["$($Matches[1])/issues/$($Matches[2])"])
             $items = @($ids | Where-Object { $_ } | ForEach-Object { ConvertTo-ApiShape $w.ById[[long]$_] ($w.Mode -eq 'no-repo') })
             if ($items.Count -eq 0) { return [pscustomobject]@{ Output = @('[]'); ExitCode = 0; StdErr = '' } }
@@ -246,6 +252,25 @@ Describe 'Invoke-BoardDepend - a write that did not do what was asked FAILS LOUD
         $r = @(Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11'))
         $r[0].Status  | Should -Be 'FAILED'
         $r[0].Message | Should -Match 'no puedo comprobar el repositorio'
+    }
+    It 'a stranger added in the GAP between two blockers fails the batch - it does not become the next baseline' {
+        # Reads: 1 = before(A), 2 = after(A), 3 = before(B). The stranger appears just before read 3.
+        $script:W.InjectOnRead = 3
+        $r = @(Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11', '12'))
+        $r[0].Status | Should -Be 'linked'
+        $r[1].Status | Should -Be 'FAILED'
+        $r[1].Message | Should -Match 'entre dos escrituras'
+        $r[1].Message | Should -Match 'jbarnette/johnson#3'
+        $script:W.Posts.Count | Should -Be 1 -Because 'nothing more is written once an unrequested link is seen'
+    }
+    It 'the gap check also stops the blockers after the failing one' {
+        $script:W.InjectOnRead = 3
+        $r = @(Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11', '12', '13'))
+        @($r.Status) | Should -Be @('linked', 'FAILED', 'skipped')
+    }
+    It 'links THIS invocation made do not count as strangers on the next read' {
+        $r = @(Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11', '12', '13'))
+        @($r.Status | Sort-Object -Unique) | Should -Be @('linked')
     }
     It 'stops at the first failure: later blockers are skipped, not written' {
         $script:W.Mode = 'misroute'
