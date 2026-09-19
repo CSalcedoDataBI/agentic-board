@@ -267,6 +267,11 @@ function Test-TriageEntry {
     }
     $bad = Test-PriorityRequest -Priority $Entry.Priority -Rationale $Entry.Rationale
     if ($bad) { return "${label}: $bad" }
+    # The optional repo qualifier must be owner/name: Resolve-IssueRef treats ANY non-empty repo as a
+    # qualified target, so a typo would only surface after the board reads, as "not on the board".
+    if ($Entry.Repo -and ($Entry.Repo -notmatch '^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$')) {
+        return "${label}: repo debe ser owner/name (recibi '$($Entry.Repo)')."
+    }
     try { $null = Resolve-IssueRef -IssueArg $Entry.Issue -ExplicitRepo $Entry.Repo }
     catch { return "${label}: $($_.Exception.Message)" }
     return $null

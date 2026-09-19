@@ -170,6 +170,11 @@ Describe 'Test-TriageEntry (#605)' {
     It 'refuses a non-numeric Estimate, naming the issue' { Test-TriageEntry (New-Entry -Issue '7' -Estimate 'big') | Should -Match '^7: .*numerico' }
     It 'refuses a Priority outside P0-P3' { Test-TriageEntry (New-Entry -Priority 'P9' -Rationale 'x') | Should -Match 'P0, P1, P2 o P3' }
     It 'refuses a Priority with no rationale (#306 applies per entry)' { Test-TriageEntry (New-Entry -Priority 'P1') | Should -Match 'razonamiento' }
+    It 'refuses a repo qualifier that is not owner/name (review of #686)' {
+        Test-TriageEntry (New-Entry -Issue '42' -Repo 'not-a-repo') | Should -Match "repo debe ser owner/name.*not-a-repo"
+        Test-TriageEntry (New-Entry -Issue '42' -Repo 'a/b/c')      | Should -Match 'owner/name'
+        Test-TriageEntry (New-Entry -Issue '42' -Repo 'owner/repo') | Should -BeNullOrEmpty
+    }
     It 'refuses a malformed ref' { Test-TriageEntry (New-Entry -Issue 'nonsense') | Should -Match 'not a valid issue reference' }
 }
 
@@ -226,6 +231,14 @@ Describe 'review of #686 - batch edge cases' -Skip:$script:notWindows {
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Owner', 'o', '-BatchFile', $bf)
         $r.Code | Should -Be 1
         $r.Out  | Should -Match 'no escribi nada'
+        $r.Calls.Count | Should -Be 0
+    }
+    It 'a row with a malformed "repo" is refused before any gh call (review of #686)' {
+        $bf = Join-Path $script:FakeDir 'badrepo.json'
+        '[{"issue":1,"type":"Bug"},{"issue":42,"repo":"not-a-repo","type":"Bug"}]' | Set-Content $bf -Encoding UTF8
+        $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-BatchFile', $bf)
+        $r.Code | Should -Be 1
+        $r.Out  | Should -Match 'repo debe ser owner/name'
         $r.Calls.Count | Should -Be 0
     }
     It 'a ONE-row -BatchFile is still a batch: an unresolvable target is listed for retry, not thrown' {
