@@ -540,7 +540,11 @@ function Format-IssueComments {
 function Format-IssueContext {
     param([string]$Title = '', [string]$Body = '', $Comments = @(), [int]$IssueNum = 0)
     $text = "$Title`n`n$Body"
-    $discussion = Format-IssueComments -Comments $Comments -IssueNum $IssueNum
+    # A comment thread that cannot be rendered must not take the whole plan down with it (the
+    # caller swallows a throw into an EMPTY plan body): keep title + body and say what was lost.
+    $discussion = ''
+    try { $discussion = Format-IssueComments -Comments $Comments -IssueNum $IssueNum }
+    catch { Write-Warning "Expert-Auto: could not fold the comments of #$IssueNum into the brief ($($_.Exception.Message)); the brief carries the description only." }
     if ($discussion) { $text += "`n`n$discussion" }
     return $text
 }
@@ -591,7 +595,7 @@ if ($Issue -gt 0 -and $Epic -gt 0) { throw "Expert-Auto: -Issue and -Epic are mu
 # These values are interpolated into the epic walker's `pwsh -Command` line and into gh calls, so
 # refuse anything that is not shaped like what it names BEFORE it travels (#499): a GitHub login,
 # an owner/name, an environment-variable identifier. Refusals only - nothing valid is rejected.
-if ($Owner -and $Owner -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$') { throw "Expert-Auto: -Owner must be a GitHub account name (letters, digits, hyphen), got '$Owner'." }
+if ($Owner -and $Owner -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Expert-Auto: -Owner must be a GitHub account name (letters, digits, '.', '_', '-'), got '$Owner'." }
 if ($PSBoundParameters.ContainsKey('TokenVar') -and $TokenVar -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { throw "Expert-Auto: -TokenVar must be an environment-variable name, got '$TokenVar'." }
 
 # ── Token scope guard (#440 footgun 1) ──────────────────────────────────────────
@@ -650,7 +654,7 @@ $repoGiven = "$Repo"
 if ($repoGiven) {
     # Explicit -Repo (#499) - validated, never guessed at: a malformed one would send every gh
     # call below at the wrong repository.
-    if ($repoGiven -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$') { throw "Expert-Auto: -Repo must be owner/name (got '$repoGiven')." }
+    if ($repoGiven -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$') { throw "Expert-Auto: -Repo must be owner/name (got '$repoGiven')." }
     $repo = $repoGiven
 } else {
     $repo = Get-RepoFromOriginUrl (git remote get-url origin 2>$null)
@@ -833,8 +837,14 @@ query($o:String!,$r:String!,$n:Int!){
                 $subBody = "$($so.body)"
                 # The sub-issue's own thread (#473) follows its body, so the brief carries what was
                 # tried and decided since - the epic above is only context.
-                $subDiscussion = Format-IssueComments -Comments $so.comments -IssueNum $s.number
-                if ($subDiscussion) { $subBody += "`n`n$subDiscussion" }
+                # Its own boundary: a thread that cannot be rendered costs the comments, never the
+                # sub-issue's dispatch (the outer catch would skip the whole launch).
+                try {
+                    $subDiscussion = Format-IssueComments -Comments $so.comments -IssueNum $s.number
+                    if ($subDiscussion) { $subBody += "`n`n$subDiscussion" }
+                } catch {
+                    Write-Warning "Expert-Auto: could not fold the comments of #$($s.number) into its brief ($($_.Exception.Message)); it carries the description only."
+                }
             } catch { $subBody = $null }
         }
         if ($null -eq $subBody) {

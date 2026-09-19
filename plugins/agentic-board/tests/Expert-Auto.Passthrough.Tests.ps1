@@ -95,6 +95,18 @@ Describe 'Format-IssueComments - the thread the body no longer tells (#473)' {
     It 'returns nothing when every comment is filtered out' {
         Format-IssueComments -Comments @(script:C 'bot' '[abios-claim] x') | Should -Be ''
     }
+    It 'a thread that cannot be rendered costs the comments, not the plan: title + body survive, with a warning' {
+        # (a script-property getter that throws is swallowed to $null by PowerShell itself, so the
+        # value must be a real .NET object whose ToString() throws when the date is stringified)
+        if (-not ('AutoTestBoom' -as [type])) {
+            Add-Type -TypeDefinition 'public class AutoTestBoom { public override string ToString() { throw new System.InvalidOperationException("boom"); } }'
+        }
+        $bad = [pscustomobject]@{ author = $null; createdAt = [AutoTestBoom]::new(); body = 'x'; isMinimized = $false }
+        $WarningPreference = 'Continue'
+        $all = @(Format-IssueContext -Title 'T' -Body 'B' -Comments @($bad) -IssueNum 3 3>&1)
+        @($all | Where-Object { $_ -is [string] })[0] | Should -Be "T`n`nB"
+        (@($all | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })[0]).Message | Should -Match 'could not fold the comments of #3'
+    }
     It 'Format-IssueContext appends the discussion after title and body' {
         $t = Format-IssueContext -Title 'Title' -Body 'Body text' -Comments @(script:C 'u' 'a later decision')
         $t | Should -Match '(?s)^Title\r?\n\r?\nBody text.*Issue discussion.*a later decision'
@@ -391,6 +403,15 @@ exit 1
         $r = script:Invoke-Auto "-Issue 8 -ProjectNum 13 $Bad"
         $r.Calls.Count | Should -Be 0
         $r.Out | Should -Match 'Expert-Auto: -(Owner|Repo|TokenVar) must be'
+    }
+
+    It '#499: real-looking account and repo names (dots, underscores, hyphens, single characters) are NOT refused' {
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner some.org_x-1 -Repo some.org_x-1/my.repo_name-2'
+        $r.Calls.Count | Should -Be 1
+        $r.Calls[0].Owner | Should -Be 'some.org_x-1'
+        $r.Calls[0].Repo | Should -Be 'some.org_x-1/my.repo_name-2'
+        $one = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner a -Repo a/b'
+        $one.Calls.Count | Should -Be 1
     }
 
     It 'the epic walker survives a clone path holding a typographic apostrophe (no injection into its child command)' {
