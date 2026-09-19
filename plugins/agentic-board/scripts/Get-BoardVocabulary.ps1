@@ -240,13 +240,24 @@ function ConvertTo-FieldMatchKey([string]$Name) {
 # name (lower-cased, spaces kept: 'linked pull requests'), and the old lookup assumed a different
 # rewrite (spaces stripped), which would have missed 'Task Type'. Comparing by ConvertTo-FieldMatchKey
 # makes the read independent of the rewrite. $null when the item has no such property.
+# The fold also makes two DIFFERENT fields collide ('Area' / the accented 'Area', 'Tamano' / 'Tamano'
+# with a tilde), which a legacy board can carry side by side while the vocabulary deliberately picks
+# one of them. So an EXACT property name (case-insensitive, accents kept) always wins, and the fold
+# is only a fallback: when it would have to choose between several different properties it answers
+# $null instead of guessing which field the caller meant.
 function Get-ItemFieldValue {
     param([object]$Item, [string]$FieldName)
     if (-not $Item -or -not $FieldName) { return $null }
-    $want = ConvertTo-FieldMatchKey $FieldName
     foreach ($p in $Item.PSObject.Properties) {
-        if ((ConvertTo-FieldMatchKey $p.Name) -eq $want) { return $p.Value }
+        if ($p.Name -eq $FieldName) { return $p.Value }
     }
+    # Fallback: a property that is EXACTLY another accepted name of the same field is that other
+    # field's value, never this one's - the fold must not turn one into the other.
+    $key    = Get-BoardFieldKey $FieldName
+    $others = @(Get-BoardFieldNames $key | Where-Object { $_ -ne $FieldName })
+    $want   = ConvertTo-FieldMatchKey $FieldName
+    $hits   = @($Item.PSObject.Properties | Where-Object { ($others -notcontains $_.Name) -and ((ConvertTo-FieldMatchKey $_.Name) -eq $want) })
+    if ($hits.Count -eq 1) { return $hits[0].Value }
     return $null
 }
 

@@ -79,9 +79,27 @@ Describe 'the field vocabulary' {
         It "reads 'Task Type' off a row gh keys 'task type' (spaces kept) - the old stripped-key lookup could not" {
             Get-ItemFieldValue ([pscustomobject]@{ 'task type' = 'Bug' }) 'Task Type' | Should -Be 'Bug'
         }
-        It "reads an accented field off an accented key, and off a folded one" {
+        It "reads an accented field off its accented key" {
             Get-ItemFieldValue ([pscustomobject]@{ "$($script:Aacute)rea".ToLower() = 'scripts' }) "$($script:Aacute)rea" | Should -Be 'scripts'
-            Get-ItemFieldValue ([pscustomobject]@{ area = 'scripts' }) "$($script:Aacute)rea" | Should -Be 'scripts'
+        }
+        It "never reads another accepted name's value as this field's (review of #697): an exact property wins, the fold cannot cross aliases" {
+            $acc = "$($script:Aacute)rea"; $accKey = $acc.ToLower()
+            $both = [pscustomobject]@{ area = 'plain'; $accKey = 'accented' }
+            Get-ItemFieldValue $both 'Area' | Should -Be 'plain'
+            Get-ItemFieldValue $both $acc   | Should -Be 'accented'
+            # Only the OTHER field has a value on this item: it is not this field's value.
+            Get-ItemFieldValue ([pscustomobject]@{ $accKey = 'accented' }) 'Area' | Should -BeNullOrEmpty
+            Get-ItemFieldValue ([pscustomobject]@{ area = 'plain' }) $acc         | Should -BeNullOrEmpty
+            $tilde = "Tama$($script:Ntilde)o"
+            $sz = [pscustomobject]@{ tamano = 'ascii'; $tilde.ToLower() = 'tilde' }
+            Get-ItemFieldValue $sz 'Tamano' | Should -Be 'ascii'
+            Get-ItemFieldValue $sz $tilde   | Should -Be 'tilde'
+        }
+        It 'an exact property name beats a folded look-alike' {
+            Get-ItemFieldValue ([pscustomobject]@{ 'task type' = 'exact'; 'task-type' = 'lookalike' }) 'Task Type' | Should -Be 'exact'
+        }
+        It 'answers $null instead of guessing when the fold matches several different properties' {
+            Get-ItemFieldValue ([pscustomobject]@{ 'task-type' = 'a'; 'task_type' = 'b' }) 'Task Type' | Should -BeNullOrEmpty
         }
         It 'reads a camel-cased key too' {
             Get-ItemFieldValue ([pscustomobject]@{ taskType = 'Bug' }) 'Task Type' | Should -Be 'Bug'
