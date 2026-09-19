@@ -1,4 +1,4 @@
-# The expert role catalog
+﻿# The expert role catalog
 
 Three files, one effective catalog:
 
@@ -23,9 +23,10 @@ committed into a project — it is not under any repo's `.git` at all.
 > !.agentic-board/roles.json
 > ```
 > **The tool applies this itself — you never do.** `Repair-RolesGitignore` (in `ExpertRolesIo.ps1`)
-> rewrites the directory rule, asks *git* (`check-ignore` and `add --dry-run`, not a grep of the
-> file) whether `roles.json` is now accepted while the rest of `.agentic-board/` stays ignored,
-> and restores the original `.gitignore` byte for byte if git still refuses. It runs when a role
+> rewrites the directory rule, asks *git* (`git check-ignore -q`, not a grep of the
+> file) whether `roles.json` is now accepted (the rewrite keeps the rest of `.agentic-board/`
+> ignored by construction), and restores the original `.gitignore` if git still refuses, reading
+> the file back to confirm before it says "nothing was changed". It runs when a role
 > is persisted with `Add-ExpertRole` (default path) and on every `/board expert config`; `roles`
 > only reports (read-only). It never emits the directory-level negation. An unanchored
 > `.agentic-board/` becomes `**/.agentic-board/*`, so a nested sub-project's own state directory

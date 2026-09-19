@@ -6,7 +6,7 @@
     git cannot re-include a file whose PARENT DIRECTORY is excluded. The working form excludes the
     directory's CONTENTS (`.agentic-board/*`) and then re-includes the file.
 
-    Every assertion here asks GIT (`git add`, `git status`, `git check-ignore`) in a real temporary
+    Every assertion here asks GIT (`git add --dry-run`, `git add`, `git diff --cached`) in a real temporary
     repository - never by grepping .gitignore for the expected text. Nothing is mocked. #>
 
 BeforeAll {
@@ -207,6 +207,7 @@ Describe 'when .gitignore cannot be written (#470)' {
         { $script:res = Repair-RolesGitignore -RolesPath "$($x.Repo)/.agentic-board/roles.json" } | Should -Not -Throw
         $script:res.Status | Should -Be 'CannotRepair'
         $script:res.Message | Should -Match 'could not write'
+        $script:res.Message | Should -Match 'Nothing was changed'      # verified: the bytes below are the original
         [System.IO.File]::ReadAllBytes("$($x.Repo)/.gitignore") | Should -Be $before
     }
     It 'Add-ExpertRole still saves the role and returns its path when the repair cannot write' {
@@ -219,6 +220,43 @@ Describe 'when .gitignore cannot be written (#470)' {
         } finally { Pop-Location }
         Test-Path "$($x.Repo)/.agentic-board/roles.json" | Should -BeTrue
         (Get-Content -Raw "$($x.Repo)/.agentic-board/roles.json" | ConvertFrom-Json).roles[0].name | Should -Be 'zoology'
+    }
+}
+
+Describe 'it never claims "nothing was changed" unless it verified that (#470)' {
+    It 'Restore-GitignoreBytes reports true only when the file really holds the original bytes' {
+        $d = New-Repo @('x')
+        $p = "$d/probe.txt"
+        [System.IO.File]::WriteAllBytes($p, [byte[]](1, 2, 3))
+        Restore-GitignoreBytes -Path $p -Bytes ([byte[]](9, 9)) | Should -BeTrue
+        [System.IO.File]::ReadAllBytes($p) | Should -Be @(9, 9)
+    }
+    It 'Restore-GitignoreBytes reports FALSE when the restore cannot be written' {
+        $d = New-Repo @('x')
+        $p = "$d/probe.txt"
+        [System.IO.File]::WriteAllBytes($p, [byte[]](1, 2, 3))
+        (Get-Item -LiteralPath $p).IsReadOnly = $true
+        try {
+            $writable = $true
+            try { [System.IO.File]::WriteAllBytes($p, [byte[]](1, 2, 3)) } catch { $writable = $false }
+            if ($writable) { Set-ItResult -Skipped -Because 'this OS lets the writer through a read-only file'; return }
+            Restore-GitignoreBytes -Path $p -Bytes ([byte[]](9, 9)) | Should -BeFalse
+        } finally { (Get-Item -LiteralPath $p).IsReadOnly = $false }
+    }
+    It 'when git refuses AND the restore fails, the message says it could not confirm - not "Nothing was changed"' {
+        $r = New-Repo @('node_modules/')
+        Add-Content -LiteralPath "$r/.git/info/exclude" -Value '.agentic-board/'   # the rule lives where it cannot be edited
+        Mock Restore-GitignoreBytes { $false }
+        $res = Repair-RolesGitignore -RolesPath "$r/.agentic-board/roles.json"
+        $res.Status | Should -Be 'CannotRepair'
+        $res.Message | Should -Not -Match 'Nothing was changed'
+        $res.Message | Should -Match 'could not confirm'
+    }
+    It 'when git refuses and the restore is verified, it does say "Nothing was changed"' {
+        $r = New-Repo @('node_modules/')
+        Add-Content -LiteralPath "$r/.git/info/exclude" -Value '.agentic-board/'
+        $res = Repair-RolesGitignore -RolesPath "$r/.agentic-board/roles.json"
+        $res.Message | Should -Match 'Nothing was changed'
     }
 }
 

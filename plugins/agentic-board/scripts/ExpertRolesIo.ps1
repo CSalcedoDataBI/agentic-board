@@ -145,6 +145,15 @@ function Test-RolesFileTrackable {
     -not $ignored
 }
 
+function Restore-GitignoreBytes {
+    # Puts the original bytes back and reports whether the file now REALLY holds them. Both steps
+    # can fail (read-only file, a lock, a full disk), so "restored" is read back, never assumed.
+    param([string]$Path, [byte[]]$Bytes)
+    try { [System.IO.File]::WriteAllBytes($Path, $Bytes) } catch { }
+    try { $now = [System.IO.File]::ReadAllBytes($Path) } catch { return $false }
+    [System.Linq.Enumerable]::SequenceEqual([byte[]]$now, [byte[]]$Bytes)
+}
+
 function Repair-RolesGitignore {
     # A project that git-ignores `.agentic-board/` can never version roles.json, and the obvious
     # one-line fix (`!.agentic-board/roles.json` after `.agentic-board/`) does nothing: git cannot
@@ -169,13 +178,16 @@ function Repair-RolesGitignore {
     $rel      = $ctx.Rel
     $stateDir = ($rel -replace '/[^/]+$', '')          # e.g. .agentic-board
     $giPath   = Join-Path $ctx.Top '.gitignore'
+    # Only claims "Nothing was changed" when that was VERIFIED (the file read back equal to the
+    # original); otherwise it says it could not confirm, so the reader knows to look.
     $cannot = {
-        param([string]$Why)
+        param([string]$Why, [bool]$Unchanged = $true)
         $res.Status  = 'CannotRepair'
         $res.Message = @("Note: git ignores the shared role file ($rel),",
                          'so it stays on this machine only.',
                          $Why,
-                         'Nothing was changed.') -join "`n"
+                         $(if ($Unchanged) { 'Nothing was changed.' }
+                           else { 'I could not confirm .gitignore is back as it was - please check it.' })) -join "`n"
         $res
     }
     if (-not (Test-Path -LiteralPath $giPath -PathType Leaf)) {
@@ -219,8 +231,8 @@ function Repair-RolesGitignore {
     try { [System.IO.File]::WriteAllText($giPath, (($lines -join $eol) + $eol), [System.Text.UTF8Encoding]::new($skip -eq 3)) }
     catch {
         # A failed write can leave the file half written: put the original back if it will let us.
-        try { [System.IO.File]::WriteAllBytes($giPath, $origBytes) } catch { }
-        return (& $cannot 'I could not write .gitignore (it may be read-only or in use).')
+        $back = Restore-GitignoreBytes -Path $giPath -Bytes $origBytes
+        return (& $cannot 'I could not write .gitignore (it may be read-only or in use).' $back)
     }
 
     if ((Test-RolesFileTrackable -RolesPath $RolesPath) -eq $true) {
@@ -231,8 +243,8 @@ function Repair-RolesGitignore {
                          "The rest of $stateDir/ stays ignored. Nothing for you to run.") -join "`n"
         return $res
     }
-    try { [System.IO.File]::WriteAllBytes($giPath, $origBytes) } catch { }   # exact restore
-    & $cannot 'Git still refuses it after the change: the rule is somewhere I cannot edit.'
+    $back = Restore-GitignoreBytes -Path $giPath -Bytes $origBytes   # exact restore, read back
+    & $cannot 'Git still refuses it after the change: the rule is somewhere I cannot edit.' $back
 }
 
 function Add-ExpertRole {
