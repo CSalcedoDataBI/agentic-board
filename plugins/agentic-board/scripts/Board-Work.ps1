@@ -661,7 +661,121 @@ function Read-SessionRegistry {
     # before -Watch/-AutoClean could tear down its worktree (a dead PID is a completion
     # signal, not garbage) - Codex review, PR #269. The file self-tidies on the next
     # Write-SessionRegistryEntry (it rebuilds from this filtered read) or Remove-SessionRegistryEntry.
-    return @($entries | Where-Object { $_.sessionPid -and (Get-Process -Id $_.sessionPid -ErrorAction SilentlyContinue) })
+    #
+    # Liveness is Get-SessionLivePid, not "does this PID exist" (#520/#557): a recycled PID must not
+    # keep a dead session alive, and a wt tab whose registered PID is unusable is found by its
+    # launch script instead of being dropped. A wt entry that resolves through its tab shell is
+    # returned with THAT pid, so every caller (conflict guard, reaper guard, dashboard) sees the
+    # session's own process. Only this returned copy is corrected - the file is never rewritten here.
+    $live = @()
+    foreach ($e in $entries) {
+        $livePid = Get-SessionLivePid $e
+        if ($livePid -gt 0) {
+            try { $e.sessionPid = $livePid } catch { }
+            $live += $e
+        }
+    }
+    return @($live)
+}
+
+# Was a process with this start time plausibly the session registered at $Started? PURE (#520).
+# A process that started AFTER the registration stamp cannot be the session that stamp describes -
+# Windows recycles PIDs, so the same number later belongs to some unrelated process.
+# UNKNOWN reads as "consistent" (returns $true): no start time, no stamp, or a stamp that does
+# not parse. That is deliberate and it is the caller's protective direction - these liveness reads
+# guard live sessions (the working-copy conflict check, the reaper's never-kill set, the watch's
+# "finished" verdict that leads to a teardown), so "cannot tell" keeps a session rather than
+# discarding one; it is exactly what the code did before the stamp was compared at all.
+# Slack covers the stamp's truncation: sessions.json keeps whole seconds (older entries whole
+# minutes), while a process start time carries sub-second precision.
+function Test-SessionStartConsistent {
+    param($ProcessStart, [string]$Started)
+    if ($null -eq $ProcessStart -or -not $Started) { return $true }
+    $registered = [datetime]::MinValue
+    if (-not [datetime]::TryParse($Started, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$registered)) { return $true }
+    $slackSec = if ($Started.Trim() -match '^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$') { 61 } else { 2 }
+    return ([datetime]$ProcessStart -le $registered.AddSeconds($slackSec))
+}
+
+# The PID of the live process that IS this registered session, or 0 when it is gone (#520/#557).
+#  1. The stored PID counts only if a process with that number exists AND started no later than
+#     the registration stamp (Test-SessionStartConsistent) - a recycled PID does not qualify.
+#  2. A `wt` session has no reliable stored PID (the launcher exits at once, and old entries hold
+#     the launching shell's parent). It is found by its tab shell instead: the `pwsh` running
+#     launch-<issue>.ps1 (Find-WtTabShell, #413). That covers an entry registered before the tab
+#     shell was up, and one whose stored PID was recycled.
+function Get-SessionLivePid {
+    param([object]$Session)
+    $stored = 0
+    try { $stored = [int]$Session.sessionPid } catch { }
+    if ($stored -gt 0) {
+        $proc = Get-Process -Id $stored -ErrorAction SilentlyContinue
+        if ($proc) {
+            $start = $null
+            try { $start = $proc.StartTime } catch { }   # protected processes refuse StartTime: unknown
+            if (Test-SessionStartConsistent -ProcessStart $start -Started ([string]$Session.started)) { return $stored }
+        }
+    }
+    if ("$($Session.via)" -eq 'wt' -and $Session.issue) {
+        $tab = $null
+        try { $tab = Find-WtTabShell ([int]$Session.issue) } catch { }
+        if ($tab -and [int]$tab.ProcessId -gt 0) { return [int]$tab.ProcessId }
+    }
+    return 0
+}
+
+# Locate the REAL tab shell of a session just launched through Windows Terminal (#557). `wt`
+# returns a launcher that exits at once, so the process Start-Process hands back is worthless;
+# the tab's own `pwsh -NoExit -File launch-<n>.ps1` shows up a moment later. Polls for it (the
+# tab takes a second or two to start), and only accepts a shell CREATED at or after -NotBefore:
+# `-NoExit` leaves an earlier run's shell of the same issue open after its agent finished, and the
+# script name alone would match that stale one. Returns 0 when it never appears - the caller then
+# records no PID (never the launcher's parent), and Get-SessionLivePid finds the tab later.
+# Thin over an injectable process list, sleeper and attempt budget so the wait is testable.
+function Resolve-WtSessionPid {
+    param(
+        [int]$IssueNum,
+        [datetime]$NotBefore = [datetime]::MinValue,
+        [int]$MaxAttempts = 20,
+        [int]$PollMs = 500,
+        [scriptblock]$ListProcesses = {
+            @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+                Select-Object ProcessId, CommandLine, CreationDate)
+        },
+        [scriptblock]$Sleep = { param($ms) Start-Sleep -Milliseconds $ms }
+    )
+    for ($i = 0; $i -lt $MaxAttempts; $i++) {
+        $procs = @()
+        try { $procs = @(& $ListProcesses) } catch { }
+        $fresh = @($procs | Where-Object { -not $_.CreationDate -or [datetime]$_.CreationDate -ge $NotBefore })
+        $tab = Find-WtTabShellCore -Processes $fresh -IssueNum $IssueNum
+        if ($tab -and [int]$tab.ProcessId -gt 0) { return [int]$tab.ProcessId }
+        if ($i -lt $MaxAttempts - 1) { & $Sleep $PollMs }
+    }
+    return 0
+}
+
+# Record a session the launcher just spawned, tracking the PID that is really the SESSION's
+# (#557). pwsh window: the spawned process. wt tab: its tab shell (Resolve-WtSessionPid), or no
+# PID at all when it does not show up - never the launching shell's parent, which is what every
+# wt entry used to carry (one shared, long-lived process: it made a crashed agent read as alive
+# and, once that shell exited, dropped the whole fleet from view).
+function Register-LaunchedSession {
+    param(
+        $Spawn, [int]$IssueNum, [string]$Cli = 'claude', [string]$FleetSession = '',
+        [datetime]$LaunchedAt = [datetime]::MinValue
+    )
+    $via = if ($Spawn.usesWt) { 'wt' } else { 'pwsh' }
+    if ($Spawn.usesWt) {
+        # The stamp taken just before Start-Process, less a little clock slack.
+        if ($LaunchedAt -eq [datetime]::MinValue -and $Spawn.launchedAt) { $LaunchedAt = ([datetime]$Spawn.launchedAt).AddSeconds(-2) }
+        $tabPid = Resolve-WtSessionPid -IssueNum $IssueNum -NotBefore $LaunchedAt
+        Write-SessionRegistryEntry -IssueNum $IssueNum -SessionPid $tabPid -Via $via -Cli $Cli -FleetSession $FleetSession
+    } elseif ($Spawn.process) {
+        Write-SessionRegistryEntry -IssueNum $IssueNum -SessionPid $Spawn.process.Id -Via $via -Cli $Cli -FleetSession $FleetSession
+    } else {
+        Write-SessionRegistryEntry -IssueNum $IssueNum -Via $via -Cli $Cli -FleetSession $FleetSession
+    }
 }
 
 function Write-SessionRegistryEntry {
@@ -675,11 +789,17 @@ function Write-SessionRegistryEntry {
     # PID identity: an explicit spawned-session PID wins (a parallel launch tracks the
     # actual worktree session, not the launcher); otherwise the PARENT of this script
     # (the long-lived host session, since the script's own PID dies on return).
+    #
+    # EXCEPT a `wt` launch (#557): the launching shell's parent is one long-lived process shared by
+    # EVERY session of the batch, so recording it made a crashed agent read as alive and, once
+    # that shell exited, dropped the whole fleet from view. A wt entry with no resolved PID keeps
+    # sessionPid 0 ("not known yet"): Get-SessionLivePid finds its tab shell by launch script.
     $trackPid = $SessionPid
-    if ($trackPid -le 0) {
+    if ($trackPid -le 0 -and $Via -ne 'wt') {
         try { $trackPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
     }
-    if (-not $trackPid) { return }
+    if (-not $trackPid -and $Via -ne 'wt') { return }
+    if (-not $trackPid) { $trackPid = 0 }
     # Preserve fields already recorded for this issue (e.g. repo set at start time)
     # when a later launch updates only the PID/via. Read RAW: a relaunch after the old
     # PID died must still inherit the prior branch/repo/workPath.
@@ -1673,6 +1793,7 @@ function Start-WorktreeSession {
     # line -> no stray tab-splitting). See Build-WorktreeLaunch header for the why.
     Set-Content -LiteralPath $plan.launchScriptFile -Value $plan.launchScript -Encoding UTF8
     $proc = $null
+    $launchedAt = Get-Date   # lets the caller tell THIS launch's wt tab shell from an older one (#557)
     try {
         if ($plan.usesWt) { $proc = Start-Process $plan.launcher -ArgumentList $plan.args -PassThru }
         else              { $proc = Start-Process $plan.launcher -ArgumentList $plan.args -WorkingDirectory $WorkPath -PassThru }
@@ -1685,6 +1806,7 @@ function Start-WorktreeSession {
     # NOTE: a 'wt' process forks the terminal host and exits fast, so its PID is not a
     # reliable liveness signal - only the standalone pwsh window's PID is tracked.
     $plan | Add-Member -NotePropertyName process -NotePropertyValue $proc -Force
+    $plan | Add-Member -NotePropertyName launchedAt -NotePropertyValue $launchedAt -Force
     return $plan
 }
 
@@ -2137,7 +2259,9 @@ function Get-SessionLiveStatus {
     if ($rateLimited) {
         return [pscustomobject]@{ done = $false; reason = 'UNKNOWN (rate limit)'; rateLimited = $true; merged = $false }
     }
-    $pidAlive = [bool]($Session.sessionPid -and (Get-Process -Id $Session.sessionPid -ErrorAction SilentlyContinue))
+    # Not "does this PID exist": a recycled PID would report a dead session alive forever (#520),
+    # and a wt entry without a usable PID is resolved through its tab shell (#557).
+    $pidAlive = ((Get-SessionLivePid $Session) -gt 0)
     return Get-SessionCompletion -PrState $prState -IssueState $issueState -PidAlive $pidAlive `
         -PrHeadOid ([string]$prHeadOid) -BranchTip ([string]$branchTip)
 }
@@ -2287,11 +2411,12 @@ function Invoke-SessionCleanup {
     $actions = @()
     # Kill ONLY a session whose tracked PID is genuinely its own spawned shell: a standalone
     # `pwsh` window (via='pwsh') records $spawn.process.Id, so killing that releases the
-    # worktree handle. A `wt` tab and an in-place -Start record the HOST/launcher PID (the
-    # tab's real shell is not tracked), so killing it could take down the host process and
-    # unrelated tabs - NEVER do that (Codex review, PR #269). Stop-ProcessTree also guards
-    # self + ancestors as a backstop. For wt/in-place, skip the kill and let the worktree
-    # removal report a held handle if the untracked shell still has it open.
+    # worktree handle. An in-place -Start records the HOST PID, and a `wt` entry's stored PID
+    # is not trusted for a kill (older ones hold the launcher's parent), so killing by it could
+    # take down the host process and unrelated tabs - NEVER do that (Codex review, PR #269).
+    # Stop-ProcessTree also guards self + ancestors as a backstop. A wt tab is instead found
+    # below by its launch script; in-place skips the kill and lets the worktree removal report
+    # a held handle if a shell still has it open.
     if ($Session.sessionPid -and $Session.via -eq 'pwsh') {
         $actions += "kill PID $($Session.sessionPid) (ventana pwsh propia - libera el worktree)"
         if (-not $DryRun) { Stop-ProcessTree -TargetPid ([int]$Session.sessionPid) | Out-Null }
@@ -2429,7 +2554,7 @@ function Invoke-SessionWatch {
         [scriptblock]$IsStale = {
             param($s)
             ($s.sessionPid -gt 0) -and
-            -not (Get-Process -Id $s.sessionPid -ErrorAction SilentlyContinue) -and
+            ((Get-SessionLivePid $s) -le 0) -and
             $s.workPath -and
             -not (Test-Path $s.workPath -PathType Container)
         },
@@ -2634,9 +2759,7 @@ if ($Relaunch -gt 0) {
         Write-Host ("  Relaunch #{0} FALLO: el worktree no existe o no se pudo lanzar - registro intacto." -f $Relaunch) -ForegroundColor Red
         exit 1
     }
-    $via = if ($spawn.usesWt) { 'wt' } else { 'pwsh' }
-    if ($spawn.process -and -not $spawn.usesWt) { Write-SessionRegistryEntry -IssueNum $Relaunch -SessionPid $spawn.process.Id -Via $via -Cli $cli -FleetSession $marker }
-    else { Write-SessionRegistryEntry -IssueNum $Relaunch -Via $via -Cli $cli -FleetSession $marker }
+    Register-LaunchedSession -Spawn $spawn -IssueNum $Relaunch -Cli $cli -FleetSession $marker
     Write-Host ("  Relaunched #{0} [{1}]." -f $Relaunch, $cli) -ForegroundColor Green
     exit 0
 }
@@ -3390,12 +3513,7 @@ if ($Parallel.Count -gt 0) {
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
                                                -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `
                                                -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
-                $via = if ($spawn.usesWt) { "wt" } else { "pwsh" }
-                if ($spawn.process -and -not $spawn.usesWt) {
-                    Write-SessionRegistryEntry -IssueNum $entry.issue -SessionPid $spawn.process.Id -Via $via -Cli $actualCli -FleetSession $marker
-                } else {
-                    Write-SessionRegistryEntry -IssueNum $entry.issue -Via $via -Cli $actualCli -FleetSession $marker
-                }
+                Register-LaunchedSession -Spawn $spawn -IssueNum $entry.issue -Cli $actualCli -FleetSession $marker
                 $actualCli
             }.GetNewClosure()
             # Governor: pace launches in waves sized to machine capacity, instead of firing
@@ -3452,14 +3570,9 @@ if ($Parallel.Count -gt 0) {
                     $marker = New-FleetSessionMarker $r.issue $runId
                     $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
                     $launched++
-                    # Track the spawned session's own PID (pwsh window is reliable; a wt
-                    # launcher forks and exits, so keep the host PID there).
-                    $via = if ($spawn.usesWt) { "wt" } else { "pwsh" }
-                    if ($spawn.process -and -not $spawn.usesWt) {
-                        Write-SessionRegistryEntry -IssueNum $r.issue -SessionPid $spawn.process.Id -Via $via -FleetSession $marker
-                    } else {
-                        Write-SessionRegistryEntry -IssueNum $r.issue -Via $via -FleetSession $marker
-                    }
+                    # Track the spawned session's own PID: the pwsh window's process, or for a wt
+                    # tab (whose launcher forks and exits) the tab shell found by its launch script.
+                    Register-LaunchedSession -Spawn $spawn -IssueNum $r.issue -FleetSession $marker
                 }
             }
             Write-Host ""
