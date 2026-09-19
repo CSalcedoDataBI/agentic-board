@@ -303,13 +303,15 @@ function Test-IsBrakedCommand {
 
     # An AMBIGUOUS `&` (#546). The narrowed --delete gap (see $script:PushDeleteFlagPattern) reads a `&`
     # between `push` and `--delete` as a background operator, which is only safe when it plainly is
-    # one. A shell can also make it an argument character - inside quotes, escaped (`\&`, `^&`, a
-    # PowerShell backtick), or inside `$( )` / backticks nested to any depth - and a text classifier
-    # cannot enumerate every spelling of that: two independent reviews each found one more. So the
-    # fix narrows ONLY a plain command. If the command carries any character that could quote or
-    # escape a `&`, the delete flag is judged by the OLD unbounded pattern, exactly as before #546.
-    # By construction that can only ADD a `delete` verdict, never remove one.
-    if ($irr -contains 'delete' -and "$Command".Contains('&') -and "$Command" -match '["''\\^`]|\$[({]') {
+    # one. A shell can make it an argument character in ways a text classifier cannot enumerate - quotes,
+    # backslash or caret or PowerShell-backtick escapes, `$( )` nested to any depth, extglob `@(a&b)`,
+    # heredocs, brace expansion: three reviews each found one more, and every fix invited the next.
+    # So the rule is inverted and fails closed BY CONSTRUCTION: the narrowing applies ONLY to a command
+    # made entirely of plain characters (letters, digits, blanks and a few separators/redirections),
+    # where a `&` cannot be anything but an operator. Any other character anywhere in the command and
+    # the delete flag is judged by the pre-#546 unbounded pattern, exactly as before. That can only ADD
+    # a `delete` verdict, never remove one.
+    if ($irr -contains 'delete' -and "$Command".Contains('&') -and "$Command" -notmatch '^[A-Za-z0-9_./:=,+@ \t&|;<>-]+\z') {
         foreach ($segment in ((ConvertTo-NormalizedCommand $Command) -split $script:SegmentSeparator)) {
             $seg = $segment.Trim()
             if (-not $seg) { continue }

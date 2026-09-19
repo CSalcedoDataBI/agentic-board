@@ -70,10 +70,16 @@ Describe 'a & that is NOT a background operator does not open a hole (reviewing 
     ) {
         Classify $cmd | Should -Be 'delete'
     }
-    It 'a REAL background & is still a boundary, so no false positive comes back' {
+    It 'a REAL background & in a PLAIN command is still a boundary, so the false positive stays fixed' {
         Classify 'git push origin fine & echo --delete' | Should -BeNullOrEmpty
-        Classify 'git push origin feat #& --delete' | Should -BeNullOrEmpty
         Classify 'git push origin a& --delete x' | Should -BeNullOrEmpty
+    }
+    It 'any character outside the plain set keeps the OLD verdict: fail closed by construction' {
+        # A comment marker, a glob, a brace: none of them is proven harmless, so the pre-#546 pattern decides.
+        Classify 'git push origin feat #& --delete' | Should -Be 'delete'
+        Classify 'git push origin @(a&b) --delete victim' | Should -Be 'delete'     # extglob: found by Codex on #703
+        Classify 'git push origin {a,b}& --delete victim' | Should -Be 'delete'
+        Classify 'git push origin a* & --delete victim' | Should -Be 'delete'
     }
 }
 
