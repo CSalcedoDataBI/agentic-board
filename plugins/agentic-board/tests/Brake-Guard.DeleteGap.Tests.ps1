@@ -65,6 +65,8 @@ Describe 'a & that is NOT a background operator does not open a hole (reviewing 
         @{ cmd = 'git push origin $(echo a&b) --delete x' }
         @{ cmd = 'git push origin `echo a&b` --delete x' }
         @{ cmd = 'cmd /c git push origin a^&b --delete x' }
+        @{ cmd = 'git push origin $(echo $(echo keep) & echo ref) --delete victim' }   # nested $( ): found by Codex on #703
+        @{ cmd = 'git push origin a`&b --delete victim' }                              # PowerShell backtick escape: same
     ) {
         Classify $cmd | Should -Be 'delete'
     }
@@ -87,10 +89,13 @@ Describe 'a & INSIDE a quoted argument does not open a hole either (external rev
     ) {
         Classify $cmd | Should -Be 'delete'
     }
-    It 'a REAL background & outside quotes still ends the gap, quotes or not' {
-        Classify 'git push origin "feat" & echo --delete' | Should -BeNullOrEmpty
-        Classify 'git push origin fine & echo "--delete"' | Should -BeNullOrEmpty
-        Classify "git push origin 'a' & echo --delete" | Should -BeNullOrEmpty
+    It 'a plain background & still ends the gap; once quotes are present the OLD verdict is kept (fail closed)' {
+        # The fix narrows only a PLAIN command. Any quote (or escape, or $( ) / backtick) makes an & ambiguous,
+        # so those commands are judged by the pre-#546 pattern: they keep being denied, as before.
+        Classify 'git push origin fine & echo --delete' | Should -BeNullOrEmpty
+        Classify 'git push origin "feat" & echo --delete' | Should -Be 'delete'
+        Classify 'git push origin fine & echo "--delete"' | Should -Be 'delete'
+        Classify "git push origin 'a' & echo --delete" | Should -Be 'delete'
     }
     It 'the second look only ever applies when the contract brakes on delete' {
         Test-IsBrakedCommand -Command 'git push origin "a&b" --delete x' -Irreversible @('merge') | Should -BeNullOrEmpty
