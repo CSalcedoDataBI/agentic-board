@@ -10,7 +10,7 @@ Loaded on demand by /board (#573).
   is not already cited — as `(#n)` **or inside a range** such as `#423–#430` — and has a Type or
   label that says which heading it goes under (there is no default heading; an unclassified issue
   is never filed under `### Added`). Every closed issue that is left out because of the PR rule or
-  the missing classification is printed with its reason, so you can place it by hand: the generator
+  the missing classification - or a closing-PR list too long to read in full (`unknown-prs`: the tool says it cannot establish which PR closed it rather than guessing) - is printed with its reason, so you can place it by hand: the generator
   proposes candidates, it does not take over the curation of `[Unreleased]` (#676). Prints the
   block; `-Write` inserts it at the top of CHANGELOG.md; `-Version`/`-Date`/`-Since` override the
   defaults (version read from plugin.json). Pre-existing prose entries without a number are not

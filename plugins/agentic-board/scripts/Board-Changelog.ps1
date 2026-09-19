@@ -21,7 +21,9 @@
     reported with its reason, so nothing disappears silently:
       1. it is closed and belongs to -Repo;
       2. it was NOT closed as "not planned" (a duplicate or a won't-fix is never release content);
-      3. it was closed BY a merged pull request (closedByPullRequestsReferences), and that PR was
+      3. it was closed BY a merged pull request (closedByPullRequestsReferences; when that list is
+         truncated and the merged PR is not among those read, the fact CANNOT BE ESTABLISHED and the
+         issue is listed for you instead of being judged on a partial list), and that PR was
          merged on/after -Since (default: the date of the most recent CHANGELOG entry). An issue
          closed by hand, or by a commit with no PR, is listed for you to add by hand;
       4. the issue number is not already cited in the existing CHANGELOG - as `(#<n>)` OR inside a
@@ -216,18 +218,24 @@ function Resolve-ChangelogSection {
 }
 
 # Does this CLOSED issue belong in the release being folded? Pure.
-#   $Issue: { state; stateReason; closedByPullRequestsReferences = { nodes = @({ number; state; merged; mergedAt }) } }
+#   $Issue: { state; stateReason; closedByPullRequestsReferences = { totalCount; pageInfo = { hasNextPage };
+#             nodes = @({ number; state; merged; mergedAt }) } }
 # Returns @{ include; reason } - reason is a short code the report prints:
-#   not-closed | not-planned | no-merged-pr | pr-before-release | ok
+#   not-closed | not-planned | unknown-prs | no-merged-pr | pr-before-release | ok
+# `unknown-prs`: the closing-PR connection is a page (first:5), and "no merged PR" or "merged before the
+# release" are claims about ALL of them. If the page is truncated - or the response does not say
+# whether it is - and no merged PR of this release is among the ones read, the answer is "cannot
+# establish", never a guess (a busy issue must not be misjudged as unfixed or as already shipped).
+# A merged PR of this release that WAS read is enough to include: that fact is established.
 function Test-IssueInRelease {
     param($Issue, [datetime]$SinceDt = [datetime]::MinValue)
     if ("$($Issue.state)" -ne 'CLOSED') { return @{ include = $false; reason = 'not-closed' } }
     $sr = "$($Issue.stateReason)".ToUpperInvariant()
     if ($sr -eq 'NOT_PLANNED' -or $sr -eq 'DUPLICATE') { return @{ include = $false; reason = 'not-planned' } }
 
-    $prs = @($Issue.closedByPullRequestsReferences.nodes | Where-Object {
-        $_ -and (("$($_.state)" -eq 'MERGED') -or ($_.merged -eq $true)) })
-    if ($prs.Count -eq 0) { return @{ include = $false; reason = 'no-merged-pr' } }
+    $conn  = $Issue.closedByPullRequestsReferences
+    $nodes = @($conn.nodes | Where-Object { $_ })
+    $prs   = @($nodes | Where-Object { ("$($_.state)" -eq 'MERGED') -or ($_.merged -eq $true) })
 
     foreach ($pr in $prs) {
         if (-not $pr.mergedAt) { continue }
@@ -235,6 +243,16 @@ function Test-IssueInRelease {
                   else { [datetime]::Parse([string]$pr.mergedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
         if ($merged -ge $SinceDt) { return @{ include = $true; reason = 'ok' } }
     }
+
+    # Nothing of this release was read. Was the whole list read?
+    $pageInfo = if ($conn -and ($conn.PSObject.Properties.Name -contains 'pageInfo')) { $conn.pageInfo } else { $null }
+    # Complete ONLY when the response says so explicitly: absent pageInfo / absent hasNextPage / $null
+    # all read as "cannot tell", i.e. not complete.
+    $hasNext  = -not ($pageInfo -and $pageInfo.hasNextPage -eq $false)
+    $total = if ($conn -and ($conn.PSObject.Properties.Name -contains 'totalCount') -and $null -ne $conn.totalCount) { [int]$conn.totalCount } else { -1 }
+    if ($hasNext -or ($total -ge 0 -and $total -gt $nodes.Count)) { return @{ include = $false; reason = 'unknown-prs' } }
+
+    if ($prs.Count -eq 0) { return @{ include = $false; reason = 'no-merged-pr' } }
     return @{ include = $false; reason = 'pr-before-release' }
 }
 
@@ -376,7 +394,7 @@ query(`$owner:String!, `$num:Int!, `$cursor:String) {
             ... on Issue {
               number title state stateReason closedAt url
               labels(first:15) { nodes { name } }
-              closedByPullRequestsReferences(first:5, includeClosedPrs:true) { nodes { number state merged mergedAt } }
+              closedByPullRequestsReferences(first:5, includeClosedPrs:true) { totalCount pageInfo { hasNextPage } nodes { number state merged mergedAt } }
             }
           }
         }
@@ -423,13 +441,14 @@ Write-Host "=== Board-Changelog  $Repo  board #$ProjectNum ===" -ForegroundColor
 Write-Host ("  Since: {0}  |  incluidos: {1}  |  omitidos: {2} otro-repo, {3} ya-citados (incl. rangos), {4} anteriores, {5} no-planeados" -f `
     ($(if ($Since) { $Since } else { "(todo)" })), $included, $skippedRepo, $skippedCited, $skippedOld, (Get-SkipCount 'not-planned')) -ForegroundColor DarkGray
 # Nothing is dropped silently: what a human may want to place by hand is named, with the reason.
-$review = @($sel.Skipped | Where-Object { $_.reason -in @('no-merged-pr', 'pr-before-release', 'unclassified') })
+$review = @($sel.Skipped | Where-Object { $_.reason -in @('no-merged-pr', 'pr-before-release', 'unknown-prs', 'unclassified') })
 if ($review.Count -gt 0) {
     Write-Host "  Cerrados pero NO incluidos (revisa a mano si corresponden a este release):" -ForegroundColor Yellow
     foreach ($r in $review) {
         $why = switch ($r.reason) {
             'no-merged-pr'      { 'no lo cerro ningun PR mergeado' }
             'pr-before-release' { 'su PR se mergeo antes de este release' }
+            'unknown-prs'       { 'tiene mas PRs de los que se leyeron: no se pudo establecer cual lo cerro' }
             'unclassified'      { 'sin Type ni label: no se en que seccion va' }
         }
         Write-Host ("    #{0}  {1}  - {2}" -f $r.number, $r.title, $why) -ForegroundColor DarkYellow

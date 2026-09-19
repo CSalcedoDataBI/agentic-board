@@ -245,8 +245,10 @@ Describe 'Get-CitedIssueNumbers - ranges are citations too' {
 Describe 'Test-IssueInRelease - only an issue closed BY a merged PR of this release' {
     BeforeAll {
         $script:Since = [datetime]::Parse('2026-09-01', [Globalization.CultureInfo]::InvariantCulture)
-        function script:Iss($state, $reason, $prs) { [pscustomobject]@{ state = $state; stateReason = $reason
-            closedByPullRequestsReferences = [pscustomobject]@{ nodes = @($prs) } } }
+        function script:Iss($state, $reason, $prs, $hasNext = $false, $total = $null) {
+            $conn = [pscustomobject]@{ pageInfo = [pscustomobject]@{ hasNextPage = $hasNext }; nodes = @($prs) }
+            if ($null -ne $total) { $conn | Add-Member -NotePropertyName totalCount -NotePropertyValue $total }
+            [pscustomobject]@{ state = $state; stateReason = $reason; closedByPullRequestsReferences = $conn } }
         function script:Pr($merged, $at) { [pscustomobject]@{ number = 1; state = $(if ($merged) { 'MERGED' } else { 'CLOSED' }); merged = $merged; mergedAt = $at } }
     }
     It 'closed as NOT PLANNED is never release content - the #661 case (a duplicate)' {
@@ -278,6 +280,38 @@ Describe 'Test-IssueInRelease - only an issue closed BY a merged PR of this rele
     It 'an open issue is not content' {
         (Test-IssueInRelease -Issue (Iss 'OPEN' '' @()) -SinceDt $script:Since).reason | Should -Be 'not-closed'
     }
+    It 'a TRUNCATED closing-PR list with no merged PR of this release among those read is UNKNOWN, not "no merged PR"' {
+        $v = Test-IssueInRelease -Issue (Iss 'CLOSED' 'COMPLETED' @((Pr $false $null)) $true) -SinceDt $script:Since
+        $v.include | Should -BeFalse
+        $v.reason | Should -Be 'unknown-prs'
+    }
+    It 'a truncated list whose read PRs all predate the release is UNKNOWN too - the next page may hold the PR of this release' {
+        $v = Test-IssueInRelease -Issue (Iss 'CLOSED' 'COMPLETED' @((Pr $true '2026-07-01T10:00:00Z')) $true) -SinceDt $script:Since
+        $v.reason | Should -Be 'unknown-prs'
+    }
+    It 'totalCount larger than the nodes read means truncated even when hasNextPage says false' {
+        $v = Test-IssueInRelease -Issue (Iss 'CLOSED' 'COMPLETED' @((Pr $true '2026-07-01T10:00:00Z')) $false 9) -SinceDt $script:Since
+        $v.reason | Should -Be 'unknown-prs'
+    }
+    It 'a response that does not say whether the list is complete is not trusted (fail toward "cannot establish")' {
+        $noInfo = [pscustomobject]@{ state = 'CLOSED'; stateReason = 'COMPLETED'
+            closedByPullRequestsReferences = [pscustomobject]@{ nodes = @() } }
+        (Test-IssueInRelease -Issue $noInfo -SinceDt $script:Since).reason | Should -Be 'unknown-prs'
+        $noConn = [pscustomobject]@{ state = 'CLOSED'; stateReason = 'COMPLETED' }
+        (Test-IssueInRelease -Issue $noConn -SinceDt $script:Since).reason | Should -Be 'unknown-prs'
+    }
+    It 'a merged PR of THIS release that was read still includes the issue even when the list is truncated' {
+        $v = Test-IssueInRelease -Issue (Iss 'CLOSED' 'COMPLETED' @((Pr $true '2026-09-05T10:00:00Z')) $true) -SinceDt $script:Since
+        $v.include | Should -BeTrue
+        $v.reason | Should -Be 'ok'
+    }
+    It 'not-planned still wins over an unknown closing-PR list' {
+        (Test-IssueInRelease -Issue (Iss 'CLOSED' 'NOT_PLANNED' @() $true) -SinceDt $script:Since).reason | Should -Be 'not-planned'
+    }
+    It 'a COMPLETE list (hasNextPage false, totalCount equal) keeps the original verdicts' {
+        (Test-IssueInRelease -Issue (Iss 'CLOSED' 'COMPLETED' @() $false 0) -SinceDt $script:Since).reason | Should -Be 'no-merged-pr'
+        (Test-IssueInRelease -Issue (Iss 'CLOSED' 'COMPLETED' @((Pr $true '2026-07-01T10:00:00Z')) $false 1) -SinceDt $script:Since).reason | Should -Be 'pr-before-release'
+    }
     It 'an older issue with no stateReason at all is decided by its PR, not waved through' {
         (Test-IssueInRelease -Issue (Iss 'CLOSED' $null @()) -SinceDt $script:Since).include | Should -BeFalse
     }
@@ -301,14 +335,14 @@ Describe 'Resolve-ChangelogSection - no default heading' {
 Describe 'Select-ChangelogItems - the fold on a board with the v0.38.2 traps in it' {
     BeforeAll {
         $script:Since = [datetime]::Parse('2026-09-01', [Globalization.CultureInfo]::InvariantCulture)
-        function script:Node($n, $title, $reason, $prs, $type = $null, $labels = @(), $closedAt = '2026-09-10T10:00:00Z', $url = $null, $state = 'CLOSED', $typename = 'Issue') {
+        function script:Node($n, $title, $reason, $prs, $type = $null, $labels = @(), $closedAt = '2026-09-10T10:00:00Z', $url = $null, $state = 'CLOSED', $typename = 'Issue', $hasNext = $false) {
             [pscustomobject]@{
                 fieldValues = [pscustomobject]@{ nodes = @($(if ($type) { [pscustomobject]@{ field = [pscustomobject]@{ name = 'Type' }; name = $type } })) }
                 content = [pscustomobject]@{
                     __typename = $typename; number = $n; title = $title; state = $state; stateReason = $reason; closedAt = $closedAt
                     url = $(if ($url) { $url } else { "https://github.com/o/r/issues/$n" })
                     labels = [pscustomobject]@{ nodes = @($labels | ForEach-Object { [pscustomobject]@{ name = $_ } }) }
-                    closedByPullRequestsReferences = [pscustomobject]@{ nodes = @($prs) } }
+                    closedByPullRequestsReferences = [pscustomobject]@{ totalCount = @($prs).Count; pageInfo = [pscustomobject]@{ hasNextPage = $hasNext }; nodes = @($prs) } }
             }
         }
         $script:MergedPr = @([pscustomobject]@{ number = 900; state = 'MERGED'; merged = $true; mergedAt = '2026-09-10T09:00:00Z' })
@@ -321,6 +355,7 @@ Describe 'Select-ChangelogItems - the fold on a board with the v0.38.2 traps in 
             (Node 701 'Closed by hand with no PR' 'COMPLETED' @() 'Bug')
             (Node 424 'Inside the cited range' 'COMPLETED' $script:MergedPr 'Bug')
             (Node 703 'No type and no label' 'COMPLETED' $script:MergedPr)
+            (Node 709 'Busy issue: more closing PRs than were read' 'COMPLETED' @() 'Bug' @() '2026-09-10T10:00:00Z' $null 'CLOSED' 'Issue' $true)
             (Node 705 'Long ago' 'COMPLETED' $script:MergedPr 'Bug' @() '2026-06-01T10:00:00Z')
             (Node 706 'Other repository' 'COMPLETED' $script:MergedPr 'Bug' @() '2026-09-10T10:00:00Z' 'https://github.com/x/y/issues/706')
             (Node 707 'Still open' '' @() 'Bug' @() $null 'https://github.com/o/r/issues/707' 'OPEN')
@@ -360,6 +395,10 @@ Describe 'Select-ChangelogItems - the fold on a board with the v0.38.2 traps in 
         Reason 707 | Should -BeNullOrEmpty
         Reason 708 | Should -BeNullOrEmpty
     }
+    It 'a busy issue whose closing PRs were not all read is left out as UNKNOWN - named for a human, never folded or called unfixed' {
+        $script:All | Should -Not -Match '#709'
+        Reason 709 | Should -Be 'unknown-prs'
+    }
     It 'counts exactly the two entries that belong' {
         $script:Sel.Included | Should -Be 2
     }
@@ -374,6 +413,9 @@ Describe 'Board-Changelog.ps1 asks GitHub for what the rules need' {
     It 'requests the closing PRs INCLUDING merged ones' {
         $script:ClSrc | Should -Match 'closedByPullRequestsReferences\(first:5, includeClosedPrs:true\)'
     }
+    It 'requests pageInfo AND totalCount, so a truncated closing-PR list can be recognised (review thread)' {
+        $script:ClSrc | Should -Match 'closedByPullRequestsReferences\(first:5, includeClosedPrs:true\) \{ totalCount pageInfo \{ hasNextPage \}'
+    }
     It 'builds the cited set through Get-CitedIssueNumbers (ranges), not a bare #n scan' {
         $script:ClSrc | Should -Match 'Get-CitedIssueNumbers -Text \$clText'
     }
@@ -387,18 +429,19 @@ Describe 'Board-Changelog.ps1 end to end - a fake gh serves the board' {
         $script:Tmp2 = Join-Path ([System.IO.Path]::GetTempPath()) ('cl-e2e-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $script:Tmp2 -Force | Out-Null
         $item = {
-            param($n, $title, $reason, $type, $prMerged)
+            param($n, $title, $reason, $type, $prMerged, $hasNext = $false)
             $prs = if ($prMerged) { @(@{ number = 900; state = 'MERGED'; merged = $true; mergedAt = '2026-09-10T09:00:00Z' }) } else { @() }
             @{ fieldValues = @{ nodes = @($(if ($type) { @{ field = @{ name = 'Type' }; name = $type } })) }
                content = @{ __typename = 'Issue'; number = $n; title = $title; state = 'CLOSED'; stateReason = $reason; closedAt = '2026-09-10T10:00:00Z'
                             url = "https://github.com/o/r/issues/$n"; labels = @{ nodes = @() }
-                            closedByPullRequestsReferences = @{ nodes = $prs } } }
+                            closedByPullRequestsReferences = @{ totalCount = @($prs).Count; pageInfo = @{ hasNextPage = $hasNext }; nodes = $prs } } }
         }
         $nodes = @(
             (& $item 661 'Board-ReviewGate returns exit 0 when the only review is a quota-blocked Copilot review' 'NOT_PLANNED' 'Bug' $false),
             (& $item 700 'A real bug fixed by this release' 'COMPLETED' 'Bug' $true),
             (& $item 424 'Inside a cited range' 'COMPLETED' 'Bug' $true),
-            (& $item 703 'Unclassified work' 'COMPLETED' $null $true)
+            (& $item 703 'Unclassified work' 'COMPLETED' $null $true),
+            (& $item 709 'Busy issue with more closing PRs than were read' 'COMPLETED' 'Bug' $false $true)
         )
         $resp = @{ data = @{ user = @{ projectV2 = @{ id = 'P1'; items = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = $nodes } } } } }
         $resp | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $script:Tmp2 'gh-response.json') -Encoding UTF8
@@ -426,6 +469,10 @@ Describe 'Board-Changelog.ps1 end to end - a fake gh serves the board' {
         $script:Out | Should -Not -Match '\(#661\)'
         $script:Out | Should -Not -Match '\(#424\)'
         $script:Out | Should -Not -Match '\(#703\)'
+    }
+    It 'a busy issue whose closing PRs were not all read is named for a human, never folded' {
+        $script:Out | Should -Not -Match '\(#709\)'
+        $script:Out | Should -Match '#709.*no se pudo establecer cual lo cerro'
     }
     It 'does not invent an Added section for an issue it could not classify' {
         $script:Out | Should -Not -Match '### Added'
