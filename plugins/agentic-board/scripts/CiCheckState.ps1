@@ -58,28 +58,28 @@ function Get-CheckJobId {
 }
 
 <#
-    How many steps of a job actually executed, from the job object of
-    `GET /repos/{o}/{r}/actions/jobs/{id}`. Returns -1 when the facts cannot be trusted (no
-    object, or no `steps` member at all) - a missing array is "I could not tell", which must not
-    read as the same thing as an empty one ("zero steps ran").
+    How many steps a job REPORTS, from the job object of `GET /repos/{o}/{r}/actions/jobs/{id}`.
+    Returns -1 when the facts cannot be trusted (no object, or no `steps` member at all) - a
+    missing array is "I could not tell", which must not read as the same thing as an empty one.
+
+    Deliberately the count of steps PRESENT, not of steps with a recognised conclusion (external
+    review): a job GitHub refused to start has `steps: []`, and that emptiness is the only
+    fingerprint. A job that started and then crashed can carry steps with a null or unusual
+    conclusion; counting only known conclusions would call it "never ran", and that is the
+    dangerous direction (it tells a run to stop pushing at a CI that did start).
 #>
-function Get-JobExecutedStepCount {
+function Get-JobStepCount {
     param($Job)
     if ($null -eq $Job) { return -1 }
     if (-not ($Job.PSObject.Properties.Name -contains 'steps') -and
         -not (($Job -is [hashtable]) -and $Job.ContainsKey('steps'))) { return -1 }
-    $steps = @($Job.steps | Where-Object { $_ })
-    # A step "executed" when it reached a real outcome. Steps that are pending, or were skipped
-    # because an earlier one failed, did not run.
-    return @($steps | Where-Object {
-        "$($_.conclusion)".Trim().ToLowerInvariant() -in @('success','failure','cancelled','timed_out')
-    }).Count
+    return @($Job.steps | Where-Object { $_ }).Count
 }
 
 <#
     Did this check's job never execute a single step?
 
-    $JobFacts maps a check's link to @{ executedSteps = <int> } as read by the caller; a check
+    $JobFacts maps a check's link to @{ stepCount = <int> } as read by the caller; a check
     with no entry (or -1) has unknown facts and is NOT concluded to have never run.
 #>
 function Test-CheckNeverExecuted {
@@ -94,7 +94,7 @@ function Test-CheckNeverExecuted {
     if ("$($Check.bucket)" -ne 'fail') { return $false }
     $link = "$($Check.link)"
     if (-not $link -or -not $JobFacts -or -not $JobFacts.ContainsKey($link)) { return $false }
-    $n = $JobFacts[$link].executedSteps
+    $n = $JobFacts[$link].stepCount
     return ($null -ne $n -and [int]$n -eq 0)
 }
 

@@ -491,23 +491,27 @@ function Get-ChecksVerdict {
     param(
         $Checks = @(),
         [bool]$Parsed = $false,
-        # check link -> @{ executedSteps = <int> }, read by the caller for the FAILED checks (#481).
+        # check link -> @{ stepCount = <int> }, read by the caller for the FAILED checks (#481).
         # Lets a job that GitHub refused to start (exhausted quota: steps [], runner_id 0) be told
         # apart from a real failure. Absent facts never reclassify anything.
         [hashtable]$JobFacts = @{}
     )
     if (-not $Parsed) {
-        return @{ Parsed = $false; Settled = $false; Ok = $false; NoChecks = $false; Failed = @(); Pending = @(); NotEvaluated = @() }
+        return @{ Parsed = $false; Settled = $false; Ok = $false; NoChecks = $false; Failed = @(); Pending = @(); NotEvaluated = @(); NotEvaluatedUnexcusable = @() }
     }
     $list = @(@($Checks) | Where-Object { $_ })
     if ($list.Count -eq 0) {
-        return @{ Parsed = $true; Settled = $true; Ok = $true; NoChecks = $true; Failed = @(); Pending = @(); NotEvaluated = @() }
+        return @{ Parsed = $true; Settled = $true; Ok = $true; NoChecks = $true; Failed = @(); Pending = @(); NotEvaluated = @(); NotEvaluatedUnexcusable = @() }
     }
     # CI that NEVER RAN is not CI that FAILED (#481): startup_failure, or a job with zero executed
     # steps. It still blocks (Ok stays false) - this only stops it being reported as broken code.
     $neverRan = @($list | Where-Object { Test-CheckNeverExecuted -Check $_ -JobFacts $JobFacts })
     $rest     = @($list | Where-Object { $neverRan -notcontains $_ })
     $notEval = @($neverRan | ForEach-Object { "$($_.name)" })
+    # Never-ran checks gh did NOT file as fail/cancel (a STARTUP_FAILURE it bucketed as pending or
+    # skipping). Before #481 these were never "red", so the reviewer-only allowance could not have
+    # excused them; the allowance must not start covering them now (external review round 1).
+    $notEvalUnexcusable = @($neverRan | Where-Object { "$($_.bucket)" -notin @('fail','cancel') } | ForEach-Object { "$($_.name)" })
     $failed  = @($rest | Where-Object { "$($_.bucket)" -in @('fail','cancel') } | ForEach-Object { "$($_.name)" })
     $pending = @($rest | Where-Object { "$($_.bucket)" -eq 'pending' }          | ForEach-Object { "$($_.name)" })
     return @{
@@ -518,6 +522,7 @@ function Get-ChecksVerdict {
         Failed       = $failed
         Pending      = $pending
         NotEvaluated = $notEval
+        NotEvaluatedUnexcusable = $notEvalUnexcusable
     }
 }
 
@@ -538,8 +543,8 @@ function Get-FailedCheckJobFacts {
         if ($jobId -le 0 -or $facts.ContainsKey($link)) { continue }
         try {
             $job = Invoke-Gh -GhArgs @('api',"repos/$Repo/actions/jobs/$jobId") -What "leer el job $jobId del check '$($c.name)'" -Json
-            $n = Get-JobExecutedStepCount -Job $job
-            if ($n -ge 0) { $facts[$link] = @{ executedSteps = $n } }
+            $n = Get-JobStepCount -Job $job
+            if ($n -ge 0) { $facts[$link] = @{ stepCount = $n } }
         } catch { }
     }
     return $facts
@@ -1128,7 +1133,7 @@ Write-Host ""
 # A reviewer job that never ran (startup_failure / no steps) is still "only the reviewer is red":
 # the allowance covers failed AND not-evaluated reviewer checks, exactly as before #481 split them.
 $redChecks = @($failedChecks) + @($notEvaluatedChecks)
-if (-not $checksOk -and $evidence.reviewed -and (Test-OnlyReviewerChecksFailed -FailedChecks $redChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
+if (-not $checksOk -and $evidence.reviewed -and @($verdictCi.NotEvaluatedUnexcusable).Count -eq 0 -and (Test-OnlyReviewerChecksFailed -FailedChecks $redChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
     $checksOk = $true
     Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($redChecks -join ', ')) -ForegroundColor DarkYellow
     Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray

@@ -39,7 +39,7 @@ BeforeAll {
     }
 }
 
-Describe 'Get-CheckJobId / Get-JobExecutedStepCount' {
+Describe 'Get-CheckJobId / Get-JobStepCount' {
     It 'reads the job id out of an Actions job link' {
         Get-CheckJobId -Link $script:LinkA | Should -Be 89284023176
     }
@@ -48,14 +48,20 @@ Describe 'Get-CheckJobId / Get-JobExecutedStepCount' {
         Get-CheckJobId -Link '' | Should -Be 0
     }
     It 'counts ZERO executed steps for the measured exhausted-quota job' {
-        Get-JobExecutedStepCount -Job $script:JobNeverRan | Should -Be 0
+        Get-JobStepCount -Job $script:JobNeverRan | Should -Be 0
     }
-    It 'counts only steps that reached an outcome for an ordinary failing job (a skipped step did not run)' {
-        Get-JobExecutedStepCount -Job $script:JobBroken | Should -Be 2
+    It 'counts the steps PRESENT for an ordinary failing job' {
+        Get-JobStepCount -Job $script:JobBroken | Should -Be 3
+    }
+    It 'a job that started and crashed (steps with a null / unusual conclusion) is NOT zero steps (review round 1)' {
+        $crashed = '{"steps":[{"name":"Set up job","status":"in_progress","conclusion":null,"number":1},{"name":"x","status":"completed","conclusion":"action_required","number":2}]}' | ConvertFrom-Json
+        Get-JobStepCount -Job $crashed | Should -Be 2
+        $facts = @{ $script:LinkA = @{ stepCount = (Get-JobStepCount -Job $crashed) } }
+        Test-CheckNeverExecuted -Check (script:Chk 'Pester' 'fail' 'FAILURE' $script:LinkA) -JobFacts $facts | Should -BeFalse
     }
     It 'returns -1 (cannot tell) when the job object or its steps member is missing - never 0' {
-        Get-JobExecutedStepCount -Job $null | Should -Be -1
-        Get-JobExecutedStepCount -Job ([pscustomobject]@{ id = 1; conclusion = 'failure' }) | Should -Be -1
+        Get-JobStepCount -Job $null | Should -Be -1
+        Get-JobStepCount -Job ([pscustomobject]@{ id = 1; conclusion = 'failure' }) | Should -Be -1
     }
 }
 
@@ -65,11 +71,11 @@ Describe 'Test-CheckNeverExecuted - positive evidence only' {
         Test-CheckNeverExecuted -Check (script:Chk 'CI' 'pending' 'STARTUP_FAILURE') | Should -BeTrue
     }
     It 'a failed check whose job ran zero steps never executed' {
-        $facts = @{ $script:LinkA = @{ executedSteps = 0 } }
+        $facts = @{ $script:LinkA = @{ stepCount = 0 } }
         Test-CheckNeverExecuted -Check (script:Chk 'claude-review' 'fail' 'FAILURE' $script:LinkA) -JobFacts $facts | Should -BeTrue
     }
     It 'a failed check whose job ran steps is a real failure' {
-        $facts = @{ $script:LinkA = @{ executedSteps = 2 } }
+        $facts = @{ $script:LinkA = @{ stepCount = 2 } }
         Test-CheckNeverExecuted -Check (script:Chk 'Pester' 'fail' 'FAILURE' $script:LinkA) -JobFacts $facts | Should -BeFalse
     }
     It 'a failed check with NO job facts stays a failure: not knowing is never "never ran"' {
@@ -77,7 +83,7 @@ Describe 'Test-CheckNeverExecuted - positive evidence only' {
         Test-CheckNeverExecuted -Check (script:Chk 'Pester' 'fail' 'FAILURE' $script:LinkA) | Should -BeFalse
     }
     It 'job facts never reclassify a cancelled or a passing check' {
-        $facts = @{ $script:LinkA = @{ executedSteps = 0 } }
+        $facts = @{ $script:LinkA = @{ stepCount = 0 } }
         Test-CheckNeverExecuted -Check (script:Chk 'a' 'cancel' 'CANCELLED' $script:LinkA) -JobFacts $facts | Should -BeFalse
         Test-CheckNeverExecuted -Check (script:Chk 'a' 'pass' 'SUCCESS' $script:LinkA) -JobFacts $facts | Should -BeFalse
     }
@@ -89,14 +95,14 @@ Describe 'Get-CiState - the states are distinct' {
     }
     It 'failed: a real failure, and it is retryable (the code has something to fix)' {
         $s = Get-CiState -Checks @((script:Chk 'Pester' 'fail' 'FAILURE' $script:LinkA)) -Parsed $true `
-                         -JobFacts @{ $script:LinkA = @{ executedSteps = 2 } }
+                         -JobFacts @{ $script:LinkA = @{ stepCount = 2 } }
         $s.state     | Should -Be 'failed'
         $s.failed    | Should -Contain 'Pester'
         $s.retryable | Should -BeTrue
     }
     It 'not-evaluated: the only red check never ran, and it is NOT retryable' {
         $s = Get-CiState -Checks @((script:Chk 'claude-review' 'fail' 'FAILURE' $script:LinkA)) -Parsed $true `
-                         -JobFacts @{ $script:LinkA = @{ executedSteps = 0 } }
+                         -JobFacts @{ $script:LinkA = @{ stepCount = 0 } }
         $s.state        | Should -Be 'not-evaluated'
         $s.notEvaluated | Should -Contain 'claude-review'
         $s.retryable    | Should -BeFalse
@@ -105,7 +111,7 @@ Describe 'Get-CiState - the states are distinct' {
         $s = Get-CiState -Checks @(
                 (script:Chk 'Pester' 'fail' 'FAILURE' $script:LinkA),
                 (script:Chk 'claude-review' 'fail' 'FAILURE' $script:LinkB)) -Parsed $true `
-             -JobFacts @{ $script:LinkA = @{ executedSteps = 3 }; $script:LinkB = @{ executedSteps = 0 } }
+             -JobFacts @{ $script:LinkA = @{ stepCount = 3 }; $script:LinkB = @{ stepCount = 0 } }
         $s.state        | Should -Be 'failed'
         $s.failed       | Should -Contain 'Pester'
         $s.notEvaluated | Should -Contain 'claude-review'
@@ -129,14 +135,14 @@ Describe 'Get-ChecksVerdict - never ran is split from failed, and never becomes 
     }
     It 'a real failure is Failed and still blocks' {
         $v = Get-ChecksVerdict -Checks @((script:Chk 'Pester' 'fail' 'FAILURE' $script:LinkA)) -Parsed $true `
-                               -JobFacts @{ $script:LinkA = @{ executedSteps = 2 } }
+                               -JobFacts @{ $script:LinkA = @{ stepCount = 2 } }
         $v.Ok | Should -BeFalse
         $v.Failed | Should -Contain 'Pester'
         @($v.NotEvaluated).Count | Should -Be 0
     }
     It 'a job that ran zero steps is NotEvaluated, not Failed - and still blocks (Ok stays false)' {
         $v = Get-ChecksVerdict -Checks @((script:Chk 'Pester' 'fail' 'FAILURE' $script:LinkA)) -Parsed $true `
-                               -JobFacts @{ $script:LinkA = @{ executedSteps = 0 } }
+                               -JobFacts @{ $script:LinkA = @{ stepCount = 0 } }
         $v.Ok           | Should -BeFalse
         $v.Settled      | Should -BeTrue
         @($v.Failed).Count | Should -Be 0
@@ -171,7 +177,7 @@ Describe 'Get-FailedCheckJobFacts - reads job facts for failed checks only, fail
 
     It 'fetches the failed check job and records its executed-step count under the check link' {
         $f = Get-FailedCheckJobFacts -Checks @((script:Chk 'claude-review' 'fail' 'FAILURE' $script:LinkA)) -Repo 'o/r'
-        $f[$script:LinkA].executedSteps | Should -Be 0
+        $f[$script:LinkA].stepCount | Should -Be 0
         $script:Calls[0] | Should -Be 'api repos/o/r/actions/jobs/89284023176'
     }
     It 'does NOT fetch anything for passing, pending or cancelled checks, nor for non-job links' {
@@ -293,6 +299,13 @@ function gh {
                       -ChecksJson ('[{"name":"claude-review","bucket":"fail","state":"FAILURE","link":"' + $script:LinkA + '"}]')
         $r.exit | Should -Be 0 -Because $r.out
         $r.out  | Should -Match 'GATE PASSED'
+    }
+    It 'a reviewer STARTUP_FAILURE that gh filed as PENDING is not excused by a recorded review: exit 3, never newly permitted (review round 1)' {
+        # Before #481 this check was "pending" (waited out, then blocked). The reviewer allowance
+        # covers red checks; it must not start covering a check that was never red.
+        $r = Run-Gate -Reviewed -ChecksJson '[{"name":"claude-review","bucket":"pending","state":"STARTUP_FAILURE","link":"https://github.com/o/r/actions/runs/1/job/2"}]'
+        $r.exit | Should -Be 3 -Because $r.out
+        $r.out  | Should -Not -Match 'GATE PASSED'
     }
     It 'a NON-reviewer job that never ran is NOT excused by a recorded review: exit 3, never a pass' {
         $r = Run-Gate -Reviewed -JobJson ($script:JobNeverRan | ConvertTo-Json -Depth 5 -Compress) `

@@ -187,7 +187,7 @@ function Get-CiEvidence {
         # like "this project has no CI" - which, under a dod.tests=false contract, was a merge.
         # Absent (0) keeps every existing caller on the previous behaviour.
         [int]$ExitCode = 0,
-        # check link -> @{ executedSteps = <int> } for failed checks (see CiCheckState.ps1, #481).
+        # check link -> @{ stepCount = <int> } for failed checks (see CiCheckState.ps1, #481).
         [hashtable]$JobFacts = @{}
     )
     # Empty stdout from a FAILED command means we could not read the checks, not that there are
