@@ -50,6 +50,9 @@ $ErrorActionPreference = "Stop"
 # The single resolver for the internal state dir (new name + migration + fallback).
 . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
 
+# The brake marker reader (#517): the supervisor asks whether a session's run was armed.
+. (Join-Path $PSScriptRoot 'Brake-Guard.ps1')
+
 # ------------------------------------------------------------------ pure verdict core
 # A session is stalled when it has run AT LEAST the threshold with NO PR yet (an open PR is
 # progress, so it is never stalled). Inclusive on purpose (#565 round 7): the watch's final
@@ -92,6 +95,50 @@ $ThresholdMin min). It may be stuck, waiting on something, or dead. Check
 "@
 }
 
+# A brake-armed run whose PR ended up MERGED (#517). The brake is a control, and a control whose
+# breach is only ever self-reported by the agent that breached it is not one: this detects it from
+# the observable record - the marker the launcher wrote and the PR state on GitHub - instead of
+# asking the agent. It cannot tell a human's merge after review (expected) from the run merging
+# itself (the violation), so it REPORTS with who merged and when, and lets the human judge; it never
+# acts. Only a run whose contract braked on `merge` counts (a budget-only or merge-allowed contract
+# is not breached by a merge). Pure. ADDS a report - nothing it does changes any other verdict.
+function Get-BrakeViolations {
+    param([object[]]$Sessions)
+    return @($Sessions | Where-Object {
+        $null -ne $_ -and $_.merged -and ($null -ne $_.PSObject.Properties['brakesMerge']) -and $_.brakesMerge
+    } | ForEach-Object {
+        [pscustomobject]@{
+            issue    = $_.issue
+            pr       = "$($_.pr)"
+            mergedBy = $(if ($null -ne $_.PSObject.Properties['mergedBy']) { "$($_.mergedBy)" } else { '' })
+            mergedAt = $(if ($null -ne $_.PSObject.Properties['mergedAt']) { "$($_.mergedAt)" } else { '' })
+        }
+    })
+}
+
+# The wording that reaches the human. Pure, so tests pin it.
+function Format-BrakeViolations {
+    param([object[]]$Violations)
+    $lines = @()
+    foreach ($v in @($Violations)) {
+        $who = if ($v.mergedBy) { " por $($v.mergedBy)" } else { '' }
+        $when = if ($v.mergedAt) { " ($($v.mergedAt))" } else { '' }
+        $lines += "  #$($v.issue) $($v.pr) MERGEADO$who$when - la corrida tenia el freno armado (merge = irreversible)"
+    }
+    if ($lines.Count -gt 0) {
+        $lines += "  Si mergeaste tu tras revisar, es lo esperado. Si no, el freno fue saltado: mira .agentic-board/denials.jsonl del worktree (auto-clean lo conserva, #518)."
+    }
+    return @($lines)
+}
+
+# Read the brake facts of one registry entry: is its worktree's run armed, and does it brake on merge?
+function Get-SessionBrakeInfo {
+    param([string]$WorkPath)
+    $marker = $null
+    try { $marker = Read-BrakeMarkerAt -WorkPath $WorkPath } catch { $marker = $null }
+    return [pscustomobject]@{ brakeArmed = [bool]$marker; brakesMerge = (Test-BrakeMarkerBrakesMerge -Marker $marker) }
+}
+
 # The termination verdict: stop when the fleet is complete OR too many sessions have stalled.
 function Get-FleetVerdict {
     param([object[]]$Sessions, [int]$ThresholdMin, [int]$MaxStalled)
@@ -102,10 +149,11 @@ function Get-FleetVerdict {
               elseif ($stalled.Count -ge $MaxStalled) { "stalled - $($stalled.Count) session(s) past ${ThresholdMin}min with no PR" }
               else { 'in progress' }
     return [pscustomobject]@{
-        complete   = $complete
-        stalled    = $stalled
-        shouldStop = $shouldStop
-        reason     = $reason
+        complete        = $complete
+        stalled         = $stalled
+        shouldStop      = $shouldStop
+        reason          = $reason
+        brakeViolations = @(Get-BrakeViolations $Sessions)
     }
 }
 
@@ -122,6 +170,48 @@ function Read-FleetSessions {
     try { return @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return @() }
 }
 
+# Which PR belongs to THIS session? A branch NAME is not an identity: `-TakeOver` reuses
+# `issue-<n>-<slug>`, so `gh pr list --head <branch>` can return an OLD merged PR from a previous run,
+# and reporting it as this session's PR would raise a false brake violation (and read the fleet as
+# complete) for a relaunch that has no PR yet - the same reason Get-SessionLiveStatus / Select-BranchPr
+# refuse "the newest one". Pure. In order of trust:
+#   1. the PR whose head IS this session's branch tip ($Tip);
+#   2. otherwise the newest PR CREATED at or after the session started (the branch may have moved past
+#      the pushed head; a PR opened before this run began cannot be this run's);
+#   3. otherwise none - never an older run's PR.
+# $Prs items need number, state, headRefOid, createdAt (UTC ISO). $StartedAt is the registry's local
+# stamp; both stamp formats (seconds, and the older minutes) parse. An unparseable stamp disables rule 2
+# (rule 3 applies): unknown must not adopt somebody else's PR.
+function Select-SessionPr {
+    param([object[]]$Prs = @(), [string]$Tip = '', [string]$StartedAt = '')
+    $all = @($Prs | Where-Object { $null -ne $_ })
+    if ($Tip) {
+        $byTip = @($all | Where-Object { "$($_.headRefOid)" -eq $Tip }) | Select-Object -First 1
+        if ($byTip) { return $byTip }
+    }
+    $start = $null
+    foreach ($fmt in @('yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd HH:mm')) {
+        try { $start = [datetime]::ParseExact($StartedAt, $fmt, [cultureinfo]::InvariantCulture); break } catch { }
+    }
+    if (-not $start) { return $null }
+    $floor = $start.AddSeconds(-60)
+    $later = @($all | Where-Object {
+        $c = $null
+        try { $c = ([datetimeoffset]::Parse("$($_.createdAt)", [cultureinfo]::InvariantCulture)).LocalDateTime } catch { }
+        $c -and $c -ge $floor
+    } | Sort-Object { [int]$_.number } -Descending) | Select-Object -First 1
+    return $later
+}
+
+# The tip of a session's branch, from ITS worktree ('' when it cannot be read).
+function Get-SessionBranchTip {
+    param([string]$WorkPath, [string]$Branch)
+    if (-not $WorkPath -or -not $Branch -or -not (Test-Path -LiteralPath $WorkPath)) { return '' }
+    $out = @(git -C $WorkPath rev-parse --verify "$Branch^{commit}" 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $out.Count -eq 0) { return '' }
+    return "$($out[0])".Trim()
+}
+
 # Enrich raw registry entries with ageMin (from `started`) + pr/merged (from gh).
 function Resolve-LiveSessions {
     $out = @()
@@ -135,18 +225,24 @@ function Resolve-LiveSessions {
         # failure used to read as pr='' - tolerable for a terminal warning, but -Post publishes
         # comments from this fact, and a false [abios-stall] on a session that HAS a PR is noise
         # that costs the signal its credibility.
-        $pr = ''; $merged = $false; $prKnown = $false
+        $pr = ''; $merged = $false; $prKnown = $false; $mergedBy = ''; $mergedAt = ''
         if ($e.repo -and $e.branch) {
             try {
-                $raw = gh pr list --repo $e.repo --head $e.branch --state all --json number,state --limit 1 2>$null
+                $raw = gh pr list --repo $e.repo --head $e.branch --state all --json number,state,headRefOid,createdAt,mergedBy,mergedAt --limit 20 2>$null
                 if ($LASTEXITCODE -eq 0 -and $null -ne $raw) {
                     $prKnown = $true
-                    $found = @($raw | ConvertFrom-Json)
-                    if ($found.Count -gt 0) { $pr = "#$($found[0].number)"; $merged = ($found[0].state -eq 'MERGED') }
+                    $mine = Select-SessionPr -Prs @($raw | ConvertFrom-Json) -Tip (Get-SessionBranchTip -WorkPath "$($e.workPath)" -Branch "$($e.branch)") -StartedAt "$($e.started)"
+                    if ($mine) {
+                        $pr = "#$($mine.number)"; $merged = ($mine.state -eq 'MERGED')
+                        if ($mine.mergedBy) { $mergedBy = "$($mine.mergedBy.login)" }
+                        if ($mine.mergedAt) { $mergedAt = "$($mine.mergedAt)" }
+                    }
                 }
             } catch { $prKnown = $false }
         }
-        $out += [pscustomobject]@{ issue = $e.issue; repo = $e.repo; branch = $e.branch; started = "$($e.started)"; ageMin = $ageMin; pr = $pr; merged = $merged; prKnown = $prKnown }
+        $brake = Get-SessionBrakeInfo -WorkPath "$($e.workPath)"
+        $out += [pscustomobject]@{ issue = $e.issue; repo = $e.repo; branch = $e.branch; started = "$($e.started)"; ageMin = $ageMin; pr = $pr; merged = $merged; prKnown = $prKnown
+                                   brakeArmed = $brake.brakeArmed; brakesMerge = $brake.brakesMerge; mergedBy = $mergedBy; mergedAt = $mergedAt }
     }
     return $out
 }
@@ -233,6 +329,10 @@ foreach ($s in ($sessions | Sort-Object issue)) {
 }
 Write-Host ""
 Write-Host ("Veredicto: {0}" -f $verdict.reason) -ForegroundColor Cyan
+if (@($verdict.brakeViolations).Count -gt 0) {
+    Write-Host ("  FRENO: {0} sesion(es) con el freno armado tienen su PR MERGEADO:" -f @($verdict.brakeViolations).Count) -ForegroundColor Red
+    foreach ($l in (Format-BrakeViolations $verdict.brakeViolations)) { Write-Host $l -ForegroundColor Red }
+}
 if (@($verdict.stalled).Count -gt 0) {
     Write-Host ("  Estancados: {0}" -f ((@($verdict.stalled).issue) -join ', ')) -ForegroundColor Red
     Write-Host "  Sugerencia: re-planifica el fleet o retoma con /board work -Start <n> -TakeOver." -ForegroundColor DarkYellow
