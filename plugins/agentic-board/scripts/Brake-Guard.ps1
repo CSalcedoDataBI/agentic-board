@@ -309,7 +309,12 @@ function Test-IsBrakedCommand {
     # quotes still does. Reached only when the command has such a `&` and only when the contract
     # brakes on delete; it can only ADD a `delete` verdict, never remove one.
     if ($irr -contains 'delete') {
-        $masked = [regex]::Replace("$Command", '"[^"]*"|''[^'']*''', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Value.Replace('&', '_') })
+        # Spans where a `&` is NOT a background operator: quotes, `$( )` and backticks. Then an ESCAPED `&`
+        # (`\&` in a POSIX shell, `^&` in cmd) is a literal argument character too. The old unbounded
+        # pattern denied `git push origin a\&b --delete x`; without this the narrowed gap read the
+        # escaped `&` as a separator and allowed a real delete (found reviewing #703).
+        $masked = [regex]::Replace("$Command", '"[^"]*"|''[^'']*''|\$\([^)]*\)|`[^`]*`', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Value.Replace('&', '_') })
+        $masked = $masked.Replace('\&', '\_').Replace('^&', '^_')
         if ($masked -ne "$Command") {
             foreach ($segment in ((ConvertTo-NormalizedCommand $masked) -split $script:SegmentSeparator)) {
                 $seg = $segment.Trim()

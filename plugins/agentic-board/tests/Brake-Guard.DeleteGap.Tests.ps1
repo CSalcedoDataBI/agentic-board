@@ -53,6 +53,28 @@ Describe 'a redirection between `push` and `--delete` does NOT open a hole' {
     }
 }
 
+Describe 'a & that is NOT a background operator does not open a hole (reviewing #703)' {
+    # Found by running the old and the new brake over a battery of commands: an ESCAPED `&`, or one
+    # inside `$( )` or backticks, is an argument character, yet the narrowed gap read it as a
+    # separator and ALLOWED a real delete that the old pattern denied. The fix may only remove false
+    # positives, so each of these must stay `delete`.
+    It '<cmd>' -ForEach @(
+        @{ cmd = 'git push origin a\&b --delete x' }
+        @{ cmd = 'git -C repo push origin a\&b --delete x' }
+        @{ cmd = 'git push origin \& --delete x' }
+        @{ cmd = 'git push origin $(echo a&b) --delete x' }
+        @{ cmd = 'git push origin `echo a&b` --delete x' }
+        @{ cmd = 'cmd /c git push origin a^&b --delete x' }
+    ) {
+        Classify $cmd | Should -Be 'delete'
+    }
+    It 'a REAL background & is still a boundary, so no false positive comes back' {
+        Classify 'git push origin fine & echo --delete' | Should -BeNullOrEmpty
+        Classify 'git push origin feat #& --delete' | Should -BeNullOrEmpty
+        Classify 'git push origin a& --delete x' | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'a & INSIDE a quoted argument does not open a hole either (external review of #546)' {
     # Quotes are stripped before the patterns run, so a quoted `&` looks like a background operator.
     # The old unbounded pattern denied these; the delete flag therefore gets a second look at a copy
