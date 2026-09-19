@@ -98,7 +98,7 @@ the user plainly that the close is still theirs — never imply the run will fin
 
 **Second account / refused start.** For a board on another account add `-Owner <account>` (and
 `-Repo <owner/name>` when the clone is not the target); the token variable is then resolved from the
-owner unless `-TokenVar` names one. When the launch refuses an issue another session claimed or a
+owner unless `-TokenVar` names one (an owner the suite does not know needs `-TokenVar`). When the launch refuses an issue another session claimed or a
 blocker list flagged, `-TakeOver` / `-IgnoreBlocked` are forwarded to the launch — pass them only
 when the user says so for THIS run, never from memory of a previous one.
 

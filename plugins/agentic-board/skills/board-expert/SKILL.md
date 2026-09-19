@@ -65,7 +65,9 @@ dispatch a possible duplicate). One command per wave replaces one human launch p
 **Other accounts and refused starts.** `-Owner <account>` (with `-Repo <owner/name>` when the clone
 is not the target) drives a board on a second account (#499): both are forwarded to Board-Work,
 and without `-TokenVar` the token variable comes from the suite's one owner→variable map — an owner
-the map does not know keeps the default variable and warns, it never widens to another identity.
+the map does not know is refused when the script has to choose a token itself (pass `-TokenVar` to
+name it; with `GH_TOKEN` already set it only warns), and inside a brake-armed worktree only the agent
+identity is accepted.
 `-TakeOver` / `-IgnoreBlocked` (#472) are forwarded to Board-Work's batch-start, so the advice its
 refusal prints ("Re-ejecuta con -TakeOver") can be followed through this command. Both are per-run
 and explicit: pass them only when the human said so, and never infer them from a previous run.

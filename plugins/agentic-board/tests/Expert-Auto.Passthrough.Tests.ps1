@@ -293,15 +293,21 @@ exit 1
         $env:FAKE_GH_LOG = Join-Path $script:Root 'gh.log'
 
         # Run the REAL Expert-Auto.ps1 (from the scratch copy) with `gh` shadowed by a function.
-        function script:Invoke-Auto([string]$ArgText, [string]$Cwd = '') {
+        function script:Invoke-Auto([string]$ArgText, [string]$Cwd = '', [switch]$NoToken) {
             if (-not $Cwd) { $Cwd = $script:Clone }
-            Remove-Item -LiteralPath $env:FAKE_BW_LOG, $env:FAKE_GH_LOG -Force -ErrorAction SilentlyContinue
+            # A FRESH log file per invocation, never a delete-and-reuse of one shared path: on
+            # Windows a lingering handle (antivirus scan, a slow child) can make the delete fail
+            # silently, and the next run would then read the previous run's calls.
+            $env:FAKE_BW_LOG = Join-Path $script:Root ("bw-{0}.log" -f [guid]::NewGuid().ToString('N'))
+            $env:FAKE_GH_LOG = Join-Path $script:Root ("gh-{0}.log" -f [guid]::NewGuid().ToString('N'))
             $ea   = Join-Path $script:Scripts 'Expert-Auto.ps1'
             $gh   = Join-Path $script:Fix 'gh-fake.ps1'
             # $Cwd goes in single-quoted: a typographic apostrophe in it is the point of one test,
             # so it is doubled the way the tokenizer wants (all four quote characters).
             $cwdLit = $Cwd -replace "(['‘’‚‛])", '$1$1'
-            $cmd  = "function gh { & '$gh' @args }; Set-Location '$cwdLit'; & '$ea' $ArgText"
+            # -NoToken: the child starts WITHOUT GH_TOKEN, so the script's own identity block runs.
+            $noTok = if ($NoToken) { '$env:GH_TOKEN = $null; ' } else { '' }
+            $cmd  = "${noTok}function gh { & '$gh' @args }; Set-Location '$cwdLit'; & '$ea' $ArgText"
             $out  = (& pwsh -NoProfile -Command $cmd 2>&1 | Out-String)
             $calls = @()
             if (Test-Path $env:FAKE_BW_LOG) { $calls = @(Get-Content -LiteralPath $env:FAKE_BW_LOG | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json -AsHashtable }) }
@@ -403,6 +409,35 @@ exit 1
         $r = script:Invoke-Auto "-Issue 8 -ProjectNum 13 $Bad"
         $r.Calls.Count | Should -Be 0
         $r.Out | Should -Match 'Expert-Auto: -(Owner|Repo|TokenVar) must be'
+    }
+
+    It '#499: with no GH_TOKEN, an -Owner the map does not know is REFUSED unless -TokenVar names its variable' {
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner someone-new -Repo acme/widgets' -NoToken
+        $r.Calls.Count | Should -Be 0
+        $r.Out | Should -Match "owner 'someone-new' is not in the owner->token map .* no -TokenVar was given"
+    }
+
+    It '#499: with no GH_TOKEN and -TokenVar named, the identity comes from THAT variable and a missing one is an error, not a fallback' {
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner someone-new -TokenVar MISSING_XYZ_VAR -Repo acme/widgets' -NoToken
+        $r.Calls.Count | Should -Be 0
+        $r.Out | Should -Match 'MISSING_XYZ_VAR no esta en el entorno'
+    }
+
+    It '#499: inside a brake-armed worktree the owner''s token variable is refused before any token is read' {
+        $armed = Join-Path $script:Root 'armed'
+        New-Item -ItemType Directory -Path (Join-Path $armed '.agentic-board') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $armed '.agentic-board/brake-armed.json') -Value '{}'
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PAL-Devs -Repo acme/widgets' $armed -NoToken
+        $r.Calls.Count | Should -Be 0
+        $r.Out | Should -Match 'Run FRENADO'
+        $r.Out | Should -Match 'GITHUB_TOKEN_AGENT'
+    }
+
+    It 'a caller passing only the OLD -TokenVar keeps the old identity flow (no new refusal, no forced token)' {
+        $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -TokenVar MISSING_XYZ_VAR -Repo acme/widgets' -NoToken
+        $r.Calls.Count | Should -Be 1
+        $r.Calls[0].TokenVar | Should -Be 'MISSING_XYZ_VAR'
+        $r.Out | Should -Not -Match 'no esta en el entorno'
     }
 
     It '#499: real-looking account and repo names (dots, underscores, hyphens, single characters) are NOT refused' {

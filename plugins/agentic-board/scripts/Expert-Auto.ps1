@@ -44,8 +44,10 @@
 .PARAMETER Owner
     The board's owner account (#499), forwarded to Board-Work. When given without -TokenVar the
     token variable is resolved FROM the owner by the suite's one owner->variable map
-    (Resolve-GhTokenVar); an owner that map does not know keeps -TokenVar's value and warns -
-    it never widens to another identity.
+    (Resolve-GhTokenVar). An owner that map does not know is REFUSED when this script has to
+    choose a token (no GH_TOKEN set) unless -TokenVar names its variable; with GH_TOKEN already
+    set it only warns. Nothing here ever selects a token the human did not name or the map did not
+    map, and inside a brake-armed worktree only the agent identity is accepted.
 
 .PARAMETER Repo
     owner/name of the repo the issue lives in (#499). Defaults to the clone's origin.
@@ -557,9 +559,10 @@ function Format-IssueContext {
     An explicit -TokenVar always wins. Without one, a given -Owner resolves through the suite's
     ONE owner->variable map (Get-OwnerTokenVar in Resolve-GhTokenVar) - a second account's board
     now gets that account's token instead of the default persona's. An owner the map does not know
-    keeps the default variable and says so (mapped=$false) so the caller can warn: it never picks
-    a wider identity, and the map itself is the only place a new account is added. Pure given the
-    map, which Resolve-GhTokenVar.ps1 (dot-sourced by this script) provides.
+    keeps the default variable and says so (mapped=$false): the CALLER decides what that means - the
+    CLI warns when GH_TOKEN is already set and REFUSES when it would have to pick a token itself.
+    The map is the only place a new account is added. Pure given the map, which
+    Resolve-GhTokenVar.ps1 (dot-sourced by this script) provides.
 #>
 function Resolve-AutoTokenVar {
     param([string]$TokenVar, [bool]$TokenVarExplicit, [string]$Owner = '')
@@ -612,13 +615,21 @@ $TokenVar  = $tokenPick.var
 if ($Owner -and -not $tokenPick.mapped) {
     Write-Warning "Owner '$Owner' is not in the owner->token map (Resolve-GhTokenVar): using $TokenVar. Pass -TokenVar <VAR> if that is the wrong account."
 }
-if (-not $env:GH_TOKEN -and ($tokenPick.explicit -or $Owner)) {
-    # The human named the account (-Owner) or the variable (-TokenVar): honour it instead of the
-    # ambient login, which is whoever ran `gh auth login` last and can be the WRONG account for
-    # this board. Through the suite's one resolver, which THROWS rather than continue as another
-    # identity - inside a brake-armed run only the agent identity is accepted, and a variable that
-    # is not in the environment is an error, never a quiet fallback to a broader token.
-    $ctxTok = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $(if ($Owner) { $Owner } else { 'CSalcedoDataBI' }) -ExplicitVar $TokenVar
+if (-not $env:GH_TOKEN -and $Owner) {
+    # The human named the account (-Owner): honour it instead of the ambient login, which is
+    # whoever ran `gh auth login` last and can be the WRONG account for this board. Only -Owner
+    # opens this branch - a caller passing just -TokenVar keeps the old behaviour below.
+    #
+    # An owner the suite's map does not know is REFUSED here, not defaulted: quietly acting as the
+    # default persona on a board it does not own is choosing an identity for the human. The warning
+    # above still covers the case where GH_TOKEN is already set (gh-account chose the identity).
+    if (-not $tokenPick.mapped) {
+        throw "Expert-Auto: owner '$Owner' is not in the owner->token map (Resolve-GhTokenVar) and no -TokenVar was given - refusing to guess whose token to use. Pass -TokenVar <VAR> naming its variable."
+    }
+    # Through the suite's one resolver, which THROWS rather than continue as another identity -
+    # inside a brake-armed run only the agent identity is accepted, and a variable that is not in
+    # the environment is an error, never a quiet fallback to a broader token.
+    $ctxTok = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $Owner -ExplicitVar $TokenVar
     $env:GH_TOKEN = $ctxTok.token
     Write-Host "  Token: $($ctxTok.var) ($($ctxTok.reason))." -ForegroundColor DarkGray
 } elseif (-not $env:GH_TOKEN) {
