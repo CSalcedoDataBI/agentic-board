@@ -50,6 +50,18 @@ Describe 'Test-SessionStartConsistent (pure - #520)' {
     It 'still rejects a process that started minutes after an old minute-granular stamp' {
         Test-SessionStartConsistent -ProcessStart ([datetime]'2026-07-15 12:19:10') -Started '2026-07-15 12:17' | Should -BeFalse
     }
+    It 'does not condemn a genuine session on the night the clocks go BACK (ambiguous hour)' {
+        # US Eastern, 2025-11-02: 01:00-01:59 happens twice. A process started at 01:30 in the FIRST
+        # pass reads later than a stamp taken at 01:10 in the SECOND pass, though it started earlier.
+        $tz = $null
+        foreach ($id in 'Eastern Standard Time', 'America/New_York') {
+            try { $tz = [System.TimeZoneInfo]::FindSystemTimeZoneById($id); break } catch { }
+        }
+        if (-not $tz) { Set-ItResult -Skipped -Because 'no DST time zone available on this host'; return }
+        Test-SessionStartConsistent -ProcessStart ([datetime]'2025-11-02 01:30:00') -Started '2025-11-02 01:10:00' -TimeZone $tz | Should -BeTrue
+        # ...and outside the ambiguous hour the same gap is still a recycled PID.
+        Test-SessionStartConsistent -ProcessStart ([datetime]'2025-11-02 04:30:00') -Started '2025-11-02 04:10:00' -TimeZone $tz | Should -BeFalse
+    }
     It 'cannot tell -> consistent (missing start time, missing stamp, unparseable stamp)' {
         Test-SessionStartConsistent -ProcessStart $null -Started '2026-07-15 12:17:00' | Should -BeTrue
         Test-SessionStartConsistent -ProcessStart ([datetime]'2026-07-30 08:23:40') -Started '' | Should -BeTrue
@@ -95,6 +107,34 @@ Describe 'Get-SessionLivePid (#520 recycled PID, #557 wt tab shell)' {
             Stop-Process -Id $tab.Id -Force
             $tab.WaitForExit(10000) | Out-Null
             Get-SessionLivePid $entry | Should -Be 0
+        } finally { Stop-Process -Id $tab.Id -Force -ErrorAction SilentlyContinue }
+    }
+    It 'a LEGACY wt entry (stored PID = the launching shell, alive and older) is NOT alive when no tab shell exists' {
+        # Entries written before #557 hold the launcher's parent. That process is live and started
+        # before the stamp, so the start-time check alone would keep the dead session alive for as
+        # long as the launching shell lives. Here $PID stands in for that shell.
+        $issue = Get-Random -Minimum 700000 -Maximum 799999
+        Get-SessionLivePid ([pscustomobject]@{ issue = $issue; sessionPid = $PID; via = 'wt'; started = $script:StampAfter }) | Should -Be 0
+    }
+    It 'a LEGACY wt entry resolves to the real tab shell, not the launcher, when the tab is running' {
+        $issue = Get-Random -Minimum 700000 -Maximum 799999
+        $tab = Start-FakeTabShell -Issue $issue -Dir $TestDrive
+        $script:Shells += $tab
+        try {
+            $entry = [pscustomobject]@{ issue = $issue; sessionPid = $PID; via = 'wt'; started = $script:StampAfter }
+            $found = 0
+            for ($i = 0; $i -lt 40 -and $found -le 0; $i++) { $found = Get-SessionLivePid $entry; if ($found -le 0) { Start-Sleep -Milliseconds 250 } }
+            $found | Should -Be $tab.Id
+        } finally { Stop-Process -Id $tab.Id -Force -ErrorAction SilentlyContinue }
+    }
+    It 'a wt entry whose stored PID IS the tab shell keeps that PID' {
+        $issue = Get-Random -Minimum 700000 -Maximum 799999
+        $tab = Start-FakeTabShell -Issue $issue -Dir $TestDrive
+        $script:Shells += $tab
+        try {
+            Start-Sleep -Milliseconds 1500
+            $entry = [pscustomobject]@{ issue = $issue; sessionPid = $tab.Id; via = 'wt'; started = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') }
+            Get-SessionLivePid $entry | Should -Be $tab.Id
         } finally { Stop-Process -Id $tab.Id -Force -ErrorAction SilentlyContinue }
     }
     It 'a NON-wt entry never falls back to a launch-script lookup' {

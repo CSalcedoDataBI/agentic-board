@@ -688,12 +688,24 @@ function Read-SessionRegistry {
 # discarding one; it is exactly what the code did before the stamp was compared at all.
 # Slack covers the stamp's truncation: sessions.json keeps whole seconds (older entries whole
 # minutes), while a process start time carries sub-second precision.
+#
+# The stamp is local wall-clock time with no offset, so on the night the clocks go BACK it can name
+# an hour that happened twice. A process started in the first pass reads later than a stamp taken in
+# the second (01:30 vs 01:10) although it started earlier in absolute time - which would condemn a
+# genuine session. When the stamp falls in such an ambiguous hour the slack grows by the DST delta.
+# -TimeZone is injectable only so that rule can be tested against a zone with DST.
 function Test-SessionStartConsistent {
-    param($ProcessStart, [string]$Started)
+    param($ProcessStart, [string]$Started, [System.TimeZoneInfo]$TimeZone = [System.TimeZoneInfo]::Local)
     if ($null -eq $ProcessStart -or -not $Started) { return $true }
     $registered = [datetime]::MinValue
     if (-not [datetime]::TryParse($Started, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$registered)) { return $true }
     $slackSec = if ($Started.Trim() -match '^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$') { 61 } else { 2 }
+    try {
+        if ($TimeZone.IsAmbiguousTime($registered)) {
+            $offsets = @($TimeZone.GetAmbiguousTimeOffsets($registered) | Sort-Object)
+            if ($offsets.Count -ge 2) { $slackSec += ($offsets[-1] - $offsets[0]).TotalSeconds }
+        }
+    } catch { }
     return ([datetime]$ProcessStart -le $registered.AddSeconds($slackSec))
 }
 
@@ -708,15 +720,28 @@ function Get-SessionLivePid {
     param([object]$Session)
     $stored = 0
     try { $stored = [int]$Session.sessionPid } catch { }
+    $isWt = ("$($Session.via)" -eq 'wt' -and $Session.issue)
     if ($stored -gt 0) {
         $proc = Get-Process -Id $stored -ErrorAction SilentlyContinue
         if ($proc) {
             $start = $null
             try { $start = $proc.StartTime } catch { }   # protected processes refuse StartTime: unknown
-            if (Test-SessionStartConsistent -ProcessStart $start -Started ([string]$Session.started)) { return $stored }
+            if (Test-SessionStartConsistent -ProcessStart $start -Started ([string]$Session.started)) {
+                if (-not $isWt) { return $stored }
+                # A wt entry's PID is only meaningful if it IS the tab shell (launch-<n>.ps1). Entries
+                # written before #557 hold the launching shell's parent: a live, older process that
+                # passes the start-time check and would keep a dead session alive for as long as
+                # that shell lives. Its command line tells them apart. An unreadable command line
+                # is "cannot tell" and trusts the PID, as everywhere else in this function.
+                $cmd = $null
+                try { $cmd = (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$stored" -ErrorAction Stop).CommandLine } catch { }
+                if (-not $cmd) { return $stored }
+                $self = [pscustomobject]@{ ProcessId = $stored; CommandLine = $cmd }
+                if (Find-WtTabShellCore -Processes @($self) -IssueNum ([int]$Session.issue)) { return $stored }
+            }
         }
     }
-    if ("$($Session.via)" -eq 'wt' -and $Session.issue) {
+    if ($isWt) {
         $tab = $null
         try { $tab = Find-WtTabShell ([int]$Session.issue) } catch { }
         if ($tab -and [int]$tab.ProcessId -gt 0) { return [int]$tab.ProcessId }
