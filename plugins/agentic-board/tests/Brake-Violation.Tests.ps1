@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  A brake-armed run whose PR ended up MERGED (#517, #518).
 
     #517: the supervisor DETECTS the situation from the observable record (the marker the launcher
@@ -95,6 +95,15 @@ Describe 'Fleet supervisor detects a brake-armed run whose PR merged (#517)' {
         $text = (Format-BrakeViolations @(Get-BrakeViolations @((New-FleetSess -Issue 9 -MergedBy 'alice')))) -join "`n"
         $text | Should -Match '#9 #109 MERGEADO por alice'
         $text | Should -Match 'denials\.jsonl'
+    }
+    It 'a violation without who/when (GitHub omitted them, or a legacy row) is still flagged, and the report does not invent an actor' {
+        $row = [pscustomobject]@{ issue = 4; pr = '#104'; merged = $true; brakesMerge = $true }      # no mergedBy / mergedAt at all
+        $v = @(Get-BrakeViolations @($row))
+        $v.Count | Should -Be 1
+        $v[0].mergedBy | Should -BeNullOrEmpty
+        $text = (Format-BrakeViolations $v) -join "`n"
+        $text | Should -Match '#4 #104 MERGEADO - la corrida'
+        $text | Should -Not -Match ' por '
     }
     It 'Get-SessionBrakeInfo reads the REAL marker of the session''s worktree' {
         $armed = Get-SessionBrakeInfo -WorkPath (New-ArmedDir @('merge'))
