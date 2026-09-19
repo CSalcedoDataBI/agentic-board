@@ -24,10 +24,15 @@ param(
     [string]$Root = (Get-Location).Path,
     [ValidateSet('all','plugin','personal','project')][string]$Scope = 'all',
     [double]$OverlapThreshold = 0.5,
-    [switch]$Json
+    [switch]$Json,
+    # Wall-clock budget for walking EACH scope (project, personal, plugins). When it runs out that
+    # walk stops, warns, and the inventory is partial rather than the run hanging. 0 = no limit.
+    [double]$TimeoutSeconds = 120
 )
 
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'Find-FilesPruned.ps1')
 
 # Dirs we never descend into when hunting for stray SKILL.md files.
 $ExcludeDirs = @('node_modules','.git','dist','build','vendor','bin','obj','out','.next','coverage')
@@ -137,13 +142,13 @@ function New-SkillRecord {
 }
 
 function Find-SkillFiles {
+    # Pruned walk: the excluded directories are never entered (they used to be walked in full and
+    # filtered afterwards, which is what made a repo with a big node_modules/ crawl). Each base gets
+    # its own -TimeoutSeconds budget, so one pathological tree cannot starve the other scopes.
     param([string]$Base)
-    if (-not (Test-Path -LiteralPath $Base)) { return @() }
-    Get-ChildItem -LiteralPath $Base -Recurse -File -Filter 'SKILL.md' -ErrorAction SilentlyContinue |
-        Where-Object {
-            $p = ($_.FullName -replace '\\','/')
-            -not ($ExcludeDirs | Where-Object { $p -match "/$([regex]::Escape($_))/" })
-        }
+    $deadline = if ($TimeoutSeconds -gt 0) { [datetime]::UtcNow.AddSeconds($TimeoutSeconds) } else { [datetime]::MaxValue }
+    @(Find-FilesPruned -Root $Base -Filter 'SKILL.md' -ExcludeDirs $ExcludeDirs -Deadline $deadline) |
+        ForEach-Object { [pscustomobject]@{ FullName = $_ } }
 }
 
 # ── Collect ────────────────────────────────────────────────────────────────────
@@ -173,13 +178,26 @@ if ($Scope -in @('all','plugin')) {
 
 # ── Overlaps (near-duplicate descriptions by keyword Jaccard) ────────────────────
 $overlaps = [System.Collections.Generic.List[object]]::new()
+# Every pair used to pipe both keyword lists through Where-Object / Sort-Object: ~100k pairs for a
+# normal plugin cache took ~30 s, the bulk of the whole run (#609). Same Jaccard, but on HashSets,
+# and a pair is skipped outright when even a perfect overlap of the smaller set could not reach
+# the threshold (J <= min/max size).
+$sets = @(foreach ($r in $records) {
+    # Unary comma: a HashSet is enumerable and would otherwise be flattened into its strings.
+    ,[System.Collections.Generic.HashSet[string]]::new([string[]]@(@($r._keywords) | Where-Object { $_ }))
+})
 for ($i = 0; $i -lt $records.Count; $i++) {
+    $a = $sets[$i]
+    if ($a.Count -eq 0) { continue }
     for ($j = $i + 1; $j -lt $records.Count; $j++) {
-        $a = $records[$i]._keywords; $b = $records[$j]._keywords
-        if (-not $a -or -not $b -or $a.Count -eq 0 -or $b.Count -eq 0) { continue }
-        $inter = @($a | Where-Object { $b -contains $_ }).Count
-        $union = (@($a) + @($b) | Sort-Object -Unique).Count
-        $jac   = if ($union -gt 0) { [math]::Round($inter / $union, 3) } else { 0 }
+        $b = $sets[$j]
+        if ($b.Count -eq 0) { continue }
+        $lo = [math]::Min($a.Count, $b.Count); $hi = [math]::Max($a.Count, $b.Count)
+        if ([math]::Round($lo / $hi, 3) -lt $OverlapThreshold) { continue }
+        $x = [System.Collections.Generic.HashSet[string]]::new($a)
+        $x.IntersectWith($b)
+        $union = $a.Count + $b.Count - $x.Count
+        $jac   = if ($union -gt 0) { [math]::Round($x.Count / $union, 3) } else { 0 }
         if ($jac -ge $OverlapThreshold) {
             $overlaps.Add([pscustomobject]@{
                 a = $records[$i].namespace; b = $records[$j].namespace; jaccard = $jac

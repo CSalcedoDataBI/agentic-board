@@ -112,6 +112,9 @@ function New-ExpertConfig {
 if ($env:ABIOS_EXPERTCONFIG_DOTSOURCE) { return }
 
 # ── CLI ─────────────────────────────────────────────────────────────────────────
+# Say what is happening BEFORE the scan: a script that prints nothing for a minute is
+# indistinguishable from a deadlock (#609). Write-Host, so it never lands in the output data.
+Write-Host "Scanning installed skills (usually a few seconds)..." -ForegroundColor DarkGray
 $inventory = Resolve-SkillInventory
 
 if (-not $myInstalledPluginsSet) {

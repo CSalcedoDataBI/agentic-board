@@ -30,6 +30,9 @@ $env:ABIOS_EXPERTROLES_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'ExpertRolesIo.ps1')
 $env:ABIOS_EXPERTROLES_DOTSOURCE = $prevRoles
 
+# Pruned directory walker shared with Get-SkillInventory.ps1 (function only; runs nothing).
+. (Join-Path $PSScriptRoot 'Find-FilesPruned.ps1')
+
 # ── Pure core ───────────────────────────────────────────────────────────────────
 
 function Get-DomainFromPlan {
@@ -82,19 +85,71 @@ function Get-HookedSkills {
     $hooked.ToArray()
 }
 
-function Find-AgentDefinition {
-    # Agent definitions are <root>/**/agents/<stem>.md. A 'plugin:agent' name resolves by stem —
-    # the namespace is how the Agent tool disambiguates, not part of the filename.
+function Get-AgentFrontmatterName {
+    # The Agent tool registers an agent under its frontmatter `name`, not its file name.
+    param([string]$Path)
+    try { $raw = [System.IO.File]::ReadAllText($Path) } catch { return $null }
+    $fm = [regex]::Match($raw, '(?s)^\s*---\r?\n(.*?)\r?\n---')
+    if (-not $fm.Success) { return $null }
+    $n = [regex]::Match($fm.Groups[1].Value, '(?m)^name:\s*(.+?)\s*$')
+    if ($n.Success) { return $n.Groups[1].Value.Trim('"', "'") }
+    $null
+}
+
+function Get-AgentDefinitionIndex {
+    # Every <root>/**/agents/*.md, indexed ONCE by frontmatter name and by file stem (with and
+    # without the `.agent` suffix that `<stem>.agent.md` definitions carry). Roots are walked with
+    # the pruned walker, so node_modules/ and friends cost nothing, and under a time budget so a
+    # huge plugin cache can never hang the caller (#609). Candidates keep root order, so a project
+    # definition still outranks the plugin cache.
     [CmdletBinding()]
-    param([string]$Name, [string[]]$SearchRoots)
-    if (-not $Name) { return $null }
-    $stem = ($Name -split ':')[-1]
+    param([string[]]$SearchRoots, [double]$TimeoutSeconds = 30)
+    $deadline = if ($TimeoutSeconds -gt 0) { [datetime]::UtcNow.AddSeconds($TimeoutSeconds) } else { [datetime]::MaxValue }
+    $byName = @{}; $byStem = @{}
+    $add = {
+        param($Table, [string]$Key, [string]$Path)
+        if (-not $Key) { return }
+        $k = $Key.ToLowerInvariant()
+        if (-not $Table.ContainsKey($k)) { $Table[$k] = [System.Collections.Generic.List[string]]::new() }
+        if (-not $Table[$k].Contains($Path)) { $Table[$k].Add($Path) }
+    }
     foreach ($root in @($SearchRoots)) {
-        if (-not $root -or -not (Test-Path -LiteralPath $root)) { continue }
-        $hit = Get-ChildItem -LiteralPath $root -Recurse -File -Filter "$stem.md" -ErrorAction SilentlyContinue |
-               Where-Object { ($_.FullName -replace '\\','/') -match '/agents/' } |
-               Select-Object -First 1
-        if ($hit) { return $hit.FullName }
+        if (-not $root) { continue }
+        foreach ($file in @(Find-FilesPruned -Root $root -Filter '*.md' -UnderDirNamed 'agents' -Deadline $deadline)) {
+            $stem = [System.IO.Path]::GetFileName($file) -replace '\.md$', ''
+            & $add $byStem $stem $file
+            if ($stem -match '\.agent$') { & $add $byStem ($stem -replace '\.agent$', '') $file }
+            & $add $byName (Get-AgentFrontmatterName -Path $file) $file
+        }
+    }
+    @{ byName = $byName; byStem = $byStem }
+}
+
+function Find-AgentDefinition {
+    # Resolves the name a user reads off the Agent tool's list to its definition file. Matching
+    # order: frontmatter `name` (full, then without a 'plugin:' namespace), then file stem (with or
+    # without `.agent`). A namespace is only a tie-breaker between candidates — a definition under
+    # a directory named after it wins — never a reason to fail to resolve (#469).
+    # Callers resolving several names can build the index once (Get-AgentDefinitionIndex) and pass
+    # it as -Index instead of re-walking the roots per lookup.
+    [CmdletBinding()]
+    param([string]$Name, [string[]]$SearchRoots, [hashtable]$Index)
+    if (-not $Name) { return $null }
+    if (-not $Index) { $Index = Get-AgentDefinitionIndex -SearchRoots $SearchRoots }
+    $parts = $Name -split ':'
+    $leaf  = $parts[-1].ToLowerInvariant()
+    $ns    = if ($parts.Count -gt 1) { $parts[0].ToLowerInvariant() } else { '' }
+    foreach ($probe in @(
+        @{ table = $Index.byName; key = $Name.ToLowerInvariant() },
+        @{ table = $Index.byName; key = $leaf },
+        @{ table = $Index.byStem; key = $leaf })) {
+        $cands = $probe.table[$probe.key]
+        if (-not $cands -or $cands.Count -eq 0) { continue }
+        if ($ns) {
+            $hit = @($cands) | Where-Object { ($_ -replace '\\', '/').ToLowerInvariant().Contains("/$ns/") } | Select-Object -First 1
+            if ($hit) { return $hit }
+        }
+        return $cands[0]
     }
     $null
 }
@@ -159,10 +214,13 @@ function Resolve-SkillInventory {
     # Get-SkillInventory.ps1 is a SCRIPT emitting a {summary, skills, overlaps} object — there is
     # no Get-SkillInventory *function*. Invoke it with & and never dot-source it: a dot-sourced
     # param() block runs in THIS scope and would clobber same-named variables of the caller.
-    param([string]$Root, [string]$Scope = 'all')
+    [CmdletBinding()]
+    param([string]$Root, [string]$Scope = 'all', [double]$TimeoutSeconds = 60)
     $inv = Join-Path $PSScriptRoot 'Get-SkillInventory.ps1'
     if (-not (Test-Path $inv)) { return @() }
-    $splat = @{}
+    # Bound the walk: this feeds `config` and `roles -List`, which must never sit silent for
+    # minutes on a large tree (#609). A run that hits the budget warns and returns what it found.
+    $splat = @{ TimeoutSeconds = $TimeoutSeconds }
     if ($Root)  { $splat.Root  = $Root }
     if ($Scope) { $splat.Scope = $Scope }
     try { $result = & $inv @splat } catch { return @() }

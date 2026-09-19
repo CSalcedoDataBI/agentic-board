@@ -119,17 +119,37 @@ $globalRaw = Read-ExpertRoleFile -Path (Get-ExpertRoleGlobalPath)
 $global    = if ($globalRaw) { $globalRaw } else { @{ roles = @() } }
 $localRaw  = Read-ExpertRoleFile -Path (Get-ExpertRoleLocalPath)
 $local     = if ($localRaw) { $localRaw } else { @{ roles = @() } }
+# Say what is happening BEFORE the scan: a script that prints nothing for a minute is
+# indistinguishable from a deadlock (#609). Write-Host, so it never lands in the output data.
+Write-Host "Scanning installed skills (usually a few seconds)..." -ForegroundColor DarkGray
 $inventory = Resolve-SkillInventory
+
+# An `agent:` that resolves to nothing silently degrades the role to its standards (#469), and the
+# hook count never shows it. Resolve every role's agent against ONE index of the installed
+# definitions, so the table can say which role lost its persona.
+$agentIndex = $null
+if (@($catalog.roles | Where-Object { $_.agent }).Count -gt 0) {
+    $agentIndex = Get-AgentDefinitionIndex -SearchRoots (Get-DefaultAgentRoots)
+}
 
 Write-Host "=== /board expert roles ===" -ForegroundColor Cyan
 Write-Host ""
-Write-Host ("  {0,-22} {1,-26} {2,8} {3,7}" -f 'ROLE','SOURCE','KEYWORDS','HOOKS') -ForegroundColor DarkGray
+Write-Host ("  {0,-22} {1,-26} {2,8} {3,7} {4,8}" -f 'ROLE','SOURCE','KEYWORDS','HOOKS','AGENT') -ForegroundColor DarkGray
+$agentMissing = @()
 foreach ($role in @($catalog.roles)) {
     $hooks  = @(Get-HookedSkills -Domain $role.name -Inventory $inventory -Catalog $catalog).Count
-    $colour = if ($hooks -eq 0 -and @($role.keywords).Count -gt 0) { 'Yellow' } else { 'Gray' }
-    Write-Host ("  {0,-22} {1,-26} {2,8} {3,7}" -f `
+    $agentState = '-'
+    if ($role.agent) {
+        if (Find-AgentDefinition -Name $role.agent -Index $agentIndex) { $agentState = 'ok' }
+        else { $agentState = 'MISSING'; $agentMissing += $role }
+    }
+    $colour = if (($hooks -eq 0 -and @($role.keywords).Count -gt 0) -or $agentState -eq 'MISSING') { 'Yellow' } else { 'Gray' }
+    Write-Host ("  {0,-22} {1,-26} {2,8} {3,7} {4,8}" -f `
         $role.name, (Get-RoleSource -Role $role -Factory $factory -Global $global -Local $local), `
-        @($role.keywords).Count, $hooks) -ForegroundColor $colour
+        @($role.keywords).Count, $hooks, $agentState) -ForegroundColor $colour
+}
+foreach ($m in $agentMissing) {
+    Write-Host "  role '$($m.name)' names agent '$($m.agent)', which is not installed - it falls back to its standards." -ForegroundColor Yellow
 }
 Write-Host ""
 Write-Host "  Global catalog: $(Get-ExpertRoleGlobalPath)" -ForegroundColor DarkGray
