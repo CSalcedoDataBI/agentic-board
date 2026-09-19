@@ -210,7 +210,7 @@ Describe 'Remove-BranchAndWorktree asks git, not the disk (#287)' {
         # left - and it only works once both sides spell the directory the same way. Resolving
         # after the removal would be too late: the directory may be gone.
         $res = $script:RemoveFn.IndexOf('Resolve-GitPathForm')
-        $rm  = $script:RemoveFn.IndexOf('git worktree remove --force $Row.WorktreePath 2>&1')
+        $rm  = $script:RemoveFn.IndexOf('''remove'', ''--force'', $Row.WorktreePath')
         $res | Should -BeGreaterThan 0
         $res | Should -BeLessThan $rm
     }
@@ -229,7 +229,7 @@ Describe 'Remove-BranchAndWorktree asks git, not the disk (#287)' {
     }
     It 'fails closed when the post-remove listing itself fails' {
         # "I could not ask git" is not "the worktree is gone" - keep the branch (the #277 rule).
-        ($script:RemoveFn -match '\$LASTEXITCODE -ne 0') | Should -BeTrue
+        ($script:RemoveFn -match '\$list\.ExitCode -ne 0') | Should -BeTrue
     }
 }
 

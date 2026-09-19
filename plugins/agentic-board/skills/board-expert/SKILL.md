@@ -48,8 +48,9 @@ text>"` explains which keyword in which role decided a match. Schema and merge r
 `references/roles.md`.
 
 ### auto — run it
-`scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd]`:
-1. Reads the contract; composes the autonomous brief.
+`scripts/Expert-Auto.ps1 -Issue <n> -ProjectNum <n> [-EndToEnd] [-Owner <account>] [-Repo <owner/name>] [-TakeOver] [-IgnoreBlocked]`:
+1. Reads the contract; composes the autonomous brief — the issue's description **plus its bounded
+   comment thread** (#473), where what was tried and decided since the report lives.
 2. Launches a dedicated Claude session in an isolated worktree (reuses the fleet/launch pattern).
 3. Prints the monitor command: `/board work -Sessions -Watch`.
 
@@ -60,6 +61,17 @@ the contract's brake and budget. It is **idempotent**: after the human merges a 
 re-running the same command dispatches the next wave; done and in-flight sub-issues are never
 re-dispatched, and a sub-issue whose PR state could not be read counts as in-flight (never
 dispatch a possible duplicate). One command per wave replaces one human launch per sub-issue.
+
+**Other accounts and refused starts.** `-Owner <account>` (with `-Repo <owner/name>` when the clone
+is not the target) drives a board on a second account (#499): both are forwarded to Board-Work,
+and without `-TokenVar` the token variable comes from the suite's one owner→variable map — an owner
+the map does not know is refused when the script has to choose a token itself (pass `-TokenVar` to
+name it; with `GH_TOKEN` already set it only warns), and inside a brake-armed worktree only the agent
+identity is accepted.
+`-TakeOver` / `-IgnoreBlocked` (#472) are forwarded to Board-Work's batch-start, so the advice its
+refusal prints ("Re-ejecuta con -TakeOver") can be followed through this command. Both are per-run
+and explicit: pass them only when the human said so, and never infer them from a previous run.
+The end-of-run board link is read from the board itself, so it is right for `/orgs/` boards too.
 
 Pass `-EndToEnd` **only** when the human ordered the finish in that instruction ("de punta a
 punta", "llévalo hasta el final", "ciérralo tú"). It is an order, not a setting: never carry it
@@ -75,7 +87,7 @@ The auto-expert does NOT improvise its own tooling — it dogfoods agentic-board
 | Research / prior-art | `/knowledge add` + `/knowledge harvest` |
 | Acquire / verify skills | `/skills bootstrap`, `/skills audit`, `/skills freshness` |
 | Discover latent work | `/scan` |
-| Record work / findings | `/board` issue, `/board plan`, `/board triage` |
+| Record work / findings | `/board issue`, `/board plan`, `/board triage` |
 | Report progress / evidence | `/board update`, `/board changelog`, `[abios-evidence]` comments |
 | Survive budget / interruption | `/board handoff -Save` |
 | Clean up | `/board doctor`, `/board cerrar-ciclo` |
