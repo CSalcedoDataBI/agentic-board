@@ -253,6 +253,8 @@ function Get-DoctorClassOrder {
 # Everything the -Fix sweep declined to do, so the END of the run can name it (#548). A skip used to
 # be one DarkYellow line scrolling past in the middle of a long run, and one kind of "skip" was an
 # abort that silently took every later branch with it - the run then read as "it did nothing".
+# Process-lifetime state: each real run of this script is a fresh process, so it starts empty; anything
+# that dot-sources the script more than once in one process (the tests) must reset both first.
 $script:DoctorSkipped = @()
 $script:DoctorDeleted = 0
 function Add-DoctorSkip {
@@ -449,7 +451,8 @@ function Remove-BranchAndWorktree {
 # it must be trustworthy in BOTH directions - a clean install must say clean, a check that cries wolf
 # is worse than none - so anything it cannot verify is `unverifiable`, never `clean`.
 
-# git's blob id for some bytes: sha1("blob <len>\0" + content). Lets an installed file be compared
+# git's blob id for some bytes: sha1("blob <len>\0" + content). Assumes git's default SHA-1 object
+# format (a repo created with --object-format=sha256 would read as drifted/unverifiable, never clean). Lets an installed file be compared
 # with a tree entry WITHOUT shelling out to git once per file.
 function Get-GitBlobSha {
     param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
@@ -542,7 +545,8 @@ function Get-PublishedVersion {
 }
 
 # The installed record for a plugin from installed_plugins.json: { Key; InstallPath; Version; Sha }
-# or $null. -MarketplaceHint prefers `<plugin>@<hint>` when several marketplaces carry the name.
+# or $null. When several marketplaces carry the same plugin name the FIRST entry in the file wins
+# ($PluginName may also be given as the full `<plugin>@<marketplace>` key to pick one).
 function Get-InstalledPluginRecord {
     param([Parameter(Mandatory)][string]$InstalledJson, [Parameter(Mandatory)][string]$PluginName)
     if (-not (Test-Path -LiteralPath $InstalledJson)) { return $null }
