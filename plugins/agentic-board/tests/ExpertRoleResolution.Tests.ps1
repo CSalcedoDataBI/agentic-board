@@ -99,6 +99,13 @@ Describe 'Find-AgentDefinition resolves what the Agent tool lists (#469)' {
         Find-AgentDefinition -Name 'beta:reviewer'  -SearchRoots @($root) | Should -Be $b
         Find-AgentDefinition -Name 'alpha:reviewer' -SearchRoots @($root) | Should -Be $a
     }
+    It 'a namespace that matches no candidate never makes an installed agent unresolvable (documented: it only breaks ties)' {
+        $root = New-Tracked 'agents-ns-miss'
+        $a = New-AgentFile $root 'alpha/agents/reviewer.md' 'reviewer'
+        New-AgentFile $root 'beta/agents/reviewer.md' 'reviewer' | Out-Null
+        # 'gamma' owns neither: the first candidate in root order is returned, not $null.
+        Find-AgentDefinition -Name 'gamma:reviewer' -SearchRoots @($root) | Should -Be $a
+    }
     It 'keeps root order: a project definition outranks the same name in a later root' {
         $proj  = New-Tracked 'agents-proj'
         $later = New-Tracked 'agents-later'
