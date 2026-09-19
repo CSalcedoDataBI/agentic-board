@@ -59,6 +59,12 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      decide. **Ask once, then record it** — a preference the user has to restate every session is
      not a preference. Recording it needs no GitHub token: it is a local decision, so it works on
      a machine with no PAT configured.
+     **Seeing it.** `Board-Work.ps1 -PreferGroupedPRs show` prints the current setting and where
+     it came from — `PRs agrupados: on (config del repo)`, or `auto (por defecto)` when the repo
+     recorded nothing (a recorded `auto` is stored as "no decision", so it also reads `por
+     defecto`). It only reads: no write, no token, and outside a git repo it answers `auto (por
+     defecto)`. The `/board` menu runs it to show the value under `work`, and every group the
+     pending list proposes says which setting produced it and how to change it (#681).
 
      Note what `on` does NOT mean: it never invents a group out of issues that share nothing.
      There is no honest way to batch two unrelated issues, and a group with no reason behind it
@@ -202,7 +208,7 @@ and wait for; never assume the account or the scope:
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
 | 3b. Choose the PR shape | (read the offer printed under the pending list) | **Grouped is the default when the issues overlap (#662)**: the listing names each group, the evidence behind it (same repo file named in both issues, or a shared board Area), what it saves in review rounds, and what it held back to keep the PR reviewable (cap 4). One PR per issue is the case that needs a reason — independent risk, or a separate approver |
-| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide. `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
+| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` (or `show` to read the current value and its source without changing anything) | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide. `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
 | 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, for a group chosen at 3b (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch, so all of them close through ONE PR/gate/merge |
 | 5. Finish it | push branch → PR with `Closes #<num>` (or `New-BoardPR.ps1 -Issue <n1,n2,...>` for a batch — one `Closes #<n>` line per issue) → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → merge-confirmation summary → user confirms → `Board-Merge.ps1 -PR <n>` only on exit 0 AND confirmation | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. On exit 0, present the mandatory merge-confirmation summary (#630/#631, four parts, above) and WAIT for the user's answer before merging — gate green is a precondition for asking, never a reason to skip asking. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself for every closed issue |
 

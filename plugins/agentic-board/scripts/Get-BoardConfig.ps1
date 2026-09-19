@@ -164,3 +164,23 @@ function Resolve-GroupingPosture {
     }
     if ([bool]$v) { 'always' } else { 'never' }
 }
+
+# What a user sees and types for the grouped-PR setting, and WHERE its value came from (#681).
+# `posture` (always/never/auto) is the internal decision; the setting is what
+# `-PreferGroupedPRs on|off|auto` accepts, so the menu and every proposal can name the same word the
+# user would type to change it. `source` says whether the repo recorded an answer ('config': a
+# non-null preferGroupedPRs in .agentic-board/config.json) or nothing was decided and the tool's
+# default applies ('default'). A recorded `auto` is stored as null, so "auto" from the default and
+# "auto" chosen on purpose are the same to the tool and are reported as 'default'.
+function Get-GroupingSetting {
+    [CmdletBinding()]
+    param($Config)
+
+    $posture  = Resolve-GroupingPosture $Config
+    $recorded = ($null -ne $Config) -and ($null -ne $Config['preferGroupedPRs'])
+    [pscustomobject]@{
+        value   = switch ($posture) { 'always' { 'on' } 'never' { 'off' } default { 'auto' } }
+        posture = $posture
+        source  = $(if ($recorded) { 'config' } else { 'default' })
+    }
+}

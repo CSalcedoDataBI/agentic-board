@@ -3,13 +3,18 @@ description: Administer/automate a GitHub Projects board — verbs work/plan/fil
 ---
 You are running the agentic-board /board command.
 
-**If $ARGUMENTS is empty or only whitespace, do NOT run anything yet.** Show this menu and wait
-for the user to pick (they can answer with just the number):
+**If $ARGUMENTS is empty or only whitespace, do NOT start any work yet.** The one thing you run
+first is the read-only `scripts/Board-Work.ps1 -PreferGroupedPRs show` (no GitHub token, changes
+nothing): its first line is `PRs agrupados: <valor> (<fuente>)`. Put that text in the sub-line under
+`1. work` below, in place of `<valor del repo>` (#681). If it fails or the cwd is not a git repo,
+print `auto (por defecto)`. Then show this menu and wait for the user to pick (they can answer with
+just the number):
 
 ```
 ¿Qué quieres hacer con el board?
 
 1. work             → ver qué issues están pendientes y empezar a trabajar (los relacionados van juntos en un solo PR)
+                      PRs agrupados en este repo: <valor del repo> — cambiar con: work -PreferGroupedPRs on|off|auto
 2. plan             → planificar (o tomar un plan existente) y convertir sus tareas en epic + issues
 3. fill --dry-run   → ver qué gaps hay (assignees, Status, Priority, Size, Type) SIN cambiar nada
 4. fill --auto      → llenar todos los gaps automáticamente (convierte drafts a issues reales)
@@ -70,7 +75,8 @@ improvise the recipe from this summary:
   (single or `-Parallel`/`-Launch` fleet). The pending list also offers the issues that would
   sensibly share ONE PR, with the evidence behind each group and what that saves in review
   rounds — grouped is the default posture when they overlap (#662), and the repo can record its
-  standing answer with `-PreferGroupedPRs on|off|auto`. Full contract: `references/verbs-work.md`.
+  standing answer with `-PreferGroupedPRs on|off|auto` (`show` reads the current value and where it
+  came from; the menu above prints it). Full contract: `references/verbs-work.md`.
 - **plan** — turn a plan into a tracked epic + native sub-issues (interactive or from a doc),
   with the enriched sections `/board expert auto` reads. Full contract: `references/verbs-plan.md`.
 - **fill** — detect and fill ALL board gaps (drafts→issues, assignees, Status, Priority, Size,
