@@ -28,6 +28,17 @@
 .PARAMETER Body
     Its body (optional; anchors in it count).
 
+.PARAMETER TitleFile
+.PARAMETER BodyFile
+    The same two texts, read from UTF-8 files. USE THESE from a shell: report text put inside shell
+    quotes (`-Title "..."`) breaks - or runs a local command - the moment it contains a quote, a
+    backtick or `$(`, and sanitizing removes private data, not shell metacharacters. A file is read
+    as data and never parsed by a shell (review thread). A file wins over the matching -Title/-Body.
+
+.PARAMETER CandidatesFile
+    Match against this JSON file (an array of { number, title, body, url, state, stateReason })
+    instead of asking GitHub: offline use, and what the tests feed it. No token is read.
+
 .PARAMETER Repo
     owner/name to search. Default CSalcedoDataBI/agentic-board (the tool's own repo).
 
@@ -44,6 +55,9 @@
 param(
     [string]$Title = '',
     [string]$Body = '',
+    [string]$TitleFile = '',
+    [string]$BodyFile = '',
+    [string]$CandidatesFile = '',
     [string]$Repo = 'CSalcedoDataBI/agentic-board',
     [int]   $ClosedDays = 30,
     [double]$LikelyAt = 0.6,
@@ -56,7 +70,16 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'IssueSearch.ps1')
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
-if (-not $Title.Trim()) { Write-Error 'Falta -Title.'; exit 2 }
+# Report text from files is read as DATA (UTF-8), never through a shell.
+if ($TitleFile) {
+    if (-not (Test-Path -LiteralPath $TitleFile)) { Write-Host "No existe -TitleFile '$TitleFile'." -ForegroundColor Red; exit 2 }
+    $Title = [System.IO.File]::ReadAllText($TitleFile, [System.Text.Encoding]::UTF8).Trim()
+}
+if ($BodyFile) {
+    if (-not (Test-Path -LiteralPath $BodyFile)) { Write-Host "No existe -BodyFile '$BodyFile'." -ForegroundColor Red; exit 2 }
+    $Body = [System.IO.File]::ReadAllText($BodyFile, [System.Text.Encoding]::UTF8)
+}
+if (-not $Title.Trim()) { Write-Host 'Falta -Title (o -TitleFile).' -ForegroundColor Red; exit 2 }
 
 # Identity: the personal account, or the agent's inside a braked run - the same single resolver.
 $prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
@@ -64,9 +87,14 @@ $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
 $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
 try {
-    $ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner (($Repo -split '/')[0])
-    $env:GH_TOKEN = $ctx.token
-    $cands = Get-IssueCandidates -Repo $Repo -ClosedDays $ClosedDays
+    if ($CandidatesFile) {
+        if (-not (Test-Path -LiteralPath $CandidatesFile)) { throw "no existe -CandidatesFile '$CandidatesFile'" }
+        $cands = @([System.IO.File]::ReadAllText($CandidatesFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
+    } else {
+        $ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner (($Repo -split '/')[0])
+        $env:GH_TOKEN = $ctx.token
+        $cands = Get-IssueCandidates -Repo $Repo -ClosedDays $ClosedDays
+    }
 } catch {
     Write-Host "NO SE PUDO BUSCAR duplicados en $Repo : $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "Eso NO significa 'sin duplicados'. Dilo al usuario antes de crear el issue." -ForegroundColor Red

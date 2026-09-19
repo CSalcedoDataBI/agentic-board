@@ -39,11 +39,27 @@ Describe ONLY the public tool — which skill/script/recipe is wrong and the cor
 - ✅ the public file (`skills/…`, `scripts/…`, `references/…`), the wrong command/flag, the right
   one, and a generic repro (e.g. "on any repo, `gh project delete` has no `--yes`").
 
+## Step 1b — Put the sanitized text in FILES, never inside shell quotes
+Sanitizing removes private data; it does **not** make text safe for a shell. A title or body that
+contains a quote, a backtick or `$(...)` breaks a double-quoted argument or runs a local command.
+So the text travels as **files** and is only ever read as data. Preferred: write the two files with
+the agent's file-writing tool (no shell involved). From a shell, use a **quoted** heredoc (the quotes
+around the delimiter turn off every expansion):
+```bash
+work=$(mktemp -d)
+cat > "$work/title.txt" <<'ABIOS_EOF_TITLE'
+<sanitized title>
+ABIOS_EOF_TITLE
+cat > "$work/body.md" <<'ABIOS_EOF_BODY'
+<sanitized body>
+ABIOS_EOF_BODY
+```
+
 ## Step 2a — Search first: is this defect already filed? (#675)
 The same defect was filed three times in a row (#654, #658, #667) and once as a month-old duplicate
-(#661). Before creating anything, run the duplicate check on the **sanitized** title and body:
+(#661). Before creating anything, run the duplicate check on the **sanitized** title and body files:
 ```bash
-pwsh -NoProfile -File "<plugin-root>/scripts/Find-DuplicateIssue.ps1" -Title "<sanitized title>" -Body "<sanitized body>"
+pwsh -NoProfile -File "<plugin-root>/scripts/Find-DuplicateIssue.ps1" -TitleFile "$work/title.txt" -BodyFile "$work/body.md"
 ```
 It searches the tool's open issues plus those closed in the last 30 days (a recently closed twin is a
 recurrence, not a new defect) and acts on its exit code:
@@ -59,7 +75,7 @@ recurrence, not a new defect) and acts on its exit code:
 ```bash
 tok=$(powershell.exe -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL','User')" | tr -d '\r')
 GH_TOKEN=$tok gh issue create --repo CSalcedoDataBI/agentic-board \
-  --label tool-improvement --title "<sanitized title>" --body "<sanitized body>"
+  --label tool-improvement --title "$(cat "$work/title.txt")" --body-file "$work/body.md"
 # add it to the tool's roadmap board (its own water):
 GH_TOKEN=$tok gh project item-add 13 --owner CSalcedoDataBI --url "<issue url from above>"
 ```

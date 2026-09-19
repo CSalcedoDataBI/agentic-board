@@ -295,3 +295,112 @@ Describe 'Find-DuplicateIssue.ps1 - the CLI contract the skill acts on' {
         $ast.ParamBlock | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Report text travels as FILES - shell metacharacters are data, not code (#675, review thread)' {
+    BeforeAll {
+        $script:Tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('fd-files-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:Tmp -Force | Out-Null
+        # Text that would break or hijack a double-quoted shell argument.
+        $script:Hostile = 'Board-Plan.ps1 fails on "quotes", `backticks` and $(touch pwned) and ${HOME}; rm -rf x'
+        $script:Marker  = Join-Path $script:Tmp 'pwned'
+        $script:Cands   = Join-Path $script:Tmp 'cands.json'
+        @(
+            @{ number = 10; title = $script:Hostile; body = ''; url = 'u10'; state = 'OPEN'; stateReason = '' },
+            @{ number = 11; title = 'Something entirely different about dark mode'; body = ''; url = 'u11'; state = 'OPEN'; stateReason = '' }
+        ) | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:Cands -Encoding UTF8
+        function script:Run-Cli([string[]]$A) {
+            $out = & pwsh -NoProfile -File $script:ScriptPath @A 2>&1 | Out-String
+            [pscustomobject]@{ Exit = $LASTEXITCODE; Text = $out }
+        }
+    }
+    AfterAll { Remove-Item -LiteralPath $script:Tmp -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'a hostile title read from -TitleFile is matched verbatim (exit 3) and nothing is executed' {
+        $tf = Join-Path $script:Tmp 'title.txt'
+        [System.IO.File]::WriteAllText($tf, $script:Hostile + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $r = Run-Cli @('-TitleFile', $tf, '-CandidatesFile', $script:Cands, '-Json')
+        $r.Exit | Should -Be 3
+        $j = $r.Text.Substring($r.Text.IndexOf('{')) | ConvertFrom-Json
+        @($j.matches | Where-Object { $_.level -eq 'likely' }).number | Should -Contain 10
+        Test-Path -LiteralPath $script:Marker | Should -BeFalse
+    }
+    It 'a hostile -BodyFile is read as data too' {
+        $tf = Join-Path $script:Tmp 'title2.txt'; $bf = Join-Path $script:Tmp 'body2.md'
+        [System.IO.File]::WriteAllText($tf, 'Board-Plan.ps1 fails', (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText($bf, 'see $(touch pwned) and `id` and "q"', (New-Object System.Text.UTF8Encoding($false)))
+        $r = Run-Cli @('-TitleFile', $tf, '-BodyFile', $bf, '-CandidatesFile', $script:Cands)
+        $r.Exit | Should -BeIn @(0, 3)
+        Test-Path -LiteralPath $script:Marker | Should -BeFalse
+    }
+    It 'the -BodyFile counts: the same title is only a related hit without it and a probable duplicate with the script name in the body' {
+        $cf = Join-Path $script:Tmp 'cands-body.json'
+        @(@{ number = 20; title = 'Board-Plan.ps1 loses the cursor on long lists paging'; body = ''; url = 'u20'; state = 'OPEN'; stateReason = '' }) |
+            ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $cf -Encoding UTF8
+        $tf = Join-Path $script:Tmp 'title6.txt'; $bf = Join-Path $script:Tmp 'body6.md'
+        [System.IO.File]::WriteAllText($tf, 'cursor lists gone missing', (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText($bf, 'seen in Board-Plan.ps1', (New-Object System.Text.UTF8Encoding($false)))
+        (Run-Cli @('-TitleFile', $tf, '-CandidatesFile', $cf)).Exit | Should -Be 0
+        (Run-Cli @('-TitleFile', $tf, '-BodyFile', $bf, '-CandidatesFile', $cf)).Exit | Should -Be 3
+    }
+    It 'a different title from a file is not blocked (exit 0)' {
+        $tf = Join-Path $script:Tmp 'title3.txt'
+        [System.IO.File]::WriteAllText($tf, 'Apply-FieldPreset writes labels during -DryRun', (New-Object System.Text.UTF8Encoding($false)))
+        (Run-Cli @('-TitleFile', $tf, '-CandidatesFile', $script:Cands)).Exit | Should -Be 0
+    }
+    It 'a file wins over the matching -Title' {
+        $tf = Join-Path $script:Tmp 'title4.txt'
+        [System.IO.File]::WriteAllText($tf, $script:Hostile, (New-Object System.Text.UTF8Encoding($false)))
+        (Run-Cli @('-Title', 'something unrelated entirely', '-TitleFile', $tf, '-CandidatesFile', $script:Cands)).Exit | Should -Be 3
+    }
+    It 'a missing -TitleFile / no title at all is exit 2, never "clear"' {
+        (Run-Cli @('-TitleFile', (Join-Path $script:Tmp 'nope.txt'), '-CandidatesFile', $script:Cands)).Exit | Should -Be 2
+        (Run-Cli @('-CandidatesFile', $script:Cands)).Exit | Should -Be 2
+    }
+    It 'an unreadable -CandidatesFile is exit 2 - a search that could not run is not "no duplicates"' {
+        $tf = Join-Path $script:Tmp 'title5.txt'
+        [System.IO.File]::WriteAllText($tf, 'anything', (New-Object System.Text.UTF8Encoding($false)))
+        (Run-Cli @('-TitleFile', $tf, '-CandidatesFile', (Join-Path $script:Tmp 'missing.json'))).Exit | Should -Be 2
+    }
+}
+
+Describe 'abios-feedback SKILL.md never puts report text inside shell quotes (#675, review thread)' {
+    BeforeAll {
+        $script:SkillPath = Join-Path $PSScriptRoot '..' 'skills' 'abios-feedback' 'SKILL.md' | Resolve-Path
+        $script:Skill = (Get-Content -LiteralPath $script:SkillPath -Raw) -replace "`r`n", "`n"
+    }
+    It 'no command interpolates a placeholder for the title or body inside quotes' {
+        $script:Skill | Should -Not -Match '(--title|-Title|--body|-Body)\s+"<sanitized'
+    }
+    It 'the duplicate check and the filing both take the files' {
+        $script:Skill | Should -Match '-TitleFile "\$work/title\.txt" -BodyFile "\$work/body\.md"'
+        $script:Skill | Should -Match '--body-file "\$work/body\.md"'
+        $script:Skill | Should -Match '--title "\$\(cat "\$work/title\.txt"\)"'
+    }
+    It 'the heredocs have QUOTED delimiters (that is what turns expansion off)' {
+        $script:Skill | Should -Match "<<'ABIOS_EOF_TITLE'"
+        $script:Skill | Should -Match "<<'ABIOS_EOF_BODY'"
+        $script:Skill | Should -Not -Match '<<ABIOS_EOF'
+    }
+    It 'the documented file-writing pattern, run in a REAL shell with hostile text, keeps it verbatim and executes nothing' {
+        $bash = @('C:\Program Files\Git\bin\bash.exe', '/bin/bash', '/usr/bin/bash') | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (-not $bash) { Set-ItResult -Skipped -Because 'no bash available'; return }
+        # The exact block from the skill, with the placeholders replaced by hostile text.
+        $m = [regex]::Match($script:Skill, '(?s)(work=\$\(mktemp -d\).*?\nABIOS_EOF_BODY\n)')
+        $m.Success | Should -BeTrue
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('fd-sh-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        try {
+            $hostileTitle = 'T "q" `id` $(touch PWNED_T) ${HOME}'
+            $hostileBody  = 'B "q" `id` $(touch PWNED_B) $HOME'
+            $block = $m.Groups[1].Value.Replace('<sanitized title>', $hostileTitle).Replace('<sanitized body>', $hostileBody)
+            $script1 = ('cd ' + [char]39 + ($tmp -replace [regex]::Escape([string][char]92), '/') + [char]39 + "`n") + $block + "`n" +
+                       'cp "$work/title.txt" ./title.out' + "`n" + 'cp "$work/body.md" ./body.out' + "`n"
+            $sh = Join-Path $tmp 'run.sh'
+            [System.IO.File]::WriteAllText($sh, $script1, (New-Object System.Text.UTF8Encoding($false)))
+            & $bash $sh 2>&1 | Out-Null
+            (Get-Content -LiteralPath (Join-Path $tmp 'title.out') -Raw).Trim() | Should -Be $hostileTitle
+            (Get-Content -LiteralPath (Join-Path $tmp 'body.out') -Raw).Trim() | Should -Be $hostileBody
+            @(Get-ChildItem -LiteralPath $tmp -Filter 'PWNED*' -Recurse).Count | Should -Be 0
+        } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
