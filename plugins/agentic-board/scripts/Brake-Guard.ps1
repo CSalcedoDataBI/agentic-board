@@ -162,7 +162,17 @@ $script:BrakePatterns = @(
     @{ action = 'delete';  pattern = '\bgh\s+(issue|release)\s+delete\b' }
     # Every spelling gh accepts for the same DELETE request, not just the long one.
     @{ action = 'delete';  pattern = '\bgh\s+api\b.*(--method[=\s]+delete\b|-x\s+delete\b)' }
-    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b.*--delete\b' }
+    #
+    # The gap stops at a background `&` (#546), as the three git-push patterns above do since #542
+    # round 6 - `git push origin fine & echo --delete` deletes nothing, and `.*` walked over the `&`
+    # into a different command. It is NOT the sibling patterns' `[^;&|<>]*`, and the difference is
+    # deliberate: that class also stops at `<`, `>` and the `&` of `2>&1`, which would let
+    # `git push origin 2>&1 --delete feature` through - a command the old pattern DENIED. This fix
+    # may only remove a false positive, never a deny, so a redirection stays inside the gap: `&`
+    # is a boundary unless it belongs to a redirection (`>&`, `<&`, `&>`: a `&` right after `<`/`>`,
+    # or right before `>`). The two `&` alternatives are mutually exclusive, so every character has
+    # exactly one reading and the scan stays linear (see the timing tests).
+    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b(?:[^;&|]|(?<=[<>])&|(?<![<>])&(?=>))*--delete\b' }
     # git's other remote-branch deletion syntax: `git push origin :branch`. The leading whitespace
     # in the lookbehind keeps `HEAD:main` (an ordinary push refspec) out of it.
     @{ action = 'delete';  pattern = $script:GitCmd + 'push\b[^;&|<>]*\s:\S' }
