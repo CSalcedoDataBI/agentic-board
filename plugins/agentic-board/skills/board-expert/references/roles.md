@@ -46,7 +46,7 @@ committed into a project — it is not under any repo's `.git` at all.
 | `name` | yes | Identity, and the merge key against the factory catalog. |
 | `keywords` | yes | Matched (lowercase, substring) against the plan text to select the role. |
 | `skills` | yes | Matched against installed skill **names** — never the plugin namespace — to build the toolset. |
-| `agent` | no | An installed agent definition (`agents/*.md`, the same registry the Agent tool resolves). Its body becomes the role's standards. Preferred over `standards`. |
+| `agent` | no | An installed agent definition (`agents/*.md` or `agents/*.agent.md`). Give the name the Agent tool lists: it is matched against each definition's frontmatter `name` first (with or without a `plugin:` prefix), then against the file name (with or without `.agent`). A `plugin:` prefix only breaks a tie between two definitions of the same name. Its body becomes the role's standards. Preferred over `standards`. `/board expert roles` shows `MISSING` in its AGENT column for a role whose agent resolved to nothing. |
 | `standards` | no | Inline prose, for when no agent definition is worth creating. Ignored when `agent` is set. |
 | `knowledgeDomain` | no | A domain in `knowledge/registry.json` whose references the expert reads before building. |
 | `replace` | no | `true` makes every field replace the factory role's instead of unioning. The way to *remove* factory keywords. |
