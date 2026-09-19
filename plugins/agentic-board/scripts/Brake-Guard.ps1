@@ -73,6 +73,20 @@ $script:BrakeMarkerName = 'brake-armed.json'
 # is an argument, not a measurement. Time it.
 $script:GitCmd = '\bgit\s+(?:-[^\s;|&]*\s+(?:[^\s;|&-][^\s;|&]*\s+)?)*'
 
+# `git push ... --delete`. Defined on its own because it is evaluated TWICE: over the normalized
+# command like every pattern, and once more over a quote-masked copy (see Test-IsBrakedCommand, #546).
+#
+# The gap stops at a background `&` (#546), as the three git-push patterns below do since #542
+# round 6 - `git push origin fine & echo --delete` deletes nothing, and `.*` walked over the `&`
+# into a different command. It is NOT the sibling patterns' `[^;&|<>]*`, and the difference is
+# deliberate: that class also stops at `<`, `>` and the `&` of `2>&1`, which would let
+# `git push origin 2>&1 --delete feature` through - a command the old pattern DENIED. This fix
+# may only remove a false positive, never a deny, so a redirection stays inside the gap: `&`
+# is a boundary unless it belongs to a redirection (`>&`, `<&`, `&>`: a `&` right after `<`/`>`,
+# or right before `>`). The two `&` alternatives are mutually exclusive, so every character has
+# exactly one reading and the scan stays linear (see the timing tests).
+$script:PushDeleteFlagPattern = $script:GitCmd + 'push\b(?:[^;&|]|(?<=[<>])&|(?<![<>])&(?=>))*--delete\b'
+
 # Command patterns that REACH an irreversible action, grouped by the contract's action vocabulary
 # (the same words Expert-Autonomy uses, so one contract drives both).
 #
@@ -162,17 +176,7 @@ $script:BrakePatterns = @(
     @{ action = 'delete';  pattern = '\bgh\s+(issue|release)\s+delete\b' }
     # Every spelling gh accepts for the same DELETE request, not just the long one.
     @{ action = 'delete';  pattern = '\bgh\s+api\b.*(--method[=\s]+delete\b|-x\s+delete\b)' }
-    #
-    # The gap stops at a background `&` (#546), as the three git-push patterns above do since #542
-    # round 6 - `git push origin fine & echo --delete` deletes nothing, and `.*` walked over the `&`
-    # into a different command. It is NOT the sibling patterns' `[^;&|<>]*`, and the difference is
-    # deliberate: that class also stops at `<`, `>` and the `&` of `2>&1`, which would let
-    # `git push origin 2>&1 --delete feature` through - a command the old pattern DENIED. This fix
-    # may only remove a false positive, never a deny, so a redirection stays inside the gap: `&`
-    # is a boundary unless it belongs to a redirection (`>&`, `<&`, `&>`: a `&` right after `<`/`>`,
-    # or right before `>`). The two `&` alternatives are mutually exclusive, so every character has
-    # exactly one reading and the scan stays linear (see the timing tests).
-    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b(?:[^;&|]|(?<=[<>])&|(?<![<>])&(?=>))*--delete\b' }
+    @{ action = 'delete';  pattern = $script:PushDeleteFlagPattern }
     # git's other remote-branch deletion syntax: `git push origin :branch`. The leading whitespace
     # in the lookbehind keeps `HEAD:main` (an ordinary push refspec) out of it.
     @{ action = 'delete';  pattern = $script:GitCmd + 'push\b[^;&|<>]*\s:\S' }
@@ -292,6 +296,28 @@ function Test-IsBrakedCommand {
         foreach ($p in $script:BrakePatterns) {
             if ($irr -notcontains $p.action) { continue }
             if ($seg -match $p.pattern) { return $p.action }
+        }
+    }
+
+    # A `&` INSIDE a quoted argument (#546). Quotes are stripped before the patterns run, so
+    # `git push origin 'a&b' --delete x` reads as if `&` were a background operator - and the narrowed
+    # --delete gap (see $script:PushDeleteFlagPattern) stopped there, ALLOWING a real delete the old
+    # unbounded pattern denied. This fix may only remove a false positive, so the delete flag gets a
+    # second look at a copy of the command in which every `&` INSIDE a quoted span is replaced by a
+    # neutral character (the span is otherwise kept, so a quoted `"--delete"` is still the flag the
+    # shell will pass): there a quoted `&` cannot end the gap, while a real background `&` outside
+    # quotes still does. Reached only when the command has such a `&` and only when the contract
+    # brakes on delete; it can only ADD a `delete` verdict, never remove one.
+    if ($irr -contains 'delete') {
+        $masked = [regex]::Replace("$Command", '"[^"]*"|''[^'']*''', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Value.Replace('&', '_') })
+        if ($masked -ne "$Command") {
+            foreach ($segment in ((ConvertTo-NormalizedCommand $masked) -split $script:SegmentSeparator)) {
+                $seg = $segment.Trim()
+                if (-not $seg) { continue }
+                if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
+                if (Test-IsGenuinePreview -Segment $seg) { continue }
+                if ($seg -match $script:PushDeleteFlagPattern) { return 'delete' }
+            }
         }
     }
     return ''

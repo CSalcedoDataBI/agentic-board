@@ -53,6 +53,27 @@ Describe 'a redirection between `push` and `--delete` does NOT open a hole' {
     }
 }
 
+Describe 'a & INSIDE a quoted argument does not open a hole either (external review of #546)' {
+    # Quotes are stripped before the patterns run, so a quoted `&` looks like a background operator.
+    # The old unbounded pattern denied these; the delete flag therefore gets a second look at a copy
+    # of the command with the quoted spans masked out.
+    It '<cmd>' -ForEach @(
+        @{ cmd = 'git push origin "a&b" --delete x' }
+        @{ cmd = "git push origin 'a & b' --delete x" }
+        @{ cmd = 'git push "o&r" origin --delete x' }
+        @{ cmd = 'git push origin "x" --delete y' }
+    ) {
+        Classify $cmd | Should -Be 'delete'
+    }
+    It 'a REAL background & outside quotes still ends the gap, quotes or not' {
+        Classify 'git push origin "feat" & echo --delete' | Should -BeNullOrEmpty
+        Classify 'git push origin fine & echo "--delete"' | Should -BeNullOrEmpty
+        Classify "git push origin 'a' & echo --delete" | Should -BeNullOrEmpty
+    }
+    It 'the second look only ever applies when the contract brakes on delete' {
+        Test-IsBrakedCommand -Command 'git push origin "a&b" --delete x' -Irreversible @('merge') | Should -BeNullOrEmpty
+    }
+}
 Describe 'text after a separating & is no longer read as the push''s --delete (#546)' {
     It '<cmd>' -ForEach @(
         @{ cmd = 'git push origin mi-rama-normal & echo --delete' }          # the reported case
@@ -80,37 +101,45 @@ Describe 'the refspec-delete pattern across a background & (#546, same pass)' {
 }
 
 Describe 'the fix only ever REMOVES an over-block' {
-    It 'over generated commands, old-denied-but-new-allowed happens ONLY across a separating &' {
+    It 'over generated commands, old-denied-but-new-allowed happens ONLY across a separating & outside quotes' {
+        # OLD = the whole classifier with the ORIGINAL unbounded pattern swapped into the pattern list.
+        # (The quote-masked second look reads $script:PushDeleteFlagPattern, which is not swapped, so it
+        # is present on both sides: the comparison isolates exactly what the gap change did.)
         $oldPattern = $script:GitCmd + 'push\b.*--delete\b'
-        $newPattern = ($script:BrakePatterns | Where-Object { $_.action -eq 'delete' -and $_.pattern -like '*--delete*' } | Select-Object -First 1).pattern
-        $newPattern | Should -Not -BeNullOrEmpty
-        $tokens = @('git push origin', 'x', '--delete', 'feat', '&', '2>&1', '>out.txt', '&>o.txt', '<in.txt', 'echo', '&&', ';', '|', '-f', ':y', '--force')
+        $entry = $script:BrakePatterns | Where-Object { $_.action -eq 'delete' -and $_.pattern -eq $script:PushDeleteFlagPattern } | Select-Object -First 1
+        $entry | Should -Not -BeNullOrEmpty
+        $newPattern = $entry.pattern
+        $tokens = @('git push origin', 'x', '--delete', 'feat', '&', '2>&1', '>out.txt', '&>o.txt', '<in.txt', 'echo', '&&', ';', '|', '-f',
+                    '--force', '"a&b"', "'x & y'", '"q"', '"--delete"')
         $rng = New-Object System.Random 546
         $weakened = 0; $checked = 0
-        for ($i = 0; $i -lt 6000; $i++) {
-            $n = $rng.Next(2, 9)
-            $seg = 'git push ' + ((1..$n | ForEach-Object { $tokens[$rng.Next($tokens.Count)] }) -join ' ')
-            $norm = ConvertTo-NormalizedCommand $seg
-            foreach ($s in ($norm -split $script:SegmentSeparator)) {
-                $s = $s.Trim(); if (-not $s) { continue }
+        try {
+            for ($i = 0; $i -lt 5000; $i++) {
+                $n = $rng.Next(2, 9)
+                $cmd = 'git push ' + ((1..$n | ForEach-Object { $tokens[$rng.Next($tokens.Count)] }) -join ' ')
+                $entry.pattern = $newPattern
+                $new = Test-IsBrakedCommand -Command $cmd -Irreversible @('delete')
+                $entry.pattern = $oldPattern
+                $old = Test-IsBrakedCommand -Command $cmd -Irreversible @('delete')
+                $entry.pattern = $newPattern
                 $checked++
-                $old = $s -match $oldPattern
-                $new = $s -match $newPattern
-                if ($new -and -not $old) { throw "NEW pattern denies something OLD allowed: '$s'" }
+                if ($new -and -not $old) { throw "NEW denies something OLD allowed: '$cmd'" }
                 if ($old -and -not $new) {
-                    # Legitimate only when a SEPARATING & sits between `push` and the last `--delete`.
-                    $between = $s.Substring($s.IndexOf('push'))
-                    $bare = [regex]::IsMatch($between, '(?<![<>])&(?!>)')
-                    if (-not $bare) { throw "NEW pattern lost a deny with no separating &: '$s'" }
+                    # Independent oracle: with the & inside quotes neutralised, a bare & (not part of a redirection)
+                    # must sit between `push` and the last `--delete`.
+                    $masked = [regex]::Replace($cmd, '"[^"]*"|''[^'']*''', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Value.Replace('&', '_') })
+                    $from = $masked.IndexOf('push')
+                    $to = $masked.LastIndexOf('--delete')
+                    $between = if ($to -gt $from) { $masked.Substring($from, $to - $from) } else { $masked.Substring($from) }
+                    if (-not [regex]::IsMatch($between, '(?<![<>])&(?!>)')) { throw "NEW lost a deny with no separating & outside quotes: '$cmd'" }
                     $weakened++
                 }
             }
-        }
-        $checked | Should -BeGreaterThan 5000
+        } finally { $entry.pattern = $newPattern }
+        $checked | Should -BeGreaterThan 4000
         $weakened | Should -BeGreaterThan 0          # the generator does reach the fixed case
     }
 }
-
 Describe 'the classifier stays linear on a hostile command' {
     It '2000 `>&` tokens then a real delete: denied, quickly' {
         $cmd = 'git push origin ' + ('2>&1 ' * 2000) + '--delete feature'
