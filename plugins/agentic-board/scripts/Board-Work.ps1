@@ -235,6 +235,16 @@ $ErrorActionPreference = "Stop"
 
 function Get-BoardUrl([int]$num) { "https://github.com/users/$Owner/projects/$num" }
 
+# The title to SHOW for a pending item. GitHub snapshots the Projects item title (`.title`)
+# when the item joins the board and never refreshes it when the issue is renamed, so for an
+# issue or PR the live title is `.content.title`; renaming usually means the scope was
+# renegotiated, which is exactly when reading the old title misleads (#522). A draft note has
+# no content of its own, so its item title is the real one and stays the source there.
+function Get-PendingItemTitle($item) {
+    if ($item.content -and $item.content.title) { return "$($item.content.title)" }
+    return "$($item.title)"
+}
+
 # An item is PENDING when it has no Status yet, or its Status MEANS Backlog - in the
 # canonical vocabulary or in a legacy one (GitHub's default template calls it 'Todo').
 # Before #278 this compared to the literal "Backlog", so every item of a default-template
@@ -951,6 +961,89 @@ function Format-ClaimFingerprint {
     return "[abios-claim] $Note por sesion Claude en $Computer (PID $ProcessId) - $Date$tail"
 }
 
+# A timestamp from gh JSON as a DateTimeOffset, or $null when it cannot be read.
+# ConvertFrom-Json turns ISO-8601 strings into [datetime] on PowerShell 7, so all three
+# shapes (already-typed, string, absent) have to be accepted.
+function ConvertTo-DateTimeOffset([object]$Value) {
+    if ($null -eq $Value -or "$Value" -eq '') { return $null }
+    if ($Value -is [datetimeoffset]) { return $Value }
+    if ($Value -is [datetime])       { return [datetimeoffset]$Value }
+    $out = [datetimeoffset]::MinValue
+    if ([datetimeoffset]::TryParse("$Value", [Globalization.CultureInfo]::InvariantCulture,
+                                   [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$out)) { return $out }
+    return $null
+}
+
+# The first line of a commit message: the only part a squash-merge convention gives meaning to.
+function Get-CommitSubject([string]$Message) {
+    if (-not $Message) { return '' }
+    return (($Message -split "\r?\n")[0]).Trim()
+}
+
+# `revert(scope): ...` (conventional) or `Revert "..."` (git's own).
+function Test-RevertSubject([string]$Subject) {
+    return [bool]($Subject -match '(?i)^revert(\([^)]*\))?!?:' -or $Subject -match '^Revert\s+"')
+}
+
+# Does a commit SUBJECT cite issue $IssueNum? Two shapes count: the parenthesised `(#n)` that
+# a subject carries when the commit is about that issue, and a GitHub closing keyword
+# (`closes|fixes|resolves #n`). A bare `#n`, `Refs #n` or `Part of #n` is a cross-reference,
+# not a claim that the issue was worked, so it never counts (#502).
+function Test-SubjectCitesIssue([string]$Subject, [int]$IssueNum) {
+    if ($Subject -match "\(#$IssueNum\)") { return $true }
+    return [bool]($Subject -match "(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#$IssueNum(?!\d)")
+}
+
+# From `gh search commits` hits, the commits that really LANDED work for issue $IssueNum,
+# plus when (if ever) that work was reverted. Pure -> unit-testable against a real git log.
+#
+# Only the SUBJECT counts (#507/#502): a `(#n)` in a commit BODY is prose - a changelog list,
+# a "deferred" note, a Co-authored trailer - and a squash-merge body is full of them.
+# A revert (#471) is the strongest evidence AGAINST integration, so a revert subject never
+# counts as landed work; it also retires the work it undoes - the commit it names
+# (`This reverts commit <sha>`) and any citing commit that is not newer than it. When the
+# order cannot be established (a missing date, or a tie) the citing commit is KEPT: an unreadable
+# or equal timestamp can only preserve the refusal, never lift it.
+# -Truncated says the search hit its result cap: a landed commit may then be missing from $Hits
+# while its revert is present, so a revert must not be trusted to mean "nothing landed" and is
+# counted like any citing commit (the refusal the guard always gave).
+# Returns @{ commits = @({sha}); revertedAt = [datetimeoffset] or $null }.
+function Select-IssueCitingCommits {
+    param([object[]]$Hits = @(), [int]$IssueNum, [switch]$Truncated)
+    $landed = @(); $reverts = @(); $revertedShas = @()
+    foreach ($h in @($Hits)) {
+        $msg     = "$($h.commit.message)"
+        $subject = Get-CommitSubject $msg
+        if (Test-RevertSubject $subject) {
+            foreach ($m in [regex]::Matches($msg, '(?i)this reverts commit ([0-9a-f]{7,40})')) {
+                $revertedShas += $m.Groups[1].Value.ToLowerInvariant()
+            }
+            if (Test-SubjectCitesIssue $subject $IssueNum) { $reverts += $h }
+            continue
+        }
+        if (Test-SubjectCitesIssue $subject $IssueNum) { $landed += $h }
+    }
+    if ($Truncated -and $reverts.Count -gt 0) { $landed += $reverts; $reverts = @() }
+
+    $newestRevert = $null
+    foreach ($r in $reverts) {
+        $d = ConvertTo-DateTimeOffset $(if ($r.commit.committer.date) { $r.commit.committer.date } else { $r.commit.author.date })
+        if ($null -ne $d -and ($null -eq $newestRevert -or $d -gt $newestRevert)) { $newestRevert = $d }
+    }
+
+    $kept = @($landed | Where-Object {
+        $sha = "$($_.sha)".ToLowerInvariant()
+        foreach ($rs in $revertedShas) { if ($sha.StartsWith($rs)) { return $false } }
+        if ($null -eq $newestRevert) { return $true }
+        $d = ConvertTo-DateTimeOffset $(if ($_.commit.committer.date) { $_.commit.committer.date } else { $_.commit.author.date })
+        return ($null -eq $d -or $d -ge $newestRevert)
+    })
+    return [pscustomobject]@{
+        commits    = @($kept | ForEach-Object { [pscustomobject]@{ sha = $_.sha } })
+        revertedAt = $newestRevert
+    }
+}
+
 # Decide whether an issue already has landed/active work that -Start should refuse,
 # EVEN with no [abios-claim] comment (issue #236: a session can merge to main without
 # posting a formal claim, and the assignee is always the shared bot owner). Pure ->
@@ -960,8 +1053,18 @@ function Format-ClaimFingerprint {
 # integrated commit means the work is DONE; an OPEN PR means a session is mid-flight.
 # CLOSED-unmerged PRs are ignored so an abandoned attempt never blocks a fresh start.
 function Get-PriorWorkRefusal {
-    param([object[]]$Prs = @(), [object[]]$Commits = @())
-    $merged = @($Prs | Where-Object { $_.state -eq 'MERGED' })
+    param([object[]]$Prs = @(), [object[]]$Commits = @(), [object]$RevertedAt = $null)
+    # A MERGED PR whose merge a later revert commit (citing the issue) undid is not landed
+    # work any more (#471). Only a PR with a KNOWN mergedAt older than the revert is set
+    # aside; a PR with no timestamp still counts, so an unreadable date can only keep the
+    # refusal, never lift it.
+    $revertedAtDto = ConvertTo-DateTimeOffset $RevertedAt
+    $merged = @($Prs | Where-Object {
+        if ($_.state -ne 'MERGED') { return $false }
+        if ($null -eq $revertedAtDto) { return $true }
+        $at = ConvertTo-DateTimeOffset $_.mergedAt
+        return ($null -eq $at -or $at -ge $revertedAtDto)
+    })
     if ($merged.Count -gt 0) {
         return "ya tiene un PR MERGED (#$($merged[0].number)) - el trabajo ya esta en la rama por defecto"
     }
@@ -983,7 +1086,8 @@ function Get-PriorWorkRefusal {
 # Wrapped so Invoke-IssueStart's PR/commit-aware refusal is unit-testable via a mock.
 function Get-IssueLinkedWork {
     param([string]$Repo, [int]$IssueNum)
-    $prs = @(); $commits = @()
+    $prs = @(); $commits = @(); $revertedAt = $null
+    $commitSearchLimit = 100   # one API page; the search ranks by relevance, so the cap can drop old hits
     $rp = $Repo -split '/'
     try {
         $data = Invoke-Gh -GhArgs @('api','graphql','-f','query=
@@ -991,23 +1095,25 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){
     issue(number:$n){
       closedByPullRequestsReferences(first:10, includeClosedPrs:true){
-        nodes { number state }
+        nodes { number state mergedAt }
       }
     }
   }
 }','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$IssueNum") -What "leer los PRs de #$IssueNum" -Graphql
         $prs = @($data.data.repository.issue.closedByPullRequestsReferences.nodes)
     } catch { }
-    # GitHub commit search indexes the DEFAULT branch. Filter to the exact (#n) token
-    # so #12 never matches #123 (substring search would).
+    # GitHub commit search indexes the DEFAULT branch. The search matches the number
+    # anywhere in the message, so the hits are filtered to the ones whose SUBJECT cites
+    # the exact issue (#12 never matches #123) and reverts are set aside - see
+    # Select-IssueCitingCommits for why the body and reverts do not count.
     try {
-        $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit','20') `
+        $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit',"$commitSearchLimit") `
                           -What "buscar commits de #$IssueNum" -Json
-        $rx = "\(#$IssueNum\)"
-        $commits = @($hits | Where-Object { $_.commit.message -match $rx } |
-                     ForEach-Object { [pscustomobject]@{ sha = $_.sha } })
+        $sel = Select-IssueCitingCommits -Hits @($hits) -IssueNum $IssueNum -Truncated:(@($hits).Count -ge $commitSearchLimit)
+        $commits    = @($sel.commits)
+        $revertedAt = $sel.revertedAt
     } catch { }
-    return [pscustomobject]@{ prs = $prs; commits = $commits }
+    return [pscustomobject]@{ prs = $prs; commits = $commits; revertedAt = $revertedAt }
 }
 
 # Where an issue's worktree lives: <parent>/<repo>--worktrees/issue-<n>. Pure ->
@@ -1262,7 +1368,7 @@ function Invoke-IssueStart {
     # issue is already worked - refuse so a second session cannot clobber landed work.
     if (-not $TakeOver) {
         $linked = Get-IssueLinkedWork $repo $IssueNum
-        $priorReason = Get-PriorWorkRefusal -Prs $linked.prs -Commits $linked.commits
+        $priorReason = Get-PriorWorkRefusal -Prs $linked.prs -Commits $linked.commits -RevertedAt $linked.revertedAt
         if ($priorReason) {
             $result.skipped = "YA TRABAJADO: $priorReason"
             Write-Host "  SKIP #${IssueNum}: $($result.skipped)" -ForegroundColor Red
@@ -3131,11 +3237,11 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
             Write-Host ("  [draft]  {0}" -f $p.title) -ForegroundColor DarkYellow
             Write-Host  "           (nota draft - conviertela a issue real con /board fill antes de trabajarla)" -ForegroundColor DarkGray
         } elseif (@($p.labels) -contains "blocked") {
-            Write-Host ("  #{0,-4} [BLOCKED] {1}" -f $p.content.number, $p.title) -ForegroundColor Red
+            Write-Host ("  #{0,-4} [BLOCKED] {1}" -f $p.content.number, (Get-PendingItemTitle $p)) -ForegroundColor Red
             Write-Host  "        bloqueado por una dependencia - no se puede empezar (quita el label 'blocked' al desbloquearse)" -ForegroundColor DarkGray
         } else {
             $repo = $p.content.repository
-            Write-Host ("  #{0,-4} {1}" -f $p.content.number, $p.title) -ForegroundColor Yellow
+            Write-Host ("  #{0,-4} {1}" -f $p.content.number, (Get-PendingItemTitle $p)) -ForegroundColor Yellow
             Write-Host ("        {0} | Size {1} | {2} | {3}" -f $prio, $size, $type, $repo) -ForegroundColor DarkGray
         }
     }
