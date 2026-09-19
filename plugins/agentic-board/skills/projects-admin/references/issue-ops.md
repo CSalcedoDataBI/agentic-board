@@ -78,6 +78,26 @@ gh api repos/<owner>/<repo>/issues/<child_issue_number> --jq .id
 
 ---
 
+## Native blocked-by dependencies (`Board-Depend.ps1`, #521)
+
+`/board work -Start` reads native blocked-by links and refuses an issue that still has open
+blockers. To WRITE them, use the script - never the raw endpoint:
+
+```powershell
+& "<plugin-root>/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36,37,38          # 40 waits for 36, 37, 38
+& "<plugin-root>/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36 -DryRun         # resolve + validate, write nothing
+```
+
+Why not `gh api .../dependencies/blocked_by --input {"issue_id": N}`: `issue_id` is the issue's
+**database id**, not its number. A number does not fail - it links whatever issue anywhere on
+GitHub has that database id (`{"issue_id": 17}` linked `jbarnette/johnson#3`). The script resolves
+number -> id first, refuses any blocker outside the target repo (`owner/repo#N` of another repo,
+foreign URLs), reads the list before and after, and exits 1 if the requested blocker did not appear
+with the right number and repository or if anything unrequested did. Re-running is safe (an existing
+link is reported as `already`). It is not yet called from `/board plan`.
+
+---
+
 ## URL rule for issue bodies and board descriptions
 
 Any file or resource link placed in an issue body, project description, or comment MUST be a full remote URL in this form:
