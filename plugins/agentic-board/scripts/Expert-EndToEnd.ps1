@@ -207,10 +207,12 @@ function Get-CiEvidence {
         return @{ present = $true; passed = $false; state = 'unreadable' }
     }
     if ($arr.Count -eq 0) { return @{ present = $false; passed = $false; state = 'none' } }
-    $bad    = @($arr | Where-Object { "$($_.bucket)" -notin @('pass','skipping') })
-    $passed = @($arr | Where-Object { "$($_.bucket)" -eq 'pass' })
     $ci = Get-CiState -Checks $arr -Parsed $true -JobFacts $JobFacts
-    return @{ present = $true; passed = ($passed.Count -gt 0 -and $bad.Count -eq 0); state = $ci.state }
+    # `passed` comes from the CLASSIFIED state, not from the buckets alone (review thread): a payload
+    # like { bucket: 'pass', state: 'STARTUP_FAILURE' } is 'not-evaluated' and must not satisfy a
+    # caller that reads only `passed`. For every other input the two agree (state 'passed' means at
+    # least one pass and nothing failed, pending, unknown or never-ran).
+    return @{ present = $true; passed = ($ci.state -eq 'passed'); state = $ci.state }
 }
 
 # Render the decision for a human. Kept next to the decision so the refusal and its wording cannot

@@ -266,6 +266,20 @@ Describe 'Get-CiEvidence (Expert-EndToEnd) exposes the state without loosening `
         $e.state  | Should -Be 'not-evaluated'
         $e.passed | Should -BeFalse
     }
+    It 'a bucket-pass check whose state is STARTUP_FAILURE is not-evaluated and NOT passed (review thread)' {
+        $e = Get-CiEvidence -ChecksJson '[{"name":"CI","bucket":"pass","state":"STARTUP_FAILURE"}]'
+        $e.state  | Should -Be 'not-evaluated'
+        $e.passed | Should -BeFalse
+        (Test-CiChecksPassed -ChecksJson '[{"name":"CI","bucket":"pass","state":"STARTUP_FAILURE"}]') | Should -BeFalse
+    }
+    It '`passed` still agrees with the old bucket rule everywhere else: pass+skipping true; skipping-only, pending, unknown, cancel false' {
+        (Get-CiEvidence -ChecksJson '[{"bucket":"pass","name":"a"},{"bucket":"skipping","name":"b"}]').passed | Should -BeTrue
+        foreach ($b in 'skipping', 'pending', 'weird', 'cancel', 'fail') {
+            (Get-CiEvidence -ChecksJson ('[{"bucket":"pass","name":"a"},{"bucket":"' + $b + '","name":"b"}]')).passed |
+                Should -Be ($b -eq 'skipping') -Because $b
+        }
+        (Get-CiEvidence -ChecksJson '[{"bucket":"skipping","name":"a"}]').passed | Should -BeFalse
+    }
     It 'a real failure is state failed' {
         (Get-CiEvidence -ChecksJson '[{"name":"a","bucket":"pass"},{"name":"b","bucket":"fail","state":"FAILURE"}]').state | Should -Be 'failed'
     }
