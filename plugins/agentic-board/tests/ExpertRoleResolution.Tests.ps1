@@ -162,8 +162,13 @@ Describe 'Find-FilesPruned never enters an excluded directory (#609)' {
         New-Item -ItemType Directory -Path "$root/keep" -Force | Out-Null
         Set-Content -LiteralPath "$root/keep/hit.md" -Value 'x'
         1..1500 | ForEach-Object { New-Item -ItemType Directory -Path "$root/node_modules/p$_" -Force | Out-Null }
-        $pruned   = (Measure-Command { $a = @(Find-FilesPruned -Root $root -Filter '*.md') }).TotalMilliseconds
-        $unpruned = (Measure-Command { $b = @(Find-FilesPruned -Root $root -Filter '*.md' -ExcludeDirs @()) }).TotalMilliseconds
+        # Best of three per side: a scheduling hiccup on a loaded CI runner inflates one sample,
+        # not the minimum, so the ratio measures the walk and not the machine.
+        $pruned = [double]::MaxValue; $unpruned = [double]::MaxValue
+        foreach ($i in 1..3) {
+            $pruned   = [math]::Min($pruned,   (Measure-Command { $a = @(Find-FilesPruned -Root $root -Filter '*.md') }).TotalMilliseconds)
+            $unpruned = [math]::Min($unpruned, (Measure-Command { $b = @(Find-FilesPruned -Root $root -Filter '*.md' -ExcludeDirs @()) }).TotalMilliseconds)
+        }
         @($a).Count | Should -Be 1
         @($b).Count | Should -Be 1
         $pruned | Should -BeLessThan ($unpruned / 3)
