@@ -147,7 +147,11 @@ param(
     # the operator's head and being restated every time (#662). 'on' = always propose one PR
     # for the batch; 'off' = never propose grouping (each issue gets its own reviewable PR);
     # 'auto' = the default, propose it only where there is evidence the issues overlap.
-    [ValidateSet('on', 'off', 'auto')]
+    # 'show' only READS the current value and where it came from (writes no preference, needs no
+    # token) - it is what the /board menu runs so the menu can state the repo's setting (#681). Like
+    # every call that resolves the state dir it may perform that resolver's one-time silent rename of
+    # a legacy `.agentic-bi-ops/` folder; it never touches config.json.
+    [ValidateSet('on', 'off', 'auto', 'show')]
     [string] $PreferGroupedPRs = '',
     [switch]$Launch,
     [switch]$Fleet,
@@ -524,12 +528,21 @@ function Get-RepoTrackedFiles {
 # actually pays (review rounds and merge confirmations, not "PRs"), names the evidence for
 # every group, and ends with the exact selection to accept - so saying yes is one answer, not
 # a research task.
+function Format-GroupingSettingLabel {
+    param($Setting)
+    $where = if ($Setting.source -eq 'config') { 'config del repo' } else { 'por defecto' }
+    return "$($Setting.value) ($where)"
+}
+
 function Show-GroupingOffer {
     [CmdletBinding()]
     param(
         [object[]] $Suggestions,
         [string]   $Posture = 'auto',
         [string]   $CurrentRepo = '',
+        # 'auto (por defecto)' / 'on (config del repo)': the setting that produced these proposals
+        # and where its value came from (#681). Empty = say nothing about it (older callers).
+        [string]   $SettingLabel = '',
         # Twelve groups is a wall, not an offer. Show the biggest savings and COUNT the rest -
         # the user is choosing where to start, not reading an inventory.
         [int]      $MaxShown = 5
@@ -567,6 +580,9 @@ function Show-GroupingOffer {
                   else                      { "los $(@($s.issues).Count) estan en la misma area del board ($($s.evidence))" }
         Write-Host ("  {0}  ->  un solo PR" -f $nums) -ForegroundColor Yellow
         Write-Host ("        porque {0}" -f $porque) -ForegroundColor DarkGray
+        if ($SettingLabel) {
+            Write-Host ("        propuesta de PR agrupado - ajuste 'PRs agrupados': {0}" -f $SettingLabel) -ForegroundColor DarkGray
+        }
         # On a board holding several repos, WHICH repo the batch lands in is part of the offer:
         # the PR can only be opened where the issues live.
         if ($CurrentRepo -and $s.repo -and $s.repo -ne $CurrentRepo) {
@@ -589,6 +605,9 @@ function Show-GroupingOffer {
         Write-Host "Este repo ya pidio juntar lo que se solape, asi que es lo que hare salvo que digas otra cosa." -ForegroundColor DarkGray
     } else {
         Write-Host "Separalos solo si alguno tiene riesgo propio o alguien debe poder aprobarlo o rechazarlo aparte." -ForegroundColor DarkGray
+    }
+    if ($SettingLabel) {
+        Write-Host ("Ajuste 'PRs agrupados' de este repo: {0}. Cambiarlo: /board work -PreferGroupedPRs on|off|auto" -f $SettingLabel) -ForegroundColor DarkGray
     }
 }
 
@@ -3044,6 +3063,20 @@ if ($Relaunch -gt 0) {
 # answer about grouped PRs (#662) and stop. It is a decision, not a run: writing it
 # and then also listing the board would bury the confirmation the user needs to see.
 # ==============================================================================
+if ($PreferGroupedPRs -eq 'show') {
+    # Read-only. Outside a git repo there is no config to read, and that is a normal answer, not an
+    # error: the default applies. An unreadable file is said out loud, never read as "no preference"
+    # in silence - but the first line still carries the value the tool will actually use.
+    $read    = Read-BoardConfig -Path (Get-BoardConfigPath)
+    $setting = Get-GroupingSetting $read.config
+    Write-Host ("PRs agrupados: " + (Format-GroupingSettingLabel $setting))
+    if (-not $read.ok) {
+        Write-Host "  No pude leer la preferencia del repo ($($read.error)); se usa el criterio por defecto." -ForegroundColor Yellow
+    }
+    Write-Host "  on = juntar en un solo PR lo que se solape, sin preguntar | off = un PR por issue | auto = proponerlo y decides tu" -ForegroundColor DarkGray
+    Write-Host "  Cambiarlo: /board work -PreferGroupedPRs on|off|auto" -ForegroundColor DarkGray
+    exit 0
+}
 if ($PreferGroupedPRs) {
     $cfgPath = Get-BoardConfigPath
     if (-not $cfgPath) {
@@ -3575,7 +3608,8 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     # kill the listing AFTER printing it, over a feature that is only ever an offer.
     $hereRepo = try { Get-RepoFromOrigin } catch { '' }
     $groups  = @(Get-GroupingSuggestions -Pending $pending -RepoFiles (Get-RepoTrackedFiles) -CurrentRepo $hereRepo)
-    Show-GroupingOffer -Suggestions $groups -Posture $posture -CurrentRepo $hereRepo
+    Show-GroupingOffer -Suggestions $groups -Posture $posture -CurrentRepo $hereRepo `
+                       -SettingLabel (Format-GroupingSettingLabel (Get-GroupingSetting $cfgRead.config))
 
     Write-Host ""
     $startable = if ($posture -ne 'never') { Select-StartableGroup -Suggestions $groups -CurrentRepo $hereRepo } else { $null }

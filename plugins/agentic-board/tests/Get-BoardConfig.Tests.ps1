@@ -148,4 +148,9 @@ Describe 'Resolve-GroupingPosture' {
     It 'falls back to auto on a value it cannot read, never to a silent never' {
         Resolve-GroupingPosture @{ preferGroupedPRs = 'quizas' } | Should -BeExactly 'auto'
     }
+    It 'does not read truthiness as a decision: 0 is not never, 42 is not always' {
+        Resolve-GroupingPosture @{ preferGroupedPRs = 0 }        | Should -BeExactly 'auto'
+        Resolve-GroupingPosture @{ preferGroupedPRs = 42 }       | Should -BeExactly 'auto'
+        Resolve-GroupingPosture @{ preferGroupedPRs = @{ a = 1 } } | Should -BeExactly 'auto'
+    }
 }
