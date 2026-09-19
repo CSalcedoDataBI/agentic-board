@@ -130,6 +130,15 @@ function ConvertTo-ComparablePath {
     param([string]$Path)
     if (-not $Path) { return '' }
     try { $full = [System.IO.Path]::GetFullPath($Path) } catch { $full = $Path }
+    # An 8.3 short name (`C:\Users\CRISTO~1\...`) is the same folder as its long spelling, and if the
+    # two compared unequal the registry row would be skipped and a real branch mismatch missed - the
+    # fail-open direction. GetFullPath expands short names on the hosts measured (pwsh 7.6, Windows
+    # PowerShell 5.1), but that is an implementation detail; Get-Item hands back the on-disk spelling
+    # by contract (Resolve-Path and FileSystemObject keep the short one), so an existing path is
+    # canonicalised through it. A path that no longer exists has no other spelling to reconcile.
+    try {
+        if (Test-Path -LiteralPath $full) { $full = (Get-Item -LiteralPath $full -Force -ErrorAction Stop).FullName }
+    } catch { }
     return $full.Replace('\', '/').TrimEnd('/').ToLowerInvariant()
 }
 

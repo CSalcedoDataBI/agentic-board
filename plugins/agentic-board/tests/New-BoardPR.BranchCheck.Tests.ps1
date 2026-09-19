@@ -61,6 +61,70 @@ Describe 'Get-RegisteredBranchMismatch (pure)' {
     }
 }
 
+Describe 'the working-copy comparison survives 8.3 short-name spellings (Windows)' {
+    # A folder the registry spells long and git/cwd spells short (or the other way round) is still the
+    # SAME folder. If the two spellings compared unequal the entry would be skipped and a real branch
+    # mismatch silently missed (fail open), so both failure directions are pinned here. The short
+    # spelling is produced by the OS itself (`%~sI`), not typed by hand.
+    BeforeAll {
+        $script:LongRoot = Join-Path $TestDrive 'a-rather-long-folder-name-for-83-test'
+        $script:LongDir  = Join-Path $script:LongRoot 'another-quite-long-subfolder-name'
+        New-Item -ItemType Directory -Path $script:LongDir -Force | Out-Null
+        $script:ShortDir = ''
+        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+            $script:ShortDir = (cmd /c "for %I in (""$($script:LongDir)"") do @echo %~sI").Trim()
+        }
+        # Only meaningful when the volume really hands out a different short spelling.
+        $script:Has83 = [bool]($script:ShortDir -and ($script:ShortDir -like '*~*') -and ($script:ShortDir -ne $script:LongDir))
+    }
+
+    It 'the fixture really has two different spellings of one folder (else the tests below prove nothing)' {
+        if (-not $script:Has83) { Set-ItResult -Skipped -Because 'this volume has no 8.3 short names (or not Windows)'; return }
+        $script:ShortDir | Should -Not -Be $script:LongDir
+        (Get-Item -LiteralPath $script:ShortDir).FullName | Should -Be (Get-Item -LiteralPath $script:LongDir).FullName
+    }
+    It 'both spellings normalise to the same comparable path' {
+        if (-not $script:Has83) { Set-ItResult -Skipped -Because 'no 8.3 names on this volume'; return }
+        (ConvertTo-ComparablePath $script:ShortDir) | Should -Be (ConvertTo-ComparablePath $script:LongDir)
+    }
+    It 'must NOT miss a mismatch: registered long, running from the short spelling (and the reverse)' {
+        if (-not $script:Has83) { Set-ItResult -Skipped -Because 'no 8.3 names on this volume'; return }
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $script:LongDir)  -Repo 'o/r' -Issues @(5) -WorkPath $script:ShortDir -Branch 'other' | Should -Match 'se registro en la rama'
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $script:ShortDir) -Repo 'o/r' -Issues @(5) -WorkPath $script:LongDir  -Branch 'other' | Should -Match 'se registro en la rama'
+    }
+    It 'must NOT refuse a legitimate push: same branch, different spellings' {
+        if (-not $script:Has83) { Set-ItResult -Skipped -Because 'no 8.3 names on this volume'; return }
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $script:LongDir)  -Repo 'o/r' -Issues @(5) -WorkPath $script:ShortDir -Branch 'issue-5-x' | Should -Be ''
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $script:ShortDir) -Repo 'o/r' -Issues @(5) -WorkPath $script:LongDir  -Branch 'issue-5-x' | Should -Be ''
+    }
+    It 'must NOT confuse two different folders that only look alike' {
+        if (-not $script:Has83) { Set-ItResult -Skipped -Because 'no 8.3 names on this volume'; return }
+        $other = Join-Path $script:LongRoot 'another-quite-long-subfolder-name-two'
+        New-Item -ItemType Directory -Path $other -Force | Out-Null
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $other) -Repo 'o/r' -Issues @(5) -WorkPath $script:ShortDir -Branch 'other' | Should -Be ''
+    }
+    It 'end to end: real git in a folder registered long, run from the short spelling, still refuses a switched branch' {
+        if (-not $script:Has83) { Set-ItResult -Skipped -Because 'no 8.3 names on this volume'; return }
+        $repoLong = Join-Path $script:LongRoot 'a-repo-with-a-long-enough-name'
+        New-Item -ItemType Directory -Path $repoLong -Force | Out-Null
+        git -C $repoLong init -q -b main 2>&1 | Out-Null
+        git -C $repoLong -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+        git -C $repoLong checkout -q -b issue-5-x
+        git -C $repoLong branch other-branch
+        $repoShort = (cmd /c "for %I in (""$repoLong"") do @echo %~sI").Trim()
+        $repoShort | Should -Not -Be $repoLong
+        New-Item -ItemType Directory -Path (Join-Path $repoLong '.agentic-board') -Force | Out-Null
+        @(New-Entry 5 'issue-5-x' $repoLong) | ConvertTo-Json -AsArray | Set-Content (Join-Path $repoLong '.agentic-board' 'sessions.json')
+        git -C $repoLong checkout -q other-branch
+        Push-Location $repoShort
+        try {
+            $out = & pwsh -NoProfile -File $script:Script -Issue 5 -Repo 'o/r' -TokenVar 'ABIOS_TEST_NO_SUCH_VAR' 2>&1 | Out-String
+        } finally { Pop-Location }
+        $out | Should -Match 'se registro en la rama ''issue-5-x'''
+        $out | Should -Not -Match 'no esta en el entorno USER'
+    }
+}
+
 Describe 'Get-LiveSessionEntries' {
     It 'keeps a live PID and drops a dead one (a dead session must never count as holding the folder)' {
         $p = Join-Path $TestDrive 'sessions.json'
