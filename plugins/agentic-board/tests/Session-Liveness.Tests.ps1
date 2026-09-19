@@ -218,6 +218,14 @@ Describe 'Invoke-SessionWatch zombie prune honours the start-time check (#520)' 
         $r.allDone | Should -BeTrue
         $script:statusCalls | Should -Be 0
     }
+    It 'prunes a wt session recorded with NO pid (tab never found) once its worktree is gone' {
+        $script:statusCalls = 0
+        $s = [pscustomobject]@{ issue = 88; sessionPid = 0; via = 'wt'; started = $script:StampAfter; workPath = (Join-Path $TestDrive 'missing-worktree') }
+        Invoke-SessionWatch -DryRun -SuperviseEvery 0 -ReadSessions { @($s) } `
+                -GetStatus { param($x) $script:statusCalls++; [pscustomobject]@{ done = $true; reason = 'x'; merged = $false } } `
+                -Now { Get-Date } -Sleep { param($sec) } | Out-Null
+        $script:statusCalls | Should -Be 0
+    }
     It 'does NOT prune the same session when its PID is genuinely its own' {
         $script:statusCalls = 0
         $s = [pscustomobject]@{ issue = 88; sessionPid = $PID; started = $script:StampAfter; workPath = (Join-Path $TestDrive 'missing-worktree') }

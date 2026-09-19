@@ -2587,7 +2587,7 @@ function Invoke-SessionWatch {
         # safe to prune from sessions.json without a gh call. Injectable for tests.
         [scriptblock]$IsStale = {
             param($s)
-            ($s.sessionPid -gt 0) -and
+            (($s.sessionPid -gt 0) -or ("$($s.via)" -eq 'wt')) -and
             ((Get-SessionLivePid $s) -le 0) -and
             $s.workPath -and
             -not (Test-Path $s.workPath -PathType Container)
