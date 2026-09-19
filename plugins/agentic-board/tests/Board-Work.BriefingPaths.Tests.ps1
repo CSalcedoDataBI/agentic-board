@@ -44,7 +44,12 @@ Describe 'a briefing composed for a repo that is NOT this one (#480)' {
         }
     }
     It 'names paths that EXIST on disk - the bug was commands that pointed at nothing' {
-        foreach ($t in $script:Tokens) { (Test-Path -LiteralPath $t) | Should -BeTrue -Because "'$t' must resolve for the session" }
+        # Resolve them the way the session will: from ITS working directory. From the runner's own cwd
+        # (usually this repo's root) the old repo-relative form would resolve too and hide the bug.
+        Push-Location $script:Consumer
+        try {
+            foreach ($t in $script:Tokens) { (Test-Path -LiteralPath $t) | Should -BeTrue -Because "'$t' must resolve from the session's working directory" }
+        } finally { Pop-Location }
     }
     It 'no longer emits the repo-relative form that only resolves in this repo' {
         $script:Brief | Should -Not -Match 'pwsh plugins/agentic-board/scripts/'
