@@ -139,10 +139,24 @@ if (-not $contract.roleMatched) {
     Write-Host "  NO ROLE MATCHED this plan - the expert would run as 'generic', with no domain toolset." -ForegroundColor Yellow
     Write-Host "  Research the plan's domain, propose a role to the user in plain language, and only" -ForegroundColor DarkGray
     Write-Host "  persist it once they confirm - it changes how every future plan is classified." -ForegroundColor DarkGray
+    # (#470) Persisting also makes the file shareable by itself (Add-ExpertRole repairs and
+    # verifies the project's .gitignore). Never ask the user about git, and never hand them a command.
+    Write-Host "  Persisting with Add-ExpertRole also takes care of .gitignore - do not ask the user about it." -ForegroundColor DarkGray
     Write-Host ""
 }
 $written = Write-ExpertContract -Contract $contract -Path $target
 Write-Host "  OK  contract written -> $written" -ForegroundColor Green
+# (#470) A roles.json that already exists but that git ignores is a role the team will never get,
+# and the fix people reach for does nothing. Repair it here and say what was done in plain words:
+# nothing for the user to run, nothing to decide in git terms.
+$localRoles = Get-ExpertRoleLocalPath
+if ($localRoles -and (Test-Path -LiteralPath $localRoles -PathType Leaf)) {
+    $fix = Repair-RolesGitignore -RolesPath $localRoles
+    if ($fix.Status -in 'Repaired', 'CannotRepair') {
+        Write-Host ""
+        Write-Host $fix.Message -ForegroundColor $(if ($fix.Status -eq 'Repaired') { 'Green' } else { 'Yellow' })
+    }
+}
 Write-Host "      autonomy brakes only on: $($contract.autonomy.irreversible -join ', ')" -ForegroundColor DarkGray
 Write-Host "      definition of done: $((@($contract.dod.Keys | Sort-Object)) -join ', ')" -ForegroundColor DarkGray
 if (-not $contract.dod.ContainsKey('bpa')) {
