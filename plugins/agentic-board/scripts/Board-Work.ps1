@@ -742,9 +742,18 @@ function Get-SessionLivePid {
         }
     }
     if ($isWt) {
-        $tab = $null
-        try { $tab = Find-WtTabShell ([int]$Session.issue) } catch { }
-        if ($tab -and [int]$tab.ProcessId -gt 0) { return [int]$tab.ProcessId }
+        # Only a shell created around or after this entry was registered: `pwsh -NoExit` leaves an
+        # EARLIER run's shell of the same issue open after its agent finished, and the script name
+        # alone would resurrect a dead session by latching onto it. The registration stamp is taken
+        # up to ~10 s after the launch (Resolve-WtSessionPid's wait), so allow 30 s before it.
+        $notBefore = [datetime]::MinValue
+        $stamp = [datetime]::MinValue
+        if ([datetime]::TryParse("$($Session.started)", [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$stamp)) {
+            $notBefore = $stamp.AddSeconds(-30)
+        }
+        $tabPid = 0
+        try { $tabPid = Resolve-WtSessionPid -IssueNum ([int]$Session.issue) -NotBefore $notBefore -MaxAttempts 1 } catch { }
+        if ($tabPid -gt 0) { return $tabPid }
     }
     return 0
 }

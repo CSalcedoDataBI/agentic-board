@@ -137,6 +137,18 @@ Describe 'Get-SessionLivePid (#520 recycled PID, #557 wt tab shell)' {
             Get-SessionLivePid $entry | Should -Be $tab.Id
         } finally { Stop-Process -Id $tab.Id -Force -ErrorAction SilentlyContinue }
     }
+    It 'a wt entry does NOT latch onto an OLDER tab shell of the same issue left open by -NoExit' {
+        # The stamp is 10 minutes AFTER the shell was created, i.e. the shell belongs to an earlier
+        # run. Without the creation-time bound the fallback resurrected the dead session.
+        $issue = Get-Random -Minimum 700000 -Maximum 799999
+        $tab = Start-FakeTabShell -Issue $issue -Dir $TestDrive
+        $script:Shells += $tab
+        try {
+            Start-Sleep -Seconds 2
+            $entry = [pscustomobject]@{ issue = $issue; sessionPid = 0; via = 'wt'; started = (Get-Date).AddMinutes(10).ToString('yyyy-MM-dd HH:mm:ss') }
+            Get-SessionLivePid $entry | Should -Be 0
+        } finally { Stop-Process -Id $tab.Id -Force -ErrorAction SilentlyContinue }
+    }
     It 'a NON-wt entry never falls back to a launch-script lookup' {
         $issue = Get-Random -Minimum 700000 -Maximum 799999
         $tab = Start-FakeTabShell -Issue $issue -Dir $TestDrive
