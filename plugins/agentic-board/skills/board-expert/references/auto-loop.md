@@ -14,7 +14,9 @@ guiding principle: **total self-use of agentic-board — never improvise your ow
 3. **Execute (test-first)** — build guided by tests first, in the worktree.
 4. **Verify + evidence** — run the definition-of-done gates. Write a structured `[abios-evidence]`
    block (`Expert-Evidence.Format-EvidenceBlock`) to **three places**: the PR body, a durable
-   issue comment, and a versioned `evidence/<issue>.md`. If green → open the PR + run the review
+   issue comment, and a versioned `evidence/<issue>.md`. Record a gate the diff does not owe as
+   `N/A` (not `PASS`, #475) and a CI that never executed as `NOT-EVALUATED` (not `FAIL`, #481) —
+   see `SKILL.md` → Evidence for the four states. If green → open the PR + run the review
    gate **with `-RequireIndependentReviewer`** (#623) — this run is unsupervised, and that flag is
    what stops it from certifying its own work (#541). Evidence posted under its own identity does
    not count and `-RecordReview` refuses outright; it waits for a review from a genuinely
@@ -25,7 +27,10 @@ guiding principle: **total self-use of agentic-board — never improvise your ow
    - in-scope problem → fix it in the loop and continue;
    - out-of-scope finding → file a sanitized `discovered` issue on the board (`/board`, the
      `abios-feedback` sanitization criteria) and keep going.
-6. **Loop until done or budget**: keep iterating until the DoD is green — then **leave the PR
+6. **Loop until done or budget** — but **never loop on a CI that did not run** (#481): if the review
+   gate exits **3** (`CI NO SE EVALUO`), no code change can turn that CI green, so stop re-pushing,
+   record the `ci` gate as `NOT-EVALUATED`, finish the rest and report it plainly. Exit 1 (a real
+   failure) is the case the loop exists for. Otherwise keep iterating until the DoD is green — then **leave the PR
    ready and STOP before merge** (the irreversible line) — or the budget is spent →
    `/board handoff -Save` so a later session resumes. The time budget is **enforced
    mechanically** (#564): it travels in the brake marker, and past `maxMinutes` the PreToolUse

@@ -40,6 +40,12 @@
                 threads, no TMDL-breaking / BPA-error findings, AND somebody
                 actually reviewed)
            1 -> gate BLOCKED (address the printed feedback, push, re-run)
+           3 -> gate BLOCKED, CI NOT EVALUATED (#481): the only blocker is that CI
+                never executed a step (startup_failure, or a job GitHub refused to
+                start: quota, billing, no runner). Still a block - never a pass - but
+                no code change can clear it, so a caller must stop re-pushing and
+                report `not evaluated` instead of burning its budget. A real failing
+                check, or any other blocker, keeps exit 1.
            2 -> gate UNREVIEWED (#510): nothing is wrong, but nobody looked.
                 Distinct from 0 on purpose - `claude-review` reported a passing
                 check having left zero reviews, and a caller reading only the
@@ -484,25 +490,59 @@ function Test-OnlyReviewerChecksFailed {
 function Get-ChecksVerdict {
     param(
         $Checks = @(),
-        [bool]$Parsed = $false
+        [bool]$Parsed = $false,
+        # check link -> @{ executedSteps = <int> }, read by the caller for the FAILED checks (#481).
+        # Lets a job that GitHub refused to start (exhausted quota: steps [], runner_id 0) be told
+        # apart from a real failure. Absent facts never reclassify anything.
+        [hashtable]$JobFacts = @{}
     )
     if (-not $Parsed) {
-        return @{ Parsed = $false; Settled = $false; Ok = $false; NoChecks = $false; Failed = @(); Pending = @() }
+        return @{ Parsed = $false; Settled = $false; Ok = $false; NoChecks = $false; Failed = @(); Pending = @(); NotEvaluated = @() }
     }
     $list = @(@($Checks) | Where-Object { $_ })
     if ($list.Count -eq 0) {
-        return @{ Parsed = $true; Settled = $true; Ok = $true; NoChecks = $true; Failed = @(); Pending = @() }
+        return @{ Parsed = $true; Settled = $true; Ok = $true; NoChecks = $true; Failed = @(); Pending = @(); NotEvaluated = @() }
     }
-    $failed  = @($list | Where-Object { "$($_.bucket)" -in @('fail','cancel') } | ForEach-Object { "$($_.name)" })
-    $pending = @($list | Where-Object { "$($_.bucket)" -eq 'pending' }          | ForEach-Object { "$($_.name)" })
+    # CI that NEVER RAN is not CI that FAILED (#481): startup_failure, or a job with zero executed
+    # steps. It still blocks (Ok stays false) - this only stops it being reported as broken code.
+    $neverRan = @($list | Where-Object { Test-CheckNeverExecuted -Check $_ -JobFacts $JobFacts })
+    $rest     = @($list | Where-Object { $neverRan -notcontains $_ })
+    $notEval = @($neverRan | ForEach-Object { "$($_.name)" })
+    $failed  = @($rest | Where-Object { "$($_.bucket)" -in @('fail','cancel') } | ForEach-Object { "$($_.name)" })
+    $pending = @($rest | Where-Object { "$($_.bucket)" -eq 'pending' }          | ForEach-Object { "$($_.name)" })
     return @{
-        Parsed   = $true
-        Settled  = ($pending.Count -eq 0)
-        Ok       = ($pending.Count -eq 0 -and $failed.Count -eq 0)
-        NoChecks = $false
-        Failed   = $failed
-        Pending  = $pending
+        Parsed       = $true
+        Settled      = ($pending.Count -eq 0)
+        Ok           = ($pending.Count -eq 0 -and $failed.Count -eq 0 -and $notEval.Count -eq 0)
+        NoChecks     = $false
+        Failed       = $failed
+        Pending      = $pending
+        NotEvaluated = $notEval
     }
+}
+
+<#
+    Read the job facts for the FAILED checks of a snapshot (#481). The one place this gate reads
+    job data; everything it returns is positive evidence about a check, never a default.
+
+    Only checks that (a) failed and (b) link to a GitHub Actions job are looked up. A failed read
+    yields NO entry, so the check stays a plain failure: "I could not look" is never turned into
+    "CI never ran", because that is the state a run is allowed to stop retrying on.
+#>
+function Get-FailedCheckJobFacts {
+    param($Checks = @(), [string]$Repo = '')
+    $facts = @{}
+    foreach ($c in @(@($Checks) | Where-Object { $_ -and "$($_.bucket)" -eq 'fail' })) {
+        $link  = "$($c.link)"
+        $jobId = Get-CheckJobId -Link $link
+        if ($jobId -le 0 -or $facts.ContainsKey($link)) { continue }
+        try {
+            $job = Invoke-Gh -GhArgs @('api',"repos/$Repo/actions/jobs/$jobId") -What "leer el job $jobId del check '$($c.name)'" -Json
+            $n = Get-JobExecutedStepCount -Job $job
+            if ($n -ge 0) { $facts[$link] = @{ executedSteps = $n } }
+        } catch { }
+    }
+    return $facts
 }
 
 <#
@@ -549,6 +589,10 @@ function Test-CopilotSilentTimeout {
 # helper that Get-ReviewEvidence now depends on, so it has to be present in the pure-helper-only
 # load the tests use. The file is pure at load - it defines functions and touches nothing.
 . (Join-Path $PSScriptRoot 'CopilotAvailability.ps1')
+
+# "CI failed" vs "CI never ran" (#481). Pure, and above the guard for the same reason: the check
+# verdict below depends on it, so the tests' pure-helper-only load must have it.
+. (Join-Path $PSScriptRoot 'CiCheckState.ps1')
 
 # Does this repo have any workflow that could produce a check? Read once per run and cached by
 # the caller. Fails CLOSED on a read error: reporting "no workflows" from a failed read would
@@ -918,7 +962,9 @@ while ($true) {
     # CI snapshot — STRUCTURED read only (the display-text table was a merge decision made from
     # human-readable output; see the #510 history above). A failed read keeps polling and, at the
     # deadline, blocks — it can never invent a pass.
-    $checksJson = gh pr checks $PR --repo $Repo --json name,bucket 2>$null
+    # state + link (#481): `state` carries STARTUP_FAILURE, which `bucket` folds into a plain fail,
+    # and `link` is how a failed check is traced to its job to see whether any step ever ran.
+    $checksJson = gh pr checks $PR --repo $Repo --json name,bucket,state,link 2>$null
     $parsedList = @(); $parsedOk = $false
     if ($checksJson) {
         try { $parsedList = @($checksJson | ConvertFrom-Json); $parsedOk = $true } catch { }
@@ -973,9 +1019,19 @@ $prState = Get-ReviewState
 # result: if checks settle green while the loop is still open for the review side, that pass is
 # real and counts. The invariant that matters is fail-closed and it holds on every path - a pass
 # requires a PARSED, SETTLED, all-green snapshot; pending-at-exit and unreadable both block.
+# Split the RED checks into "failed" and "never ran" (#481) once the snapshot has settled: a red
+# check whose job executed zero steps (GitHub refused to start it) is a fact about the
+# environment, not about this diff. Facts are only ever read for failed checks, and a failed read
+# leaves the check a plain failure.
+if ($verdictCi.Parsed -and $verdictCi.Settled -and @($verdictCi.Failed).Count -gt 0) {
+    $jobFacts = Get-FailedCheckJobFacts -Checks $parsedList -Repo $Repo
+    if ($jobFacts.Count -gt 0) { $verdictCi = Get-ChecksVerdict -Checks $parsedList -Parsed $true -JobFacts $jobFacts }
+}
+
 $checksOk     = $true
 $ciTimedOut   = $false
 $failedChecks = @($verdictCi.Failed)
+$notEvaluatedChecks = @($verdictCi.NotEvaluated)
 $checksParsed = [bool]$verdictCi.Parsed
 if ($verdictCi.NoChecks) {
     Write-Host "  (sin checks configurados - cuenta como pass, considera /board automate)" -ForegroundColor DarkGray
@@ -988,7 +1044,14 @@ if ($verdictCi.NoChecks) {
     Write-Host "       (limite del gate #562 - antes esto esperaba sin techo y colgaba la sesion)" -ForegroundColor DarkGray
 } elseif (-not $verdictCi.Ok) {
     $checksOk = $false
-    Write-Host ("  FAIL hay checks fallando: {0}" -f ($failedChecks -join ', ')) -ForegroundColor Red
+    if ($failedChecks.Count -gt 0) {
+        Write-Host ("  FAIL hay checks fallando: {0}" -f ($failedChecks -join ', ')) -ForegroundColor Red
+    }
+    if ($notEvaluatedChecks.Count -gt 0) {
+        Write-Host ("  CI NO SE EVALUO (no corrio ningun paso): {0}" -f ($notEvaluatedChecks -join ', ')) -ForegroundColor Red
+        Write-Host "       No es un fallo del codigo: el workflow termino en startup_failure o el job fue rechazado antes de su primer paso" -ForegroundColor DarkGray
+        Write-Host "       (cuota de Actions agotada, limite de gasto, sin runner). Un push nuevo no lo arregla (#481)." -ForegroundColor DarkGray
+    }
 } else {
     Write-Host "  OK  checks en verde" -ForegroundColor Green
 }
@@ -1062,17 +1125,29 @@ Write-Host ""
 # file, so its verification correctly reports "nobody reviewed" and would then block that PR
 # forever, no matter how carefully a human or an external reviewer read it.
 # Narrow on purpose: only when EVERY failing check is a reviewer job AND real evidence exists.
-if (-not $checksOk -and $evidence.reviewed -and (Test-OnlyReviewerChecksFailed -FailedChecks $failedChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
+# A reviewer job that never ran (startup_failure / no steps) is still "only the reviewer is red":
+# the allowance covers failed AND not-evaluated reviewer checks, exactly as before #481 split them.
+$redChecks = @($failedChecks) + @($notEvaluatedChecks)
+if (-not $checksOk -and $evidence.reviewed -and (Test-OnlyReviewerChecksFailed -FailedChecks $redChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
     $checksOk = $true
-    Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($failedChecks -join ', ')) -ForegroundColor DarkYellow
+    Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($redChecks -join ', ')) -ForegroundColor DarkYellow
     Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray
     Write-Host "        contestada, asi que deja de ser motivo de bloqueo." -ForegroundColor DarkGray
 }
 
 $blockers = @()
+# True when the ONLY thing wrong with CI is that it never ran (#481). A real failure next to it
+# keeps this false: the run still has code to fix, and the gate must not soften that.
+$ciNotEvaluatedOnly = $false
 if (-not $checksOk) {
-    $blockers += $(if ($ciTimedOut) { "checks de CI aun pendientes tras $CiTimeoutMinutes min (limite del gate, #562)" }
-                   else             { "checks de CI fallando" })
+    if ($ciTimedOut) {
+        $blockers += "checks de CI aun pendientes tras $CiTimeoutMinutes min (limite del gate, #562)"
+    } elseif ($failedChecks.Count -eq 0 -and $notEvaluatedChecks.Count -gt 0 -and $checksParsed -and $verdictCi.Settled) {
+        $ciNotEvaluatedOnly = $true
+        $blockers += "CI NO SE EVALUO: nunca corrio un paso, no es un fallo del codigo (#481)"
+    } else {
+        $blockers += "checks de CI fallando"
+    }
 }
 if ($decision -eq "CHANGES_REQUESTED")     { $blockers += "review pide cambios (CHANGES_REQUESTED)" }
 if ($unresolved -gt 0)                     { $blockers += "$unresolved hilo(s) de review sin resolver" }
@@ -1123,6 +1198,14 @@ if ($blockers.Count -eq 0) {
 } else {
     Write-Host "GATE BLOCKED:" -ForegroundColor Red
     $blockers | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+    if ($ciNotEvaluatedOnly -and $blockers.Count -eq 1) {
+        # Distinct exit (#481): nothing is wrong with the change and nothing the change can fix.
+        # Still non-zero, so anything testing `-eq 0` fails closed; but a caller that loops "push,
+        # re-run the gate" can tell this from a real block (1) and stop spending its budget on it.
+        Write-Host "No re-empujes: ningun cambio de codigo puede poner este CI en verde." -ForegroundColor Yellow
+        Write-Host "Registra el gate ci como NOT-EVALUATED en la evidencia, termina el resto y avisa a la persona (cuota, facturacion o workflow)." -ForegroundColor Yellow
+        exit 3
+    }
     Write-Host "Atiende el feedback, push, y re-ejecuta este gate." -ForegroundColor Yellow
     exit 1
 }

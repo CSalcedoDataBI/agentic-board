@@ -291,6 +291,9 @@ Write-Host ""
 Write-Host ("  DoD que APLICA a este diff : {0}" -f $(if ($owed.Count) { ($owed | Sort-Object) -join ', ' } else { '(ninguna)' })) -ForegroundColor Cyan
 if ($skipped.Count) {
     Write-Host ("  DoD que NO aplica (nada que la dispare en el diff): {0}" -f (($skipped | Sort-Object) -join ', ')) -ForegroundColor DarkGray
+    # #475: not owed is not the same as passed. Say so in the record, once per gate, so a reader
+    # later can tell "bpa passed" from "bpa never applied" (Expert-Evidence.Get-NotApplicableGateRows).
+    Write-Host "  -> Registra cada una en la evidencia con resultado N/A (nunca PASS): no corrio porque no aplica." -ForegroundColor DarkGray
 }
 
 
