@@ -183,6 +183,45 @@ Describe 'Repair-RolesGitignore leaves things alone when it should (#470)' {
     }
 }
 
+Describe 'when .gitignore cannot be written (#470)' {
+    BeforeAll {
+        # Real permission failure: a read-only .gitignore. Skipped where the OS lets the writer
+        # through anyway (running as root).
+        function New-ReadOnlyGitignoreRepo {
+            $r = New-Repo @('.agentic-board/')
+            (Get-Item -LiteralPath "$r/.gitignore").IsReadOnly = $true
+            $writable = $true
+            try { [System.IO.File]::WriteAllText("$r/.gitignore", 'probe') } catch { $writable = $false }
+            if ($writable) { (Get-Item -LiteralPath "$r/.gitignore").IsReadOnly = $false; [System.IO.File]::WriteAllText("$r/.gitignore", ".agentic-board/`n"); (Get-Item -LiteralPath "$r/.gitignore").IsReadOnly = $true }
+            [pscustomobject]@{ Repo = $r; Enforced = (-not $writable) }
+        }
+    }
+    AfterAll {
+        foreach ($d in $script:Dirs) { $g = Join-Path $d '.gitignore'; if (Test-Path -LiteralPath $g) { (Get-Item -LiteralPath $g -Force).IsReadOnly = $false } }
+    }
+    It 'Repair-RolesGitignore degrades to CannotRepair instead of throwing, and leaves the file as it was' {
+        $x = New-ReadOnlyGitignoreRepo
+        if (-not $x.Enforced) { Set-ItResult -Skipped -Because 'this OS lets the writer through a read-only file'; return }
+        $before = [System.IO.File]::ReadAllBytes("$($x.Repo)/.gitignore")
+        $res = $null
+        { $script:res = Repair-RolesGitignore -RolesPath "$($x.Repo)/.agentic-board/roles.json" } | Should -Not -Throw
+        $script:res.Status | Should -Be 'CannotRepair'
+        $script:res.Message | Should -Match 'could not write'
+        [System.IO.File]::ReadAllBytes("$($x.Repo)/.gitignore") | Should -Be $before
+    }
+    It 'Add-ExpertRole still saves the role and returns its path when the repair cannot write' {
+        $x = New-ReadOnlyGitignoreRepo
+        if (-not $x.Enforced) { Set-ItResult -Skipped -Because 'this OS lets the writer through a read-only file'; return }
+        Push-Location $x.Repo
+        try {
+            $path = $null
+            { $script:path = & { Add-ExpertRole -Role @{ name = 'zoology'; keywords = @('zebra'); skills = @() } } 6>$null } | Should -Not -Throw
+        } finally { Pop-Location }
+        Test-Path "$($x.Repo)/.agentic-board/roles.json" | Should -BeTrue
+        (Get-Content -Raw "$($x.Repo)/.agentic-board/roles.json" | ConvertFrom-Json).roles[0].name | Should -Be 'zoology'
+    }
+}
+
 Describe 'when git is not installed (#470)' {
     It 'reports NotARepo instead of throwing, so persisting a role never fails because the repair cannot run' {
         $d = Join-Path ([System.IO.Path]::GetTempPath()) ("gi-nogit-" + [guid]::NewGuid().ToString('N'))

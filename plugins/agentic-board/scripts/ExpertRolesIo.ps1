@@ -182,7 +182,11 @@ function Repair-RolesGitignore {
         return (& $cannot 'The rule is not in a .gitignore of this repository.')
     }
 
-    $origBytes = [System.IO.File]::ReadAllBytes($giPath)
+    # File I/O throws real exceptions whatever $ErrorActionPreference says (read-only file, a lock
+    # held by an editor or antivirus, a full disk). The role is already saved by the time this runs,
+    # so a failure here must degrade to a message, never abort persisting the role.
+    try { $origBytes = [System.IO.File]::ReadAllBytes($giPath) }
+    catch { return (& $cannot 'I could not read .gitignore.') }
     $skip      = if ($origBytes.Length -ge 3 -and $origBytes[0] -eq 0xEF -and $origBytes[1] -eq 0xBB -and $origBytes[2] -eq 0xBF) { 3 } else { 0 }
     $text      = [System.Text.UTF8Encoding]::new($false).GetString($origBytes, $skip, $origBytes.Length - $skip)
     $eol       = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
@@ -212,7 +216,12 @@ function Repair-RolesGitignore {
     $lines.Add('# Versioned on purpose: the shared expert role catalog (agentic-board)')
     $lines.Add("!$lead$rel")
 
-    [System.IO.File]::WriteAllText($giPath, (($lines -join $eol) + $eol), [System.Text.UTF8Encoding]::new($skip -eq 3))
+    try { [System.IO.File]::WriteAllText($giPath, (($lines -join $eol) + $eol), [System.Text.UTF8Encoding]::new($skip -eq 3)) }
+    catch {
+        # A failed write can leave the file half written: put the original back if it will let us.
+        try { [System.IO.File]::WriteAllBytes($giPath, $origBytes) } catch { }
+        return (& $cannot 'I could not write .gitignore (it may be read-only or in use).')
+    }
 
     if ((Test-RolesFileTrackable -RolesPath $RolesPath) -eq $true) {
         $res.Status  = 'Repaired'; $res.Changed = $true
@@ -222,7 +231,7 @@ function Repair-RolesGitignore {
                          "The rest of $stateDir/ stays ignored. Nothing for you to run.") -join "`n"
         return $res
     }
-    [System.IO.File]::WriteAllBytes($giPath, $origBytes)   # exact restore
+    try { [System.IO.File]::WriteAllBytes($giPath, $origBytes) } catch { }   # exact restore
     & $cannot 'Git still refuses it after the change: the rule is somewhere I cannot edit.'
 }
 
