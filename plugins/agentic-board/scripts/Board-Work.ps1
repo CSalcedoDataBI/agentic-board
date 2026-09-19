@@ -671,7 +671,155 @@ function Read-SessionRegistry {
     # before -Watch/-AutoClean could tear down its worktree (a dead PID is a completion
     # signal, not garbage) - Codex review, PR #269. The file self-tidies on the next
     # Write-SessionRegistryEntry (it rebuilds from this filtered read) or Remove-SessionRegistryEntry.
-    return @($entries | Where-Object { $_.sessionPid -and (Get-Process -Id $_.sessionPid -ErrorAction SilentlyContinue) })
+    #
+    # Liveness is Get-SessionLivePid, not "does this PID exist" (#520/#557): a recycled PID must not
+    # keep a dead session alive, and a wt tab whose registered PID is unusable is found by its
+    # launch script instead of being dropped. A wt entry that resolves through its tab shell is
+    # returned with THAT pid, so every caller (conflict guard, reaper guard, dashboard) sees the
+    # session's own process. Only this returned copy is corrected - the file is never rewritten here.
+    $live = @()
+    foreach ($e in $entries) {
+        $livePid = Get-SessionLivePid $e
+        if ($livePid -gt 0) {
+            try { $e.sessionPid = $livePid } catch { }
+            $live += $e
+        }
+    }
+    return @($live)
+}
+
+# Was a process with this start time plausibly the session registered at $Started? PURE (#520).
+# A process that started AFTER the registration stamp cannot be the session that stamp describes -
+# Windows recycles PIDs, so the same number later belongs to some unrelated process.
+# UNKNOWN reads as "consistent" (returns $true): no start time, no stamp, or a stamp that does
+# not parse. That is deliberate and it is the caller's protective direction - these liveness reads
+# guard live sessions (the working-copy conflict check, the reaper's never-kill set, the watch's
+# "finished" verdict that leads to a teardown), so "cannot tell" keeps a session rather than
+# discarding one; it is exactly what the code did before the stamp was compared at all.
+# Slack covers the stamp's truncation: sessions.json keeps whole seconds (older entries whole
+# minutes), while a process start time carries sub-second precision.
+#
+# The stamp is local wall-clock time with no offset, so on the night the clocks go BACK it can name
+# an hour that happened twice. A process started in the first pass reads later than a stamp taken in
+# the second (01:30 vs 01:10) although it started earlier in absolute time - which would condemn a
+# genuine session. When the stamp falls in such an ambiguous hour the slack grows by the DST delta.
+# -TimeZone is injectable only so that rule can be tested against a zone with DST.
+function Test-SessionStartConsistent {
+    param($ProcessStart, [string]$Started, [System.TimeZoneInfo]$TimeZone = [System.TimeZoneInfo]::Local)
+    if ($null -eq $ProcessStart -or -not $Started) { return $true }
+    $registered = [datetime]::MinValue
+    if (-not [datetime]::TryParse($Started, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$registered)) { return $true }
+    $slackSec = if ($Started.Trim() -match '^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$') { 61 } else { 2 }
+    try {
+        if ($TimeZone.IsAmbiguousTime($registered)) {
+            $offsets = @($TimeZone.GetAmbiguousTimeOffsets($registered) | Sort-Object)
+            if ($offsets.Count -ge 2) { $slackSec += ($offsets[-1] - $offsets[0]).TotalSeconds }
+        }
+    } catch { }
+    return ([datetime]$ProcessStart -le $registered.AddSeconds($slackSec))
+}
+
+# The PID of the live process that IS this registered session, or 0 when it is gone (#520/#557).
+#  1. The stored PID counts only if a process with that number exists AND started no later than
+#     the registration stamp (Test-SessionStartConsistent) - a recycled PID does not qualify.
+#  2. A `wt` session has no reliable stored PID (the launcher exits at once, and old entries hold
+#     the launching shell's parent). It is found by its tab shell instead: the `pwsh` running
+#     launch-<issue>.ps1 (Find-WtTabShell, #413). That covers an entry registered before the tab
+#     shell was up, and one whose stored PID was recycled.
+function Get-SessionLivePid {
+    param([object]$Session)
+    $stored = 0
+    try { $stored = [int]$Session.sessionPid } catch { }
+    $isWt = ("$($Session.via)" -eq 'wt' -and $Session.issue)
+    if ($stored -gt 0) {
+        $proc = Get-Process -Id $stored -ErrorAction SilentlyContinue
+        if ($proc) {
+            $start = $null
+            try { $start = $proc.StartTime } catch { }   # protected processes refuse StartTime: unknown
+            if (Test-SessionStartConsistent -ProcessStart $start -Started ([string]$Session.started)) {
+                if (-not $isWt) { return $stored }
+                # A wt entry's PID is only meaningful if it IS the tab shell (launch-<n>.ps1). Entries
+                # written before #557 hold the launching shell's parent: a live, older process that
+                # passes the start-time check and would keep a dead session alive for as long as
+                # that shell lives. Its command line tells them apart. An unreadable command line
+                # is "cannot tell" and trusts the PID, as everywhere else in this function.
+                $cmd = $null
+                try { $cmd = (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$stored" -ErrorAction Stop).CommandLine } catch { }
+                if (-not $cmd) { return $stored }
+                $self = [pscustomobject]@{ ProcessId = $stored; CommandLine = $cmd }
+                if (Find-WtTabShellCore -Processes @($self) -IssueNum ([int]$Session.issue)) { return $stored }
+            }
+        }
+    }
+    if ($isWt) {
+        # Only a shell created around or after this entry was registered: `pwsh -NoExit` leaves an
+        # EARLIER run's shell of the same issue open after its agent finished, and the script name
+        # alone would resurrect a dead session by latching onto it. The registration stamp is taken
+        # up to ~10 s after the launch (Resolve-WtSessionPid's wait), so allow 30 s before it.
+        $notBefore = [datetime]::MinValue
+        $stamp = [datetime]::MinValue
+        if ([datetime]::TryParse("$($Session.started)", [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$stamp)) {
+            $notBefore = $stamp.AddSeconds(-30)
+        }
+        $tabPid = 0
+        try { $tabPid = Resolve-WtSessionPid -IssueNum ([int]$Session.issue) -NotBefore $notBefore -MaxAttempts 1 } catch { }
+        if ($tabPid -gt 0) { return $tabPid }
+    }
+    return 0
+}
+
+# Locate the REAL tab shell of a session just launched through Windows Terminal (#557). `wt`
+# returns a launcher that exits at once, so the process Start-Process hands back is worthless;
+# the tab's own `pwsh -NoExit -File launch-<n>.ps1` shows up a moment later. Polls for it (the
+# tab takes a second or two to start), and only accepts a shell CREATED at or after -NotBefore:
+# `-NoExit` leaves an earlier run's shell of the same issue open after its agent finished, and the
+# script name alone would match that stale one. Returns 0 when it never appears - the caller then
+# records no PID (never the launcher's parent), and Get-SessionLivePid finds the tab later.
+# Thin over an injectable process list, sleeper and attempt budget so the wait is testable.
+function Resolve-WtSessionPid {
+    param(
+        [int]$IssueNum,
+        [datetime]$NotBefore = [datetime]::MinValue,
+        [int]$MaxAttempts = 20,
+        [int]$PollMs = 500,
+        [scriptblock]$ListProcesses = {
+            @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+                Select-Object ProcessId, CommandLine, CreationDate)
+        },
+        [scriptblock]$Sleep = { param($ms) Start-Sleep -Milliseconds $ms }
+    )
+    for ($i = 0; $i -lt $MaxAttempts; $i++) {
+        $procs = @()
+        try { $procs = @(& $ListProcesses) } catch { }
+        $fresh = @($procs | Where-Object { -not $_.CreationDate -or [datetime]$_.CreationDate -ge $NotBefore })
+        $tab = Find-WtTabShellCore -Processes $fresh -IssueNum $IssueNum
+        if ($tab -and [int]$tab.ProcessId -gt 0) { return [int]$tab.ProcessId }
+        if ($i -lt $MaxAttempts - 1) { & $Sleep $PollMs }
+    }
+    return 0
+}
+
+# Record a session the launcher just spawned, tracking the PID that is really the SESSION's
+# (#557). pwsh window: the spawned process. wt tab: its tab shell (Resolve-WtSessionPid), or no
+# PID at all when it does not show up - never the launching shell's parent, which is what every
+# wt entry used to carry (one shared, long-lived process: it made a crashed agent read as alive
+# and, once that shell exited, dropped the whole fleet from view).
+function Register-LaunchedSession {
+    param(
+        $Spawn, [int]$IssueNum, [string]$Cli = 'claude', [string]$FleetSession = '',
+        [datetime]$LaunchedAt = [datetime]::MinValue
+    )
+    $via = if ($Spawn.usesWt) { 'wt' } else { 'pwsh' }
+    if ($Spawn.usesWt) {
+        # The stamp taken just before Start-Process, less a little clock slack.
+        if ($LaunchedAt -eq [datetime]::MinValue -and $Spawn.launchedAt) { $LaunchedAt = ([datetime]$Spawn.launchedAt).AddSeconds(-2) }
+        $tabPid = Resolve-WtSessionPid -IssueNum $IssueNum -NotBefore $LaunchedAt
+        Write-SessionRegistryEntry -IssueNum $IssueNum -SessionPid $tabPid -Via $via -Cli $Cli -FleetSession $FleetSession
+    } elseif ($Spawn.process) {
+        Write-SessionRegistryEntry -IssueNum $IssueNum -SessionPid $Spawn.process.Id -Via $via -Cli $Cli -FleetSession $FleetSession
+    } else {
+        Write-SessionRegistryEntry -IssueNum $IssueNum -Via $via -Cli $Cli -FleetSession $FleetSession
+    }
 }
 
 function Write-SessionRegistryEntry {
@@ -685,11 +833,17 @@ function Write-SessionRegistryEntry {
     # PID identity: an explicit spawned-session PID wins (a parallel launch tracks the
     # actual worktree session, not the launcher); otherwise the PARENT of this script
     # (the long-lived host session, since the script's own PID dies on return).
+    #
+    # EXCEPT a `wt` launch (#557): the launching shell's parent is one long-lived process shared by
+    # EVERY session of the batch, so recording it made a crashed agent read as alive and, once
+    # that shell exited, dropped the whole fleet from view. A wt entry with no resolved PID keeps
+    # sessionPid 0 ("not known yet"): Get-SessionLivePid finds its tab shell by launch script.
     $trackPid = $SessionPid
-    if ($trackPid -le 0) {
+    if ($trackPid -le 0 -and $Via -ne 'wt') {
         try { $trackPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
     }
-    if (-not $trackPid) { return }
+    if (-not $trackPid -and $Via -ne 'wt') { return }
+    if (-not $trackPid) { $trackPid = 0 }
     # Preserve fields already recorded for this issue (e.g. repo set at start time)
     # when a later launch updates only the PID/via. Read RAW: a relaunch after the old
     # PID died must still inherit the prior branch/repo/workPath.
@@ -1514,6 +1668,36 @@ function Resolve-LaunchBrake {
     return $true    # default: brake for every fleet/launch session (#598)
 }
 
+# How the session briefing NAMES a plugin script so the session can run it (#480).
+# The briefing used to hard-code `plugins/agentic-board/scripts/<name>`, a path relative to the
+# session's working directory that exists in exactly one repository - this one. In every
+# consumer project the four commands pointed at nothing, the session improvised a bare
+# `gh pr create`, and the review gate never ran.
+#   1. The session's own working copy carries the plugin (this repo, or one that vendors it):
+#      keep the relative form. It resolves from the session's cwd exactly as before and runs
+#      the branch's own copy of the script.
+#   2. Anywhere else: the copy of the script sitting next to the one that is composing the
+#      briefing - the same install, so it exists by construction. Forward slashes (safe for pwsh
+#      on Windows), quoted only when the path has whitespace.
+#   3. Neither exists: say so (found = $false) so the briefing can report it instead of naming a
+#      path that leads nowhere.
+# The absolute form embeds the install's directory, which is version-pinned for a marketplace
+# install; that directory stays on disk while the session that was handed it runs.
+function Resolve-BriefingScriptRef {
+    param([string]$Name, [string]$WorkPath, [string]$ScriptsDir)
+    $rel = "plugins/agentic-board/scripts/$Name"
+    if ($WorkPath -and (Test-Path -LiteralPath (Join-Path $WorkPath $rel))) {
+        return [pscustomobject]@{ ref = $rel; found = $true }
+    }
+    $abs = if ($ScriptsDir) { Join-Path $ScriptsDir $Name } else { '' }
+    if ($abs -and (Test-Path -LiteralPath $abs)) {
+        $p = $abs -replace '\\', '/'
+        if ($p -match '\s') { $p = '"' + $p + '"' }
+        return [pscustomobject]@{ ref = $p; found = $true }
+    }
+    return [pscustomobject]@{ ref = $rel; found = $false }
+}
+
 # The one-line first message a spawned Claude session receives. Pure -> testable.
 # -Cli is threaded (default 'claude') so Phase-2 adapters can specialize the leading
 # autonomy sentence per CLI without another signature change; Phase 1 keeps the
@@ -1525,6 +1709,10 @@ function Resolve-LaunchBrake {
 # condition. A session that merged to main was obeying its brief, not defying it. With the
 # brake on, the merge step is never emitted and the finish line moves to a reviewed PR.
 # -BriefFile is the other half: it hands the session the expert brief it was never given.
+#
+# -ScriptsDir is where the plugin scripts live; it defaults to THIS script's own folder, so a
+# briefing names scripts that exist on the machine that composed it (#480). A parameter so a test
+# can point it at a folder that lacks a script.
 function Get-SessionBriefing {
     param(
         [int]$issueNum,
@@ -1533,11 +1721,33 @@ function Get-SessionBriefing {
         [string]$workPath,
         [string]$Cli = 'claude',
         [switch]$StopAtPR,
-        [string]$BriefFile = ''
+        [string]$BriefFile = '',
+        [string]$ScriptsDir = ''
     )
+    if (-not $ScriptsDir) { $ScriptsDir = $PSScriptRoot }
+    # Every plugin script the briefing names, resolved so the session can actually run it.
+    $needed = @('Fleet-Findings', 'Fleet-Handoff', 'Fleet-Ownership', 'New-BoardPR', 'Board-ReviewGate')
+    if (-not $StopAtPR) { $needed += 'Board-Merge' }
+    $sc = @{}; $unreachable = @()
+    foreach ($n in $needed) {
+        $r = Resolve-BriefingScriptRef -Name "$n.ps1" -WorkPath $workPath -ScriptsDir $ScriptsDir
+        $sc[$n] = $r.ref
+        if (-not $r.found) { $unreachable += "$n.ps1" }
+    }
+    # An unreachable script must be REPORTED, not routed around: a session that could not find
+    # New-BoardPR.ps1 used to improvise a bare `gh pr create`, losing the identity resolution,
+    # the push-permission check and the credential helper, and skipped the review gate without
+    # anyone being told (#480). The standing sentence covers a script that exists but fails.
+    $noSubstitute = "If a script named here is missing or fails to run, STOP and report exactly which one and why - " +
+                    "do NOT replace New-BoardPR.ps1 with a bare 'gh pr create' and do NOT skip the review gate: " +
+                    "they carry the account check and the review, and a substitute drops both silently. "
+    if ($unreachable.Count -gt 0) {
+        $noSubstitute = "WARNING - these plugin scripts were NOT found on this machine: " + ($unreachable -join ', ') +
+                        ". Report that as a broken install before doing anything else. " + $noSubstitute
+    }
     # Steps after the review gate are renumbered so the brake never leaves a hole at (5).
     $mergeStep = if ($StopAtPR) { "" } else {
-        "(5) merge it (ruleset-safe): pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR <pr> ; "
+        "(5) merge it (ruleset-safe): pwsh $($sc['Board-Merge']) -PR <pr> ; "
     }
     $recordNum = if ($StopAtPR) { "(5)" } else { "(6)" }
     $closing = if ($StopAtPR) {
@@ -1561,21 +1771,22 @@ function Get-SessionBriefing {
             "a bare commit takes whatever else is staged in the index, and if another session ever touches this folder your branch " +
             "ends up carrying its files under your message. " +
             "FIRST load fleet coordination context so you collaborate with sibling sessions: " +
-            "read prior findings with 'pwsh plugins/agentic-board/scripts/Fleet-Findings.ps1 -List' ; " +
-            "inherit any upstream hand-off with 'pwsh plugins/agentic-board/scripts/Fleet-Handoff.ps1 -Context -Issue $issueNum' ; " +
+            "read prior findings with 'pwsh $($sc['Fleet-Findings']) -List' ; " +
+            "inherit any upstream hand-off with 'pwsh $($sc['Fleet-Handoff']) -Context -Issue $issueNum' ; " +
             "and once you know which files you will edit, claim them with " +
-            "'pwsh plugins/agentic-board/scripts/Fleet-Ownership.ps1 -Claim -Issue $issueNum -Branch $branch -Paths <files>' " +
+            "'pwsh $($sc['Fleet-Ownership']) -Claim -Issue $issueNum -Branch $branch -Paths <files>' " +
             "(if it warns of overlap with another live session, steer clear of those files). Then: " +
             "(1) read it with: gh issue view $issueNum --repo $repo ; " +
             "(2) implement it fully in this worktree and commit your changes ; " +
-            "(3) open the PR with: pwsh plugins/agentic-board/scripts/New-BoardPR.ps1 -Issue $issueNum " +
+            "(3) open the PR with: pwsh $($sc['New-BoardPR']) -Issue $issueNum " +
             "and note the PR number it prints ; " +
-            "(4) pass the review gate: pwsh plugins/agentic-board/scripts/Board-ReviewGate.ps1 -PR <pr> ; " +
+            "(4) pass the review gate: pwsh $($sc['Board-ReviewGate']) -PR <pr> ; " +
             "address any feedback and re-run until it is green ; " +
             $mergeStep +
             "$recordNum record what you learned for other sessions with " +
-            "'pwsh plugins/agentic-board/scripts/Fleet-Findings.ps1 -Add -Issue $issueNum -Status done -Files <files touched> -Decisions <key decisions> -Gotchas <pitfalls>' " +
-            "and free your files with 'pwsh plugins/agentic-board/scripts/Fleet-Ownership.ps1 -Release -Issue $issueNum' . " +
+            "'pwsh $($sc['Fleet-Findings']) -Add -Issue $issueNum -Status done -Files <files touched> -Decisions <key decisions> -Gotchas <pitfalls>' " +
+            "and free your files with 'pwsh $($sc['Fleet-Ownership']) -Release -Issue $issueNum' . " +
+            $noSubstitute +
             "Work ONLY this issue - never touch other worktrees or issues. " + $closing)
 }
 
@@ -1799,6 +2010,7 @@ function Start-WorktreeSession {
     # line -> no stray tab-splitting). See Build-WorktreeLaunch header for the why.
     Set-Content -LiteralPath $plan.launchScriptFile -Value $plan.launchScript -Encoding UTF8
     $proc = $null
+    $launchedAt = Get-Date   # lets the caller tell THIS launch's wt tab shell from an older one (#557)
     try {
         if ($plan.usesWt) { $proc = Start-Process $plan.launcher -ArgumentList $plan.args -PassThru }
         else              { $proc = Start-Process $plan.launcher -ArgumentList $plan.args -WorkingDirectory $WorkPath -PassThru }
@@ -1811,6 +2023,7 @@ function Start-WorktreeSession {
     # NOTE: a 'wt' process forks the terminal host and exits fast, so its PID is not a
     # reliable liveness signal - only the standalone pwsh window's PID is tracked.
     $plan | Add-Member -NotePropertyName process -NotePropertyValue $proc -Force
+    $plan | Add-Member -NotePropertyName launchedAt -NotePropertyValue $launchedAt -Force
     return $plan
 }
 
@@ -2263,7 +2476,9 @@ function Get-SessionLiveStatus {
     if ($rateLimited) {
         return [pscustomobject]@{ done = $false; reason = 'UNKNOWN (rate limit)'; rateLimited = $true; merged = $false }
     }
-    $pidAlive = [bool]($Session.sessionPid -and (Get-Process -Id $Session.sessionPid -ErrorAction SilentlyContinue))
+    # Not "does this PID exist": a recycled PID would report a dead session alive forever (#520),
+    # and a wt entry without a usable PID is resolved through its tab shell (#557).
+    $pidAlive = ((Get-SessionLivePid $Session) -gt 0)
     return Get-SessionCompletion -PrState $prState -IssueState $issueState -PidAlive $pidAlive `
         -PrHeadOid ([string]$prHeadOid) -BranchTip ([string]$branchTip)
 }
@@ -2302,7 +2517,10 @@ function Remove-SessionRegistryEntry {
             Add-Content -LiteralPath $histPath -Encoding UTF8 -Value (([pscustomobject]$row) | ConvertTo-Json -Compress -Depth 4)
         }
     } catch { }
-    $kept | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p
+    # An EMPTY list must be written explicitly: piping @() into ConvertTo-Json emits nothing, so
+    # Set-Content never ran and the LAST entry of the registry could never be pruned (#555 - the
+    # legacy entries that finally drain are exactly the ones that used to sit there forever).
+    if (@($kept).Count -eq 0) { Set-Content -LiteralPath $p -Value '[]' } else { $kept | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p }
 }
 
 # Parse `git worktree list --porcelain` into objects. The porcelain format is a blank-line
@@ -2402,6 +2620,28 @@ function Resolve-GitPathForm {
     try { return (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName } catch { return $Path }
 }
 
+# Is this folder the MAIN working copy (or a folder inside it) rather than a linked worktree? (#555)
+# Answered by git, not by comparing path strings: in a main working tree the git dir IS the common
+# dir, while in a linked worktree it is <common>/worktrees/<name>. A folder inside the main copy
+# (a legacy session registered from `plugins/<x>` instead of the clone root) answers the same as the
+# clone itself, which is exactly the point - none of them is a worktree, so none may be torn down.
+# The registry can name such a path: sessions from before the worktree flow ran `-Start` in the clone
+# and recorded the clone as the "worktree". Unreadable (no such folder, not a repo, git failed)
+# returns $false: the caller's own guards (dirty check, git's refusal) still apply to that case.
+function Test-IsMainWorkingCopy {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+    $gitDir = @(git -C $Path rev-parse --absolute-git-dir 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $gitDir.Count -eq 0 -or -not "$($gitDir[0])".Trim()) { return $false }
+    $commonDir = @(git -C $Path rev-parse --git-common-dir 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $commonDir.Count -eq 0 -or -not "$($commonDir[0])".Trim()) { return $false }
+    $common = "$($commonDir[0])".Trim()
+    # --git-common-dir is relative to the folder git ran in when it is not absolute.
+    if (-not [System.IO.Path]::IsPathRooted($common)) { $common = Join-Path (Resolve-GitPathForm $Path) $common }
+    $norm = { param($p) ((Resolve-GitPathForm ([System.IO.Path]::GetFullPath($p))) -replace '\\', '/').TrimEnd('/') }
+    return ((& $norm "$($gitDir[0])".Trim()) -ieq (& $norm $common))
+}
+
 # Tear down a finished session: kill the tab shell FIRST (the `pwsh -NoExit` left cwd'd
 # inside the worktree keeps a handle -> `git worktree remove` fails with Permission denied),
 # then remove the worktree, delete the local branch, and prune the registry entry. Returns
@@ -2413,11 +2653,12 @@ function Invoke-SessionCleanup {
     $actions = @()
     # Kill ONLY a session whose tracked PID is genuinely its own spawned shell: a standalone
     # `pwsh` window (via='pwsh') records $spawn.process.Id, so killing that releases the
-    # worktree handle. A `wt` tab and an in-place -Start record the HOST/launcher PID (the
-    # tab's real shell is not tracked), so killing it could take down the host process and
-    # unrelated tabs - NEVER do that (Codex review, PR #269). Stop-ProcessTree also guards
-    # self + ancestors as a backstop. For wt/in-place, skip the kill and let the worktree
-    # removal report a held handle if the untracked shell still has it open.
+    # worktree handle. An in-place -Start records the HOST PID, and a `wt` entry's stored PID
+    # is not trusted for a kill (older ones hold the launcher's parent), so killing by it could
+    # take down the host process and unrelated tabs - NEVER do that (Codex review, PR #269).
+    # Stop-ProcessTree also guards self + ancestors as a backstop. A wt tab is instead found
+    # below by its launch script; in-place skips the kill and lets the worktree removal report
+    # a held handle if a shell still has it open.
     if ($Session.sessionPid -and $Session.via -eq 'pwsh') {
         $actions += "kill PID $($Session.sessionPid) (ventana pwsh propia - libera el worktree)"
         if (-not $DryRun) { Stop-ProcessTree -TargetPid ([int]$Session.sessionPid) | Out-Null }
@@ -2442,7 +2683,18 @@ function Invoke-SessionCleanup {
     # refuse and keep everything for a later retry. A merged session is torn down as usual: its
     # work landed, so what remains is scratch. -ForceRemoveWorktree is the deliberate discard.
     # The check is read-only, so it also runs under -DryRun and makes the plan predictive.
-    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and (Test-Path -LiteralPath $Session.workPath)) {
+    #
+    # THE MAIN WORKING COPY IS NEVER A TEARDOWN TARGET (#555). A session from before the worktree
+    # flow recorded the clone itself (or a folder inside it) as its workPath. There is no worktree to
+    # remove, and asking git to remove one is not a safe no-op: git refuses the clone root, but a
+    # folder INSIDE the clone is "not a working tree" too, git no longer lists it, and the litter
+    # cleanup below then took that as licence to `Remove-Item -Recurse` the folder - measured: it
+    # deleted `plugins/agentic-board` out of the clone. Decided FIRST, before the dirty check, because
+    # a clone with uncommitted files (the normal state of somebody's clone) would otherwise return
+    # early and the entry would never drain. -ForceRemoveWorktree does NOT override this: it means
+    # "discard the uncommitted files of a real worktree", not "delete the primary checkout".
+    $isMainCopy = [bool]($Session.workPath -and (Test-IsMainWorkingCopy $Session.workPath))
+    if ($Session.workPath -and -not $PrMerged -and -not $ForceRemoveWorktree -and -not $isMainCopy -and (Test-Path -LiteralPath $Session.workPath)) {
         $out = @(git -C $Session.workPath status --porcelain 2>&1)
         # FAIL CLOSED: an unreadable worktree (corrupt metadata, index lock, no git) yields no
         # output, which must NOT be read as "clean" - that would hand the --force exactly the
@@ -2472,7 +2724,9 @@ function Invoke-SessionCleanup {
     # comes from `git worktree list`; workPath here comes from the registry, so nothing self-heals.
     # This is the designed case for a `wt` session, whose shell is deliberately never killed above.
     $worktreeGone = $true
-    if ($Session.workPath) {
+    if ($isMainCopy) {
+        $actions += "SKIP no toco $($Session.workPath) (#$($Session.issue)): es el working copy principal (o una carpeta dentro de el), no un worktree enlazado - nunca se borra. Sesion anterior al flujo de worktrees: solo se poda su registro"
+    } elseif ($Session.workPath) {
         $actions += "git worktree remove --force $($Session.workPath)"
         if (-not $DryRun) {
             # Resolve BEFORE the removal, while the directory still exists to be resolved: after a
@@ -2554,8 +2808,8 @@ function Invoke-SessionWatch {
         # safe to prune from sessions.json without a gh call. Injectable for tests.
         [scriptblock]$IsStale = {
             param($s)
-            ($s.sessionPid -gt 0) -and
-            -not (Get-Process -Id $s.sessionPid -ErrorAction SilentlyContinue) -and
+            (($s.sessionPid -gt 0) -or ("$($s.via)" -eq 'wt')) -and
+            ((Get-SessionLivePid $s) -le 0) -and
             $s.workPath -and
             -not (Test-Path $s.workPath -PathType Container)
         },
@@ -2760,9 +3014,7 @@ if ($Relaunch -gt 0) {
         Write-Host ("  Relaunch #{0} FALLO: el worktree no existe o no se pudo lanzar - registro intacto." -f $Relaunch) -ForegroundColor Red
         exit 1
     }
-    $via = if ($spawn.usesWt) { 'wt' } else { 'pwsh' }
-    if ($spawn.process -and -not $spawn.usesWt) { Write-SessionRegistryEntry -IssueNum $Relaunch -SessionPid $spawn.process.Id -Via $via -Cli $cli -FleetSession $marker }
-    else { Write-SessionRegistryEntry -IssueNum $Relaunch -Via $via -Cli $cli -FleetSession $marker }
+    Register-LaunchedSession -Spawn $spawn -IssueNum $Relaunch -Cli $cli -FleetSession $marker
     Write-Host ("  Relaunched #{0} [{1}]." -f $Relaunch, $cli) -ForegroundColor Green
     exit 0
 }
@@ -3516,12 +3768,7 @@ if ($Parallel.Count -gt 0) {
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
                                                -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `
                                                -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
-                $via = if ($spawn.usesWt) { "wt" } else { "pwsh" }
-                if ($spawn.process -and -not $spawn.usesWt) {
-                    Write-SessionRegistryEntry -IssueNum $entry.issue -SessionPid $spawn.process.Id -Via $via -Cli $actualCli -FleetSession $marker
-                } else {
-                    Write-SessionRegistryEntry -IssueNum $entry.issue -Via $via -Cli $actualCli -FleetSession $marker
-                }
+                Register-LaunchedSession -Spawn $spawn -IssueNum $entry.issue -Cli $actualCli -FleetSession $marker
                 $actualCli
             }.GetNewClosure()
             # Governor: pace launches in waves sized to machine capacity, instead of firing
@@ -3578,14 +3825,9 @@ if ($Parallel.Count -gt 0) {
                     $marker = New-FleetSessionMarker $r.issue $runId
                     $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
                     $launched++
-                    # Track the spawned session's own PID (pwsh window is reliable; a wt
-                    # launcher forks and exits, so keep the host PID there).
-                    $via = if ($spawn.usesWt) { "wt" } else { "pwsh" }
-                    if ($spawn.process -and -not $spawn.usesWt) {
-                        Write-SessionRegistryEntry -IssueNum $r.issue -SessionPid $spawn.process.Id -Via $via -FleetSession $marker
-                    } else {
-                        Write-SessionRegistryEntry -IssueNum $r.issue -Via $via -FleetSession $marker
-                    }
+                    # Track the spawned session's own PID: the pwsh window's process, or for a wt
+                    # tab (whose launcher forks and exits) the tab shell found by its launch script.
+                    Register-LaunchedSession -Spawn $spawn -IssueNum $r.issue -FleetSession $marker
                 }
             }
             Write-Host ""
