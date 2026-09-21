@@ -35,6 +35,13 @@
 .PARAMETER Repo
     owner/name. Default: derived from the origin remote of the cwd.
 
+.PARAMETER IssueRepo
+    owner/name of the repository the -Issue number(s) live in, when that is NOT the repo the PR
+    goes to (a cross-repo issue, #487). The issue is then read from -IssueRepo and the PR body
+    says `Refs <IssueRepo>#<n>` instead of `Closes #<n>`: a `Closes #<n>` in another repo would
+    close THAT repo's own issue <n>. Nothing closes the issue automatically then - it is closed
+    when all its PRs have merged. Default: empty = the classic same-repo `Closes #<n>`.
+
 .PARAMETER Branch
     Branch to push. Default: the currently checked-out branch.
 
@@ -75,6 +82,7 @@
 param(
     [Parameter(Mandatory)][string[]]$Issue,
     [string]$Repo     = "",
+    [string]$IssueRepo = "",
     [string]$Branch   = "",
     [string]$Base     = "",
     [string]$Title    = "",
@@ -116,11 +124,22 @@ function Get-IssueNumbers {
 }
 
 # Builds the mandatory 'Closes #<n>' block - one line per issue - plus any extra -Body text (#633).
+# With -IssueRepo (a cross-repo issue, #487) the lines are 'Refs <owner/name>#<n>' instead: a bare
+# `Closes #<n>` in a PR of another repository would close THAT repository's issue <n>.
 function Format-ClosesBody {
-    param([int[]]$Issues, [string]$Extra = "")
-    $closes = ($Issues | ForEach-Object { "Closes #$_" }) -join "`n"
+    param([int[]]$Issues, [string]$Extra = "", [string]$IssueRepo = "")
+    $closes = if ($IssueRepo) { ($Issues | ForEach-Object { "Refs $IssueRepo#$_" }) -join "`n" }
+              else            { ($Issues | ForEach-Object { "Closes #$_" }) -join "`n" }
     if ($Extra) { return "$closes`n`n$Extra" }
     return $closes
+}
+
+# Which repository do the -Issue numbers live in? The PR's own repo, unless -IssueRepo says the issue
+# is elsewhere (a cross-repo issue, #487). Pure.
+function Get-IssueHomeRepo {
+    param([string]$Repo, [string]$IssueRepo = "")
+    if ($IssueRepo) { return $IssueRepo }
+    return $Repo
 }
 
 # A path in a form two spellings of the same folder compare equal in: full, forward slashes,
@@ -291,15 +310,17 @@ if ($Branch -eq $Base) { throw "Estas en '$Base' (la base). Trabaja el issue en 
 $issueNums = @(Get-IssueNumbers $Issue)
 if ($issueNums.Count -eq 0) { throw "-Issue no trajo ningun numero de issue valido (recibi '$($Issue -join ',')')." }
 
+if ($IssueRepo -and $IssueRepo -notmatch '^[^/]+/[^/]+$') { throw "-IssueRepo debe ser owner/name (recibi '$IssueRepo')." }
+$issueHome = Get-IssueHomeRepo -Repo $Repo -IssueRepo $IssueRepo
 $issues = @()
 foreach ($n in $issueNums) {
-    $one = gh api "repos/$Repo/issues/$n" 2>$null | ConvertFrom-Json
-    if (-not $one) { throw "Issue #$n no existe en $Repo." }
+    $one = gh api "repos/$issueHome/issues/$n" 2>$null | ConvertFrom-Json
+    if (-not $one) { throw "Issue #$n no existe en $issueHome." }
     if ($one.state -ne 'open') { Write-Host "AVISO: issue #$n esta '$($one.state)' - el PR igual lo referencia." -ForegroundColor Yellow }
     $issues += $one
 }
 if (-not $Title) { $Title = $issues[0].title }
-$prBody = Format-ClosesBody -Issues $issueNums -Extra $Body
+$prBody = Format-ClosesBody -Issues $issueNums -Extra $Body -IssueRepo $(if ($IssueRepo -and ($IssueRepo -ine $Repo)) { $IssueRepo } else { '' })
 
 # -- Existing open PR for this branch? (re-run = iterate on it) ------------------
 # Fail closed (Invoke-Gh -Json) then require a positive-integer number: a phantom/null-number row is
