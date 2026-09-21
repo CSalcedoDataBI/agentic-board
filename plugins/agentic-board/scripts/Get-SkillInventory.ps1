@@ -123,9 +123,20 @@ function ConvertTo-RepoSlug {
     param($Value)
     $u = if ($Value -is [string]) { $Value } elseif ($Value -and $Value.url) { [string]$Value.url } else { '' }
     if (-not $u) { return $null }
-    $m = [regex]::Match($u.Trim(), '^(?:github:)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$')
-    if (-not $m.Success) { $m = [regex]::Match($u, '(?i)github\.com[/:]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/#?]|$)') }
-    if ($m.Success) { "$($m.Groups[1].Value)/$($m.Groups[2].Value)" } else { $null }
+    # The HOST must be exactly github.com (a substring match would turn https://notgithub.com/o/r or
+    # https://github.com.evil.io/o/r into a GitHub slug). Accepted shapes: owner/repo, github:owner/repo,
+    # [git+]https|ssh|git://[user@]github.com/owner/repo[.git][/#?...], and scp-style git@github.com:owner/repo.
+    $seg = '([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)'
+    $forms = @(
+        "^(?:github:)?$seg(?:\.git)?/?$",
+        "(?i)^(?:git\+)?(?:https?|ssh|git)://(?:[^/@\s]+@)?(?:www\.)?github\.com[/:]$seg(?:\.git)?(?:[/#?].*)?$",
+        "(?i)^(?:[^/@\s:]+@)?github\.com:$seg(?:\.git)?/?$"
+    )
+    foreach ($re in $forms) {
+        $m = [regex]::Match($u.Trim(), $re)
+        if ($m.Success) { return "$($m.Groups[1].Value)/$($m.Groups[2].Value)" }
+    }
+    $null
 }
 function Get-PluginIdentity {
     param([string]$SkillFile, [string]$Base)
@@ -138,8 +149,15 @@ function Get-PluginIdentity {
     if (-not $baseItem -or -not $dirItem) { return $unknown }
     $baseN = ($baseItem.FullName -replace '\\','/').TrimEnd('/')
     $dir = ($dirItem.FullName -replace '\\','/')
+    # A manifest only counts if it sits ABOVE the plugin's skills/ directory: one dropped inside
+    # skills/<x>/ (nearer to the SKILL.md than the plugin root) would otherwise win the walk and let a
+    # single skill name its own plugin. No skills/ ancestor below the base = not a plugin layout = unknown.
+    $up = $dir
+    while ($up.Length -gt $baseN.Length -and (Split-Path $up -Leaf) -ne 'skills') { $up = ((Split-Path $up -Parent) -replace '\\','/') }
+    if ($up.Length -le $baseN.Length) { return $unknown }
+    $start = ((Split-Path $up -Parent) -replace '\\','/')
     # 1. nearest plugin.json, walking up but never above the scanned base.
-    $walk = $dir
+    $walk = $start
     while ($walk -and $walk.Length -gt $baseN.Length -and $walk.StartsWith($baseN + '/', [StringComparison]::OrdinalIgnoreCase)) {
         $man = Read-JsonFile (Join-Path $walk '.claude-plugin/plugin.json')
         if ($man -eq 'unreadable') { return $unknown }
@@ -153,9 +171,9 @@ function Get-PluginIdentity {
     }
     # 2. a marketplace.json entry with a LOCAL source directory that contains the skill (longest wins;
     #    two equally good entries are ambiguous, hence unknown).
-    $walk = $dir
+    $walk = $start
     while ($walk -and $walk.Length -gt $baseN.Length -and $walk.StartsWith($baseN + '/', [StringComparison]::OrdinalIgnoreCase)) {
-        $mkt = Read-JsonFile (Join-Path $walk '.claude-plugin/marketplace.json')
+        $mkt =Read-JsonFile (Join-Path $walk '.claude-plugin/marketplace.json')
         if ($mkt -eq 'unreadable') { return $unknown }
         if ($mkt) {
             $best = @(); $bestLen = -1

@@ -83,7 +83,11 @@ foreach ($s in $skills) {
 $groups = [ordered]@{}
 foreach ($s in $skills) {
     $o = Get-Owner $s
-    $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)"
+    # The lint outcome is part of the key: the variant compares descriptions with whitespace collapsed,
+    # so two copies can differ in length (over-budget) or wording-lint result while sharing a variant;
+    # a fold must never hide a finding the other copy would have produced.
+    $sig = @($s.budget.overCap, $s.lint.thirdPerson, $s.lint.hasTriggers, $s.lint.hasWhenNotToUse, [bool]$s.description) -join ','
+    $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)|$sig"
     if (-not $groups.Contains($gk)) { $groups[$gk] = [System.Collections.Generic.List[object]]::new() }
     $groups[$gk].Add($s)
 }

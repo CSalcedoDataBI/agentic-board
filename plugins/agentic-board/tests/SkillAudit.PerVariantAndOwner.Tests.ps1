@@ -160,6 +160,75 @@ Describe 'plugin identity is read from the manifest, not from a path segment (#4
     }
 }
 
+Describe 'repository URLs only count when the host is github.com (review round 1)' {
+    It 'a manifest declaring a look-alike host does not become a GitHub slug, so the plugin is not filed' {
+        $fx = New-Fixture 'hosts'
+        $cases = [ordered]@{
+            'h1' = 'https://notgithub.com/CSalcedoDataBI/agentic-board'
+            'h2' = 'https://github.com.evil.io/CSalcedoDataBI/agentic-board'
+            'h3' = 'https://gitlab.com/CSalcedoDataBI/agentic-board'
+            'h4' = 'gitlab:CSalcedoDataBI/agentic-board'
+            'h5' = 'git@notgithub.com:CSalcedoDataBI/agentic-board.git'
+        }
+        foreach ($k in $cases.Keys) {
+            Set-Manifest $fx.Home ".claude/plugins/cache/m/$k/1" ('{"name":"agentic-board","homepage":"' + $cases[$k] + '"}')
+            New-Skill $fx.Home ".claude/plugins/cache/m/$k/1/skills/$k" $k 'I can help with things.'
+        }
+        $inv = Invoke-Inv $fx
+        foreach ($k in $cases.Keys) { ($inv.skills | Where-Object name -eq $k).pluginRepo | Should -BeNullOrEmpty }
+        $aud = Invoke-Aud $fx
+        @($aud.findings | Where-Object filing -eq 'file').Count | Should -Be 0
+    }
+    It 'the real GitHub spellings are all accepted' {
+        $fx = New-Fixture 'hosts-ok'
+        $cases = [ordered]@{
+            'g1' = 'https://github.com/o/g1'
+            'g2' = 'git+https://github.com/o/g2.git'
+            'g3' = 'git@github.com:o/g3.git'
+            'g4' = 'ssh://git@github.com/o/g4'
+            'g5' = 'github:o/g5'
+            'g6' = 'o/g6'
+            'g7' = 'https://www.github.com/o/g7/tree/main'
+        }
+        foreach ($k in $cases.Keys) {
+            Set-Manifest $fx.Home ".claude/plugins/cache/m/$k/1" ('{"name":"' + $k + '","repository":"' + $cases[$k] + '"}')
+            New-Skill $fx.Home ".claude/plugins/cache/m/$k/1/skills/$k" $k 'Does a thing. Use when asked.'
+        }
+        $inv = Invoke-Inv $fx
+        foreach ($k in $cases.Keys) { ($inv.skills | Where-Object name -eq $k).pluginRepo | Should -Be "o/$k" }
+    }
+}
+
+Describe 'a manifest nested inside skills/ cannot name its own plugin (review round 1)' {
+    It 'a plugin.json (or marketplace.json) dropped in skills/NAME/.claude-plugin is ignored; the real plugin root wins' {
+        $fx = New-Fixture 'nested'
+        Set-Manifest $fx.Home '.claude/plugins/cache/m/realplugin/1' '{"name":"realplugin","repository":"someone/realplugin"}'
+        New-Skill $fx.Home '.claude/plugins/cache/m/realplugin/1/skills/leak' 'leak' 'I can help with things.'
+        Set-Manifest $fx.Home '.claude/plugins/cache/m/realplugin/1/skills/leak' $script:ToolManifest
+        $r = (Invoke-Inv $fx).skills | Where-Object name -eq 'leak'
+        $r.plugin | Should -Be 'realplugin'
+        (Invoke-Aud $fx).findings | Where-Object { $_.filing -eq 'file' } | Should -BeNullOrEmpty
+    }
+    It 'a skill outside any skills/ directory has no plugin layout, hence unknown' {
+        $fx = New-Fixture 'no-skills-dir'
+        Set-Manifest $fx.Home '.claude/plugins/cache/m/p/1' $script:ToolManifest
+        New-Skill $fx.Home '.claude/plugins/cache/m/p/1/elsewhere/z' 'z' 'Does a thing. Use when asked.'
+        ((Invoke-Inv $fx).skills | Where-Object name -eq 'z').pluginIdentity | Should -Be 'unknown'
+    }
+}
+
+Describe 'folding never hides a finding a copy would have produced (review round 1)' {
+    It 'copies whose descriptions differ only in whitespace but not in over-budget status are not folded' {
+        $fx = New-Fixture 'fold-budget'
+        $tail = 'not for unrelated work.'
+        New-Skill $fx.Root 'plugins/agentic-board/skills/demo' 'demo' "Use when asked; $tail"
+        Set-Manifest $fx.Home '.claude/plugins/cache/m/agentic-board/1' $script:ToolManifest
+        New-Skill $fx.Home '.claude/plugins/cache/m/agentic-board/1/skills/demo' 'demo' ('Use when asked;' + (' ' * 1600) + $tail)
+        $aud = Invoke-Aud $fx $script:ToolRepo
+        @($aud.findings | Where-Object type -eq 'over-budget').Count | Should -Be 1
+    }
+}
+
 Describe 'owner routing is fail-closed (#462)' {
     It 'Resolve-SkillOwner: the tool is the tool only when name AND declared repo agree' {
         $o = & $script:Resolver -Scope plugin -Plugin agentic-board -PluginRepo $script:ToolRepo
