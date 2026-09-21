@@ -17,6 +17,11 @@ $audit = & "${CLAUDE_PLUGIN_ROOT}/scripts/Invoke-SkillAudit.ps1" -Root . -Scope 
 $audit.summary; $audit.findings | Format-Table severity,type,skill,filing
 ```
 
+The overlap pass compares distinct skills, not copies: the same skill seen through the repo tree,
+the plugin cache and worktrees is folded into one (`summary.copiesCollapsed` says how many were
+folded, and a `near-duplicate` finding says when it stands for several copies with the same description; the audit compares descriptions, so two copies whose bodies differ but whose descriptions match are folded). Two
+copies of one name with DIFFERENT descriptions are a real `divergent-copy` finding (a stale copy).
+
 Findings carry a `filing` route (`file` = open an issue on the owner repo; `local` =
 report only). This is `Resolve-SkillOwner` deciding where each finding belongs — the tool's
 board for agentic-board skills, the project's board for project skills, local-only for

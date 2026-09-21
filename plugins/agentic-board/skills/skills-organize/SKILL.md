@@ -27,7 +27,7 @@ Present, grouped by scope (plugin / personal / project):
   - `lint.hasTriggers` false → add concrete trigger terms / "Use when…".
   - `lint.hasWhenNotToUse` false → add a "when NOT to use → see X" clause (the #1 lever against mis-triggering between neighbors).
   - `budget.overCap` true → description over the 1536-char cap; it gets truncated (a silently weakened skill).
-- **near-duplicates** — the `overlaps` array (description keyword Jaccard ≥ 0.5). Each pair needs a disambiguation edit or a merge.
+- **near-duplicates** — the `overlaps` array (description keyword Jaccard ≥ 0.5). Each pair needs a disambiguation edit or a merge. Copies of one skill (same name and description) are folded first and counted in `summary.collapsedCopies`; copies of one name with different descriptions come back as `kind: divergent-copy` (a stale copy).
 - **misplaced / orphaned** — `misplaced=true` means a SKILL.md outside `.claude/skills` (or `plugins/*/skills`); candidates for Mode 2.
 
 > The `budget` block is a **proxy** for Claude Code's `doctor` health view (which is a

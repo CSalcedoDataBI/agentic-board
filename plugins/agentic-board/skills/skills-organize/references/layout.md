@@ -38,3 +38,10 @@ by `Get-SkillInventory.ps1`:
 
 Near-duplicate descriptions (keyword Jaccard ≥ 0.5, in the `overlaps` array) are the main
 cause of mis-triggering. Resolve each by adding a disambiguation clause to both, or merging.
+
+The same skill is often visible through several copies (repo tree, installed plugin cache,
+marketplaces clone, worktrees). Copies with the same name and description are folded into one
+before comparing, so a skill is never reported against itself; the number folded is
+`summary.collapsedCopies`. Two copies of one name whose descriptions differ are reported as
+`kind: divergent-copy` (one of them is stale — re-sync it), whatever their overlap.
+`hasTriggers` accepts `Triggers: …`, `Triggers — …` and `Triggers – …` (space before the dash is fine).

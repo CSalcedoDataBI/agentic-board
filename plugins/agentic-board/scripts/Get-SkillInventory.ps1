@@ -11,6 +11,9 @@
     documented 1536-char per-skill cap), the inferred monorepo project, and whether the
     file is misplaced (outside .claude/skills). It also flags near-duplicate skills by
     description keyword overlap (Jaccard) — the main disambiguation lever between neighbors.
+    Copies of ONE skill (same name, same description, e.g. repo tree + plugin cache) are folded
+    into one before comparing and counted in summary.collapsedCopies; two copies of one name
+    whose descriptions differ are reported as kind 'divergent-copy' (a stale copy).
 
     Deterministic and side-effect free: it reads files and emits objects (or JSON).
     Everything else in skills-ops consumes this contract.
@@ -74,7 +77,11 @@ function Get-Lint {
     $len = $d.Length
     [pscustomobject]@{
         thirdPerson    = ($d -notmatch '(?i)\b(I can|I will|I''ll|I help|let me|we help)\b') -and ($len -gt 0)
-        hasTriggers    = [bool]($d -match '(?i)(use when|use to|use for|triggers?[:—-]|when the user|when you)')
+        # A "Triggers" clause is the word followed by a colon or a dash, with optional space BEFORE
+        # the punctuation ("Triggers — a, b" is how this repo's own skills write it). A bare hyphen
+        # must have a space after it, so "trigger-happy" and prose like "Triggers happen when..."
+        # do not count.
+        hasTriggers    = [bool]($d -match '(?i)(use when|use to|use for|\btriggers?\b(\s*[:—–]|\s*-\s)|when the user|when you)')
         useCaseFirst   = [bool]($d -match '(?i)^(use )?[a-z]+(s|es|es)?\b') -or ($len -gt 0 -and $d -match '^[A-Z]')
         hasWhenNotToUse= [bool]($d -match '(?i)(not for|do ?n[o'']t use|don''t use|NOT use|except when|rather than)')
         lenOk          = ($len -le $DescCap -and $len -gt 0)
@@ -178,33 +185,88 @@ if ($Scope -in @('all','plugin')) {
 
 # ── Overlaps (near-duplicate descriptions by keyword Jaccard) ────────────────────
 $overlaps = [System.Collections.Generic.List[object]]::new()
-# Every pair used to pipe both keyword lists through Where-Object / Sort-Object: ~100k pairs for a
-# normal plugin cache took ~30 s, the bulk of the whole run (#609). Same Jaccard, but on HashSets,
-# and a pair is skipped outright when even a perfect overlap of the smaller set could not reach
-# the threshold (J <= min/max size).
-$sets = @(foreach ($r in $records) {
-    # Unary comma: a HashSet is enumerable and would otherwise be flattened into its strings.
-    ,[System.Collections.Generic.HashSet[string]]::new([string[]]@(@($r._keywords) | Where-Object { $_ }))
-})
+
+# The same skill is normally visible through several copies at once (the repo working tree, the
+# installed plugin cache, the marketplaces clone, worktrees under .claude/worktrees): 273 of the
+# 357 findings the audit produced on one real machine paired a skill with ITS OWN copy. So the
+# pass works on VARIANTS: records with the same base name and the same description (whitespace
+# and case aside) are one variant, and only variants are compared. Nothing is hidden: the copies
+# folded into a variant are counted (`aCopies`/`bCopies`, `summary.collapsedCopies`), and two
+# copies of one name whose descriptions DIFFER stay visible as a `divergent-copy` pair (a stale copy).
+$scopeRank = @{ project = 0; personal = 1; plugin = 2 }
+# Most local first: project, personal, plugin; and within a scope the real tree before a copy of it
+# under .claude/worktrees. Ties by path, so the choice never depends on directory-enumeration order.
+function Get-CopyRank {
+    param($Record)
+    ([int]$scopeRank[$Record.scope]) * 2 + $(if ($Record.path -match '/\.claude/worktrees/') { 1 } else { 0 })
+}
+# The namespace is deliberately NOT part of the key: the "plugin" of a plugin-scope record is read from
+# its path, and for a marketplaces clone or a cache layout that segment is the marketplace, not the
+# plugin, so the very same skill carries different namespaces in different copies.
+$variantMap = [ordered]@{}
 for ($i = 0; $i -lt $records.Count; $i++) {
-    $a = $sets[$i]
+    $r = $records[$i]
+    $fp  = (([string]$r.description) -replace '\s+', ' ').Trim().ToLowerInvariant()
+    $key = ([string]$r.name).ToLowerInvariant() + "`n" + $fp
+    if (-not $variantMap.Contains($key)) { $variantMap[$key] = [System.Collections.Generic.List[int]]::new() }
+    $variantMap[$key].Add($i)
+}
+$variants = @(foreach ($idxs in $variantMap.Values) {
+    $rep = @($idxs | Sort-Object @{ e = { Get-CopyRank $records[$_] } }, @{ e = { $records[$_].path } })[0]
+    [pscustomobject]@{
+        Rec    = $records[$rep]
+        Copies = $idxs.Count
+        Paths  = @($idxs | ForEach-Object { $records[$_].path })
+        # Unary comma: a HashSet is enumerable and would otherwise be flattened into its strings.
+        Set    = [System.Collections.Generic.HashSet[string]]::new([string[]]@(@($records[$rep]._keywords) | Where-Object { $_ }))
+    }
+})
+
+function Get-Jaccard {
+    param($A, $B)
+    $x = [System.Collections.Generic.HashSet[string]]::new($A)
+    $x.IntersectWith($B)
+    $union = $A.Count + $B.Count - $x.Count
+    if ($union -gt 0) { [math]::Round($x.Count / $union, 3) } else { 0 }
+}
+function New-Overlap {
+    param($VA, $VB, [string]$Kind, $Jaccard)
+    [pscustomobject]@{
+        a = $VA.Rec.namespace; b = $VB.Rec.namespace; jaccard = $Jaccard; kind = $Kind
+        aPath = $VA.Rec.path; bPath = $VB.Rec.path; aCopies = $VA.Copies; bCopies = $VB.Copies
+        # Every copy folded into each side, so a caller that filtered to one copy can still find its pair.
+        aPaths = $VA.Paths; bPaths = $VB.Paths
+    }
+}
+
+# Different skills: every pair used to pipe both keyword lists through Where-Object / Sort-Object:
+# ~100k pairs for a normal plugin cache took ~30 s, the bulk of the whole run (#609). Same Jaccard,
+# but on HashSets, and a pair is skipped outright when even a perfect overlap of the smaller set
+# could not reach the threshold (J <= min/max size).
+for ($i = 0; $i -lt $variants.Count; $i++) {
+    $a = $variants[$i].Set
     if ($a.Count -eq 0) { continue }
-    for ($j = $i + 1; $j -lt $records.Count; $j++) {
-        $b = $sets[$j]
+    for ($j = $i + 1; $j -lt $variants.Count; $j++) {
+        # Same name = the same skill (compared below as a stale copy), never a "near-duplicate".
+        if ($variants[$i].Rec.name -ieq $variants[$j].Rec.name) { continue }
+        $b = $variants[$j].Set
         if ($b.Count -eq 0) { continue }
         $lo = [math]::Min($a.Count, $b.Count); $hi = [math]::Max($a.Count, $b.Count)
         if ([math]::Round($lo / $hi, 3) -lt $OverlapThreshold) { continue }
-        $x = [System.Collections.Generic.HashSet[string]]::new($a)
-        $x.IntersectWith($b)
-        $union = $a.Count + $b.Count - $x.Count
-        $jac   = if ($union -gt 0) { [math]::Round($x.Count / $union, 3) } else { 0 }
-        if ($jac -ge $OverlapThreshold) {
-            $overlaps.Add([pscustomobject]@{
-                a = $records[$i].namespace; b = $records[$j].namespace; jaccard = $jac
-            })
-        }
+        $jac = Get-Jaccard $a $b
+        if ($jac -ge $OverlapThreshold) { $overlaps.Add((New-Overlap $variants[$i] $variants[$j] 'near-duplicate' $jac)) }
     }
 }
+
+# One skill, several descriptions: the primary variant (most local copy) against each other one,
+# whatever their overlap. Bounded at (variants - 1) pairs per name however many copies exist.
+foreach ($grp in ($variants | Group-Object { ([string]$_.Rec.name).ToLowerInvariant() } | Where-Object { $_.Count -gt 1 })) {
+    $ordered = @($grp.Group | Sort-Object @{ e = { Get-CopyRank $_.Rec } }, @{ e = { $_.Rec.path } })
+    for ($k = 1; $k -lt $ordered.Count; $k++) {
+        $overlaps.Add((New-Overlap $ordered[0] $ordered[$k] 'divergent-copy' (Get-Jaccard $ordered[0].Set $ordered[$k].Set)))
+    }
+}
+$collapsedCopies = $records.Count - $variants.Count
 
 # Strip the internal keyword field from the public contract.
 $clean = $records | Select-Object -Property * -ExcludeProperty _keywords
@@ -217,6 +279,9 @@ $result = [pscustomobject]@{
         overCap     = @($clean | Where-Object { $_.budget.overCap }).Count
         noTriggers  = @($clean | Where-Object { -not $_.lint.hasTriggers }).Count
         overlaps    = $overlaps.Count
+        # Records folded into another record of the same name and description before comparing
+        # (total - collapsedCopies = distinct skills the overlap pass looked at).
+        collapsedCopies = $collapsedCopies
     }
     skills   = $clean
     overlaps = $overlaps
