@@ -344,14 +344,27 @@ Notes:
     in a clone/worktree of each target repo and open ONE PR per target repo with
     `New-BoardPR.ps1 -Issue <n> -IssueRepo <issue's repo> -Repo <target>` (the body says
     `Refs <issue repo>#<n>`, never `Closes` - a `Closes #<n>` in another repo would close THAT repo's own
-    issue), run the review gate on each (`Board-ReviewGate.ps1 -Repo <target> -PR <pr>`), and never close the
+    issue), run the review gate on each (`Board-ReviewGate.ps1 -Repo <target> -PR <pr>`, or all at once with `-Issue <n>`), and never close the
     issue itself.
   - **Registry fidelity.** After every PR the session opens: `Board-Work.ps1 -RecordPr <owner/name>#<pr> -ForIssue <n>`
     (local only, no token; refused when the issue has no registered session - it never invents a row). `-Sessions`
     then lists the target repos, every recorded PR with its live state, and "N of M merged".
-  - **Closing (a decision left to the human).** With `Refs` PRs nothing closes the issue automatically: it is
-    closed by hand when ALL its PRs have merged. A plural review gate (one call for all PRs) and an automatic
-    close-when-all-merged are NOT implemented.
+  - **Gating several PRs (`Board-ReviewGate.ps1 -PullRequests` / `-Issue`).** `-PullRequests 'o/a#5','o/b#9'`
+    (or `-Issue <n>`, which takes the PRs recorded for that issue's session) runs the SAME single-PR gate on
+    each PR, as its own process with your gate switches forwarded, then prints one verdict per PR and a RUN
+    verdict. **All pass = pass (exit 0); any block = block (exit 1); any PR that could not be read or classified,
+    or an empty selection, = unknown (exit 4) - never a pass;** a PR that is CI-not-evaluated gives 3 and an
+    unreviewed one 2 (ranking, worst first: 1, 4, 3, 2, 0). The aggregation can only escalate: a PR the
+    single gate blocks is a block here. `-PR` (the classic call) is unchanged in behaviour and exit codes and
+    cannot be mixed with the multi form; `-RecordReview` / `-InstallRuleset` stay one PR at a time. Exit 4 exists
+    only in the multi form. Never merge on anything but exit 0, and never merge a PR whose own verdict is not pass.
+  - **Closing (explicit, after showing the list).** With `Refs` PRs nothing closes the issue automatically.
+    `Board-Work.ps1 -CloseCrossRepo <n>` prints every recorded PR with its live state and closes the issue ONLY
+    when ALL of them are MERGED and every target repo the issue declares has a recorded PR; without `-Force` (or
+    with `-DryRun`) it closes nothing, so run it once, show the user the list, and re-run with `-Force` after
+    their yes. It never closes on the first merged PR, and never when a PR is open, closed unmerged, has no
+    readable state, when no PR is recorded, or when the issue has no session (exit 1, nothing closed). An issue
+    that is already closed is left alone. `-Sessions` says `LISTO PARA CERRAR` or why not, per session.
 - **Compaction-survival (long single-session queues)**: when you work a queue of issues tied to an
   **epic** in ONE session, keep a durable run-ledger so the run survives auto-compaction. Three
   touch-points (see [references/compact-survival.md](references/compact-survival.md)):

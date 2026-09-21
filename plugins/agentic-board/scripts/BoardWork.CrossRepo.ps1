@@ -127,7 +127,7 @@ function Format-CrossRepoBriefing {
             "IMMEDIATELY after EACH PR is opened, record it so the fleet dashboard shows what is really live: " +
             "pwsh $($Refs['Board-Work']) -RecordPr <target owner/name>#<pr number> -ForIssue $IssueNum ; " +
             "(4) pass the review gate on EACH PR: pwsh $($Refs['Board-ReviewGate']) -Repo <target owner/name> -PR <pr> ; " +
-            "address feedback and re-run until every one is green ; ")
+            "address feedback and re-run until every one is green (all of them at once: pwsh $($Refs['Board-ReviewGate']) -Issue $IssueNum - the run passes only when every PR passes) ; ")
 }
 
 # ------------------------------------------------------------------------------- registry IO
@@ -193,4 +193,154 @@ function Format-SessionPrLines {
     }
     $lines += ("{0} de {1} PR(s) mergeados - el issue no se cierra solo con ninguno: se cierra cuando estan todos." -f $merged, $rows.Count)
     return @($lines)
+}
+
+# ------------------------------------------------------------------ gate and closure (#487, 3 and 5)
+
+# The PRs recorded for an issue's session(s) in sessions.json rows, as "owner/name#n" strings, in
+# order of recording, de-duplicated. PURE over the rows. An issue with no row, or a row with no
+# recorded PR, yields an empty list - and every caller treats empty as "nothing to gate / nothing
+# to close", never as "all clear".
+function Get-RecordedPullRequests {
+    param([object[]]$Entries = @(), [int]$Issue)
+    $out = @(); $seen = @{}
+    foreach ($e in @($Entries | Where-Object { $_ -and [int]$_.issue -eq $Issue })) {
+        if (-not $e.PSObject.Properties['prs']) { continue }
+        foreach ($p in @($e.prs | Where-Object { $_ -and $_.repo -and $_.number })) {
+            $k = "$($p.repo)#$($p.number)"
+            if ($seen.ContainsKey($k.ToLowerInvariant())) { continue }
+            $seen[$k.ToLowerInvariant()] = $true; $out += $k
+        }
+    }
+    return @($out)
+}
+
+# May the issue be closed? PURE. It may ONLY when: at least one PR is recorded, EVERY recorded PR is
+# MERGED (from a live read), and every target repo the issue declares has a recorded PR. Anything
+# else - a PR still open or closed unmerged, a PR whose state could not be read, a declared target
+# with no PR - is a refusal that names the reason. Never closes on the first merged PR.
+#   $Prs     recorded rows { repo; number }      $States  "repo#n" -> OPEN|MERGED|CLOSED (absent = unknown)
+#   $TargetRepos the issue's declared target repos (may be empty)
+# Returns { CanClose; Reason; Merged; Total; Unknown; NotMerged; Unrecorded }
+function Get-IssueClosureVerdict {
+    param([object[]]$Prs = @(), [hashtable]$States = @{}, [string[]]$TargetRepos = @())
+    $rows = @($Prs | Where-Object { $_ -and $_.repo -and $_.number })
+    $unknown = @(); $notMerged = @(); $merged = 0
+    foreach ($p in $rows) {
+        $k = "$($p.repo)#$($p.number)"
+        if (-not $States.ContainsKey($k) -or -not $States[$k]) { $unknown += $k; continue }
+        if ($States[$k] -eq 'MERGED') { $merged++ } else { $notMerged += $k }
+    }
+    $have = @{}; foreach ($p in $rows) { $have["$($p.repo)".ToLowerInvariant()] = $true }
+    $unrecorded = @(@($TargetRepos | Where-Object { $_ }) | Where-Object { -not $have.ContainsKey($_.ToLowerInvariant()) })
+    $reason = ''
+    if ($rows.Count -eq 0)           { $reason = 'no hay ningun PR anotado para este issue' }
+    elseif ($unknown.Count -gt 0)    { $reason = "no pude leer el estado de: $($unknown -join ', ')" }
+    elseif ($notMerged.Count -gt 0)  { $reason = "siguen sin mergear: $($notMerged -join ', ')" }
+    elseif ($unrecorded.Count -gt 0) { $reason = "repos objetivo sin PR anotado: $($unrecorded -join ', ')" }
+    [pscustomobject]@{
+        CanClose = ($reason -eq ''); Reason = $reason; Merged = $merged; Total = $rows.Count
+        Unknown = @($unknown); NotMerged = @($notMerged); Unrecorded = @($unrecorded)
+    }
+}
+
+# The closure plan of one issue's session, read from the executing sources: the registry row for the
+# recorded PRs + targets and a LIVE state per PR. { Ok; Error; Repo; Prs; States; Verdict }.
+function Get-CrossRepoClosurePlan {
+    param([Parameter(Mandatory)][int]$IssueNum)
+    $p = Get-SessionRegistryPath
+    if (-not $p -or -not (Test-Path -LiteralPath $p)) {
+        return [pscustomobject]@{ Ok = $false; Error = "no hay registro de sesiones (sessions.json): el issue #$IssueNum no tiene sesion registrada." }
+    }
+    try { $entries = @(Get-Content -LiteralPath $p -Raw | ConvertFrom-Json) }
+    catch { return [pscustomobject]@{ Ok = $false; Error = "sessions.json ilegible ($($_.Exception.Message)): no cierro nada." } }
+    $mine = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
+    if ($mine.Count -eq 0) { return [pscustomobject]@{ Ok = $false; Error = "el issue #$IssueNum no tiene sesion registrada." } }
+    $repo = "$(@($mine | Where-Object { $_.repo } | Select-Object -First 1).repo)"
+    if (-not $repo) { return [pscustomobject]@{ Ok = $false; Error = "la sesion del issue #$IssueNum no registra su repo: no se donde cerrarlo." } }
+    $refs = @(Get-RecordedPullRequests -Entries $mine -Issue $IssueNum)
+    $prs = @($refs | ForEach-Object { $r = Get-PullRequestRef $_; if ($r) { [pscustomobject]@{ repo = $r.Repo; number = $r.Number } } })
+    $targets = @()
+    foreach ($e in $mine) { if ($e.PSObject.Properties['targetRepos']) { $targets += @($e.targetRepos | Where-Object { $_ }) } }
+    $states = Get-SessionPrStates -Prs $prs
+    [pscustomobject]@{
+        Ok = $true; Error = ''; Repo = $repo; Prs = $prs; States = $states
+        Verdict = (Get-IssueClosureVerdict -Prs $prs -States $states -TargetRepos @($targets | Select-Object -Unique))
+    }
+}
+
+# The lines that show the plan, so the user sees exactly what would be closed and why. PURE.
+function Format-ClosurePlanLines {
+    param([int]$IssueNum, [string]$Repo, [object[]]$Prs = @(), [hashtable]$States = @{}, $Verdict)
+    $lines = @("Issue $Repo#$IssueNum - PRs anotados:")
+    foreach ($p in @($Prs)) {
+        $k = "$($p.repo)#$($p.number)"
+        $st = if ($States.ContainsKey($k)) { $States[$k] } else { 'estado desconocido' }
+        $lines += "  - $k [$st]"
+    }
+    if (@($Prs).Count -eq 0) { $lines += '  (ninguno)' }
+    $lines += if ($Verdict.CanClose) { "Todos mergeados ($($Verdict.Merged) de $($Verdict.Total)): el issue se puede cerrar." }
+              else                   { "NO se cierra: $($Verdict.Reason)." }
+    return @($lines)
+}
+
+# ---------------------------------------------------------------- multi-PR review gate
+
+# "owner/name#n" or "n" (with a default repo) -> { Repo; Number }, or $null when it is neither.
+# PURE. A bare number without a default repo is refused (null): the gate must never guess which repo.
+function Resolve-GatePullRequest {
+    param([string]$Spec, [string]$DefaultRepo = '')
+    $ref = Get-PullRequestRef $Spec
+    if ($ref) { return $ref }
+    if ($Spec -and $Spec.Trim() -match '^\d+$' -and [int]$Spec.Trim() -gt 0 -and $DefaultRepo) {
+        return [pscustomobject]@{ Repo = $DefaultRepo; Number = [int]$Spec.Trim() }
+    }
+    return $null
+}
+
+# What one PR's single-PR gate exit code MEANS, for the run verdict. PURE. The single gate's own
+# codes are unchanged (0 pass, 1 block, 2 unreviewed, 3 CI not evaluated); a missing or unexpected
+# code - the child could not run, was killed, printed nothing - is 'unknown', never a pass.
+function Get-GateVerdictName {
+    param($ExitCode)
+    if ($null -eq $ExitCode -or "$ExitCode" -notmatch '^-?\d+$') { return 'unknown' }
+    switch ([int]$ExitCode) {
+        0 { return 'pass' }
+        1 { return 'block' }
+        2 { return 'unreviewed' }
+        3 { return 'ci-not-evaluated' }
+        default { return 'unknown' }
+    }
+}
+
+# The run verdict over the per-PR verdicts, and the exit code for it. PURE. It can only ESCALATE:
+# a PR the single gate blocked is a block here, and the run passes only when there is at least one
+# PR and EVERY PR passed. Ranking (worst first): block 1, unknown 4, ci-not-evaluated 3,
+# unreviewed 2, pass 0. Exit 4 exists only in multi-PR mode; the single -PR path never returns it.
+function Get-GateRunVerdict {
+    param([string[]]$Verdicts = @())
+    $v = @($Verdicts | Where-Object { $_ })
+    if ($v.Count -eq 0)                  { return [pscustomobject]@{ Name = 'unknown';          ExitCode = 4 } }
+    if ($v -contains 'block')            { return [pscustomobject]@{ Name = 'block';            ExitCode = 1 } }
+    if ($v -contains 'unknown')          { return [pscustomobject]@{ Name = 'unknown';          ExitCode = 4 } }
+    if ($v -contains 'ci-not-evaluated') { return [pscustomobject]@{ Name = 'ci-not-evaluated'; ExitCode = 3 } }
+    if ($v -contains 'unreviewed')       { return [pscustomobject]@{ Name = 'unreviewed';       ExitCode = 2 } }
+    if (@($v | Where-Object { $_ -ne 'pass' }).Count -eq 0) { return [pscustomobject]@{ Name = 'pass'; ExitCode = 0 } }
+    return [pscustomobject]@{ Name = 'unknown'; ExitCode = 4 }
+}
+
+# The argument list for ONE PR's single-PR gate, forwarding the caller's own gate switches so each
+# PR is judged by exactly the rules the caller asked for. PURE over the bound parameters.
+# -RecordReview, -InstallRuleset and the multi-PR selectors are never forwarded (they are refused
+# earlier); switches are forwarded only when the caller passed them.
+function Get-GateChildArgs {
+    param([Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][int]$Number, [System.Collections.IDictionary]$Bound = @{})
+    $a = @('-Repo', $Repo, '-PR', "$Number")
+    foreach ($n in 'TimeoutMinutes', 'CiTimeoutMinutes', 'MaxLines', 'MaxFiles', 'CopilotCooldownDays', 'TokenVar') {
+        if (@($Bound.Keys) -contains $n) { $a += @("-$n", "$($Bound[$n])") }
+    }
+    foreach ($n in 'EnableCopilot', 'AllowUnreviewed', 'RequireIndependentReviewer', 'PreferCodexRescue') {
+        if ((@($Bound.Keys) -contains $n) -and [bool]$Bound[$n]) { $a += "-$n" }
+    }
+    return @($a)
 }

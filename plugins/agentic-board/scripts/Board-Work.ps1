@@ -175,6 +175,9 @@ param(
     # URL) against the session of -ForIssue, so the dashboard shows what is really live. Local only.
     [string]$RecordPr   = "",
     [int]   $ForIssue   = 0,
+    # Cross-repo issues (#487): close the issue of this session ONLY when every PR recorded for it is
+    # MERGED. Shows the list first; without -Force (or with -DryRun) it closes nothing.
+    [int]   $CloseCrossRepo = 0,
     # cerrar-ciclo: classify the CURRENT branch and route it to the right disposition (#302).
     [switch]$CloseLoop,
     [switch]$Reap,
@@ -2191,6 +2194,10 @@ function Show-SessionFleet {
         if ($xrPrs.Count -gt 0) {
             $xrStates = Get-SessionPrStates -Prs $xrPrs
             foreach ($ln in (Format-SessionPrLines -Prs $xrPrs -States $xrStates)) { Write-Host ("        {0}" -f $ln) -ForegroundColor DarkCyan }
+            # Closure (#487): say whether the issue may be closed - only when EVERY recorded PR is merged.
+            $xrVerdict = Get-IssueClosureVerdict -Prs $xrPrs -States $xrStates -TargetRepos $xrTargets
+            if ($xrVerdict.CanClose) { Write-Host "        LISTO PARA CERRAR: todos sus PRs estan mergeados (el issue se cierra a peticion tuya)." -ForegroundColor Green }
+            else                     { Write-Host ("        Todavia no se cierra: {0}." -f $xrVerdict.Reason) -ForegroundColor DarkYellow }
         } elseif ($xrFlag -or $xrTargets.Count -gt 0) {
             Write-Host "        (aun no hay PRs anotados para esta sesion)" -ForegroundColor DarkGray
         } elseif ($s.repo -and $s.branch) {
@@ -3242,6 +3249,35 @@ if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (
 # -Base and -BaseCurrent contradict each other; silently honouring one would put the
 # branch on a base the caller did not ask for - the exact class of bug #294 was.
 if ($Base -and $BaseCurrent) { throw "-Base and -BaseCurrent are mutually exclusive: pick the ref, or the current HEAD." }
+
+# ==============================================================================
+# CLOSE-CROSS-REPO MODE: -CloseCrossRepo <n> [-Force]  -> close a cross-repo issue (#487), and ONLY
+# when ALL the PRs recorded for its session are merged. It prints the list first. It never closes on
+# the first merged PR, and never when any PR is open, closed unmerged, unreadable, or when a target
+# repo the issue declares has no recorded PR. Without -Force (or with -DryRun) it closes nothing.
+# ==============================================================================
+if ($CloseCrossRepo -gt 0) {
+    $plan = Get-CrossRepoClosurePlan -IssueNum $CloseCrossRepo
+    if (-not $plan.Ok) { Write-Host "  NO cierro: $($plan.Error)" -ForegroundColor Red; exit 1 }
+    foreach ($ln in (Format-ClosurePlanLines -IssueNum $CloseCrossRepo -Repo $plan.Repo -Prs $plan.Prs -States $plan.States -Verdict $plan.Verdict)) {
+        Write-Host "  $ln" -ForegroundColor $(if ($plan.Verdict.CanClose) { 'Green' } else { 'Yellow' })
+    }
+    if (-not $plan.Verdict.CanClose) { exit 1 }
+    try {
+        $now = Invoke-Gh -GhArgs @('issue', 'view', "$CloseCrossRepo", '--repo', $plan.Repo, '--json', 'state') `
+                         -What "leer el estado del issue $($plan.Repo)#$CloseCrossRepo" -Json
+    } catch { Write-Host "  NO cierro: no pude leer el estado del issue ($($_.Exception.Message))." -ForegroundColor Red; exit 1 }
+    if ("$($now.state)" -ne 'OPEN') { Write-Host "  El issue ya esta '$($now.state)': nada que hacer." -ForegroundColor DarkGray; exit 0 }
+    if ($DryRun -or -not $Force) {
+        Write-Host "  No cerre nada. Confirma y lo cierro." -ForegroundColor Cyan
+        exit 0
+    }
+    $body = "All $($plan.Verdict.Total) recorded pull request(s) are merged: " + ((@($plan.Prs) | ForEach-Object { "$($_.repo)#$($_.number)" }) -join ', ') + '.'
+    $null = Invoke-Gh -GhArgs @('issue', 'close', "$CloseCrossRepo", '--repo', $plan.Repo, '--reason', 'completed', '--comment', $body) `
+                      -What "cerrar el issue $($plan.Repo)#$CloseCrossRepo"
+    Write-Host "  OK  issue $($plan.Repo)#$CloseCrossRepo cerrado (todos sus PRs estaban mergeados)." -ForegroundColor Green
+    exit 0
+}
 
 # -StartGroup is a third, distinct way to start issues (#633) - combining it with -Start or
 # -Parallel would leave it ambiguous which mode actually ran.
