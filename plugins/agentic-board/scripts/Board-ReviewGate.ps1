@@ -753,7 +753,7 @@ function Invoke-GateMulti {
         'pass'             { "GATE APROBADO: los $($rows.Count) PR(s) pasaron." }
         'block'            { "GATE BLOQUEADO: al menos un PR esta bloqueado ($passed de $($rows.Count) pasaron)." }
         'ci-not-evaluated' { "GATE BLOQUEADO, CI NO EVALUADO en al menos un PR ($passed de $($rows.Count) pasaron)." }
-        'unreviewed'       { "GATE SIN REVISAR: al menos un PR no tiene revision ($passed de $($rows.Count) pasaron)." }
+        'unreviewed'       { "RUN SIN REVISAR: al menos un PR no tiene revision ($passed de $($rows.Count) pasaron)." }
         default            { "GATE DESCONOCIDO: no pude saber el estado de al menos un PR ($passed de $($rows.Count) pasaron). No es un aprobado." }
     }
     Write-Host $runLabel -ForegroundColor $(if ($run.Name -eq 'pass') { 'Green' } elseif ($run.Name -eq 'block') { 'Red' } else { 'Yellow' })

@@ -224,6 +224,21 @@ Describe 'Invoke-GateMulti -Issue reads the PRs recorded for the session (real s
     }
 }
 
+Describe 'the gate source keeps the anchors other tests slice it by' {
+    # Get-ReviewerRoster.Tests.ps1 finds the single-PR "unreviewed" branch by the FIRST occurrence of
+    # the phrase 'GATE SIN REVISAR' and reads its `exit 2`. The multi-PR run label must therefore never
+    # contain that phrase: it once did, sat earlier in the file, and sent that slice to the wrong place.
+    It 'has exactly one GATE SIN REVISAR, and it is the single-PR message followed by exit 2' {
+        $src = Get-Content -LiteralPath $script:Script -Raw
+        ([regex]::Matches($src, 'GATE SIN REVISAR')).Count | Should -Be 1
+        $sin = $src.IndexOf('GATE SIN REVISAR')
+        $src.Substring($sin, 200) | Should -Match 'NADIE reviso ESTE diff'
+        $src.Substring($sin, [Math]::Min(6000, $src.Length - $sin)) | Should -Match 'exit 2'
+    }
+    It 'the multi-PR run label for an unreviewed PR is still clearly a non-pass' {
+        (Invoke-Multi -Codes @{ 'o/a#5' = 2 } -Specs @('o/a#5', 'o/b#9')).Text | Should -Match 'RUN SIN REVISAR'
+    }
+}
 Describe 'Board-ReviewGate.ps1 as a real process' {
     BeforeAll {
         function Invoke-Gate {
