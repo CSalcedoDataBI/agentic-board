@@ -144,6 +144,27 @@ Describe 'Invoke-PluginCleanup re-checks right before deleting (the plan is a mo
         Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '1.0') | Should -BeTrue
         @($out.Removed).Count | Should -Be 0
     }
+    It 'each build gets its OWN last look: a session that starts while earlier ones are being deleted keeps its build' {
+        $fx = New-CleanFx
+        [void](Add-FakeBuild $fx -Marketplace 'm' -Plugin 'p' -Version '0.9')
+        Add-FakeMarker $fx -Marketplace 'm' -Plugin 'p' -Version '0.9' -ProcId 4242 -StartFt '134300000000000000'   # a dead holder at plan time
+        $plan = Get-VersionCleanupPlan -ClaudeHome $fx.Root -GetProcess $script:Gone
+        @($plan.Items | Where-Object Action -eq 'remove').Count | Should -Be 2
+        # The process table answers "gone" the first time it is asked about pid 4242 (the fresh plan) and
+        # "alive, same start time" from then on (the per-build last look): a session appeared in between.
+        $script:AskedAbout4242 = 0
+        $appears = { param($id)
+            if ([long]$id -eq 4242) {
+                $script:AskedAbout4242++
+                if ($script:AskedAbout4242 -gt 1) { [pscustomobject]@{ StartTime = [datetime]::FromFileTime(134300000000000000) } }
+            }
+        }
+        $out = Invoke-PluginCleanup -Plan $plan -ClaudeHome $fx.Root -GetProcess $appears
+        Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '0.9') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '1.0') | Should -BeFalse
+        @($out.Removed).Count | Should -Be 1
+        (@($out.Failed)[0].FailReason) | Should -Match 'justo antes de borrarla'
+    }
     It 'a build that is still removable at the re-check is deleted' {
         $fx = New-CleanFx
         $plan = Get-VersionCleanupPlan -ClaudeHome $fx.Root -GetProcess $script:Gone

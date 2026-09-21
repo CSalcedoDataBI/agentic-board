@@ -54,6 +54,16 @@ function Invoke-ClaudeCli {
         if (-not $pick) { return [pscustomobject]@{ ExitCode = -1; Output = 'no encuentro el programa claude en este equipo'; TimedOut = $false } }
         $Executable = $pick.Source
     }
+    # A .cmd/.bat shim is parsed by cmd.exe, whose metacharacters (& | ^ % ...) .NET does not escape. Our
+    # arguments are always plain words (marketplace and plugin names, --yes), so anything else is refused
+    # rather than escaped: a name read from a data file must never become a command.
+    if ($Executable -match '\.(cmd|bat)$') {
+        foreach ($a in $Arguments) {
+            if ($a -notmatch '^[A-Za-z0-9._@:=-]+$') {
+                return [pscustomobject]@{ ExitCode = -1; Output = "no ejecuto claude: un argumento tiene caracteres no permitidos ($a)"; TimedOut = $false }
+            }
+        }
+    }
     try {
         $psi = [System.Diagnostics.ProcessStartInfo]::new($Executable)
         foreach ($a in $Arguments) { $psi.ArgumentList.Add($a) }
@@ -67,8 +77,11 @@ function Invoke-ClaudeCli {
             try { $proc.Kill($true) } catch { }
             return [pscustomobject]@{ ExitCode = -1; Output = ''; TimedOut = $true }
         }
-        $proc.WaitForExit()
-        return [pscustomobject]@{ ExitCode = $proc.ExitCode; Output = ("$($outTask.Result)`n$($errTask.Result)").Trim(); TimedOut = $false }
+        # The process is gone, but a grandchild it started may still hold the pipes open: wait for the
+        # readers only briefly, and report what was read (nothing) rather than hang past the timeout.
+        $drained = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($outTask, $errTask), 5000)
+        $text = if ($drained) { ("$($outTask.Result)`n$($errTask.Result)").Trim() } else { '(la salida no se pudo leer por completo)' }
+        return [pscustomobject]@{ ExitCode = $proc.ExitCode; Output = $text; TimedOut = $false }
     } catch {
         return [pscustomobject]@{ ExitCode = -1; Output = "no pude ejecutar claude: $($_.Exception.Message)"; TimedOut = $false }
     }

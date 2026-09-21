@@ -411,6 +411,51 @@ function Get-DirSizeBytes([string]$Path) {
     try { return [long](Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum } catch { return 0L }
 }
 
+# Does anything still hold this build, or make it not-removable, RIGHT NOW?  $null = nothing does;
+# otherwise { Category; Reason }. The three conditions that can change between a plan and a delete:
+#   installed  it is the installed build of some entry (by real path, or plugin@marketplace + version)
+#   holders    a marker is unreadable, or its process is live or of unknown liveness
+#   grace      it was touched within -GraceMinutes (an install in progress is not in the list yet)
+# Shared by the plan and by the deleter's last look, so the two can never disagree.
+function Get-VersionHoldVerdict {
+    param(
+        $Dir, [object[]]$Entries, [string[]]$InstalledReal = @(), [scriptblock]$GetProcess,
+        [int]$GraceMinutes = 60, [datetime]$Now = (Get-Date), [hashtable]$LiveMemo = @{}
+    )
+    $cmp = if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') { [System.StringComparer]::OrdinalIgnoreCase } else { [System.StringComparer]::Ordinal }
+    $hold = { param($cat, $why) [pscustomobject]@{ Category = $cat; Reason = $why } }
+
+    $real = Get-CanonicalPath $Dir.Path
+    $isInstalled = $false
+    foreach ($e in $Entries) {
+        if ($e.Key -eq "$($Dir.Plugin)@$($Dir.Marketplace)" -and (Get-PathLeafText $e.InstallPath) -eq $Dir.Version) { $isInstalled = $true }
+        if ($e.Key -eq "$($Dir.Plugin)@$($Dir.Marketplace)" -and $e.Version -eq $Dir.Version) { $isInstalled = $true }
+    }
+    if (-not $isInstalled -and $real) { foreach ($ir in $InstalledReal) { if ($cmp.Equals($ir, $real)) { $isInstalled = $true } } }
+    if ($isInstalled) { return (& $hold 'installed' 'es la version instalada') }
+
+    $mk = Read-DirMarkers -VersionDir $Dir.Path
+    if (-not $mk.Ok) { return (& $hold 'unknown-holder' 'no pude leer quien la usa') }
+    foreach ($m in $mk.Markers) {
+        if (-not $m.Valid) { return (& $hold 'unknown-holder' "un registro de uso ilegible ($($m.Reason))") }
+        $memoKey = "$($m.Pid)|$($m.StartFt)"
+        if (-not $LiveMemo.ContainsKey($memoKey)) {
+            $a = @{ ProcessId = $m.Pid; StartFt = $m.StartFt }
+            if ($GetProcess) { $a.GetProcess = $GetProcess }
+            $LiveMemo[$memoKey] = Get-HolderLiveness @a
+        }
+        if ($LiveMemo[$memoKey] -eq 'live') { return (& $hold 'in-use' "la usa una sesion abierta (proceso $($m.Pid))") }
+        if ($LiveMemo[$memoKey] -ne 'dead') { return (& $hold 'unknown-holder' "no pude confirmar si el proceso $($m.Pid) sigue abierto") }
+    }
+
+    $vItem = Get-Item -LiteralPath $Dir.Path -Force -ErrorAction SilentlyContinue
+    if (-not $vItem) { return (& $hold 'unknown-holder' 'no pude leer la carpeta') }
+    $touched = $vItem.LastWriteTime
+    $iuItem = Get-Item -LiteralPath (Join-Path $Dir.Path '.in_use') -Force -ErrorAction SilentlyContinue
+    if ($iuItem -and $iuItem.LastWriteTime -gt $touched) { $touched = $iuItem.LastWriteTime }
+    if (($Now - $touched).TotalMinutes -lt $GraceMinutes) { return (& $hold 'recent' "se toco hace menos de $GraceMinutes minutos") }
+    return $null
+}
 # Every cached build, each with a verdict: remove | keep + the reason. A build is removable only when
 # ALL of these hold - any doubt is keep:
 #   1. installed_plugins.json is readable and non-empty (else nothing can be judged: refuse everything)
@@ -440,7 +485,6 @@ function Get-VersionCleanupPlan {
     if (Test-IsLinkItem (Get-Item -LiteralPath $cacheRoot -Force)) { return (& $refuse 'la carpeta de versiones guardadas es un enlace') }
 
     $installedReal = @($inst.Entries | ForEach-Object { Get-CanonicalPath $_.InstallPath } | Where-Object { $_ })
-    $cmp = if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') { [System.StringComparer]::OrdinalIgnoreCase } else { [System.StringComparer]::Ordinal }
     $liveMemo = @{}
     $items = [System.Collections.Generic.List[object]]::new()
 
@@ -465,40 +509,9 @@ function Get-VersionCleanupPlan {
         $inner = @(Get-ChildItem -LiteralPath $d.Path -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
         if ($inner.Count -gt 0) { $items.Add((& $keep 'link' 'contiene enlaces')); continue }
 
-        # (2) installed
-        $real = Get-CanonicalPath $d.Path
-        $isInstalled = $false
-        foreach ($e in $inst.Entries) {
-            if ($e.Key -eq "$($d.Plugin)@$($d.Marketplace)" -and (Get-PathLeafText $e.InstallPath) -eq $d.Version) { $isInstalled = $true }
-            if ($e.Key -eq "$($d.Plugin)@$($d.Marketplace)" -and $e.Version -eq $d.Version) { $isInstalled = $true }
-        }
-        if (-not $isInstalled -and $real) { foreach ($ir in $installedReal) { if ($cmp.Equals($ir, $real)) { $isInstalled = $true } } }
-        if ($isInstalled) { $items.Add((& $keep 'installed' 'es la version instalada')); continue }
-
-        # (3) holders
-        $mk = Read-DirMarkers -VersionDir $d.Path
-        if (-not $mk.Ok) { $items.Add((& $keep 'unknown-holder' 'no pude leer quien la usa')); continue }
-        $holder = $null
-        $holderCat = 'unknown-holder'
-        foreach ($m in $mk.Markers) {
-            if (-not $m.Valid) { $holder = "un registro de uso ilegible ($($m.Reason))"; break }
-            $memoKey = "$($m.Pid)|$($m.StartFt)"
-            if (-not $liveMemo.ContainsKey($memoKey)) {
-                $a = @{ ProcessId = $m.Pid; StartFt = $m.StartFt }
-                if ($GetProcess) { $a.GetProcess = $GetProcess }
-                $liveMemo[$memoKey] = Get-HolderLiveness @a
-            }
-            if ($liveMemo[$memoKey] -eq 'live')    { $holder = "la usa una sesion abierta (proceso $($m.Pid))"; $holderCat = 'in-use'; break }
-            if ($liveMemo[$memoKey] -ne 'dead')    { $holder = "no pude confirmar si el proceso $($m.Pid) sigue abierto"; break }
-        }
-        if ($holder) { $items.Add((& $keep $holderCat $holder)); continue }
-
-        # (5) grace
-        $touched = $vItem.LastWriteTime
-        $iuItem = Get-Item -LiteralPath (Join-Path $d.Path '.in_use') -Force -ErrorAction SilentlyContinue
-        if ($iuItem -and $iuItem.LastWriteTime -gt $touched) { $touched = $iuItem.LastWriteTime }
-        if (($Now - $touched).TotalMinutes -lt $GraceMinutes) { $items.Add((& $keep 'recent' "se toco hace menos de $GraceMinutes minutos")); continue }
-
+        # (2) not installed, (3) no holder, (5) not touched lately
+        $hold = Get-VersionHoldVerdict -Dir $d -Entries $inst.Entries -InstalledReal $installedReal -GetProcess $GetProcess -GraceMinutes $GraceMinutes -Now $Now -LiveMemo $liveMemo
+        if ($hold) { $items.Add((& $keep $hold.Category $hold.Reason)); continue }
         $items.Add((& $verdict 'remove' 'removable' 'nadie la usa y no es la version instalada' (Get-DirSizeBytes $d.Path)))
     }
     return [pscustomobject]@{ Ok = $true; Reason = ''; Items = @($items) }
@@ -552,6 +565,15 @@ function Invoke-PluginCleanup {
     foreach ($i in @($Plan.Items | Where-Object { $_.Action -eq 'remove' })) {
         if (-not $stillOk.ContainsKey($i.Path)) {
             $i | Add-Member -NotePropertyName FailReason -NotePropertyValue 'ya no cumple las condiciones para borrarla (se volvio a comprobar justo antes)' -Force
+            $failed.Add($i); continue
+        }
+        # Last look at THIS build (deleting the earlier ones took time, and a session may have started meanwhile).
+        $instNow = Get-InstalledPluginEntries -ClaudeHome $ClaudeHome
+        $hold = if ($instNow.Ok -and @($instNow.Entries).Count -gt 0) {
+            Get-VersionHoldVerdict -Dir $i -Entries $instNow.Entries -InstalledReal @($instNow.Entries | ForEach-Object { Get-CanonicalPath $_.InstallPath } | Where-Object { $_ }) -GetProcess $GetProcess -GraceMinutes $GraceMinutes
+        } else { [pscustomobject]@{ Category = 'unknown-holder'; Reason = 'no pude releer la lista de plugins instalados' } }
+        if ($hold) {
+            $i | Add-Member -NotePropertyName FailReason -NotePropertyValue "justo antes de borrarla: $($hold.Reason)" -Force
             $failed.Add($i); continue
         }
         $r = Remove-PluginVersionDir -Path $i.Path -ClaudeHome $ClaudeHome

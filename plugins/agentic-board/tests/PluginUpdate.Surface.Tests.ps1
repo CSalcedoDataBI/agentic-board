@@ -34,6 +34,26 @@ Describe '/board plugins is discoverable' {
     }
 }
 
+Describe 'dot-sourcing Board-Work.ps1 cannot silently reset a parameter of these scripts' {
+    # The scripts load Board-Work.ps1 (for Test-SessionStartConsistent) with its documented guard. Its
+    # param() block runs in the caller's scope, so a parameter name shared with it would be reset - and only
+    # the ones the caller passed are replayed afterwards. This pins the precondition: the only shared name is
+    # DryRun, which is a switch with the same default on both sides.
+    It 'shares no parameter name with Board-Work.ps1 except DryRun' {
+        $common = [System.Management.Automation.Cmdlet]::CommonParameters + [System.Management.Automation.Cmdlet]::OptionalCommonParameters
+        $bw = @((Get-Command (Join-Path $script:Plugin 'scripts' 'Board-Work.ps1')).Parameters.Keys | Where-Object { $common -notcontains $_ })
+        foreach ($n in 'Update-AllPlugins.ps1', 'Get-PluginSessionMap.ps1', 'Remove-OldPluginVersions.ps1') {
+            $own = @((Get-Command (Join-Path $script:Plugin 'scripts' $n)).Parameters.Keys | Where-Object { $common -notcontains $_ })
+            $shared = @($own | Where-Object { $bw -contains $_ -and $_ -ne 'DryRun' })
+            $shared | Should -BeNullOrEmpty -Because "$n would have '$($shared -join ', ')' reset by dot-sourcing Board-Work.ps1"
+        }
+    }
+    It 'the one shared name, DryRun, is a switch in both' {
+        (Get-Command (Join-Path $script:Plugin 'scripts' 'Board-Work.ps1')).Parameters['DryRun'].ParameterType.Name | Should -Be 'SwitchParameter'
+        (Get-Command (Join-Path $script:Plugin 'scripts' 'Update-AllPlugins.ps1')).Parameters['DryRun'].ParameterType.Name | Should -Be 'SwitchParameter'
+    }
+}
+
 Describe 'the reference tells the truth about the code' {
     It 'every script it names exists' {
         $names = [regex]::Matches($script:Ref, 'scripts/([A-Za-z][A-Za-z0-9-]+\.ps1)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique

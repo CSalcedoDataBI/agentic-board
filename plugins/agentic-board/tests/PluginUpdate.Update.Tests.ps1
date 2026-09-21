@@ -354,6 +354,27 @@ Describe 'Invoke-ClaudeCli - the real runner, pointed at a harmless program' {
         $r = Invoke-ClaudeCli -Executable $script:Pwsh -Arguments @('-NoProfile', '-Command', 'Start-Sleep -Seconds 60') -TimeoutSec 2
         $r.TimedOut | Should -BeTrue
     }
+    It 'does not hang past the timeout when a grandchild keeps the output pipes open' {
+        $cmd = '$psi = [System.Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path, ''-NoProfile -Command Start-Sleep -Seconds 30''); $psi.UseShellExecute = $false; [void][System.Diagnostics.Process]::Start($psi); exit 0'
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $r = Invoke-ClaudeCli -Executable $script:Pwsh -Arguments @('-NoProfile', '-Command', $cmd) -TimeoutSec 60
+        $sw.Elapsed.TotalSeconds | Should -BeLessThan 25
+        $r.ExitCode | Should -Be 0
+        $r.TimedOut | Should -BeFalse
+    }
+    It 'refuses to hand a .cmd shim an argument with cmd.exe metacharacters, and runs it with plain ones' {
+        if (-not $IsWindows) { Set-ItResult -Skipped -Because '.cmd shims are a Windows matter'; return }
+        $shim = Join-Path $TestDrive 'shim.cmd'
+        [System.IO.File]::WriteAllText($shim, "@echo off`r`necho ran> `"%~dp0ran.txt`"`r`n")
+        $bad = Invoke-ClaudeCli -Executable $shim -Arguments @('plugin', 'update', 'x&echo pwned>%~dp0pwned.txt')
+        $bad.ExitCode | Should -Not -Be 0
+        $bad.Output | Should -Match 'caracteres no permitidos'
+        Test-Path -LiteralPath (Join-Path $TestDrive 'ran.txt') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $TestDrive 'pwned.txt') | Should -BeFalse
+        $ok = Invoke-ClaudeCli -Executable $shim -Arguments @('plugin', 'update', 'alpha@mk-a', '--yes')
+        $ok.ExitCode | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $TestDrive 'ran.txt') | Should -BeTrue
+    }
     It 'a program that cannot start is a failed run with a reason, not an exception' {
         $r = Invoke-ClaudeCli -Executable (Join-Path $TestDrive 'no-such-program.exe') -Arguments @('x')
         $r.ExitCode | Should -Not -Be 0
