@@ -73,21 +73,49 @@ $script:BrakeMarkerName = 'brake-armed.json'
 # is an argument, not a measurement. Time it.
 $script:GitCmd = '\bgit\s+(?:-[^\s;|&]*\s+(?:[^\s;|&-][^\s;|&]*\s+)?)*'
 
-# `git push ... --delete`. Defined on its own because it is evaluated TWICE: over the normalized
-# command like every pattern, and once more over a quote-masked copy (see Test-IsBrakedCommand, #546).
+# The gap between `push` and whatever a git-push pattern looks for (#546, #707).
 #
-# The gap stops at a background `&` (#546), as the three git-push patterns below do since #542
-# round 6 - `git push origin fine & echo --delete` deletes nothing, and `.*` walked over the `&`
-# into a different command. It is NOT the sibling patterns' `[^;&|<>]*`, and the difference is
-# deliberate: that class also stops at `<`, `>` and the `&` of `2>&1`, which would let
-# `git push origin 2>&1 --delete feature` through - a command the old pattern DENIED. This fix
-# may only remove a false positive, never a deny, so a redirection stays inside the gap: `&`
-# is a boundary unless it belongs to a redirection (`>&`, `<&`, `&>`: a `&` right after `<`/`>`,
-# or right before `>`). The two `&` alternatives are mutually exclusive, so every character has
-# exactly one reading and the scan stays linear (see the timing tests).
-$script:PushDeleteFlagPattern = $script:GitCmd + 'push\b(?:[^;&|]|(?<=[<>])&|(?<![<>])&(?=>))*--delete\b'
-# The pre-#546 pattern, kept for the ambiguous-`&` fallback in Test-IsBrakedCommand.
-$script:PushDeleteUnboundedPattern = $script:GitCmd + 'push\b.*--delete\b'
+# It stops at a background `&` - `git push origin fine & echo --delete` deletes nothing, and a `.*`
+# walked over the `&` into a different command - but NOT at a redirection. The first cut of the
+# sibling patterns used `[^;&|<>]*`, whose `<`, `>` and the `&` of `2>&1` are boundaries: a
+# redirection in the middle of the command (`git push origin >/dev/null HEAD:main`) then hid the
+# refspec from the pattern, a command the unbounded form denies. A redirection is not a separator,
+# so it stays inside the gap: `&` is a boundary unless it belongs to one (`>&`, `<&`, `&>`: a `&`
+# right after `<`/`>`, or right before `>`). The two `&` alternatives are mutually exclusive, so
+# every character has exactly one reading and the scan stays linear (see the timing tests).
+#
+# This gap is only SOUND for a command made of plain characters, where an `&` cannot be anything
+# but an operator. Quotes are stripped before matching, so a quoted or escaped `&` looks like an
+# operator and would cut the gap short; Test-IsBrakedCommand therefore judges every other command
+# with $script:AmbiguousPushPatterns (unbounded), see there.
+$script:PushGap = '(?:[^;&|]|(?<=[<>])&|(?<![<>])&(?=>))*'
+
+# `git push ... --delete` (#546).
+$script:PushDeleteFlagPattern = $script:GitCmd + 'push\b' + $script:PushGap + '--delete\b'
+
+# The same `git` prefix, for a command whose `&` may be an ARGUMENT character (#707). `$script:GitCmd`
+# stops a global-option token at `&`, correct for a plain command and wrong for
+# `git -c "a&b=1" push origin HEAD:main`, where the quoted `&` cut the prefix short and no push
+# pattern matched at all. Same shape - one reading per token, so the same linear scan.
+$script:GitCmdAny = '\bgit\s+(?:-[^\s;|]*\s+(?:[^\s;|-][^\s;|]*\s+)?)*'
+
+# The push patterns for a command that is NOT plain (#546, #707): the pre-#546 unbounded `.*`
+# gap, with the terminators the plain patterns use. Applied by Test-IsBrakedCommand, and only
+# there, to a command that has `&`, `<` or `>` in it and any character outside the plain set.
+# It is a SUPERSET of the plain patterns on every such command, so it can only add refusals.
+$script:PushDeleteUnboundedPattern = $script:GitCmdAny + 'push\b.*--delete\b'
+$script:AmbiguousPushPatterns = @(
+    @{ action = 'delete'; pattern = $script:PushDeleteUnboundedPattern }
+    @{ action = 'delete'; pattern = $script:GitCmdAny + 'push\b.*\s:\S' }
+    @{ action = 'merge';  pattern = $script:GitCmdAny + 'push\b.*\s\+?\S+:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';  pattern = $script:GitCmdAny + 'push\b.*\s(main|master)(?=[\s;&|<>]|$)' }
+)
+
+# A command is PLAIN when every character is a letter, a digit, a blank, one of `_ . / : = , + @ -`,
+# or a separator/redirection character (`& | ; < >`). In such a command `&` is an operator or part
+# of a redirection and nothing else - there is no quote, escape, substitution, glob or comment
+# syntax that could make it an argument character. Judged on the RAW command, before quote removal.
+$script:PlainCommandPattern = '^[A-Za-z0-9_./:=,+@ \t&|;<>-]+\z'
 
 # Command patterns that REACH an irreversible action, grouped by the contract's action vocabulary
 # (the same words Expert-Autonomy uses, so one contract drives both).
@@ -154,8 +182,13 @@ $script:BrakePatterns = @(
     # human "merge is marked irreversible" for a command that removes main, arguably the worse of
     # the two. Not a bypass (the contract filter runs per pattern, so a delete-braking contract
     # still refused it), but a control is only as useful as the account it gives of itself.
-    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;&|<>]*\s\+?[^\s;|&]+:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
-    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b[^;&|<>]*\s(main|master)(?=[\s;&|<>]|$)' }
+    #
+    # THE GAP after `push` is $script:PushGap (#707): it stops at a background `&` and at nothing
+    # else, so a redirection in the middle (`git push origin >/dev/null HEAD:main`) no longer hides
+    # the refspec. A command that is not plain gets the unbounded $script:AmbiguousPushPatterns
+    # instead (see Test-IsBrakedCommand).
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b' + $script:PushGap + '\s\+?[^\s;|&]+:(?:refs/heads/)?(main|master)(?=[\s;&|<>]|$)' }
+    @{ action = 'merge';   pattern = $script:GitCmd + 'push\b' + $script:PushGap + '\s(main|master)(?=[\s;&|<>]|$)' }
 
     # --- publish: making something public / cutting a release -----------------------
     @{ action = 'publish'; pattern = '\bgh\s+release\s+create\b' }
@@ -181,7 +214,7 @@ $script:BrakePatterns = @(
     @{ action = 'delete';  pattern = $script:PushDeleteFlagPattern }
     # git's other remote-branch deletion syntax: `git push origin :branch`. The leading whitespace
     # in the lookbehind keeps `HEAD:main` (an ordinary push refspec) out of it.
-    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b[^;&|<>]*\s:\S' }
+    @{ action = 'delete';  pattern = $script:GitCmd + 'push\b' + $script:PushGap + '\s:\S' }
 
     # --- indirection through a variable ---------------------------------------------
     # Quote removal (see ConvertTo-NormalizedCommand) handles `gh pr 'merge'`, but a value the
@@ -290,7 +323,8 @@ function Test-IsBrakedCommand {
 
     # One shell invocation can carry several commands. Judge each on its own, so a harmless
     # segment never licenses the one after it.
-    foreach ($segment in ($norm -split $script:SegmentSeparator)) {
+    $segments = @($norm -split $script:SegmentSeparator)
+    foreach ($segment in $segments) {
         $seg = $segment.Trim()
         if (-not $seg) { continue }
         if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }  # the separator itself
@@ -301,23 +335,27 @@ function Test-IsBrakedCommand {
         }
     }
 
-    # An AMBIGUOUS `&` (#546). The narrowed --delete gap (see $script:PushDeleteFlagPattern) reads a `&`
-    # between `push` and `--delete` as a background operator, which is only safe when it plainly is
-    # one. A shell can make it an argument character in ways a text classifier cannot enumerate - quotes,
-    # backslash or caret or PowerShell-backtick escapes, `$( )` nested to any depth, extglob `@(a&b)`,
-    # heredocs, brace expansion: three reviews each found one more, and every fix invited the next.
-    # So the rule is inverted and fails closed BY CONSTRUCTION: the narrowing applies ONLY to a command
-    # made entirely of plain characters (letters, digits, blanks and a few separators/redirections),
-    # where a `&` cannot be anything but an operator. Any other character anywhere in the command and
-    # the delete flag is judged by the pre-#546 unbounded pattern, exactly as before. That can only ADD
-    # a `delete` verdict, never remove one.
-    if ($irr -contains 'delete' -and "$Command".Contains('&') -and "$Command" -notmatch '^[A-Za-z0-9_./:=,+@ \t&|;<>-]+\z') {
-        foreach ($segment in ((ConvertTo-NormalizedCommand $Command) -split $script:SegmentSeparator)) {
+    # An AMBIGUOUS `&` (#546, #707). The git-push patterns above (--delete, the `:refspec` delete and the
+    # two merges to main) end their gap at a `&`, which is only safe when it plainly is a background
+    # operator. A shell can make it an argument character in ways a text classifier cannot enumerate -
+    # quotes, backslash or caret or PowerShell-backtick escapes, `$( )` nested to any depth, extglob
+    # `@(a&b)`, heredocs, brace expansion: three reviews of #546 each found one more, and every fix
+    # invited the next. So the rule is inverted and fails closed BY CONSTRUCTION: the narrow gap decides
+    # ONLY for a command made entirely of plain characters (see $script:PlainCommandPattern), where a `&`
+    # cannot be anything but an operator. A command with any other character AND a `&`, `<` or `>` in it
+    # is judged by $script:AmbiguousPushPatterns - the unbounded patterns. Those match wherever the narrow
+    # ones do, so this can only ADD a verdict, never remove one. Deliberate cost: `git push origin "feat"
+    # & echo main` (quotes present) is refused, as `... & echo --delete` already was.
+    if ($irr.Count -gt 0 -and "$Command" -match '[&<>]' -and "$Command" -notmatch $script:PlainCommandPattern) {
+        foreach ($segment in $segments) {
             $seg = $segment.Trim()
             if (-not $seg) { continue }
             if ($seg -match $script:SegmentSeparator -and $seg.Length -le 2) { continue }
             if (Test-IsGenuinePreview -Segment $seg) { continue }
-            if ($seg -match $script:PushDeleteUnboundedPattern) { return 'delete' }
+            foreach ($p in $script:AmbiguousPushPatterns) {
+                if ($irr -notcontains $p.action) { continue }
+                if ($seg -match $p.pattern) { return $p.action }
+            }
         }
     }
     return ''
