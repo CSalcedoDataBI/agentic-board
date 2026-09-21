@@ -39,8 +39,14 @@ Describe 'Get-RunMarkerFinding' {
         $f.Text  | Should -Match '#493 #494 #495'
         $f.Offer | Should -Not -BeNullOrEmpty
     }
-    It 'is stale when the epic itself is already closed' {
-        (Get-RunMarkerFinding -Marker (New-Marker) -OpenNumbers @(493, 494) -Verified $true).Group | Should -Be 'stale'
+    It 'is stale when the epic itself is already closed and nothing of the queue is open' {
+        (Get-RunMarkerFinding -Marker (New-Marker) -OpenNumbers @(7) -Verified $true).Group | Should -Be 'stale'
+    }
+    It 'does NOT offer to close a run whose epic is closed while its queue is still open' {
+        $f = Get-RunMarkerFinding -Marker (New-Marker) -OpenNumbers @(493, 494) -Verified $true
+        $f.Group | Should -Be 'inflight'
+        $f.Offer | Should -BeNullOrEmpty
+        $f.Text  | Should -Match '#493 #494'
     }
     It 'is IN FLIGHT while queued issues are still open, and says how many' {
         $f = Get-RunMarkerFinding -Marker (New-Marker) -OpenNumbers @(491, 494, 495) -Verified $true
@@ -114,6 +120,16 @@ Describe 'Get-MergedWorktreeFindings' {
         $f.Count    | Should -Be 1
         $f[0].Group | Should -Be 'stale'
         $f[0].Text  | Should -Match 'issue-1-a \(PR #5\)'
+    }
+    It 'never offers to clean a merged worktree that still holds uncommitted work, or whose state is unknown' {
+        $rows = @(
+            [pscustomobject]@{ Path = 'p1'; Branch = 'b-dirty'; Merged = $true; Pr = 5; Dirty = 'dirty'; Error = '' },
+            [pscustomobject]@{ Path = 'p2'; Branch = 'b-unk';   Merged = $true; Pr = 6; Dirty = 'unknown'; Error = '' })
+        $f = @(Get-MergedWorktreeFindings -Rows $rows)
+        $f.Count | Should -Be 1
+        $f[0].Offer | Should -BeNullOrEmpty
+        $f[0].Text  | Should -Match 'b-dirty'
+        $f[0].Text  | Should -Match 'b-unk'
     }
     It 'ignores a worktree whose branch is not merged' {
         @(Get-MergedWorktreeFindings -Rows @([pscustomobject]@{ Path = 'p'; Branch = 'b'; Merged = $false; Pr = 0; Error = '' })).Count | Should -Be 0
@@ -292,6 +308,7 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
                 if ($branch -eq 'issue-10-open') { return @([pscustomobject]@{ number = 42; state = 'OPEN';   headRefOid = $script:Wt2Tip }) }
                 # The MAIN working copy is never a candidate, even if a PR of its branch merged at its tip.
                 if ($branch -eq 'main') { return @([pscustomobject]@{ number = 44; state = 'MERGED'; headRefOid = $script:MainTip }) }
+                if ($branch -eq 'issue-12-broken' -and $script:Wt4Tip) { return @([pscustomobject]@{ number = 45; state = 'MERGED'; headRefOid = $script:Wt4Tip }) }
                 if ($branch -eq 'issue-11-reused') { return @([pscustomobject]@{ number = 43; state = 'MERGED'; headRefOid = '0000000000000000000000000000000000000000' }) }
                 return @()
             }
@@ -326,6 +343,46 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
         $bySource['release'][0].Text  | Should -Match 'v0\.1\.0'
         (@($f | Where-Object { $_.Group -in 'stale', 'offboard', 'due' })).Count | Should -Be 5
         Test-StateOfPlayClean -Findings $f | Should -BeFalse
+    }
+
+    It 'reads an untracked file in a merged worktree as live work and does not offer to clean it' {
+        Set-Content -LiteralPath (Join-Path $script:Wt 'scratch.txt') -Value 'wip'
+        Push-Location $script:Root
+        try {
+            $f = @(Get-StateOfPlay -Repo 'o/r' -HereRepo 'o/r' -Items $script:Items -BoardTruncated $false `
+                                   -StateDir $script:State -LiveBranches @() -BaseRef 'main')
+        } finally {
+            Pop-Location
+            Remove-Item -LiteralPath (Join-Path $script:Wt 'scratch.txt') -Force
+        }
+        $wt = @($f | Where-Object { $_.Source -eq 'worktree' })
+        $wt.Count | Should -Be 1
+        $wt[0].Offer | Should -BeNullOrEmpty
+        $wt[0].Text  | Should -Match 'sin commitear'
+        $wt[0].Text  | Should -Match 'issue-9-done'
+    }
+
+    It 'fails closed when git cannot tell whether a merged worktree is dirty' {
+        $wt4 = Join-Path $TestDrive 'repo-wt4'
+        Push-Location $script:Root
+        try {
+            git worktree add -q -b issue-12-broken $wt4 2>&1 | Out-Null
+            $script:Wt4Tip = "$(git rev-parse issue-12-broken)".Trim()
+            # A folder git cannot read: its `.git` link is garbage, so `git status` there fails.
+            Set-Content -LiteralPath (Join-Path $wt4 '.git') -Value 'not a gitdir link'
+            $f = @(Get-StateOfPlay -Repo 'o/r' -HereRepo 'o/r' -Items $script:Items -BoardTruncated $false `
+                                   -StateDir $script:State -LiveBranches @() -BaseRef 'main')
+        } finally {
+            $script:Wt4Tip = $null
+            Remove-Item -LiteralPath $wt4 -Recurse -Force -ErrorAction SilentlyContinue
+            git worktree prune 2>&1 | Out-Null
+            git branch -D issue-12-broken 2>&1 | Out-Null
+            Pop-Location
+        }
+        $kept = @($f | Where-Object { $_.Source -eq 'worktree' -and $_.Text -match 'issue-12-broken' })
+        $kept.Count | Should -Be 1
+        $kept[0].Offer | Should -BeNullOrEmpty
+        $kept[0].Text  | Should -Match 'sin commitear'
     }
 
     It 'never offers to remove the worktree the session is standing in, even when its own PR merged' {

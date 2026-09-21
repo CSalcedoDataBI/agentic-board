@@ -95,6 +95,12 @@ function Get-RunMarkerFinding {
     $stillOpen  = @($queue | Where-Object { $open -contains $_ })
     $closedCnt  = $queue.Count - $stillOpen.Count
 
+    if (-not $epicOpen -and $stillOpen.Count -gt 0) {
+        # The epic was closed but the run's own queue still has open issues: that is not a run to
+        # close on the tool's say-so, it is a disagreement the user should see (no offer attached).
+        return New-StateFinding -Source 'run' -Group 'inflight' `
+            -Text ("Corrida autonoma activa cuyo epic #{0} ya esta cerrado, pero de su cola siguen abiertos {1}{2}." -f $epic, (Format-StateNumberList $stillOpen), $when)
+    }
     if (-not $epicOpen) {
         return New-StateFinding -Source 'run' -Group 'stale' `
             -Text "Una corrida autonoma sigue marcada como activa sobre el epic #$epic, pero ese epic ya esta cerrado$when." `
@@ -170,11 +176,21 @@ function Get-MergedWorktreeFindings {
     $live  = @($LiveBranches | Where-Object { $_ })
     $out   = @()
     $merged = @($rows | Where-Object { -not $_.Error -and $_.Merged -and ($live -notcontains $_.Branch) })
-    if ($merged.Count -gt 0) {
-        $desc = @($merged | ForEach-Object { "$($_.Branch) (PR #$($_.Pr))" }) -join ', '
+    # A merged branch whose folder still holds uncommitted or untracked files (or whose state could
+    # not be read - fail closed) is somebody's live work: it is said, but never offered for cleanup.
+    $isClean = { param($r) (-not $r.Dirty) -or $r.Dirty -eq 'clean' }
+    $cleanable = @($merged | Where-Object { & $isClean $_ })
+    $kept      = @($merged | Where-Object { -not (& $isClean $_) })
+    if ($cleanable.Count -gt 0) {
+        $desc = @($cleanable | ForEach-Object { "$($_.Branch) (PR #$($_.Pr))" }) -join ', '
         $out += New-StateFinding -Source 'worktree' -Group 'stale' `
-            -Text ("{0} worktree(s) de ramas que ya se mergearon: {1}." -f $merged.Count, $desc) `
+            -Text ("{0} worktree(s) de ramas que ya se mergearon: {1}." -f $cleanable.Count, $desc) `
             -Offer 'limpiarlos (con la confirmacion de siempre por rama)'
+    }
+    if ($kept.Count -gt 0) {
+        $desc = @($kept | ForEach-Object { "$($_.Branch) (PR #$($_.Pr))" }) -join ', '
+        $out += New-StateFinding -Source 'worktree' -Group 'stale' `
+            -Text ("{0} worktree(s) de ramas ya mergeadas, pero con cambios sin commitear (o que no pude comprobar): {1}. Los conservo, no los ofrezco para limpiar." -f $kept.Count, $desc)
     }
     $bad = @($rows | Where-Object { $_.Error })
     if ($bad.Count -gt 0) {
@@ -369,7 +385,15 @@ function Read-StateWorktreeVerdicts {
                 $v = Get-SessionCompletion -PrState ([string]$mine.state) -PrHeadOid ([string]$mine.headRefOid) -BranchTip ([string]$w.Head)
                 $merged = [bool]$v.merged; $pr = [int]$mine.number
             }
-            $rows += [pscustomobject]@{ Path = $w.Path; Branch = $w.Branch; Merged = $merged; Pr = $pr; Error = '' }
+            # Only a merged branch needs the folder checked; --untracked-files=all so a new file counts.
+            # Fail closed: a git error is 'unknown', never 'clean'.
+            $dirty = 'clean'
+            if ($merged) {
+                $st = @(git -C $w.Path status --porcelain --untracked-files=all 2>$null)
+                if ($LASTEXITCODE -ne 0) { $dirty = 'unknown' }
+                elseif ((@($st) -join '').Trim()) { $dirty = 'dirty' }
+            }
+            $rows += [pscustomobject]@{ Path = $w.Path; Branch = $w.Branch; Merged = $merged; Pr = $pr; Dirty = $dirty; Error = '' }
         } catch {
             $rows += [pscustomobject]@{ Path = $w.Path; Branch = $w.Branch; Merged = $false; Pr = 0; Error = $_.Exception.Message }
         }
