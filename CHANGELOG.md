@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.40.0] - 2026-09-21
+Plugin updates now reach you: one command updates every plugin on the machine, shows which open
+sessions are still on an old build, tells a session when a plugin it loaded was updated, and removes
+old builds nobody uses.
+### Added
+- **`/board plugins` updates every installed plugin in one pass (#712).** It refreshes each marketplace,
+  updates each plugin, and reports old -> new version and commit with a short "what's new". A failed
+  refresh or update is reported as failed (and the exit code is non-zero), never as "up to date".
+- **`/board plugins sessions` lists open sessions that are still on an old build (#713).** For each it
+  says whether `/reload-plugins` is enough or the plugin ships an MCP server and needs a new session.
+  A session with no usage record reads as unknown, never as up to date; sessions that are not live are
+  never listed (liveness by process id and start time, so a recycled id is not mistaken for a session).
+- **A running session is told once when a plugin it loaded was updated (#714).** A `UserPromptSubmit`
+  hook shows one plain-language notice per session, plugin and new build. A `cmd` shim in front of it
+  (the same approach as the brake's, #572) keeps a steady-state prompt at about 0.15-0.35 s instead of
+  about 2 s: it skips starting PowerShell while the installed list is unchanged since that session's
+  last conclusive check. Only sessions started with a build that contains the hook can show the notice;
+  the session map covers the rest.
+- **`/board plugins clean` removes old cached builds nobody uses (#715).** It lists by default and
+  deletes only with `-Execute`. A build is removed only when it is not installed, no live process holds
+  it, it is a real folder strictly inside the plugin cache (no links), and it was not touched recently;
+  each build is re-checked right before its own deletion, and any doubt keeps it.
+### Changed
+- **`.cmd` files are checked out with CRLF line endings** (`.gitattributes`), because `cmd.exe` can
+  misparse labels in LF-only files; this also covers the brake's shim.
+
 ## [0.39.0] - 2026-09-19
 A large part of the backlog closed in one pass - every fix with tests that were mutation-checked and
 an external review - plus the CI that had been red for eleven days.
