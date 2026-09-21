@@ -67,7 +67,7 @@ foreach ($s in $skills) {
 # PATH (two copies of a name can share a namespace), falling back to the namespace.
 function Get-CopiesNote {
     param($Count, [string]$Label)
-    if ($Count -gt 1) { " ($Label has $Count identical copies, reported once)" } else { '' }
+    if ($Count -gt 1) { " ($Label has $Count copies with the same description, reported once)" } else { '' }
 }
 foreach ($o in $inv.overlaps) {
     $s = $skills | Where-Object { $_.path -eq $o.aPath } | Select-Object -First 1

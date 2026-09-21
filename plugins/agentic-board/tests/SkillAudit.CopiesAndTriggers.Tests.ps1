@@ -104,7 +104,7 @@ Describe 'copies of one skill are not reported against each other (#462)' {
         $aud = Invoke-Aud $fx
         $nd = @($aud.findings | Where-Object type -eq 'near-duplicate')
         $nd.Count | Should -Be 1
-        $nd[0].detail | Should -Match 'identical copies'
+        $nd[0].detail | Should -Match '3 copies with the same description'
     }
     It 'two different skills with the very same description are NOT treated as copies' {
         $fx = New-Fixture 'twins'
