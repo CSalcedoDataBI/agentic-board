@@ -36,9 +36,26 @@ if ($Name) { $skills = $skills | Where-Object { $_.name -eq $Name -or $_.namespa
 
 $findings = [System.Collections.Generic.List[object]]::new()
 
+# Who owns a skill is resolved from its REAL plugin identity (the inventory reads the plugin's own
+# manifest) and cached per distinct (scope, plugin, declared repo): the resolver may shell out.
+# -PluginRepo is always passed (possibly empty) so the resolver runs in its fail-closed mode: a
+# plugin that is not positively the tool's own is local-only, never filed.
+$ownerCache = @{}
+function Get-Owner {
+    param($Skill)
+    $k = "$($Skill.scope)|$($Skill.plugin)|$($Skill.pluginRepo)"
+    if (-not $ownerCache.ContainsKey($k)) {
+        $ownerCache[$k] = & $resolver -Scope $Skill.scope -Plugin $Skill.plugin -PluginRepo $Skill.pluginRepo -CurrentRepo $CurrentRepo
+    }
+    $ownerCache[$k]
+}
+
+# `Members` are the records one finding stands for (the copies folded into it); `copies` and `paths`
+# say so on the finding itself (paths are LOCAL evidence: never paste them into a filed issue).
 function Add-Finding {
-    param($Skill, [string]$Severity, [string]$Type, [string]$Detail)
-    $owner = & $resolver -Scope $Skill.scope -Plugin $Skill.plugin -CurrentRepo $CurrentRepo
+    param($Skill, [string]$Severity, [string]$Type, [string]$Detail, $Members)
+    $owner = Get-Owner $Skill
+    $m = if ($Members) { @($Members) } else { @($Skill) }
     $findings.Add([pscustomobject]@{
         skill     = $Skill.namespace
         scope     = $Skill.scope
@@ -47,17 +64,47 @@ function Add-Finding {
         detail    = $Detail
         ownerRepo = $owner.ownerRepo
         filing    = $owner.filing
+        copies    = $m.Count
+        paths     = @($m | ForEach-Object { $_.path })
     })
 }
 
+# Per-file lints (a defect of THIS file): each record keeps its own finding.
 foreach ($s in $skills) {
     if (-not $s.hasName)                { Add-Finding $s 'high' 'missing-name'      'Frontmatter has no name field.' }
-    if (-not $s.description)            { Add-Finding $s 'high' 'empty-description' 'Description is empty — the skill cannot be routed to.' ; continue }
-    if ($s.budget.overCap)             { Add-Finding $s 'med'  'over-budget'       "Description is $($s.descChars) chars (> 1536 cap) — it gets truncated." }
-    if (-not $s.lint.thirdPerson)      { Add-Finding $s 'med'  'first-person'      'Description is first-person ("I can…"); use third person.' }
-    if (-not $s.lint.hasTriggers)      { Add-Finding $s 'med'  'no-triggers'       'No concrete trigger terms / "Use when…" clause.' }
-    if (-not $s.lint.hasWhenNotToUse)  { Add-Finding $s 'low'  'no-when-not'       'No "when NOT to use → see X" clause (disambiguation).' }
-    if ($s.misplaced)                  { Add-Finding $s 'low'  'misplaced'         'SKILL.md lives outside .claude/skills — run skills-organize.' }
+    if ($s.description -and $s.misplaced) { Add-Finding $s 'low' 'misplaced'        'SKILL.md lives outside .claude/skills — run skills-organize.' }
+}
+
+# Description lints (a defect of the WORDING): reported once per variant, i.e. per distinct skill.
+# The same skill is normally visible through several copies (repo tree, worktrees, installed cache,
+# marketplaces clone); one wording defect is one finding, not one per copy. A variant is folded
+# only among copies with the same OWNER (repo + filing), so a fold never changes where a finding is
+# routed, and a copy whose description differs is its own variant with its own findings.
+$groups = [ordered]@{}
+foreach ($s in $skills) {
+    $o = Get-Owner $s
+    # The lint outcome is part of the key: the variant compares descriptions with whitespace collapsed,
+    # so two copies can differ in length (over-budget) or wording-lint result while sharing a variant;
+    # a fold must never hide a finding the other copy would have produced.
+    $sig = @($s.budget.overCap, $s.lint.thirdPerson, $s.lint.hasTriggers, $s.lint.hasWhenNotToUse, [bool]$s.description) -join ','
+    $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)|$sig"
+    if (-not $groups.Contains($gk)) { $groups[$gk] = [System.Collections.Generic.List[object]]::new() }
+    $groups[$gk].Add($s)
+}
+$foldedFindings = 0
+foreach ($g in $groups.Values) {
+    $members = @($g | Sort-Object @{ e = { $_.copyRank } }, @{ e = { $_.path } })
+    $s = $members[0]
+    $before = $findings.Count
+    if (-not $s.description) {
+        Add-Finding $s 'high' 'empty-description' 'Description is empty — the skill cannot be routed to.' $members
+    } else {
+        if ($s.budget.overCap)             { Add-Finding $s 'med' 'over-budget'  "Description is $($s.descChars) chars (> 1536 cap) — it gets truncated." $members }
+        if (-not $s.lint.thirdPerson)      { Add-Finding $s 'med' 'first-person' 'Description is first-person ("I can…"); use third person.' $members }
+        if (-not $s.lint.hasTriggers)      { Add-Finding $s 'med' 'no-triggers'  'No concrete trigger terms / "Use when…" clause.' $members }
+        if (-not $s.lint.hasWhenNotToUse)  { Add-Finding $s 'low' 'no-when-not'  'No "when NOT to use → see X" clause (disambiguation).' $members }
+    }
+    $foldedFindings += ($findings.Count - $before) * ($members.Count - 1)
 }
 
 # Overlaps are pairwise; attribute to the first member (both get flagged in report text).
@@ -83,7 +130,8 @@ foreach ($o in $inv.overlaps) {
         $bScope = ($inv.skills | Where-Object { $_.path -eq $otherPath } | Select-Object -First 1).scope
         Add-Finding $s 'med' 'divergent-copy' "Two copies of '$($s.name)' carry different descriptions ($($s.scope) vs $bScope copy, Jaccard $($o.jaccard)) — one is stale; re-sync them.$note"
     } else {
-        Add-Finding $s 'med' 'near-duplicate' "Description overlaps '$($o.b)' (Jaccard $($o.jaccard)) — add a disambiguation clause or merge.$note"
+        $mem = @($skills | Where-Object { @($o.aPaths) -contains $_.path })
+        Add-Finding $s 'med' 'near-duplicate' "Description overlaps '$($o.b)' (Jaccard $($o.jaccard)) — add a disambiguation clause or merge.$note" $mem
     }
 }
 
@@ -95,6 +143,9 @@ $result = [pscustomobject]@{
         skillsAudited = @($skills).Count
         # Copies of one skill folded before the overlap pass (whole inventory, not filtered by -Name).
         copiesCollapsed = $inv.summary.collapsedCopies
+        # Description-lint findings NOT emitted because the same skill (same name, description and
+        # owner) was already reported through another copy: findings + this = the per-copy count.
+        perCopyFindingsFolded = $foldedFindings
         findings      = $sorted.Count
         high          = @($sorted | Where-Object severity -eq 'high').Count
         med           = @($sorted | Where-Object severity -eq 'med').Count

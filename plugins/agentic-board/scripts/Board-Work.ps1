@@ -241,6 +241,10 @@ $ErrorActionPreference = "Stop"
 # per-session PR record.
 . (Join-Path $PSScriptRoot 'BoardWork.CrossRepo.ps1')
 
+# The "state of play" printed before the pending list (#660): what is in flight, stale, off-board
+# or due, read from the executing sources rather than from the board's own opinion.
+. (Join-Path $PSScriptRoot 'BoardWork.StateOfPlay.ps1')
+
 # NOTE: the GH_TOKEN check lives in the main-entry guard below (after every function
 # is defined) so the pure helpers can be dot-sourced for unit tests without a token
 # and without side effects (set $env:ABIOS_BOARDWORK_DOTSOURCE=1 before dot-sourcing).
@@ -973,9 +977,9 @@ function Show-BranchDrift {
     } catch { }
 }
 
-# ==============================================================================
+# =======================================================================
 # Reusable start helpers (shared by -Start mode 3 and -Parallel mode 5)
-# ==============================================================================
+# =======================================================================
 
 # Work branch name: issue-<num>-<slug-from-title>. Pure -> unit-testable.
 function Get-IssueSlugBranch([int]$num, [string]$title) {
@@ -1700,10 +1704,10 @@ query($o:String!, $r:String!, $n:Int!) {
     Write-Host "------------------------------" -ForegroundColor Cyan
 }
 
-# ==============================================================================
+# =======================================================================
 # Parallel session launcher (mode 5 -Launch): one visible Claude session per
 # worktree, each briefed to work its own issue end-to-end.
-# ==============================================================================
+# =======================================================================
 
 # Compute the effective brake for a launched session (#598).
 # All launched sessions stop at a reviewed PR by default — a session that merges its
@@ -2207,12 +2211,12 @@ function Show-SessionFleet {
     Write-Host ("Total: {0} sesion(es) viva(s). Las de PID muerto se podaron automaticamente." -f $sessions.Count) -ForegroundColor Cyan
 }
 
-# ==============================================================================
+# =======================================================================
 # CLI adapter registry: one record per launchable AI CLI. Generalizes the
 # previously Claude-only launch path (Build-WorktreeLaunch / Get-SessionBriefing).
 # Kind: 'repl' = live tab in the worktree; 'async' = dispatches a cloud task.
 # Hooks are scriptblocks so they stay pure/testable and are invoked with &.
-# ==============================================================================
+# =======================================================================
 function Get-CliAdapters {
     @(
         [PSCustomObject]@{
@@ -2429,20 +2433,20 @@ function Build-FleetPlan([object[]]$Started, [hashtable]$CliMap) {
         [PSCustomObject]@{ issue=$r.issue; repo=$r.repo; branch=$r.branch; workPath=$r.workPath; cli=$cli }
     }
 }
-# ==============================================================================
+# =======================================================================
 # Governor (capacity) + process supervision moved to part files (#575): the same
 # functions, dot-sourced so this 3,100-line dispatcher stops holding a job scheduler
 # and a process killer inline. Loaded HERE (before the CLI and before the dot-source
 # guard) so tests that dot-source Board-Work keep seeing every function.
-# ==============================================================================
+# =======================================================================
 . (Join-Path $PSScriptRoot 'BoardWork.Capacity.ps1')
 . (Join-Path $PSScriptRoot 'BoardWork.Processes.ps1')
 
-# ==============================================================================
+# =======================================================================
 # WATCH LAYER (issue #135): auto-detect when the parallel/-Launch sessions finish and
 # (opt-in) auto-clean their worktrees + branches + registry entries. Detection is
 # read-only polling of observable state; the cleanup is guarded and DI-testable.
-# ==============================================================================
+# =======================================================================
 
 # Is a watched session DONE? PURE -> unit-testable. A session finishes when its PR is
 # MERGED, its issue is CLOSED, or its host process is dead (the tab exited). Precedence
@@ -3060,11 +3064,11 @@ function Invoke-BatchIssueStart {
     }
 }
 
-# ==============================================================================
+# =======================================================================
 # Main entry. Dot-source guard: when the test harness sets ABIOS_BOARDWORK_DOTSOURCE,
 # the script returns here with only the functions defined - no token check, no gh
 # calls, no side effects - so the pure helpers can be unit-tested in isolation.
-# ==============================================================================
+# =======================================================================
 if ($env:ABIOS_BOARDWORK_DOTSOURCE) { return }
 
 # ── Top-level error boundary (#485): any unhandled exception becomes a clean
@@ -3075,11 +3079,11 @@ trap {
     exit 1
 }
 
-# ==============================================================================
+# =======================================================================
 # KILL-LAYER MODES (Phase 2, local-only - no GH_TOKEN needed). Every kill goes
 # through the fail-safe Stop-ProcessTree (self + ancestors always excluded) and
 # DEFAULTS to a dry-run listing; add -Force to actually kill.
-# ==============================================================================
+# =======================================================================
 if ($Reap -or $KillAll) {
     $killLive = [bool]$KillAll
     if ($KillAll) {
@@ -3155,11 +3159,11 @@ if ($Relaunch -gt 0) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # RECORD-PR MODE: -RecordPr <owner/name#n> -ForIssue <n>  -> note a PR a session opened in
 # ANOTHER repo against that session's registry row (#487), so the dashboard says what is really
 # live instead of "1 session, 1 worktree". Local only: no token, nothing written to GitHub.
-# ==============================================================================
+# =======================================================================
 if ($RecordPr) {
     $ref = Get-PullRequestRef $RecordPr
     if (-not $ref)         { Write-Host "  -RecordPr espera owner/name#numero (o la URL del PR); recibi '$RecordPr'." -ForegroundColor Red; exit 1 }
@@ -3170,11 +3174,11 @@ if ($RecordPr) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # PREFERENCE MODE: -PreferGroupedPRs on|off|auto  -> record this repo's standing
 # answer about grouped PRs (#662) and stop. It is a decision, not a run: writing it
 # and then also listing the board would bury the confirmation the user needs to see.
-# ==============================================================================
+# =======================================================================
 if ($PreferGroupedPRs -eq 'show') {
     # Read-only. Outside a git repo there is no config to read, and that is a normal answer, not an
     # error: the default applies. An unreadable file is said out loud, never read as "no preference"
@@ -3246,7 +3250,7 @@ if ($groupQueue.Count -gt 0 -and ($Start -gt 0 -or $Parallel.Count -gt 0)) {
     throw "-StartGroup es mutuamente exclusivo con -Start y -Parallel: son tres modos distintos de arrancar issues."
 }
 
-# ==============================================================================
+# =======================================================================
 # LOCK MODE: -Lock <n> / -Unlock <n>  -> in ONE step mark an issue owned-elsewhere
 # (post the [abios-claim] fingerprint, move Status, AND assign the owner) WITHOUT
 # starting or branching it locally (issue #236). Assigning the owner is what makes
@@ -3254,7 +3258,7 @@ if ($groupQueue.Count -gt 0 -and ($Start -gt 0 -or $Parallel.Count -gt 0)) {
 # that Invoke-IssueStart's existing multi-session guard refuses (a status move alone
 # would not - that guard requires an assignee). Symmetric: -Unlock posts an UNLOCK
 # claim, moves Status back to Backlog, and unassigns the owner.
-# ==============================================================================
+# =======================================================================
 if ($Lock -gt 0 -or $Unlock -gt 0) {
     if ($ProjectNum -le 0) { throw "-Lock/-Unlock necesitan -ProjectNum <n> para mover el Status." }
     $lockUrl = Get-BoardUrl $ProjectNum
@@ -3321,14 +3325,14 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # CLOSE-LOOP MODE: -CloseLoop  -> classify the CURRENT branch and route it to the
 # right disposition (#302). It PROPOSES the next step for every state and performs
 # exactly ONE action: tearing down a proven-merged local branch in place - the
 # single-session equivalent of the fleet's -AutoClean, which an interactive session
 # never reaches. It never merges (that has the review gate) and never touches a
 # dirty tree. Operates on the current branch only; the repo-wide sweep is /board doctor.
-# ==============================================================================
+# =======================================================================
 if ($CloseLoop) {
     $repo = $Repo
     if (-not $repo) { try { $repo = Get-RepoFromOrigin } catch { $repo = '' } }
@@ -3488,11 +3492,11 @@ if ($CloseLoop) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 0: -Sessions  -> monitor the local parallel-session fleet
 #         -Sessions -Watch [-AutoClean]  -> block until the sessions finish, then
 #         (opt-in) tear down their worktrees/branches/registry entries (issue #135).
-# ==============================================================================
+# =======================================================================
 if ($Sessions) {
     Show-BranchDrift
     Show-SessionFleet
@@ -3511,9 +3515,9 @@ if ($Watch -and $Parallel.Count -eq 0) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 1: -ListBoards  -> every board with its pending count
-# ==============================================================================
+# =======================================================================
 if ($ListBoards) {
     if ($Repo) {
         # Current-repo scope: only boards LINKED to this repository
@@ -3609,9 +3613,9 @@ if ($Start -gt 0 -and $Parallel.Count -gt 0) {
 
 $boardUrl = Get-BoardUrl $ProjectNum
 
-# ==============================================================================
+# =======================================================================
 # MODE 2: -ProjectNum  -> pending items of one board
-# ==============================================================================
+# =======================================================================
 if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueue.Count -eq 0) {
     Write-Host "=== Pendientes del board #$ProjectNum de $Owner ===" -ForegroundColor Cyan
     Write-Host ""
@@ -3632,6 +3636,30 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     $items   = $read.Items
     $truncWarn = Get-BoardTruncationWarning $read
     $pending = @($items | Where-Object { Test-Pending $_ })
+
+    # State of play (#660) BEFORE the pending list: "what is pending?" is not only the board's
+    # Backlog. A stale run marker, a finished epic, a merged-but-present worktree, an open issue
+    # nobody put on the board and an unreleased CHANGELOG are open work too, and a clean board
+    # would otherwise read as "nothing in flight". Read + offer only - it mutates nothing, and it
+    # can never take the listing down: a failure here is said and the pending list still prints.
+    try {
+        $spHere = try { Get-RepoFromOrigin } catch { '' }
+        $spRepo = if ($Repo) { $Repo } else { $spHere }
+        $spLive = @(Read-SessionRegistry | ForEach-Object { $_.branch })
+        # An unreadable registry must not read as "no live sessions" (Read-SessionRegistry returns @() on a parse error).
+        $spLiveOk = $true
+        $spRegPath = Get-SessionRegistryPath
+        if ($spRegPath -and (Test-Path -LiteralPath $spRegPath)) { try { $null = Get-Content -LiteralPath $spRegPath -Raw | ConvertFrom-Json } catch { $spLiveOk = $false } }
+        $spBase = if ($spHere) { Resolve-IssueBaseRef $spHere -NoFetch } else { '' }
+        $spPlan = @(Get-StateOfPlay -Repo $spRepo -HereRepo $spHere -Items $items -BoardTruncated ([bool]$read.Truncated) `
+                                    -StateDir (Get-AbiosStateDir -NoCreate) -LiveBranches $spLive -LiveKnown $spLiveOk -BaseRef $spBase)
+        foreach ($spLine in (Format-StateOfPlay -Findings $spPlan -Repo $spRepo)) {
+            Write-Host $spLine.Text -ForegroundColor $spLine.Color
+        }
+    } catch {
+        Write-Host "No pude armar el estado del trabajo ($($_.Exception.Message)); sigo con los pendientes." -ForegroundColor Yellow
+    }
+    Write-Host ""
 
     if ($pending.Count -eq 0) {
         # "No pending" is only honest when every Status on the board is one this tool
@@ -3742,11 +3770,11 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 4: -ProjectNum -ToReview <issueNum>  -> move item to the "In Review" column
 # The work flow calls this after opening the PR: the change is now in review /
 # testing while the gate runs. Merge later moves it to Done (close->Done + fill).
-# ==============================================================================
+# =======================================================================
 if ($ToReview -gt 0) {
     # -Graphql fails closed on exit OR errors[], so a read failure throws here instead of a null
     # id mislabelled "board not found" - this read drives the In Review write below (#314).
@@ -3799,9 +3827,9 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 5: -ProjectNum -Parallel <issueNums>  -> batch-start, one worktree each
-# ==============================================================================
+# =======================================================================
 if ($Parallel.Count -gt 0) {
     # Normalize to the batch queue (drop <=0, de-dup, keep order).
     $queue = @(Get-ParallelQueue $Parallel)
@@ -4016,7 +4044,7 @@ if ($Parallel.Count -gt 0) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 3b: -ProjectNum -StartGroup <n1,n2,...>  -> ONE shared branch for several small,
 # sequential sub-issues of the same epic (#633), so they close through ONE PR/gate/merge
 # instead of a full start->PR->gate->merge cycle per issue.
@@ -4026,7 +4054,7 @@ if ($Parallel.Count -gt 0) {
 # (Status -> In Progress, assignee, [abios-claim] comment) via the same Invoke-IssueStart,
 # just without -MakeBranch - then a session-registry row is added for each, pointing at the
 # leader's branch/workPath, so /board watch and cleanup see the whole group as one session.
-# ==============================================================================
+# =======================================================================
 if ($groupQueue.Count -gt 0) {
     Write-Host "=== Empezando lote de issues $($groupQueue -join ', ') (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
     Write-Host ""
@@ -4075,9 +4103,9 @@ if ($groupQueue.Count -gt 0) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 3: -ProjectNum -Start <issueNum>  -> move to In Progress + assign + context
-# ==============================================================================
+# =======================================================================
 Write-Host "=== Empezando issue #$Start (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
 Write-Host ""
 
