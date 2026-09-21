@@ -291,9 +291,8 @@ function Invoke-PluginUpdate {
         $cand = @($plan.Items | Where-Object { $_.Action -eq 'remove' })
         $removed = 0; $failed = 0
         if ($Clean -and -not $DryRun) {
-            foreach ($c in $cand) {
-                if ((Remove-PluginVersionDir -Path $c.Path -ClaudeHome $ClaudeHome).Removed) { $removed++ } else { $failed++ }
-            }
+            $done = Invoke-PluginCleanup -Plan $plan -ClaudeHome $ClaudeHome -GetProcess $GetProcess -GraceMinutes $GraceMinutes
+            $removed = @($done.Removed).Count; $failed = @($done.Failed).Count
         }
         $result.Cleanup = [pscustomobject]@{
             Available = $true; Candidates = $cand.Count; Bytes = [long](($cand | Measure-Object SizeBytes -Sum).Sum)

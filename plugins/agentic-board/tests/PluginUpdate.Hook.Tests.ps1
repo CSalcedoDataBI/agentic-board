@@ -76,6 +76,39 @@ Describe 'Invoke-StaleNotice - the decision' {
         (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd) | Should -BeNullOrEmpty
         (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd) | Should -BeNullOrEmpty
     }
+    It 'an inconclusive check (no marker yet) is trusted only briefly: a marker that appears is noticed after 5 minutes, not 30' {
+        $sc = New-StaleScenario
+        $sd = New-StateDir
+        $t0 = [datetime]::UtcNow
+        Remove-Item -LiteralPath (Join-Path $sc.Fx.Root 'plugins' 'cache' 'm' 'p' '1.0' '.in_use' '111')
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0) | Should -BeNullOrEmpty
+        Add-FakeMarker $sc.Fx -Marketplace 'm' -Plugin 'p' -Version '1.0' -ProcId 111 -StartFt $script:Ft   # the first prompt raced ahead of it
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0.AddMinutes(3)) | Should -BeNullOrEmpty
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0.AddMinutes(6)) | Should -Match 'reload-plugins'
+    }
+    It 'a session that is not in the registry yet is re-checked briefly too' {
+        $sc = New-StaleScenario
+        $sd = New-StateDir
+        $t0 = [datetime]::UtcNow
+        $late = @{ session_id = 'sess-late' } | ConvertTo-Json -Compress
+        (Invoke-StaleNotice -StdinText $late -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0) | Should -BeNullOrEmpty
+        [void](Add-FakeSession $sc.Fx -ProcId 555 -StartFt $script:Ft -SessionId 'sess-late')
+        Add-FakeMarker $sc.Fx -Marketplace 'm' -Plugin 'p' -Version '1.0' -ProcId 555 -StartFt $script:Ft
+        (Invoke-StaleNotice -StdinText $late -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0.AddMinutes(6)) | Should -Match 'reload-plugins'
+    }
+    It 'writing the state keeps a notice another session recorded meanwhile (read-merge-write)' {
+        $sd = New-StateDir
+        $path = Join-Path $sd 'plugin-notices.json'
+        $mine = @{ Sessions = @{ 'A' = @{ 'p@m@2.0' = 'x' } }; Checks = @{ 'A' = @{ Stamp = 's'; At = 1L; Full = $true } } }
+        # session B recorded its own notice after A read the file but before A writes
+        $theirs = @{ Sessions = @{ 'B' = @{ 'q@m@1.1' = 'y' } }; Checks = @{ 'B' = @{ Stamp = 's'; At = 2L; Full = $true } } }
+        Write-NoticeState -Path $path -State $theirs -KeepSessions @('A', 'B') -SessionId 'B'
+        Write-NoticeState -Path $path -State $mine -KeepSessions @('A', 'B') -SessionId 'A'
+        $back = Read-NoticeState -Path $path
+        $back.Sessions.ContainsKey('A') | Should -BeTrue
+        $back.Sessions.ContainsKey('B') | Should -BeTrue
+        $back.Sessions['B'].ContainsKey('q@m@1.1') | Should -BeTrue
+    }
     It 'the once-only record holds on its own, even when the cheap skip does not apply (recheck after the interval)' {
         $sc = New-StaleScenario
         $sd = New-StateDir

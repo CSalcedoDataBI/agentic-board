@@ -517,6 +517,11 @@ function Remove-PluginVersionDir {
     if (Test-IsLinkItem $item) { return (& $no 'es un enlace') }
     $pDir = Split-Path -Parent $item.FullName
     $mDir = Split-Path -Parent $pDir
+    # A parent that became a junction would make the string-prefix checks below pass while the delete
+    # walks through it to somewhere else (Get-Item reports the path as spelled, not where it leads).
+    foreach ($up in @($pDir, $mDir, $cacheRoot)) {
+        if (Test-IsLinkItem (Get-Item -LiteralPath $up -Force -ErrorAction SilentlyContinue)) { return (& $no 'una carpeta que la contiene es un enlace') }
+    }
     if (-not (Test-PathStrictlyInside -Child $item.FullName -Parent $pDir -DirectChild) -or
         -not (Test-PathStrictlyInside -Child $pDir -Parent $mDir -DirectChild) -or
         -not (Test-PathStrictlyInside -Child $mDir -Parent $cacheRoot -DirectChild)) {
@@ -529,4 +534,29 @@ function Remove-PluginVersionDir {
     catch { return (& $no "no se pudo borrar: $($_.Exception.Message)") }
     if (Test-Path -LiteralPath $item.FullName) { return (& $no 'sigue existiendo despues de borrar') }
     return [pscustomobject]@{ Removed = $true; Reason = '' }
+}
+
+# Plan -> deletions, with the plan RE-DERIVED first. The plan a person looked at is a moment old: since
+# then a session may have loaded the build or an update may have installed it. So a fresh plan is made
+# right before deleting, and only a build that is removable in BOTH is attempted; each is then
+# re-verified by Remove-PluginVersionDir. { Removed = items; Failed = items (with FailReason) }
+function Invoke-PluginCleanup {
+    param($Plan, [string]$ClaudeHome, [scriptblock]$GetProcess, [int]$GraceMinutes = 60)
+    $removed = [System.Collections.Generic.List[object]]::new()
+    $failed = [System.Collections.Generic.List[object]]::new()
+    $args_ = @{ ClaudeHome = $ClaudeHome; GraceMinutes = $GraceMinutes }
+    if ($GetProcess) { $args_.GetProcess = $GetProcess }
+    $fresh = Get-VersionCleanupPlan @args_
+    $stillOk = @{}
+    if ($fresh.Ok) { foreach ($f in @($fresh.Items | Where-Object { $_.Action -eq 'remove' })) { $stillOk[$f.Path] = $true } }
+    foreach ($i in @($Plan.Items | Where-Object { $_.Action -eq 'remove' })) {
+        if (-not $stillOk.ContainsKey($i.Path)) {
+            $i | Add-Member -NotePropertyName FailReason -NotePropertyValue 'ya no cumple las condiciones para borrarla (se volvio a comprobar justo antes)' -Force
+            $failed.Add($i); continue
+        }
+        $r = Remove-PluginVersionDir -Path $i.Path -ClaudeHome $ClaudeHome
+        if ($r.Removed) { $removed.Add($i) }
+        else { $i | Add-Member -NotePropertyName FailReason -NotePropertyValue $r.Reason -Force; $failed.Add($i) }
+    }
+    return [pscustomobject]@{ Removed = @($removed); Failed = @($failed) }
 }

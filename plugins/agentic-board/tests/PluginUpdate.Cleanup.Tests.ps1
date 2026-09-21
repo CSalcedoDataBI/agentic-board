@@ -125,6 +125,34 @@ Describe 'Get-VersionCleanupPlan - what may be removed' {
     }
 }
 
+Describe 'Invoke-PluginCleanup re-checks right before deleting (the plan is a moment old)' {
+    It 'a session that loads the build AFTER the plan was made keeps it' {
+        $fx = New-CleanFx
+        $plan = Get-VersionCleanupPlan -ClaudeHome $fx.Root -GetProcess $script:Gone
+        (Get-Item-Of $plan '1.0').Action | Should -Be 'remove'
+        Add-FakeMarker $fx -Marketplace 'm' -Plugin 'p' -Version '1.0' -ProcId $PID -StartFt $script:MyFt      # now held by a live process
+        $out = Invoke-PluginCleanup -Plan $plan -ClaudeHome $fx.Root
+        Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '1.0') | Should -BeTrue
+        @($out.Removed).Count | Should -Be 0
+        @($out.Failed).Count | Should -Be 1
+    }
+    It 'an update that makes the build the installed one AFTER the plan keeps it' {
+        $fx = New-CleanFx
+        $plan = Get-VersionCleanupPlan -ClaudeHome $fx.Root -GetProcess $script:Gone
+        Set-FakeInstalledBuild $fx -Key 'p@m' -Version '1.0'
+        $out = Invoke-PluginCleanup -Plan $plan -ClaudeHome $fx.Root -GetProcess $script:Gone
+        Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '1.0') | Should -BeTrue
+        @($out.Removed).Count | Should -Be 0
+    }
+    It 'a build that is still removable at the re-check is deleted' {
+        $fx = New-CleanFx
+        $plan = Get-VersionCleanupPlan -ClaudeHome $fx.Root -GetProcess $script:Gone
+        $out = Invoke-PluginCleanup -Plan $plan -ClaudeHome $fx.Root -GetProcess $script:Gone
+        @($out.Removed).Count | Should -Be 1
+        Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '1.0') | Should -BeFalse
+    }
+}
+
 Describe 'links and paths outside the cache are refused' {
     BeforeAll {
         # A link to a directory holding a file that must survive. Symlinks need a privilege on Windows,
@@ -163,6 +191,17 @@ Describe 'links and paths outside the cache are refused' {
         $plan = Get-VersionCleanupPlan -ClaudeHome $fx.Root -GetProcess $script:Gone
         (Get-Item-Of $plan '1.0').Action | Should -Be 'keep'
         (Get-Item-Of $plan '1.0').Category | Should -Be 'link'
+    }
+    It 'Remove-PluginVersionDir refuses a build reached THROUGH a marketplace folder that became a junction' {
+        $fx = New-CleanFx
+        $outside = Join-Path $TestDrive ("via" + [guid]::NewGuid().ToString('N').Substring(0, 6))
+        New-Item -ItemType Directory -Force -Path (Join-Path $outside 'p' '1.0') | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $outside 'p' '1.0' 'precious.txt'), 'keep me')
+        $link = Join-Path $fx.Root 'plugins' 'cache' 'swapped'
+        if (-not (New-DirLink $link $outside)) { Set-ItResult -Skipped -Because 'cannot create a symlink or junction here'; return }
+        $r = Remove-PluginVersionDir -Path (Join-Path $link 'p' '1.0') -ClaudeHome $fx.Root
+        $r.Removed | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $outside 'p' '1.0' 'precious.txt') | Should -BeTrue
     }
     It 'Remove-PluginVersionDir refuses a path OUTSIDE the cache' {
         $fx = New-CleanFx

@@ -73,19 +73,6 @@ function Format-CleanupReport {
     return @($acc)
 }
 
-# Plan -> deletions. Only 'remove' items are attempted, and each is re-verified by Remove-PluginVersionDir.
-function Invoke-PluginCleanup {
-    param($Plan, [string]$ClaudeHome)
-    $removed = [System.Collections.Generic.List[object]]::new()
-    $failed = [System.Collections.Generic.List[object]]::new()
-    foreach ($i in @($Plan.Items | Where-Object { $_.Action -eq 'remove' })) {
-        $r = Remove-PluginVersionDir -Path $i.Path -ClaudeHome $ClaudeHome
-        if ($r.Removed) { $removed.Add($i) }
-        else { $i | Add-Member -NotePropertyName FailReason -NotePropertyValue $r.Reason -Force; $failed.Add($i) }
-    }
-    return [pscustomobject]@{ Removed = @($removed); Failed = @($failed) }
-}
-
 if ($env:ABIOS_PLUGINCLEAN_DOTSOURCE) { return }
 
 # Reuse of the recycled-pid rule from Board-Work.ps1 (see Get-PluginSessionMap for why it is replayed).
@@ -108,7 +95,7 @@ if (-not $plan.Ok) {
     exit 1
 }
 if ($Execute) {
-    $out = Invoke-PluginCleanup -Plan $plan -ClaudeHome $ClaudeHome
+    $out = Invoke-PluginCleanup -Plan $plan -ClaudeHome $ClaudeHome -GraceMinutes $GraceMinutes
     foreach ($line in (Format-CleanupReport -Plan $plan -Removed $out.Removed -Failed $out.Failed -ShowKept:$ShowKept)) { Write-Host $line.Text -ForegroundColor $line.Color }
     if (@($out.Failed).Count -gt 0) { exit 1 }
     exit 0

@@ -78,7 +78,7 @@ function Read-NoticeState {
             }
         }
         if ($doc.checks) {
-            foreach ($c in $doc.checks.PSObject.Properties) { $state.Checks[$c.Name] = @{ Stamp = "$($c.Value.stamp)"; At = [long]$c.Value.at } }
+            foreach ($c in $doc.checks.PSObject.Properties) { $state.Checks[$c.Name] = @{ Stamp = "$($c.Value.stamp)"; At = [long]$c.Value.at; Full = [bool]$c.Value.full } }
         }
     } catch { return @{ Sessions = @{}; Checks = @{} } }
     return $state
@@ -87,12 +87,18 @@ function Read-NoticeState {
 # Write the state atomically (temp file, then move) and keep it small: only sessions still in the
 # registry (plus this one) survive, and never more than -MaxSessions.
 function Write-NoticeState {
-    param([string]$Path, [hashtable]$State, [string[]]$KeepSessions, [int]$MaxSessions = 200)
+    param([string]$Path, [hashtable]$State, [string[]]$KeepSessions, [string]$SessionId, [int]$MaxSessions = 200)
+    # Several sessions share this file. Re-read it right before writing and lay ONLY this session's
+    # entries over what is there now, so a notice another session recorded in the meantime is not lost.
+    $disk = Read-NoticeState -Path $Path
+    if ($SessionId -and $State.Sessions.ContainsKey($SessionId)) { $disk.Sessions[$SessionId] = $State.Sessions[$SessionId] }
+    if ($SessionId -and $State.Checks.ContainsKey($SessionId)) { $disk.Checks[$SessionId] = $State.Checks[$SessionId] }
+    $State = $disk
     $sessions = [ordered]@{}
     foreach ($k in @($State.Sessions.Keys | Where-Object { $KeepSessions -contains $_ } | Select-Object -First $MaxSessions)) { $sessions[$k] = $State.Sessions[$k] }
     $checks = [ordered]@{}
     foreach ($k in @($State.Checks.Keys | Where-Object { $KeepSessions -contains $_ } | Select-Object -First $MaxSessions)) {
-        $checks[$k] = [ordered]@{ stamp = $State.Checks[$k].Stamp; at = $State.Checks[$k].At }
+        $checks[$k] = [ordered]@{ stamp = $State.Checks[$k].Stamp; at = $State.Checks[$k].At; full = [bool]$State.Checks[$k].Full }
     }
     $json = [ordered]@{ sessions = $sessions; checks = $checks } | ConvertTo-Json -Depth 6 -Compress
     $tmp = "$Path.$PID.tmp"
@@ -109,6 +115,7 @@ function Invoke-StaleNotice {
         [string]$StateDir,
         [int]$BudgetMs = 4000,
         [int]$RecheckMinutes = 30,
+        [int]$UnknownRecheckMinutes = 5,
         [datetime]$NowUtc = ([datetime]::UtcNow)
     )
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
@@ -127,8 +134,11 @@ function Invoke-StaleNotice {
         $last = $state.Checks[$sessionId]
         # The time is kept as UTC ticks: ConvertFrom-Json turns an ISO date string into a culture-formatted one.
         if ($last.Stamp -eq $stamp -and $last.At -gt 0) {
+            # An inconclusive check (session not found yet, no marker yet, installed list unreadable) is
+            # only trusted briefly: the first prompt can race ahead of the records it needs.
+            $window = if ($last.Full) { $RecheckMinutes } else { $UnknownRecheckMinutes }
             $age = ($NowUtc.Ticks - $last.At) / [double][TimeSpan]::TicksPerMinute
-            if ($age -ge 0 -and $age -lt $RecheckMinutes) { return '' }
+            if ($age -ge 0 -and $age -lt $window) { return '' }
         }
     }
 
@@ -137,11 +147,13 @@ function Invoke-StaleNotice {
     $reg = Read-ClaudeSessions -ClaudeHome $ClaudeHome
     $me = @($reg.Sessions | Where-Object { $_.SessionId -eq $sessionId }) | Select-Object -First 1
     $fresh = @()
+    $definitive = $false
     if ($me) {
         $inst = Get-InstalledPluginEntries -ClaudeHome $ClaudeHome
         if ($inst.Ok) {
             $markers = @(Read-VersionMarkers -ClaudeHome $ClaudeHome -OnlyPid $me.Pid)
             $st = Get-SessionPluginState -Session $me -Markers $markers -InstalledEntries $inst.Entries
+            $definitive = ($st.State -ne 'unknown')
             if ($st.State -eq 'stale') {
                 if (-not $state.Sessions.ContainsKey($sessionId)) { $state.Sessions[$sessionId] = @{} }
                 $fresh = @($st.Stale | Where-Object { -not $state.Sessions[$sessionId].ContainsKey("$($_.Key)@$($_.Installed)") })
@@ -152,9 +164,9 @@ function Invoke-StaleNotice {
 
     $stampNow = $NowUtc.ToString('o')   # a readable record of when a notice was shown
     foreach ($f in $fresh) { $state.Sessions[$sessionId]["$($f.Key)@$($f.Installed)"] = $stampNow }
-    if ($stamp) { $state.Checks[$sessionId] = @{ Stamp = $stamp; At = [long]$NowUtc.Ticks } }
+    if ($stamp) { $state.Checks[$sessionId] = @{ Stamp = $stamp; At = [long]$NowUtc.Ticks; Full = $definitive } }
     $keepIds = @($reg.Sessions | ForEach-Object { $_.SessionId }) + @($sessionId)
-    Write-NoticeState -Path $statePath -State $state -KeepSessions $keepIds
+    Write-NoticeState -Path $statePath -State $state -KeepSessions $keepIds -SessionId $sessionId
     if ($fresh.Count -eq 0) { return '' }
     return (Format-StaleNotice -Items $fresh)
 }

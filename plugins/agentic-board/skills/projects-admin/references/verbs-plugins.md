@@ -109,6 +109,21 @@ Cost: it runs before every prompt, so it stays nearly free by skipping while `in
 notice (or one that has since run `/reload-plugins`, which loads new hooks). Older sessions are covered by
 `/board plugins sessions`.
 
+## Known limits (say them, do not hide them)
+
+- **Same version, new commit.** A build is identified by its cache folder (`<plugin>/<version>`). If a
+  marketplace republishes the SAME version at a new commit and Claude Code reuses that folder, the marker
+  cannot tell the old contents from the new: a session that loaded the earlier contents reads current. The
+  update report still shows the commit change (`installed_plugins.json` records it); the session map cannot.
+- **Liveness tolerance.** "Started no later than recorded" reuses the 2-second slack of
+  `Test-SessionStartConsistent` (and its extra slack on the night clocks go back). A pid recycled inside that
+  window reads live. That is the safe direction for deleting (it keeps) and a negligible one for the map.
+- **After `/reload-plugins`** the session map and the notice treat a session as current when a marker for the
+  installed build exists for it. Whether Claude Code writes that marker on a reload was not verifiable
+  offline; if it does not, such a session keeps being listed (never the reverse).
+- The MCP check reads the build itself (`.mcp.json`, `mcpServers` in `plugin.json`); a server declared only
+  in the marketplace entry is not visible, so it would be reported as reload-only.
+
 ## Facts this rests on (verified 2026-09-21)
 
 - `/reload-plugins` (Claude Code 2.1.260+) loads new skills, commands, agents and hooks into a running
