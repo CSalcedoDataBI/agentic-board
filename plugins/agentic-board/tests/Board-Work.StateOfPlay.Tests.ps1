@@ -285,6 +285,12 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
         # A merge that does not cover these commits proves nothing about them.
         $script:Wt3 = Join-Path $TestDrive 'repo-wt3'
         git worktree add -q -b issue-11-reused $script:Wt3 2>&1 | Out-Null
+        # A fourth with TWO PRs for the same branch name: an older CLOSED one listed first, and the
+        # MERGED one whose head is this very tip. The PR that speaks for the worktree is the one
+        # matching the tip, not the first row.
+        $script:Wt5 = Join-Path $TestDrive 'repo-wt5'
+        git worktree add -q -b issue-13-twoprs $script:Wt5 2>&1 | Out-Null
+        $script:Wt5Tip = "$(git -C $script:Wt5 rev-parse HEAD)".Trim()
         $script:MainTip = "$(git rev-parse main)".Trim()
         Pop-Location
 
@@ -314,6 +320,9 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
                 # The MAIN working copy is never a candidate, even if a PR of its branch merged at its tip.
                 if ($branch -eq 'main') { return @([pscustomobject]@{ number = 44; state = 'MERGED'; headRefOid = $script:MainTip }) }
                 if ($branch -eq 'issue-12-broken' -and $script:Wt4Tip) { return @([pscustomobject]@{ number = 45; state = 'MERGED'; headRefOid = $script:Wt4Tip }) }
+                if ($branch -eq 'issue-13-twoprs') { return @(
+                    [pscustomobject]@{ number = 46; state = 'CLOSED'; headRefOid = '1111111111111111111111111111111111111111' },
+                    [pscustomobject]@{ number = 47; state = 'MERGED'; headRefOid = $script:Wt5Tip }) }
                 if ($branch -eq 'issue-11-reused') { return @([pscustomobject]@{ number = 43; state = 'MERGED'; headRefOid = '0000000000000000000000000000000000000000' }) }
                 return @()
             }
@@ -337,6 +346,7 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
         $bySource['epic'][0].Text   | Should -Match '#300'
         $bySource['worktree'].Count | Should -Be 1
         $bySource['worktree'][0].Text | Should -Match 'issue-9-done \(PR #41\)'
+        $bySource['worktree'][0].Text | Should -Match 'issue-13-twoprs \(PR #47\)'   # the PR matching the tip, not the first row
         $bySource['worktree'][0].Text | Should -Not -Match 'issue-10-open'
         $bySource['worktree'][0].Text | Should -Not -Match 'issue-11-reused'   # merged PR, but not for THIS tip
         $bySource['worktree'][0].Text | Should -Not -Match 'PR #44'            # the main working copy
@@ -360,11 +370,10 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
             Pop-Location
             Remove-Item -LiteralPath (Join-Path $script:Wt 'scratch.txt') -Force
         }
-        $wt = @($f | Where-Object { $_.Source -eq 'worktree' })
+        $wt = @($f | Where-Object { $_.Source -eq 'worktree' -and $_.Text -match 'issue-9-done' })
         $wt.Count | Should -Be 1
         $wt[0].Offer | Should -BeNullOrEmpty
         $wt[0].Text  | Should -Match 'sin commitear'
-        $wt[0].Text  | Should -Match 'issue-9-done'
     }
 
     It 'fails closed when git cannot tell whether a merged worktree is dirty' {
@@ -396,7 +405,7 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
             $f = @(Get-StateOfPlay -Repo 'o/r' -HereRepo 'o/r' -Items $script:Items -BoardTruncated $false `
                                    -StateDir $script:State -LiveBranches @() -BaseRef 'main')
         } finally { Pop-Location }
-        (@($f | Where-Object { $_.Source -eq 'worktree' })).Count | Should -Be 0
+        (@($f | Where-Object { $_.Source -eq 'worktree' -and $_.Text -match 'issue-9-done' })).Count | Should -Be 0
     }
 
     It 'without the live-session list it does not offer to clean any worktree (unknown instead)' {
