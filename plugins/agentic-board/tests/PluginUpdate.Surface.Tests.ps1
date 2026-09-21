@@ -17,7 +17,7 @@ Describe '/board plugins is discoverable' {
         $script:Board | Should -Match '(?m)^23\.\s+plugins\s'
     }
     It 'is named in the /board description (the generated README catalog reads it)' {
-        $script:Board | Should -Match '(?m)^description:.*/plugins\.'
+        $script:Board | Should -Match '(?m)^description:.*/plugins(?:/|\.)'
     }
     It 'routes to its reference from /board and from the projects-admin skill' {
         $script:Board | Should -Match 'references/verbs-plugins\.md'

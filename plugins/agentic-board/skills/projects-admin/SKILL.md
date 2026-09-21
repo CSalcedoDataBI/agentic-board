@@ -94,6 +94,7 @@ follow it exactly:
 | `/board telemetry` | `references/verbs-telemetry.md` |
 | `/board triage` | `references/verbs-triage.md` |
 | `/board plugins` (update every plugin; `sessions` map; `clean` old builds) | `references/verbs-plugins.md` |
+| `/board actions-cost` (read-only, MEASURED audit of a repo's Actions cost: usage endpoint + workflow rules) | `references/verbs-actions-cost.md` |
 
 ---
 ## Routing table
@@ -128,6 +129,7 @@ follow it exactly:
 | Break a big issue into sub-issues | `Board-Breakdown.ps1 -Parent <n> -Tasks ...` | native sub-issues via `addSubIssue`; refuses a CLOSED parent; task-list checkboxes are the fallback for tiny pieces |
 | Post a board status update | `Post-BoardStatusUpdate.ps1 -ProjectNum <n>` | `createProjectV2StatusUpdate`; body auto-generated from live counts + next pending, or `-Body`/`-Status` override |
 | Turn a plan into epic + sub-issues | `Board-Plan.ps1 -Title "plan: X" -Tasks ...` | ensures plan labels, creates epic, reuses Board-Breakdown (native sub-issues), Resolve-Board (no duplicates), registers all on the board; doc links must be full blob URLs on pushed refs |
+| **Audit a repo's GitHub Actions cost** (measured minutes + workflow cost rules, read-only) | `references/verbs-actions-cost.md` | **`Get-ActionsCostAudit.ps1`** (no fix mode; `-Local` audits the working tree) |
 | **Audit stale / unmerged / ghost branches and worktrees** | `references/verbs-doctor.md` | **`Board-Doctor.ps1`** (read-only; `-Fix` confirms per branch) |
 | **Verify the board is fully worked** (0 pending) — `/board complete` | `commands/board.md` | `Assert-BoardComplete.ps1 -ProjectNum <n> -Owner <o>` (exit 0 = PASS/clear, exit 1 lists pending; CI-friendly) |
 | Release a **BI artifact** (model/report) — the definition of done — `/board bi-checklist` | `references/bi-release-checklist.md` | the M4.1 spec: what the gate enforces (BPA + TMDL-breaking), what stays external to Fabric (deploy/refresh), what a human confirms |
