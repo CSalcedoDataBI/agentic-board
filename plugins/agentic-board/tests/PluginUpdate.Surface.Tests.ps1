@@ -54,6 +54,16 @@ Describe 'dot-sourcing Board-Work.ps1 cannot silently reset a parameter of these
     }
 }
 
+Describe 'no function is defined twice in a script (a leftover of an edit that silently shadows the first copy)' {
+    It '<_> defines every function once' -ForEach @('PluginState.ps1', 'Update-AllPlugins.ps1', 'Get-PluginSessionMap.ps1', 'Remove-OldPluginVersions.ps1', 'PluginStale-NoticeHook.ps1') {
+        $path = Join-Path $script:Plugin 'scripts' $_
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+        $dups = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) |
+            Group-Object Name | Where-Object Count -gt 1 | ForEach-Object Name)
+        $dups | Should -BeNullOrEmpty -Because "duplicated: $($dups -join ', ')"
+    }
+}
+
 Describe 'the reference tells the truth about the code' {
     It 'every script it names exists' {
         $names = [regex]::Matches($script:Ref, 'scripts/([A-Za-z][A-Za-z0-9-]+\.(?:ps1|cmd))') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique

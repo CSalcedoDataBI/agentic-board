@@ -138,6 +138,9 @@ Describe 'the shim takes only a validated session id from the first line' -Skip:
         $cases = @(
             '', 'not json at all', '{}', '{"session_id":""}', '{"session_id":"abc"}',
             ('{"session_idX' + $script:Id + '"}'),            # no colon after the key: not a session_id field
+            ('{"session_id":"' + $script:Id + '/escape"}'),   # a valid 36-char prefix followed by a path character
+            ('{"session_id":"' + $script:Id + '&calc"}'),
+            ('{"session_id":"' + $script:Id + '."}'),
             ('{"session_id":"' + $script:Id.Replace('a', 'g') + '"}'),
             ('{"session_id":"' + $script:Id + '0"}'),
             '{"session_id":"..\..\evil"}', '{"session_id":"../../evil-and-very-long-so-it-has-36-chars"}',

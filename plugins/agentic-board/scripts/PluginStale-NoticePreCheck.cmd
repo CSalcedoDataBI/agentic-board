@@ -43,12 +43,14 @@ if not defined LASTCHAR exit /b 0
 set "T=!ID!"
 for %%C in (0 1 2 3 4 5 6 7 8 9 a b c d e f -) do if defined T set "T=!T:%%C=!"
 if defined T exit /b 0
-rem the id must END there: a 37th hex/dash character means this is not a 36-character id
+rem the id must END there: what follows the 36 characters (quotes and spaces are already gone) may only be
+rem the end of the line, a comma or a closing brace. A 37th hex, dash, slash or any other character means this
+rem is not a 36-character id (it would otherwise be truncated to a prefix that names another session).
 set "NEXT=!REST:~37,1!"
 if not defined NEXT goto idok
-set "N=!NEXT!"
-for %%C in (0 1 2 3 4 5 6 7 8 9 a b c d e f -) do if defined N set "N=!N:%%C=!"
-if not defined N exit /b 0
+if "!NEXT!"=="," goto idok
+if "!NEXT!"=="}" goto idok
+exit /b 0
 :idok
 set "CFG=%CLAUDE_CONFIG_DIR%"
 if not defined CFG set "CFG=%USERPROFILE%\.claude"

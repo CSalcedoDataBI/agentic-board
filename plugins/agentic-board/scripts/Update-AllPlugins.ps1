@@ -333,17 +333,6 @@ function Format-ShortBuild($Build) {
     return $v
 }
 
-# ---------------------------------------------------------------------------- the report (pure)
-
-function Format-ShortBuild($Build) {
-    if (-not $Build) { return '?' }
-    $sha = "$($Build.Sha)"
-    $v = "$($Build.Version)"
-    if ($sha.Length -gt 7) { $sha = $sha.Substring(0, 7) }
-    if ($sha -and $v -notlike "$sha*") { return "$v ($sha)" }
-    return $v
-}
-
 function Format-Megabytes([long]$Bytes) {
     if ($Bytes -lt 1MB) { return '<1 MB' }
     return ('{0:N0} MB' -f ($Bytes / 1MB))
