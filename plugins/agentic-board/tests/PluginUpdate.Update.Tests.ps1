@@ -298,6 +298,12 @@ Describe 'the "what is new" excerpt is bounded, optional and plain' {
         $ex | Should -Not -Match "[\x00-\x08\x0b\x1b\x07]"
         $ex | Should -Match 'evil'
     }
+    It 'the line limit binds on its own: many short lines are cut to 6' {
+        $dir = Join-Path $TestDrive 'ex2'
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $dir 'CHANGELOG.md'), ("## [2.0.0]`n" + ((1..40 | ForEach-Object { "- n$_" }) -join "`n")))
+        @((Get-WhatsNewExcerpt -SearchDirs @($dir) -Version '2.0.0') -split "`n").Count | Should -Be 6
+    }
     It 'Get-ChangelogVersionSection: 0.39.1 does not match the 0.39.10 heading, and accepts several heading styles' {
         (Get-ChangelogVersionSection -Text "## [0.39.10] - d`n- ten`n" -Version '0.39.1') | Should -Be ''
         (Get-ChangelogVersionSection -Text "## 0.39.1`n- plain`n" -Version '0.39.1') | Should -Match 'plain'

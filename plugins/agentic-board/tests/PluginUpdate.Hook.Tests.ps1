@@ -76,6 +76,14 @@ Describe 'Invoke-StaleNotice - the decision' {
         (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd) | Should -BeNullOrEmpty
         (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd) | Should -BeNullOrEmpty
     }
+    It 'the once-only record holds on its own, even when the cheap skip does not apply (recheck after the interval)' {
+        $sc = New-StaleScenario
+        $sd = New-StateDir
+        $t0 = [datetime]::UtcNow
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0) | Should -Not -BeNullOrEmpty
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0.AddMinutes(31)) | Should -BeNullOrEmpty
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0.AddMinutes(75)) | Should -BeNullOrEmpty
+    }
     It 'a NEWER build later is a new notice; the older one stays acknowledged' {
         $sc = New-StaleScenario
         $sd = New-StateDir

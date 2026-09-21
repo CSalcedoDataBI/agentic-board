@@ -260,7 +260,8 @@ Describe 'Get-LiveSessionMap + Format-SessionMap' {
         $map = Get-LiveSessionMap -ClaudeHome $fx.Root -GetProcess $table
         $map.Sessions[0].State | Should -Be 'unknown'
         $lines = @(Format-SessionMap -Map $map)
-        ($lines | ForEach-Object Text) -join "`n" | Should -Match 'SIN DATOS'
+        # the per-session line itself (the summary line also says "sin datos", in lower case)
+        ($lines | ForEach-Object Text) -join "`n" | Should -MatchExactly 'Blind session".*SIN DATOS: no encuentro'
         ($lines | ForEach-Object Text) -join "`n" | Should -Match '0 al dia'
     }
     It 'an unreadable installed list is a failure, not "all current"' {
