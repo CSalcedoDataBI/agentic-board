@@ -1,6 +1,6 @@
 ---
 name: projects-admin
-description: Use to administer or automate a GitHub Projects (v2) board or its issues — create/configure a project, set Status/Priority/Target fields, add/move/bulk-edit items, link a board to a repo, install CI auto-add, run /board fill to detect and fix gaps, or /board work to see pending issues across boards and start one. Always resolves identity via gh-account (default CSalcedoDataBI). Triggers — "administra el board", "mueve a Done", "crea el project", "add to board", "bulk close", "automatiza el board", "llena el board", "qué hay pendiente", "qué issue trabajo", "empecemos un issue", /board.
+description: Use to administer or automate a GitHub Projects (v2) board or its issues — create/configure a project, set Status/Priority/Target fields, add/move/bulk-edit items, link a board to a repo, install CI auto-add, run /board fill to detect and fix gaps, or /board work to see pending issues across boards and start one. Always resolves identity via gh-account (default CSalcedoDataBI). Triggers — "administra el board", "mueve a Done", "crea el project", "add to board", "bulk close", "automatiza el board", "llena el board", "qué hay pendiente", "pendientes", "qué hay en proceso", "what's pending", "what's in progress", "qué issue trabajo", "empecemos un issue", /board.
 user-invocable: false
 ---
 
@@ -111,7 +111,7 @@ follow it exactly:
 | Set a field value on an item | `references/board-ops.md` | `gh project item-edit` |
 | Bulk-fill a custom field across ALL items (by rule) | `references/board-ops.md` | `scripts/Set-BoardField.ps1` |
 | **Detect and fill board gaps** | `references/verbs-fill.md` | **`/board fill` / `--dry-run` / `--auto`** |
-| **See pending work / start an issue** | `references/verbs-work.md` | **`Board-Work.ps1 -ListBoards` / `-ProjectNum` / `-Start`** |
+| **See pending / in-flight work (state of play first, then the pending list) / start an issue** | `references/verbs-work.md` | **`Board-Work.ps1 -ListBoards` / `-ProjectNum` / `-Start`** |
 | Manage views / inspect board | `references/board-ops.md` | `gh project view`, `gh project item-list` |
 | Create an issue with a label | `references/issue-ops.md` | `gh issue create` |
 | Create / ensure a label exists | `references/issue-ops.md` | `gh label create --force` |
