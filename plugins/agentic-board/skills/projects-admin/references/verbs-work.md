@@ -331,6 +331,27 @@ Notes:
   cannot keep a dead session alive. A Windows Terminal (`wt`) session records its OWN tab shell
   (the `pwsh` running `launch-<n>.ps1`), never the launching shell's parent, and an entry whose
   PID is unusable is found again through that launch script (#557).
+- **Cross-repo issues (#487).** The fleet used to assume 1 issue = 1 repo = 1 worktree = 1 PR. An issue
+  whose work lands in OTHER repositories (README links, licences, CI templates, topics) is now modelled,
+  minimally and without touching the single-repo path:
+  - **Detection.** The issue carries the `cross-repo` label, or lists its targets in the body under a
+    `Target repos:` (or `## Target repos`, `Repos objetivo:`) header - a list of `owner/name`, or the
+    slugs inline after the colon. Targets equal to the issue's own repo do not count. A label with no list
+    means "cross-repo, read the issue for the targets". Prose is never mined for repos.
+  - **Start.** `-Start` / `-Parallel` print a `CROSS-REPO` line and record `crossRepo`, `targetRepos` and
+    an empty `prs` list in the session's `sessions.json` row (kept across relaunches).
+  - **Briefing.** A launched cross-repo session is told the worktree is its BASE, not the destination: work
+    in a clone/worktree of each target repo and open ONE PR per target repo with
+    `New-BoardPR.ps1 -Issue <n> -IssueRepo <issue's repo> -Repo <target>` (the body says
+    `Refs <issue repo>#<n>`, never `Closes` - a `Closes #<n>` in another repo would close THAT repo's own
+    issue), run the review gate on each (`Board-ReviewGate.ps1 -Repo <target> -PR <pr>`), and never close the
+    issue itself.
+  - **Registry fidelity.** After every PR the session opens: `Board-Work.ps1 -RecordPr <owner/name>#<pr> -ForIssue <n>`
+    (local only, no token; refused when the issue has no registered session - it never invents a row). `-Sessions`
+    then lists the target repos, every recorded PR with its live state, and "N of M merged".
+  - **Closing (a decision left to the human).** With `Refs` PRs nothing closes the issue automatically: it is
+    closed by hand when ALL its PRs have merged. A plural review gate (one call for all PRs) and an automatic
+    close-when-all-merged are NOT implemented.
 - **Compaction-survival (long single-session queues)**: when you work a queue of issues tied to an
   **epic** in ONE session, keep a durable run-ledger so the run survives auto-compaction. Three
   touch-points (see [references/compact-survival.md](references/compact-survival.md)):

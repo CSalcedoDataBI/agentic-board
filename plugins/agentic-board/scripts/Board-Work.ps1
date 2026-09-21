@@ -171,6 +171,10 @@ param(
     [int]   $Relaunch   = 0,
     [int]   $Lock       = 0,
     [int]   $Unlock     = 0,
+    # Cross-repo issues (#487): record a PR a session opened in ANOTHER repo (`owner/name#123` or its
+    # URL) against the session of -ForIssue, so the dashboard shows what is really live. Local only.
+    [string]$RecordPr   = "",
+    [int]   $ForIssue   = 0,
     # cerrar-ciclo: classify the CURRENT branch and route it to the right disposition (#302).
     [switch]$CloseLoop,
     [switch]$Reap,
@@ -232,6 +236,10 @@ $ErrorActionPreference = "Stop"
 
 # Per-repo preferences (#662) - today: whether related issues should share one PR.
 . (Join-Path $PSScriptRoot 'Get-BoardConfig.ps1')
+
+# Issues whose work lives in OTHER repositories (#487): detection, the cross-repo briefing and the
+# per-session PR record.
+. (Join-Path $PSScriptRoot 'BoardWork.CrossRepo.ps1')
 
 # The "state of play" printed before the pending list (#660): what is in flight, stale, off-board
 # or due, read from the executing sources rather than from the board's own opinion.
@@ -849,7 +857,9 @@ function Write-SessionRegistryEntry {
     param(
         [int]$IssueNum, [string]$Branch, [string]$WorkPath, [string]$Repo = "",
         [int]$SessionPid = 0, [string]$Via = "", [string]$Cli = 'claude',
-        [string]$FleetSession = ''
+        [string]$FleetSession = '',
+        # Cross-repo (#487): where the issue's work actually goes. Absent = the classic single repo.
+        [string[]]$TargetRepos = @(), [bool]$CrossRepo = $false
     )
     $p = Get-SessionRegistryPath
     if (-not $p) { return }
@@ -875,6 +885,15 @@ function Write-SessionRegistryEntry {
     if (-not $Branch -and $prev) { $Branch = $prev.branch }
     if (-not $WorkPath -and $prev) { $WorkPath = $prev.workPath }
     if (-not $Via -and $prev) { $Via = $prev.via }
+    # Cross-repo facts and the PRs already recorded survive a later PID/via-only update (a relaunch).
+    $prevPrs = @()
+    if ($prev) {
+        if ($prev.PSObject.Properties['prs']) { $prevPrs = @($prev.prs) }
+        if (-not $TargetRepos -or @($TargetRepos).Count -eq 0) {
+            if ($prev.PSObject.Properties['targetRepos']) { $TargetRepos = @($prev.targetRepos) }
+            if (-not $CrossRepo -and $prev.PSObject.Properties['crossRepo']) { $CrossRepo = [bool]$prev.crossRepo }
+        }
+    }
     # NOTE: fleetSession is deliberately NOT carried forward. It is a per-LAUNCH
     # fingerprint, not stable session identity - a later marker-less update (e.g. an
     # in-place re-start of an issue that was previously fleet-launched) must NOT keep
@@ -895,6 +914,9 @@ function Write-SessionRegistryEntry {
         via          = $Via
         cli          = $Cli
         fleetSession = $FleetSession
+        crossRepo    = [bool]($CrossRepo -or @($TargetRepos).Count -gt 0)
+        targetRepos  = @($TargetRepos)
+        prs          = @($prevPrs)
         host         = $env:COMPUTERNAME
         # Seconds, not minutes (#568): this stamp is the start of every duration the tool can
         # ever compute about its own runs; minute granularity threw away the precision for free.
@@ -955,9 +977,9 @@ function Show-BranchDrift {
     } catch { }
 }
 
-# ==============================================================================
+# =======================================================================
 # Reusable start helpers (shared by -Start mode 3 and -Parallel mode 5)
-# ==============================================================================
+# =======================================================================
 
 # Work branch name: issue-<num>-<slug-from-title>. Pure -> unit-testable.
 function Get-IssueSlugBranch([int]$num, [string]$title) {
@@ -1068,7 +1090,8 @@ query(`$proj:ID!, `$cursor:String) {
           content {
             __typename
             ... on Issue {
-              number title state url
+              number title state url body
+              labels(first:30) { nodes { name } }
               assignees(first:5) { nodes { login } }
               repository { nameWithOwner }
             }
@@ -1516,6 +1539,7 @@ function Invoke-IssueStart {
     $result = [PSCustomObject]@{
         issue = $IssueNum; title = ""; repo = ""; branch = ""; workPath = ""
         started = $false; dryRun = [bool]$DryRunStart; skipped = ""
+        crossRepo = $false; targetRepos = @()
     }
 
     $item = Get-BoardItem $Ctx.projectId $IssueNum
@@ -1574,9 +1598,21 @@ function Invoke-IssueStart {
     $branchName    = Get-IssueSlugBranch $IssueNum $item.content.title
     $result.branch = $branchName
 
+    # Cross-repo (#487): does the issue say its work goes to OTHER repos? The classic flow forced
+    # every issue into the 1-issue = 1-repo = 1-worktree = 1-PR mould. Body/labels are absent on some
+    # board shapes, which simply reads as the classic single-repo case.
+    $labelNames = @(); try { $labelNames = @($item.content.labels.nodes | ForEach-Object { $_.name }) } catch { }
+    $xr = Get-IssueTargetRepos -Body ([string]$item.content.body) -Labels $labelNames -HomeRepo $repo
+    $result.crossRepo   = [bool]$xr.CrossRepo
+    $result.targetRepos = @($xr.Repos)
+
     Write-Host ("  #{0} {1}" -f $IssueNum, $item.content.title) -ForegroundColor Yellow
     Write-Host ("       Repo: {0} | Status actual: {1} -> In Progress | Assignee -> {2}" -f $repo, $currentStatus, $Owner) -ForegroundColor DarkGray
     if ($MakeBranch) { Write-Host "       Rama de trabajo: $branchName" -ForegroundColor DarkGray }
+    if ($xr.CrossRepo) {
+        $where = if (@($xr.Repos).Count -gt 0) { (@($xr.Repos) -join ', ') } else { '(el issue no lista los repos: leelo)' }
+        Write-Host "       CROSS-REPO: el trabajo va a otros repos -> $where. Este worktree es la base; un PR por repo objetivo." -ForegroundColor Magenta
+    }
 
     if ($DryRunStart) {
         Write-Host "  #${IssueNum}: DRY-RUN - nada ejecutado." -ForegroundColor Gray
@@ -1626,7 +1662,8 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
         $result.workPath = New-IssueWorkspace -repo $repo -issueNum $IssueNum -branchName $branchName `
                                               -PreferWorktree:$PreferWorktree -Base $Base -BaseCurrent:$BaseCurrent
         if ($result.workPath) {
-            Write-SessionRegistryEntry -IssueNum $IssueNum -Branch $branchName -WorkPath $result.workPath -Repo $repo
+            Write-SessionRegistryEntry -IssueNum $IssueNum -Branch $branchName -WorkPath $result.workPath -Repo $repo `
+                                       -TargetRepos @($xr.Repos) -CrossRepo ([bool]$xr.CrossRepo)
             Write-Host "  OK  Sesion registrada en .agentic-board/sessions.json" -ForegroundColor Green
         }
     }
@@ -1667,10 +1704,10 @@ query($o:String!, $r:String!, $n:Int!) {
     Write-Host "------------------------------" -ForegroundColor Cyan
 }
 
-# ==============================================================================
+# =======================================================================
 # Parallel session launcher (mode 5 -Launch): one visible Claude session per
 # worktree, each briefed to work its own issue end-to-end.
-# ==============================================================================
+# =======================================================================
 
 # Compute the effective brake for a launched session (#598).
 # All launched sessions stop at a reviewed PR by default — a session that merges its
@@ -1745,12 +1782,19 @@ function Get-SessionBriefing {
         [string]$Cli = 'claude',
         [switch]$StopAtPR,
         [string]$BriefFile = '',
-        [string]$ScriptsDir = ''
+        [string]$ScriptsDir = '',
+        # Cross-repo issue (#487): the work goes to these OTHER repos (or, with -CrossRepo alone, to
+        # repos the issue names itself). The session is told this worktree is its base, not the
+        # destination, and to open one PR per target repo.
+        [string[]]$TargetRepos = @(),
+        [switch]$CrossRepo
     )
     if (-not $ScriptsDir) { $ScriptsDir = $PSScriptRoot }
+    $isCross = ($CrossRepo -or @($TargetRepos).Count -gt 0)
     # Every plugin script the briefing names, resolved so the session can actually run it.
     $needed = @('Fleet-Findings', 'Fleet-Handoff', 'Fleet-Ownership', 'New-BoardPR', 'Board-ReviewGate')
     if (-not $StopAtPR) { $needed += 'Board-Merge' }
+    if ($isCross)       { $needed += 'Board-Work' }
     $sc = @{}; $unreachable = @()
     foreach ($n in $needed) {
         $r = Resolve-BriefingScriptRef -Name "$n.ps1" -WorkPath $workPath -ScriptsDir $ScriptsDir
@@ -1773,6 +1817,18 @@ function Get-SessionBriefing {
         "(5) merge it (ruleset-safe): pwsh $($sc['Board-Merge']) -PR <pr> ; "
     }
     $recordNum = if ($StopAtPR) { "(5)" } else { "(6)" }
+    # Cross-repo swaps steps (2)-(4) for the one-PR-per-target-repo flow, and never lets the session
+    # close the issue: it closes when ALL its PRs have merged, which is the human's call.
+    $flow = "(2) implement it fully in this worktree and commit your changes ; " +
+            "(3) open the PR with: pwsh $($sc['New-BoardPR']) -Issue $issueNum " +
+            "and note the PR number it prints ; " +
+            "(4) pass the review gate: pwsh $($sc['Board-ReviewGate']) -PR <pr> ; " +
+            "address any feedback and re-run until it is green ; "
+    if ($isCross) {
+        $flow = Format-CrossRepoBriefing -IssueNum $issueNum -HomeRepo $repo -TargetRepos $TargetRepos -Refs $sc
+        $mergeStep = if ($StopAtPR) { "" } else { "(5) merge each PR (ruleset-safe): pwsh $($sc['Board-Merge']) -Repo <target owner/name> -PR <pr> ; " }
+        $flow += "Do NOT close issue #$issueNum yourself: it stays open until ALL of its PRs are merged. "
+    }
     $closing = if ($StopAtPR) {
         "Then STOP: leave the PR open and ready for the human to merge. Your contract marks the " +
         "merge as irreversible - do NOT merge, deploy, publish or delete anything, and do not " +
@@ -1800,11 +1856,7 @@ function Get-SessionBriefing {
             "'pwsh $($sc['Fleet-Ownership']) -Claim -Issue $issueNum -Branch $branch -Paths <files>' " +
             "(if it warns of overlap with another live session, steer clear of those files). Then: " +
             "(1) read it with: gh issue view $issueNum --repo $repo ; " +
-            "(2) implement it fully in this worktree and commit your changes ; " +
-            "(3) open the PR with: pwsh $($sc['New-BoardPR']) -Issue $issueNum " +
-            "and note the PR number it prints ; " +
-            "(4) pass the review gate: pwsh $($sc['Board-ReviewGate']) -PR <pr> ; " +
-            "address any feedback and re-run until it is green ; " +
+            $flow +
             $mergeStep +
             "$recordNum record what you learned for other sessions with " +
             "'pwsh $($sc['Fleet-Findings']) -Add -Issue $issueNum -Status done -Files <files touched> -Decisions <key decisions> -Gotchas <pitfalls>' " +
@@ -2028,7 +2080,15 @@ function Start-WorktreeSession {
         Write-Host "  WARN #${IssueNum}: no pude retirar el marcador de freno previo ($_). El merge seguira bloqueado en ese worktree." -ForegroundColor DarkYellow
     }
     # Persist the briefing so the spawned session reads it without command-line quoting.
-    Set-Content -LiteralPath $briefingFile -Value (Get-SessionBriefing $IssueNum $Repo $Branch $WorkPath $Cli -StopAtPR:$StopAtPR -BriefFile $BriefFile) -Encoding UTF8
+    # Cross-repo facts were recorded in the session registry when the issue was started (#487), so a
+    # relaunch briefs the same way without every call site having to carry them.
+    $xrEntry = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq $IssueNum }) | Select-Object -First 1
+    $xrRepos = @(); $xrFlag = $false
+    if ($xrEntry) {
+        if ($xrEntry.PSObject.Properties['targetRepos']) { $xrRepos = @($xrEntry.targetRepos | Where-Object { $_ }) }
+        if ($xrEntry.PSObject.Properties['crossRepo'])   { $xrFlag  = [bool]$xrEntry.crossRepo }
+    }
+    Set-Content -LiteralPath $briefingFile -Value (Get-SessionBriefing $IssueNum $Repo $Branch $WorkPath $Cli -StopAtPR:$StopAtPR -BriefFile $BriefFile -TargetRepos $xrRepos -CrossRepo:$xrFlag) -Encoding UTF8
     # Persist the launch script so wt/pwsh runs it via -File (no ';' on wt's command
     # line -> no stray tab-splitting). See Build-WorktreeLaunch header for the why.
     Set-Content -LiteralPath $plan.launchScriptFile -Value $plan.launchScript -Encoding UTF8
@@ -2116,7 +2176,24 @@ function Show-SessionFleet {
         try { $metric = Format-SessionMetric (Get-SessionMetrics ([int]$s.sessionPid)) } catch { }
         Write-Host ("        PID {0} via {1} | {2} | host {3} | desde {4}" -f $s.sessionPid, $via, $metric, $s.host, $s.started) -ForegroundColor DarkGray
         if ($s.workPath) { Write-Host ("        {0}" -f $s.workPath) -ForegroundColor DarkGray }
-        if ($s.repo -and $s.branch) {
+        # Cross-repo (#487): the row says where the work goes and which PRs the session really has
+        # live, in as many repos as it opened them. The by-branch lookup below only ever finds a PR
+        # in the issue's own repo, which is exactly the one a cross-repo session never opens.
+        $xrTargets = @(); $xrPrs = @()
+        if ($s.PSObject.Properties['targetRepos']) { $xrTargets = @($s.targetRepos | Where-Object { $_ }) }
+        if ($s.PSObject.Properties['prs'])         { $xrPrs     = @($s.prs | Where-Object { $_ -and $_.repo }) }
+        $xrFlag = ($s.PSObject.Properties['crossRepo'] -and [bool]$s.crossRepo)
+        if ($xrTargets.Count -gt 0) {
+            Write-Host ("        CROSS-REPO -> {0}" -f ($xrTargets -join ', ')) -ForegroundColor Magenta
+        } elseif ($xrFlag) {
+            Write-Host "        CROSS-REPO (los repos objetivo estan en el issue)" -ForegroundColor Magenta
+        }
+        if ($xrPrs.Count -gt 0) {
+            $xrStates = Get-SessionPrStates -Prs $xrPrs
+            foreach ($ln in (Format-SessionPrLines -Prs $xrPrs -States $xrStates)) { Write-Host ("        {0}" -f $ln) -ForegroundColor DarkCyan }
+        } elseif ($xrFlag -or $xrTargets.Count -gt 0) {
+            Write-Host "        (aun no hay PRs anotados para esta sesion)" -ForegroundColor DarkGray
+        } elseif ($s.repo -and $s.branch) {
             try {
                 $pr = @(gh pr list --repo $s.repo --head $s.branch --state all --json number,state,url --limit 1 2>$null | ConvertFrom-Json)
                 if ($pr.Count -gt 0) {
@@ -2134,12 +2211,12 @@ function Show-SessionFleet {
     Write-Host ("Total: {0} sesion(es) viva(s). Las de PID muerto se podaron automaticamente." -f $sessions.Count) -ForegroundColor Cyan
 }
 
-# ==============================================================================
+# =======================================================================
 # CLI adapter registry: one record per launchable AI CLI. Generalizes the
 # previously Claude-only launch path (Build-WorktreeLaunch / Get-SessionBriefing).
 # Kind: 'repl' = live tab in the worktree; 'async' = dispatches a cloud task.
 # Hooks are scriptblocks so they stay pure/testable and are invoked with &.
-# ==============================================================================
+# =======================================================================
 function Get-CliAdapters {
     @(
         [PSCustomObject]@{
@@ -2356,20 +2433,20 @@ function Build-FleetPlan([object[]]$Started, [hashtable]$CliMap) {
         [PSCustomObject]@{ issue=$r.issue; repo=$r.repo; branch=$r.branch; workPath=$r.workPath; cli=$cli }
     }
 }
-# ==============================================================================
+# =======================================================================
 # Governor (capacity) + process supervision moved to part files (#575): the same
 # functions, dot-sourced so this 3,100-line dispatcher stops holding a job scheduler
 # and a process killer inline. Loaded HERE (before the CLI and before the dot-source
 # guard) so tests that dot-source Board-Work keep seeing every function.
-# ==============================================================================
+# =======================================================================
 . (Join-Path $PSScriptRoot 'BoardWork.Capacity.ps1')
 . (Join-Path $PSScriptRoot 'BoardWork.Processes.ps1')
 
-# ==============================================================================
+# =======================================================================
 # WATCH LAYER (issue #135): auto-detect when the parallel/-Launch sessions finish and
 # (opt-in) auto-clean their worktrees + branches + registry entries. Detection is
 # read-only polling of observable state; the cleanup is guarded and DI-testable.
-# ==============================================================================
+# =======================================================================
 
 # Is a watched session DONE? PURE -> unit-testable. A session finishes when its PR is
 # MERGED, its issue is CLOSED, or its host process is dead (the tab exited). Precedence
@@ -2987,11 +3064,11 @@ function Invoke-BatchIssueStart {
     }
 }
 
-# ==============================================================================
+# =======================================================================
 # Main entry. Dot-source guard: when the test harness sets ABIOS_BOARDWORK_DOTSOURCE,
 # the script returns here with only the functions defined - no token check, no gh
 # calls, no side effects - so the pure helpers can be unit-tested in isolation.
-# ==============================================================================
+# =======================================================================
 if ($env:ABIOS_BOARDWORK_DOTSOURCE) { return }
 
 # ── Top-level error boundary (#485): any unhandled exception becomes a clean
@@ -3002,11 +3079,11 @@ trap {
     exit 1
 }
 
-# ==============================================================================
+# =======================================================================
 # KILL-LAYER MODES (Phase 2, local-only - no GH_TOKEN needed). Every kill goes
 # through the fail-safe Stop-ProcessTree (self + ancestors always excluded) and
 # DEFAULTS to a dry-run listing; add -Force to actually kill.
-# ==============================================================================
+# =======================================================================
 if ($Reap -or $KillAll) {
     $killLive = [bool]$KillAll
     if ($KillAll) {
@@ -3082,11 +3159,26 @@ if ($Relaunch -gt 0) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
+# RECORD-PR MODE: -RecordPr <owner/name#n> -ForIssue <n>  -> note a PR a session opened in
+# ANOTHER repo against that session's registry row (#487), so the dashboard says what is really
+# live instead of "1 session, 1 worktree". Local only: no token, nothing written to GitHub.
+# =======================================================================
+if ($RecordPr) {
+    $ref = Get-PullRequestRef $RecordPr
+    if (-not $ref)         { Write-Host "  -RecordPr espera owner/name#numero (o la URL del PR); recibi '$RecordPr'." -ForegroundColor Red; exit 1 }
+    if ($ForIssue -le 0)   { Write-Host "  -RecordPr necesita -ForIssue <numero del issue de la sesion>." -ForegroundColor Red; exit 1 }
+    $rec = Add-SessionPullRequest -IssueNum $ForIssue -Repo $ref.Repo -Number $ref.Number
+    if (-not $rec.Ok) { Write-Host "  NO anotado: $($rec.Message)" -ForegroundColor Red; exit 1 }
+    Write-Host "  OK  $($rec.Message)" -ForegroundColor Green
+    exit 0
+}
+
+# =======================================================================
 # PREFERENCE MODE: -PreferGroupedPRs on|off|auto  -> record this repo's standing
 # answer about grouped PRs (#662) and stop. It is a decision, not a run: writing it
 # and then also listing the board would bury the confirmation the user needs to see.
-# ==============================================================================
+# =======================================================================
 if ($PreferGroupedPRs -eq 'show') {
     # Read-only. Outside a git repo there is no config to read, and that is a normal answer, not an
     # error: the default applies. An unreadable file is said out loud, never read as "no preference"
@@ -3158,7 +3250,7 @@ if ($groupQueue.Count -gt 0 -and ($Start -gt 0 -or $Parallel.Count -gt 0)) {
     throw "-StartGroup es mutuamente exclusivo con -Start y -Parallel: son tres modos distintos de arrancar issues."
 }
 
-# ==============================================================================
+# =======================================================================
 # LOCK MODE: -Lock <n> / -Unlock <n>  -> in ONE step mark an issue owned-elsewhere
 # (post the [abios-claim] fingerprint, move Status, AND assign the owner) WITHOUT
 # starting or branching it locally (issue #236). Assigning the owner is what makes
@@ -3166,7 +3258,7 @@ if ($groupQueue.Count -gt 0 -and ($Start -gt 0 -or $Parallel.Count -gt 0)) {
 # that Invoke-IssueStart's existing multi-session guard refuses (a status move alone
 # would not - that guard requires an assignee). Symmetric: -Unlock posts an UNLOCK
 # claim, moves Status back to Backlog, and unassigns the owner.
-# ==============================================================================
+# =======================================================================
 if ($Lock -gt 0 -or $Unlock -gt 0) {
     if ($ProjectNum -le 0) { throw "-Lock/-Unlock necesitan -ProjectNum <n> para mover el Status." }
     $lockUrl = Get-BoardUrl $ProjectNum
@@ -3233,14 +3325,14 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # CLOSE-LOOP MODE: -CloseLoop  -> classify the CURRENT branch and route it to the
 # right disposition (#302). It PROPOSES the next step for every state and performs
 # exactly ONE action: tearing down a proven-merged local branch in place - the
 # single-session equivalent of the fleet's -AutoClean, which an interactive session
 # never reaches. It never merges (that has the review gate) and never touches a
 # dirty tree. Operates on the current branch only; the repo-wide sweep is /board doctor.
-# ==============================================================================
+# =======================================================================
 if ($CloseLoop) {
     $repo = $Repo
     if (-not $repo) { try { $repo = Get-RepoFromOrigin } catch { $repo = '' } }
@@ -3400,11 +3492,11 @@ if ($CloseLoop) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 0: -Sessions  -> monitor the local parallel-session fleet
 #         -Sessions -Watch [-AutoClean]  -> block until the sessions finish, then
 #         (opt-in) tear down their worktrees/branches/registry entries (issue #135).
-# ==============================================================================
+# =======================================================================
 if ($Sessions) {
     Show-BranchDrift
     Show-SessionFleet
@@ -3423,9 +3515,9 @@ if ($Watch -and $Parallel.Count -eq 0) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 1: -ListBoards  -> every board with its pending count
-# ==============================================================================
+# =======================================================================
 if ($ListBoards) {
     if ($Repo) {
         # Current-repo scope: only boards LINKED to this repository
@@ -3521,9 +3613,9 @@ if ($Start -gt 0 -and $Parallel.Count -gt 0) {
 
 $boardUrl = Get-BoardUrl $ProjectNum
 
-# ==============================================================================
+# =======================================================================
 # MODE 2: -ProjectNum  -> pending items of one board
-# ==============================================================================
+# =======================================================================
 if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueue.Count -eq 0) {
     Write-Host "=== Pendientes del board #$ProjectNum de $Owner ===" -ForegroundColor Cyan
     Write-Host ""
@@ -3678,11 +3770,11 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 4: -ProjectNum -ToReview <issueNum>  -> move item to the "In Review" column
 # The work flow calls this after opening the PR: the change is now in review /
 # testing while the gate runs. Merge later moves it to Done (close->Done + fill).
-# ==============================================================================
+# =======================================================================
 if ($ToReview -gt 0) {
     # -Graphql fails closed on exit OR errors[], so a read failure throws here instead of a null
     # id mislabelled "board not found" - this read drives the In Review write below (#314).
@@ -3735,9 +3827,9 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 5: -ProjectNum -Parallel <issueNums>  -> batch-start, one worktree each
-# ==============================================================================
+# =======================================================================
 if ($Parallel.Count -gt 0) {
     # Normalize to the batch queue (drop <=0, de-dup, keep order).
     $queue = @(Get-ParallelQueue $Parallel)
@@ -3952,7 +4044,7 @@ if ($Parallel.Count -gt 0) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 3b: -ProjectNum -StartGroup <n1,n2,...>  -> ONE shared branch for several small,
 # sequential sub-issues of the same epic (#633), so they close through ONE PR/gate/merge
 # instead of a full start->PR->gate->merge cycle per issue.
@@ -3962,7 +4054,7 @@ if ($Parallel.Count -gt 0) {
 # (Status -> In Progress, assignee, [abios-claim] comment) via the same Invoke-IssueStart,
 # just without -MakeBranch - then a session-registry row is added for each, pointing at the
 # leader's branch/workPath, so /board watch and cleanup see the whole group as one session.
-# ==============================================================================
+# =======================================================================
 if ($groupQueue.Count -gt 0) {
     Write-Host "=== Empezando lote de issues $($groupQueue -join ', ') (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
     Write-Host ""
@@ -4011,9 +4103,9 @@ if ($groupQueue.Count -gt 0) {
     exit 0
 }
 
-# ==============================================================================
+# =======================================================================
 # MODE 3: -ProjectNum -Start <issueNum>  -> move to In Progress + assign + context
-# ==============================================================================
+# =======================================================================
 Write-Host "=== Empezando issue #$Start (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
 Write-Host ""
 
