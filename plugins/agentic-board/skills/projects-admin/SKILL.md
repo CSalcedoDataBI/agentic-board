@@ -93,6 +93,7 @@ follow it exactly:
 | `/board cerrar-ciclo` | `references/verbs-cerrar-ciclo.md` |
 | `/board telemetry` | `references/verbs-telemetry.md` |
 | `/board triage` | `references/verbs-triage.md` |
+| `/board plugins` (update every plugin; `sessions` map; `clean` old builds) | `references/verbs-plugins.md` |
 
 ---
 ## Routing table

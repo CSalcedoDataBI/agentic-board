@@ -1,5 +1,5 @@
 ---
-description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/telemetry/triage/complete/bi-checklist. Defaults to the CSalcedoDataBI account.
+description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/telemetry/triage/complete/bi-checklist/plugins. Defaults to the CSalcedoDataBI account.
 ---
 You are running the agentic-board /board command.
 
@@ -36,6 +36,8 @@ just the number):
 20. triage          → llenar Type/Area/Estimate por evidencia + PROPONER Priority (con confirmación) en los pendientes
 21. complete        → verificar que el board quedó full (0 pendientes) — PASS/FAIL, útil para CI o cierre
 22. bi-checklist    → mostrar el checklist de release para artefactos BI (modelos/reportes)
+23. plugins         → actualizar TODOS los plugins instalados y ver qué sesiones abiertas siguen con una versión vieja
+                      (plugins = actualizar | plugins sessions = mapa de sesiones | plugins clean = borrar versiones viejas sin uso)
 
 ── otros comandos (se tipean) ──────────────────────────────────
 /scan       → escanear ESTE proyecto por trabajo sin trackear (TODOs, checklists, planes) → issues + plan
@@ -95,6 +97,10 @@ improvise the recipe from this summary:
   mechanical signals, read-only). Full contract: `references/verbs-telemetry.md`.
 - **triage** — fill Type/Area/Estimate from evidence and PROPOSE Priority (never write it
   silently). Full contract: `references/verbs-triage.md`.
+- **plugins** — update EVERY installed Claude Code plugin in one pass and report what changed
+  (`plugins`), map the open sessions still running an old build (`plugins sessions`), and safely
+  clean old cached builds nobody uses (`plugins clean`, a listing until `-Execute`). Needs no GitHub
+  token: skip the account step above for this verb. Full contract: `references/verbs-plugins.md`.
 
 The short verbs run directly:
 

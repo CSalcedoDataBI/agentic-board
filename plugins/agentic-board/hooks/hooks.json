@@ -40,6 +40,17 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd /d /c \"${CLAUDE_PLUGIN_ROOT}/scripts/PluginStale-NoticePreCheck.cmd\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreCompact": [
       {
         "matcher": "*",

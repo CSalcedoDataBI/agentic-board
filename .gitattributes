@@ -1,0 +1,3 @@
+# Batch files must be CRLF on every checkout: cmd.exe can mis-parse labels and gotos in LF-only files,
+# and the plugin's cmd shims (Brake-PreCheck.cmd, PluginStale-NoticePreCheck.cmd) rely on both.
+*.cmd text eol=crlf
