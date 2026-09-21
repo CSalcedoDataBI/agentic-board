@@ -22,6 +22,18 @@ the plugin cache and worktrees is folded into one (`summary.copiesCollapsed` say
 folded, and a `near-duplicate` finding says when it stands for several copies with the same description; the audit compares descriptions, so two copies whose bodies differ but whose descriptions match are folded). Two
 copies of one name with DIFFERENT descriptions are a real `divergent-copy` finding (a stale copy).
 
+A wording defect (`no-triggers`, `first-person`, `over-budget`, `no-when-not`, `empty-description`) is
+reported ONCE per skill, not once per copy: copies with the same name, the same description and the
+same owner are one finding, which carries `copies` and `paths` (local evidence: never paste the paths
+into a filed issue). `summary.perCopyFindingsFolded` says how many findings that saved. A copy whose
+description differs keeps its own findings, and per-file defects (`missing-name`, `misplaced`) stay per file.
+
+Ownership comes from the plugin's OWN manifest (`.claude-plugin/plugin.json`, else the marketplace
+entry), never from a path segment (that segment is the marketplace name in the installed cache
+and the word `marketplaces` in a marketplaces clone). A plugin is the tool's only if its name AND its
+declared repository/homepage are the tool's; an unknown, unreadable or unverified plugin is
+`filing = local` (`ownerRepo` is an `owner/repo` or empty, never a name). Nothing is filed on a guess.
+
 Findings carry a `filing` route (`file` = open an issue on the owner repo; `local` =
 report only). This is `Resolve-SkillOwner` deciding where each finding belongs — the tool's
 board for agentic-board skills, the project's board for project skills, local-only for

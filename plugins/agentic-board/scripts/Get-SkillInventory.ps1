@@ -96,8 +96,89 @@ function Get-Keywords {
         Sort-Object -Unique
 }
 
+# ── Plugin identity ─────────────────────────────────────────────────────────────
+# The plugin a skill belongs to used to be read from a PATH SEGMENT (plugins/<x>/ or
+# plugins/cache/<x>/). That segment is the MARKETPLACE for the installed cache
+# (cache/<marketplace>/<plugin>/<version>/) and the literal word "marketplaces" for a marketplaces
+# clone (marketplaces/<marketplace>/plugins/<plugin>/), so findings were routed to an owner called
+# "marketplaces". The identity is now READ from the plugin's own manifest: the nearest ancestor of
+# the skill that holds .claude-plugin/plugin.json; failing that, the marketplace.json entry whose
+# local source directory contains the skill. Nothing is guessed: no manifest, or an unreadable one,
+# is `unknown` (plugin = $null) and the audit then files nothing.
+$script:ManifestCache = @{}
+function Read-JsonFile {
+    param([string]$File)
+    if (-not $script:ManifestCache.ContainsKey($File)) {
+        $val = $null
+        if (Test-Path -LiteralPath $File -PathType Leaf) {
+            try { $val = Get-Content -LiteralPath $File -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+            catch { $val = 'unreadable' }
+        }
+        $script:ManifestCache[$File] = $val
+    }
+    $script:ManifestCache[$File]
+}
+function ConvertTo-RepoSlug {
+    # A manifest's repository/homepage/source-url -> "owner/repo", or $null when it is not a GitHub repo.
+    param($Value)
+    $u = if ($Value -is [string]) { $Value } elseif ($Value -and $Value.url) { [string]$Value.url } else { '' }
+    if (-not $u) { return $null }
+    $m = [regex]::Match($u.Trim(), '^(?:github:)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$')
+    if (-not $m.Success) { $m = [regex]::Match($u, '(?i)github\.com[/:]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/#?]|$)') }
+    if ($m.Success) { "$($m.Groups[1].Value)/$($m.Groups[2].Value)" } else { $null }
+}
+function Get-PluginIdentity {
+    param([string]$SkillFile, [string]$Base)
+    $unknown = [pscustomobject]@{ name = $null; repo = $null; source = 'unknown' }
+    # Both sides are canonicalised through Get-Item first: it expands 8.3 short names (CRISTO~1), so a
+    # USERPROFILE spelled short still contains the long-spelled paths the walk returns. A prefix test
+    # on raw strings would silently fail and every plugin would come out `unknown`.
+    $baseItem = Get-Item -LiteralPath $Base -ErrorAction SilentlyContinue
+    $dirItem  = Get-Item -LiteralPath (Split-Path $SkillFile -Parent) -ErrorAction SilentlyContinue
+    if (-not $baseItem -or -not $dirItem) { return $unknown }
+    $baseN = ($baseItem.FullName -replace '\\','/').TrimEnd('/')
+    $dir = ($dirItem.FullName -replace '\\','/')
+    # 1. nearest plugin.json, walking up but never above the scanned base.
+    $walk = $dir
+    while ($walk -and $walk.Length -gt $baseN.Length -and $walk.StartsWith($baseN + '/', [StringComparison]::OrdinalIgnoreCase)) {
+        $man = Read-JsonFile (Join-Path $walk '.claude-plugin/plugin.json')
+        if ($man -eq 'unreadable') { return $unknown }
+        if ($man) {
+            if (-not $man.name) { return $unknown }
+            $repo = ConvertTo-RepoSlug $man.repository
+            if (-not $repo) { $repo = ConvertTo-RepoSlug $man.homepage }
+            return [pscustomobject]@{ name = [string]$man.name; repo = $repo; source = 'plugin.json' }
+        }
+        $walk = ((Split-Path $walk -Parent) -replace '\\','/')
+    }
+    # 2. a marketplace.json entry with a LOCAL source directory that contains the skill (longest wins;
+    #    two equally good entries are ambiguous, hence unknown).
+    $walk = $dir
+    while ($walk -and $walk.Length -gt $baseN.Length -and $walk.StartsWith($baseN + '/', [StringComparison]::OrdinalIgnoreCase)) {
+        $mkt = Read-JsonFile (Join-Path $walk '.claude-plugin/marketplace.json')
+        if ($mkt -eq 'unreadable') { return $unknown }
+        if ($mkt) {
+            $best = @(); $bestLen = -1
+            foreach ($e in @($mkt.plugins)) {
+                if (-not $e -or -not $e.name -or $e.source -isnot [string] -or $e.source -notmatch '^\./') { continue }
+                $src = ([System.IO.Path]::GetFullPath((Join-Path $walk $e.source)) -replace '\\','/').TrimEnd('/')
+                $dn  = ([System.IO.Path]::GetFullPath($dir) -replace '\\','/')
+                if ($dn -eq $src -or $dn.StartsWith($src + '/', [StringComparison]::OrdinalIgnoreCase)) {
+                    if ($src.Length -gt $bestLen) { $best = @($e); $bestLen = $src.Length }
+                    elseif ($src.Length -eq $bestLen) { $best += $e }
+                }
+            }
+            if ($best.Count -eq 1) { return [pscustomobject]@{ name = [string]$best[0].name; repo = $null; source = 'marketplace.json' } }
+            return $unknown
+        }
+        $walk = ((Split-Path $walk -Parent) -replace '\\','/')
+    }
+    $unknown
+}
+
 function New-SkillRecord {
-    param([string]$Path, [string]$SkillScope, [string]$PluginName, [string]$RootPath)
+    param([string]$Path, [string]$SkillScope, [string]$PluginName, [string]$RootPath,
+          [string]$PluginRepo, [string]$PluginSource)
 
     $fm   = Get-Frontmatter -Path $Path
     $desc = if ($fm) { $fm.description } else { $null }
@@ -131,6 +212,8 @@ function New-SkillRecord {
         name        = $nm
         scope       = $SkillScope
         plugin      = $PluginName
+        pluginRepo  = $PluginRepo         # repo the plugin's own manifest declares (owner/repo) or $null
+        pluginIdentity = $PluginSource    # 'plugin.json' | 'marketplace.json' | 'unknown' (plugin scope only)
         namespace   = $ns
         path        = $norm
         project     = $project
@@ -176,10 +259,9 @@ if ($Scope -in @('all','personal')) {
 if ($Scope -in @('all','plugin')) {
     $plbase = Join-Path $userHome '.claude/plugins'
     foreach ($f in (Find-SkillFiles -Base $plbase)) {
-        $p   = ($f.FullName -replace '\\','/')
-        $pm  = [regex]::Match($p, '/plugins/(?:cache/)?([^/]+)/')
-        $plg = if ($pm.Success) { $pm.Groups[1].Value } else { 'plugin' }
-        $records.Add((New-SkillRecord -Path $f.FullName -SkillScope 'plugin' -PluginName $plg -RootPath $plbase))
+        $id = Get-PluginIdentity -SkillFile $f.FullName -Base $plbase
+        $records.Add((New-SkillRecord -Path $f.FullName -SkillScope 'plugin' -PluginName $id.name -RootPath $plbase `
+                -PluginRepo $id.repo -PluginSource $id.source))
     }
 }
 
@@ -210,6 +292,18 @@ for ($i = 0; $i -lt $records.Count; $i++) {
     $key = ([string]$r.name).ToLowerInvariant() + "`n" + $fp
     if (-not $variantMap.Contains($key)) { $variantMap[$key] = [System.Collections.Generic.List[int]]::new() }
     $variantMap[$key].Add($i)
+}
+# Stamp each record with its variant so the audit can report a per-skill lint once per variant
+# instead of once per copy: `variantId` (short hash of name + normalised description),
+# `variantCopies` (how many records share it) and `copyRank` (lower = more local).
+$sha = [System.Security.Cryptography.SHA1]::Create()
+foreach ($k in $variantMap.Keys) {
+    $vid = [System.BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($k))).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+    foreach ($ix in $variantMap[$k]) {
+        $records[$ix] | Add-Member -NotePropertyName variantId -NotePropertyValue $vid -Force
+        $records[$ix] | Add-Member -NotePropertyName variantCopies -NotePropertyValue $variantMap[$k].Count -Force
+        $records[$ix] | Add-Member -NotePropertyName copyRank -NotePropertyValue (Get-CopyRank $records[$ix]) -Force
+    }
 }
 $variants = @(foreach ($idxs in $variantMap.Values) {
     $rep = @($idxs | Sort-Object @{ e = { Get-CopyRank $records[$_] } }, @{ e = { $records[$_].path } })[0]

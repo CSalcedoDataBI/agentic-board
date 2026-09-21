@@ -30,6 +30,16 @@ BeforeAll {
         $dir = Join-Path $Base $RelDir
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $dir 'SKILL.md') -Encoding utf8 -Value "---`nname: $Name`ndescription: $Description`n---`nBody"
+        # An installed plugin's identity is read from its manifest (not from a path segment), so a
+        # fixture under .claude/plugins/{cache,marketplaces}/<plugin>/ gets a plugin.json named <plugin>.
+        $m = [regex]::Match(($RelDir -replace '\\', '/'), '^(\.claude/plugins/(?:cache|marketplaces)/([^/]+))/')
+        if ($m.Success) {
+            $mdir = Join-Path $Base (Join-Path $m.Groups[1].Value '.claude-plugin')
+            if (-not (Test-Path (Join-Path $mdir 'plugin.json'))) {
+                New-Item -ItemType Directory -Path $mdir -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $mdir 'plugin.json') -Encoding utf8 -Value ('{"name":"' + $m.Groups[2].Value + '"}')
+            }
+        }
     }
     # The three usual places one skill shows up: the repo tree, a worktree of it, the installed plugin cache.
     function New-Copies {
