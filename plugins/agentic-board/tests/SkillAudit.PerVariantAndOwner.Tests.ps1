@@ -209,6 +209,15 @@ Describe 'a manifest nested inside skills/ cannot name its own plugin (review ro
         $r.plugin | Should -Be 'realplugin'
         (Invoke-Aud $fx).findings | Where-Object { $_.filing -eq 'file' } | Should -BeNullOrEmpty
     }
+    It 'a manifest under a NESTED skills/ tree (skills/real/examples/skills/leak) is ignored too: the outermost skills/ anchors' {
+        $fx = New-Fixture 'nested2'
+        Set-Manifest $fx.Home '.claude/plugins/cache/m/third/1' '{"name":"third","repository":"someone/third"}'
+        Set-Manifest $fx.Home '.claude/plugins/cache/m/third/1/skills/real/examples' $script:ToolManifest
+        New-Skill $fx.Home '.claude/plugins/cache/m/third/1/skills/real/examples/skills/leak' 'leak' 'I can help with things.'
+        $r = (Invoke-Inv $fx).skills | Where-Object name -eq 'leak'
+        $r.plugin | Should -Be 'third'
+        (Invoke-Aud $fx).findings | Where-Object { $_.filing -eq 'file' } | Should -BeNullOrEmpty
+    }
     It 'a skill outside any skills/ directory has no plugin layout, hence unknown' {
         $fx = New-Fixture 'no-skills-dir'
         Set-Manifest $fx.Home '.claude/plugins/cache/m/p/1' $script:ToolManifest

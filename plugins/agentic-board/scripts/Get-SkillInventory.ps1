@@ -152,10 +152,15 @@ function Get-PluginIdentity {
     # A manifest only counts if it sits ABOVE the plugin's skills/ directory: one dropped inside
     # skills/<x>/ (nearer to the SKILL.md than the plugin root) would otherwise win the walk and let a
     # single skill name its own plugin. No skills/ ancestor below the base = not a plugin layout = unknown.
-    $up = $dir
-    while ($up.Length -gt $baseN.Length -and (Split-Path $up -Leaf) -ne 'skills') { $up = ((Split-Path $up -Parent) -replace '\\','/') }
-    if ($up.Length -le $baseN.Length) { return $unknown }
-    $start = ((Split-Path $up -Parent) -replace '\\','/')
+    # The OUTERMOST skills/ ancestor is the anchor, so a manifest below ANY skills/... segment (a nested
+    # skills/<x>/examples/skills/<y> tree included) cannot establish identity.
+    $up = $dir; $outer = $null
+    while ($up.Length -gt $baseN.Length) {
+        if ((Split-Path $up -Leaf) -eq 'skills') { $outer = $up }
+        $up = ((Split-Path $up -Parent) -replace '\\','/')
+    }
+    if (-not $outer) { return $unknown }
+    $start = ((Split-Path $outer -Parent) -replace '\\','/')
     # 1. nearest plugin.json, walking up but never above the scanned base.
     $walk = $start
     while ($walk -and $walk.Length -gt $baseN.Length -and $walk.StartsWith($baseN + '/', [StringComparison]::OrdinalIgnoreCase)) {
