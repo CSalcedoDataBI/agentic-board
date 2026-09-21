@@ -190,6 +190,36 @@ Describe 'copies of one name with DIFFERENT descriptions stay visible as a stale
     }
 }
 
+Describe 'auditing one specific copy still finds its pair (#462)' {
+    It '-Name with the namespaced (non-primary) copy still yields the divergent-copy finding, phrased from that copy' {
+        $fx = New-Fixture 'name-b'
+        New-Skill $fx.Root 'plugins/tool/skills/ledger-tool' 'ledger-tool' 'Reconciles ledger entries against bank statements each month.'
+        New-Skill $fx.Home '.claude/plugins/cache/tool/skills/ledger-tool' 'ledger-tool' 'Totally unrelated text about gardening tomatoes outdoors.'
+        $aud = Invoke-Aud $fx 'tool:ledger-tool'
+        $f = @($aud.findings | Where-Object type -eq 'divergent-copy')
+        $f.Count | Should -Be 1
+        $f[0].skill | Should -Be 'tool:ledger-tool'
+        $f[0].detail | Should -Match 'plugin vs project'
+    }
+    It '-Name with a copy folded into the first side of a near-duplicate still yields the finding' {
+        $fx = New-Fixture 'name-a'
+        New-Copies $fx 'report-builder' 'Generate quarterly revenue reports from spreadsheets for financial dashboards.'
+        # Personal scope is walked after project scope, so report-builder is deterministically the first side.
+        New-Skill $fx.Home '.claude/skills/revenue-reporter' 'revenue-reporter' 'Build quarterly revenue reports from spreadsheets for financial dashboards.'
+        $aud = Invoke-Aud $fx 'tool:report-builder'
+        @($aud.findings | Where-Object type -eq 'near-duplicate').Count | Should -Be 1
+    }
+    It 'the same skill under two plugin namespaces (a cache and a marketplaces clone name them differently) is one skill' {
+        $fx = New-Fixture 'ns'
+        New-Skill $fx.Home '.claude/plugins/cache/alpha/skills/review' 'review' 'Reviews pull requests for security issues. Use when auditing PRs.'
+        New-Skill $fx.Home '.claude/plugins/marketplaces/beta/skills/review' 'review' 'Reviews pull requests for security issues. Use when auditing PRs.'
+        $inv = Invoke-Inv $fx
+        @($inv.skills).Count | Should -Be 2
+        @($inv.overlaps).Count | Should -Be 0
+        $inv.summary.collapsedCopies | Should -Be 1
+    }
+}
+
 Describe 'the Triggers lint accepts the way this repo writes it (#462)' {
     BeforeAll {
         $script:Fx = New-Fixture 'triggers'

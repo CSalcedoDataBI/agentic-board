@@ -71,13 +71,17 @@ function Get-CopiesNote {
 }
 foreach ($o in $inv.overlaps) {
     $s = $skills | Where-Object { $_.path -eq $o.aPath } | Select-Object -First 1
-    if (-not $s) { $s = $skills | Where-Object { $_.namespace -eq $o.a } | Select-Object -First 1 }
+    # -Name may have kept only ANOTHER copy of the skill: any copy folded into the first side counts,
+    # and for a divergent pair (one skill, two wordings) a copy on the second side does too.
+    if (-not $s) { $s = $skills | Where-Object { @($o.aPaths) -contains $_.path } | Select-Object -First 1 }
+    if (-not $s -and $o.kind -eq 'divergent-copy') { $s = $skills | Where-Object { @($o.bPaths) -contains $_.path } | Select-Object -First 1 }
     if (-not $s) { continue }
     $note = (Get-CopiesNote $o.aCopies "'$($o.a)'") + (Get-CopiesNote $o.bCopies "'$($o.b)'")
     if ($o.kind -eq 'divergent-copy') {
         # Scopes, never paths: a finding may be filed later and must not carry local paths.
-        $bScope = ($inv.skills | Where-Object { $_.path -eq $o.bPath } | Select-Object -First 1).scope
-        Add-Finding $s 'med' 'divergent-copy' "Two copies of '$($o.a)' carry different descriptions ($($s.scope) vs $bScope copy, Jaccard $($o.jaccard)) — one is stale; re-sync them.$note"
+        $otherPath = if (@($o.bPaths) -contains $s.path) { $o.aPath } else { $o.bPath }
+        $bScope = ($inv.skills | Where-Object { $_.path -eq $otherPath } | Select-Object -First 1).scope
+        Add-Finding $s 'med' 'divergent-copy' "Two copies of '$($s.name)' carry different descriptions ($($s.scope) vs $bScope copy, Jaccard $($o.jaccard)) — one is stale; re-sync them.$note"
     } else {
         Add-Finding $s 'med' 'near-duplicate' "Description overlaps '$($o.b)' (Jaccard $($o.jaccard)) — add a disambiguation clause or merge.$note"
     }

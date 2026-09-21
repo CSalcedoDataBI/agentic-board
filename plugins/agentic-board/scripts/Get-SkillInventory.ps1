@@ -200,6 +200,9 @@ function Get-CopyRank {
     param($Record)
     ([int]$scopeRank[$Record.scope]) * 2 + $(if ($Record.path -match '/\.claude/worktrees/') { 1 } else { 0 })
 }
+# The namespace is deliberately NOT part of the key: the "plugin" of a plugin-scope record is read from
+# its path, and for a marketplaces clone or a cache layout that segment is the marketplace, not the
+# plugin, so the very same skill carries different namespaces in different copies.
 $variantMap = [ordered]@{}
 for ($i = 0; $i -lt $records.Count; $i++) {
     $r = $records[$i]
@@ -213,6 +216,7 @@ $variants = @(foreach ($idxs in $variantMap.Values) {
     [pscustomobject]@{
         Rec    = $records[$rep]
         Copies = $idxs.Count
+        Paths  = @($idxs | ForEach-Object { $records[$_].path })
         # Unary comma: a HashSet is enumerable and would otherwise be flattened into its strings.
         Set    = [System.Collections.Generic.HashSet[string]]::new([string[]]@(@($records[$rep]._keywords) | Where-Object { $_ }))
     }
@@ -230,6 +234,8 @@ function New-Overlap {
     [pscustomobject]@{
         a = $VA.Rec.namespace; b = $VB.Rec.namespace; jaccard = $Jaccard; kind = $Kind
         aPath = $VA.Rec.path; bPath = $VB.Rec.path; aCopies = $VA.Copies; bCopies = $VB.Copies
+        # Every copy folded into each side, so a caller that filtered to one copy can still find its pair.
+        aPaths = $VA.Paths; bPaths = $VB.Paths
     }
 }
 
