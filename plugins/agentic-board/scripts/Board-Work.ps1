@@ -233,6 +233,10 @@ $ErrorActionPreference = "Stop"
 # Per-repo preferences (#662) - today: whether related issues should share one PR.
 . (Join-Path $PSScriptRoot 'Get-BoardConfig.ps1')
 
+# The "state of play" printed before the pending list (#660): what is in flight, stale, off-board
+# or due, read from the executing sources rather than from the board's own opinion.
+. (Join-Path $PSScriptRoot 'BoardWork.StateOfPlay.ps1')
+
 # NOTE: the GH_TOKEN check lives in the main-entry guard below (after every function
 # is defined) so the pure helpers can be dot-sourced for unit tests without a token
 # and without side effects (set $env:ABIOS_BOARDWORK_DOTSOURCE=1 before dot-sourcing).
@@ -3540,6 +3544,26 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     $items   = $read.Items
     $truncWarn = Get-BoardTruncationWarning $read
     $pending = @($items | Where-Object { Test-Pending $_ })
+
+    # State of play (#660) BEFORE the pending list: "what is pending?" is not only the board's
+    # Backlog. A stale run marker, a finished epic, a merged-but-present worktree, an open issue
+    # nobody put on the board and an unreleased CHANGELOG are open work too, and a clean board
+    # would otherwise read as "nothing in flight". Read + offer only - it mutates nothing, and it
+    # can never take the listing down: a failure here is said and the pending list still prints.
+    try {
+        $spHere = try { Get-RepoFromOrigin } catch { '' }
+        $spRepo = if ($Repo) { $Repo } else { $spHere }
+        $spLive = @(Read-SessionRegistry | ForEach-Object { $_.branch })
+        $spBase = if ($spHere) { Resolve-IssueBaseRef $spHere -NoFetch } else { '' }
+        $spPlan = @(Get-StateOfPlay -Repo $spRepo -HereRepo $spHere -Items $items -BoardTruncated ([bool]$read.Truncated) `
+                                    -StateDir (Get-AbiosStateDir) -LiveBranches $spLive -BaseRef $spBase)
+        foreach ($spLine in (Format-StateOfPlay -Findings $spPlan -Repo $spRepo)) {
+            Write-Host $spLine.Text -ForegroundColor $spLine.Color
+        }
+    } catch {
+        Write-Host "No pude armar el estado del trabajo ($($_.Exception.Message)); sigo con los pendientes." -ForegroundColor Yellow
+    }
+    Write-Host ""
 
     if ($pending.Count -eq 0) {
         # "No pending" is only honest when every Status on the board is one this tool

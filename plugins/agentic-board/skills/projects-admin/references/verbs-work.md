@@ -18,7 +18,32 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      - All / not inside a git repo (skip the question then) → `-ListBoards` (every board of the
        account, most pending first).
   2. **Pick a board.** Show the listing (pending counts + URLs) and ask which board.
-  3. **Pick an issue.** Run with `-ProjectNum <n>` — pending items sorted by Priority. Show them
+  2b. **State of play — it comes FIRST, before the pending list (#660).** "What is pending?",
+     "pendientes", "qué hay en proceso" and every other phrasing of that question are NOT answered
+     by the board's Backlog alone: the same `-ProjectNum <n>` run opens with an `Estado del
+     trabajo` block that reads five more sources from the things that execute them — the run
+     marker (`.agentic-board/active-run.json`), the epics with every sub-issue closed, the
+     worktrees whose branch already merged, the open issues that are not on the board, and the
+     `[Unreleased]` CHANGELOG block of the default branch. It also lists what is IN FLIGHT (board
+     items In Progress / In Review, open PRs, a run whose queue is still open). **Read it to the
+     user in their terms, then act on the findings — never answer with the pending list alone.**
+     It is read + offer only: the script mutates nothing, and each finding carries the offer.
+     **Never print a command for the user to run** — on a yes, YOU perform the disposition, through
+     the verb that owns it, with that verb's usual confirmation:
+
+     | Finding | On a yes, you… |
+     |---|---|
+     | Run still `active` but its queue/epic is closed | `Board-RunLedger.ps1 -Close -Epic <n>` (marks the marker closed and updates the ledger comment) |
+     | Epic open with every sub-issue closed | close the epic issue (`gh issue close <n> --reason completed`) and let `Board-Fill` move it to Done |
+     | Worktrees of branches already merged | `/board doctor -Fix` — per-branch confirmation, dirty worktrees kept |
+     | Open issues not on the board | `/board add` for each (references/issue-ops.md), then `/board fill` to set their Status/Priority/Size |
+     | `[Unreleased]` waiting for a release | the release flow (`New-Release.ps1`) — never tag or publish without the user's go-ahead |
+
+     A source that could not be read appears under `No pude comprobar` — say so; it is NOT "clean".
+     A repo with nothing to report prints ONE line (`sin novedades`) and goes straight to the
+     pending list. The marker, worktrees and CHANGELOG belong to the CLONE you stand in, so they are
+     skipped (and the line says so) when `-Repo` names a different repository.
+  3. **Pick an issue.** The pending items follow the state of play, sorted by Priority. Show them
      and ask which issue to start. Draft notes appear flagged: they must be converted with
      `/board fill` before they can be started. Items labeled `blocked` appear as `[BLOCKED]`
      and cannot be started; `-Start` also refuses them (and issues with open native blocked-by
@@ -220,6 +245,7 @@ and wait for; never assume the account or the scope:
 | 2. Pick a board | `Board-Work.ps1 -ListBoards [-Repo <owner/name>]` | With `-Repo`: only boards LINKED to that repo (`repository.projectsV2`) — exactly one result skips this pick. Without: every board of the owner (backups excluded). Both show pending count (Backlog or no Status) + URL, most pending first |
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
+| 3a. Read the state of play | (printed at the top of the same run) | **`Estado del trabajo` (#660)** — what is in flight (board In Progress / In Review, open PRs, a run with an open queue) and what is stale or due: a run marker still `active` over a closed queue, an epic open with every sub-issue closed, worktrees of already-merged branches, open issues missing from the board, `[Unreleased]` waiting for a release. Read + offer only; on a yes the agent performs it through the owning verb (table in step 2b). A repo with nothing to report prints one `sin novedades` line; an unreadable source is listed as `No pude comprobar`, never as clean |
 | 3b. Choose the PR shape | (read the offer printed under the pending list) | **Grouped is the default when the issues overlap (#662)**: the listing names each group, the evidence behind it (same repo file named in both issues, or a shared board Area), what it saves in review rounds, and what it held back to keep the PR reviewable (cap 4). One PR per issue is the case that needs a reason — independent risk, or a separate approver |
 | 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` (or `show` to read the current value and its source without changing anything) | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide. `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
 | 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, for a group chosen at 3b (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch, so all of them close through ONE PR/gate/merge |
