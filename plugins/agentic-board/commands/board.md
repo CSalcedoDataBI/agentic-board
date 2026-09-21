@@ -1,5 +1,5 @@
 ---
-description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/telemetry/triage/complete/bi-checklist/plugins. Defaults to the CSalcedoDataBI account.
+description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/telemetry/triage/complete/bi-checklist/plugins/actions-cost. Defaults to the CSalcedoDataBI account.
 ---
 You are running the agentic-board /board command.
 
@@ -38,6 +38,7 @@ just the number):
 22. bi-checklist    → mostrar el checklist de release para artefactos BI (modelos/reportes)
 23. plugins         → actualizar TODOS los plugins instalados y ver qué sesiones abiertas siguen con una versión vieja
                       (plugins = actualizar | plugins sessions = mapa de sesiones | plugins clean = borrar versiones viejas sin uso)
+24. actions-cost    → auditar el costo de GitHub Actions de este repo (solo lectura): minutos MEDIDOS + reglas de costo sobre los workflows
 
 ── otros comandos (se tipean) ──────────────────────────────────
 /scan       → escanear ESTE proyecto por trabajo sin trackear (TODOs, checklists, planes) → issues + plan
@@ -101,6 +102,12 @@ improvise the recipe from this summary:
   (`plugins`), map the open sessions still running an old build (`plugins sessions`), and safely
   clean old cached builds nobody uses (`plugins clean`, a listing until `-Execute`). Needs no GitHub
   token: skip the account step above for this verb. Full contract: `references/verbs-plugins.md`.
+- **actions-cost** — READ-ONLY audit of a repo's GitHub Actions cost: minutes MEASURED from the account
+  usage endpoint (never the runs timing endpoint or run wall-clock), plus the cost rules over its
+  `.github/workflows` (timeouts, concurrency, duplicate triggers, runners, crons, retention, repeated
+  setup, the required-check deadlock trap). Every finding carries file:line; whatever it cannot measure is
+  listed with the reason, never reported as clean. Writes nothing and has no fix mode. Full contract:
+  `references/verbs-actions-cost.md`.
 
 The short verbs run directly:
 

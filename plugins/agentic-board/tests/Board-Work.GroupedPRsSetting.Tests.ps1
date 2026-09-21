@@ -172,8 +172,8 @@ Describe 'the /board menu shows the setting (#681)' {
         $script:Board | Should -Match 'scripts/Board-Work\.ps1 -PreferGroupedPRs show'
         $script:Board | Should -Match 'print\s+`auto \(por defecto\)`'
     }
-    It 'the menu keeps its 23 numbered entries (the sub-line is not a 24th option)' {
-        @([regex]::Matches($script:Menu, '(?m)^\d+\. ')).Count | Should -Be 23
+    It 'the menu keeps its 24 numbered entries (the sub-line is not a 25th option)' {
+        @([regex]::Matches($script:Menu, '(?m)^\d+\. ')).Count | Should -Be 24
     }
     It 'the work reference documents show and the three values in one place' {
         $ref = Get-Content -LiteralPath (Join-Path $script:Plugin 'skills' 'projects-admin' 'references' 'verbs-work.md') -Raw
