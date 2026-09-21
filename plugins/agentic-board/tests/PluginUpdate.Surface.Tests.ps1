@@ -56,8 +56,8 @@ Describe 'dot-sourcing Board-Work.ps1 cannot silently reset a parameter of these
 
 Describe 'the reference tells the truth about the code' {
     It 'every script it names exists' {
-        $names = [regex]::Matches($script:Ref, 'scripts/([A-Za-z][A-Za-z0-9-]+\.ps1)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique
-        @($names).Count | Should -BeGreaterOrEqual 4
+        $names = [regex]::Matches($script:Ref, 'scripts/([A-Za-z][A-Za-z0-9-]+\.(?:ps1|cmd))') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique
+        @($names).Count | Should -BeGreaterOrEqual 4  # the four verb scripts and the cmd shim
         foreach ($n in $names) { Test-Path -LiteralPath (Join-Path $script:Plugin 'scripts' $n) | Should -BeTrue -Because "$n is named in verbs-plugins.md" }
     }
     It 'every flag it documents is a real parameter of its script' {
@@ -78,6 +78,14 @@ Describe 'the reference tells the truth about the code' {
         $script:Ref | Should -Match '/reload-plugins'
         $script:Ref | Should -Match '(?i)does not reconnect plugin MCP servers|MCP servers'
         $script:Ref | Should -Match '(?i)Honest limit'
+    }
+    It 'documents the cmd shim in front of the notice hook: what it reads, its fail direction, and that the shim file exists' {
+        $script:Ref | Should -Match 'PluginStale-NoticePreCheck\.cmd'
+        $script:Ref | Should -Match '(?i)only the first payload line'
+        $script:Ref | Should -Match '(?i)fc /b'
+        $script:Ref | Should -Match '(?i)only ever \*skips\* work when the stamp provably'
+        $script:Ref | Should -Match '(?i)inconclusive check .* is never\s+remembered'
+        Test-Path -LiteralPath (Join-Path $script:Plugin 'scripts' 'PluginStale-NoticePreCheck.cmd') | Should -BeTrue
     }
     It 'says -AcceptMarketplaceCommands is off by default' {
         $script:Ref | Should -Match '(?i)off by default'

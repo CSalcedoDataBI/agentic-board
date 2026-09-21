@@ -95,20 +95,45 @@ reason for every build that stays.
 
 ## The in-session notice (automatic, not typed)
 
-`hooks/hooks.json` registers a `UserPromptSubmit` hook (`scripts/PluginStale-NoticeHook.ps1`). When a
-plugin the session loaded has a newer installed build it shows **once per (session, plugin, new build)**,
-in plain language, either "type /reload-plugins" or "open a new session (it has MCP servers)". It is silent
-otherwise, bounded by a 10 s timeout and its own time budget, swallows its own errors, and always exits 0.
-State: `plugin-notices.json` under the shared state directory (`Get-AbiosStateDir -Root $HOME`).
+`hooks/hooks.json` registers a `UserPromptSubmit` hook. When a plugin the session loaded has a newer
+installed build it shows **once per (session, plugin, new build)**, in plain language, either "type
+/reload-plugins" or "open a new session (it has MCP servers)". It is silent otherwise, bounded by a 10 s
+timeout and its own time budget, swallows its own errors, and always exits 0. State: `plugin-notices.json`
+under the shared state directory (`Get-AbiosStateDir -Root $HOME`).
 
-Cost: it runs before every prompt, so it stays nearly free by skipping while `installed_plugins.json`
-(the thing an update rewrites) is unchanged since that session's last check, re-checking at most every
-30 minutes.
+**Cost, and the cmd shim.** The hook runs before every prompt of every session and a `pwsh` start alone is
+about 2 s on the maintainer's machine, so hooks.json calls `scripts/PluginStale-NoticePreCheck.cmd` (the
+same idea as `Brake-PreCheck.cmd`, #572), which answers the common case in about 0.15-0.35 s:
+
+1. It reads **only the first payload line** with `set /p` and takes the session id from it. The payload
+   holds the user's prompt (`& | < > ^ % !` and quotes), so it is never echoed, never put on a command line,
+   and only ever touched through delayed expansion, whose results cmd does not re-parse.
+2. It accepts the id only if it is exactly 36 characters of hex digits and dashes (a UUID). Anything else
+   exits 0 silently (the notice is advisory, so silence is the safe direction here, unlike the brake). A
+   passing id cannot hold a path separator, so it cannot name anything outside the stamp folder.
+3. It compares the installed list (`installed_plugins.json`) byte for byte (`fc /b`) with that session's
+   stamp, `<home>\.agentic-board\plugin-check\<id>\installed_plugins.json`: the list as the last
+   **conclusive** check READ it. Identical -> exit 0 without starting `pwsh`. Different, missing, or `fc`
+   reporting an error -> `pwsh` runs the real hook with `-SessionId <id>` (no stdin is read) and its stdout
+   (the `systemMessage` JSON) reaches Claude Code unchanged.
+
+Fail direction: the shim only ever *skips* work when the stamp provably equals the list of the last
+conclusive check for that same session. The hook writes the stamp only **after** a conclusive check (the
+session is in the registry, its markers exist, the installed list is readable) and after the notice, if any,
+was recorded; an inconclusive check (first prompt racing ahead of the session record or marker) is never
+remembered, so the next prompt reaches the hook again. Stamps of sessions that left the registry are
+removed on the next conclusive check. `.gitattributes` pins `*.cmd` to CRLF because cmd.exe can mis-parse
+labels in LF-only files.
+
+Inside the hook the same idea remains for what the shim lets through: the installed list's stamp is kept in
+`plugin-notices.json` and re-checked at most every 30 minutes after a conclusive check, 5 after an
+inconclusive one.
 
 **Honest limit:** only a session that started with a build that already contains this hook can show the
 notice (or one that has since run `/reload-plugins`, which loads new hooks). Older sessions are covered by
-`/board plugins sessions`.
-
+`/board plugins sessions`. The shim reads only the first payload line: if Claude Code ever sends the session
+id after a very long first-line field, or pretty-prints the payload over several lines, the shim stays silent
+(never wrong, but the notice is then lost).
 ## Known limits (say them, do not hide them)
 
 - **Same version, new commit.** A build is identified by its cache folder (`<plugin>/<version>`). If a

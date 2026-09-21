@@ -76,6 +76,27 @@ Describe 'Invoke-StaleNotice - the decision' {
         (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd) | Should -BeNullOrEmpty
         (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd) | Should -BeNullOrEmpty
     }
+    It 'the shim stamp is written after a CONCLUSIVE check only, and restored by the cheap path if it went missing' {
+        $id = 'fc250d38-1384-4486-beae-91ef341119df'
+        $sc = New-StaleScenario -SessionId $id
+        $sd = New-StateDir
+        $t0 = [datetime]::UtcNow
+        $stampDir = Join-Path $sd 'plugin-check' $id
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0) | Should -Match 'reload-plugins'
+        Test-Path -LiteralPath (Join-Path $stampDir 'installed_plugins.json') | Should -BeTrue
+        [System.IO.Directory]::Delete((Join-Path $sd 'plugin-check'), $true)
+        # inside the 30 minute window the hook takes its cheap path: the conclusive result still stands, so the stamp comes back
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd -NowUtc $t0.AddMinutes(2)) | Should -BeNullOrEmpty
+        Test-Path -LiteralPath (Join-Path $stampDir 'installed_plugins.json') | Should -BeTrue
+    }
+    It 'an inconclusive check writes no shim stamp' {
+        $id = 'fc250d38-1384-4486-beae-91ef341119df'
+        $sc = New-StaleScenario -SessionId $id
+        Remove-Item -LiteralPath (Join-Path $sc.Fx.Root 'plugins' 'cache' 'm' 'p' '1.0' '.in_use' '111') -Force
+        $sd = New-StateDir
+        (Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir $sd) | Should -BeNullOrEmpty
+        Test-Path -LiteralPath (Join-Path $sd 'plugin-check') | Should -BeFalse
+    }
     It 'an inconclusive check (no marker yet) is trusted only briefly: a marker that appears is noticed after 5 minutes, not 30' {
         $sc = New-StaleScenario
         $sd = New-StateDir
@@ -264,6 +285,38 @@ Describe 'the real hook script over real stdin' {
         $r.Stdout | Should -BeNullOrEmpty
         $r.Stderr | Should -BeNullOrEmpty
     }
+    It 'started with -SessionId (as the cmd shim does) it needs no stdin, prints the notice, and writes the shim stamp' {
+        $sc = New-StaleScenario -SessionId 'fc250d38-1384-4486-beae-91ef341119df'
+        $home_ = Join-Path $TestDrive 'sidhome'
+        New-Item -ItemType Directory -Force -Path $home_ | Out-Null
+        $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+        foreach ($a in '-NoProfile', '-File', $script:Hook, '-SessionId', 'fc250d38-1384-4486-beae-91ef341119df') { $psi.ArgumentList.Add($a) }
+        $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.UseShellExecute = $false
+        $psi.Environment['CLAUDE_CONFIG_DIR'] = $sc.Fx.Root; $psi.Environment['HOME'] = $home_; $psi.Environment['USERPROFILE'] = $home_
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $p.StandardInput.Close()   # nothing on stdin at all
+        $out = $p.StandardOutput.ReadToEnd(); [void]$p.StandardError.ReadToEnd(); $p.WaitForExit()
+        $p.ExitCode | Should -Be 0
+        ($out | ConvertFrom-Json).systemMessage | Should -Match 'reload-plugins'
+        Test-Path -LiteralPath (Join-Path $home_ '.agentic-board' 'plugin-check' 'fc250d38-1384-4486-beae-91ef341119df' 'installed_plugins.json') | Should -BeTrue
+    }
+    It 'started with an invalid -SessionId it exits 0 and writes nothing, anywhere' {
+        $sc = New-StaleScenario
+        $home_ = Join-Path $TestDrive 'badsidhome'
+        New-Item -ItemType Directory -Force -Path $home_ | Out-Null
+        foreach ($bad in '..\..\escape', 'has space', 'x/y', 'sess-1') {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+            foreach ($a in '-NoProfile', '-File', $script:Hook, '-SessionId', $bad) { $psi.ArgumentList.Add($a) }
+            $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.UseShellExecute = $false
+            $psi.Environment['CLAUDE_CONFIG_DIR'] = $sc.Fx.Root; $psi.Environment['HOME'] = $home_; $psi.Environment['USERPROFILE'] = $home_
+            $p = [System.Diagnostics.Process]::Start($psi); $p.StandardInput.Close()
+            $out = $p.StandardOutput.ReadToEnd(); $err = $p.StandardError.ReadToEnd(); $p.WaitForExit()
+            $p.ExitCode | Should -Be 0 -Because $bad
+            $out | Should -BeNullOrEmpty -Because $bad
+            $err | Should -BeNullOrEmpty -Because $bad
+        }
+        Test-Path -LiteralPath (Join-Path $home_ '.agentic-board' 'plugin-check') | Should -BeFalse
+    }
     It 'a Claude home that does not exist exits 0, silently' {
         $home_ = Join-Path $TestDrive 'nohome'
         New-Item -ItemType Directory -Force -Path $home_ | Out-Null
@@ -277,10 +330,10 @@ Describe 'hooks.json wiring' {
     BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
     It 'registers the notice on UserPromptSubmit (the only event that fires after an update, in a session that is already open)' {
         $cmds = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks } | ForEach-Object { $_.command })
-        ($cmds -join ' ') | Should -Match 'PluginStale-NoticeHook\.ps1'
+        ($cmds -join ' ') | Should -Match 'PluginStale-NoticePreCheck\.cmd'
     }
     It 'gives the hook a timeout of at most 10 seconds' {
-        $h = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks } | Where-Object { $_.command -match 'PluginStale-NoticeHook' })[0]
+        $h = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks } | Where-Object { $_.command -match 'PluginStale-Notice' })[0]
         [int]$h.timeout | Should -BeGreaterThan 0
         [int]$h.timeout | Should -BeLessOrEqual 10
     }
