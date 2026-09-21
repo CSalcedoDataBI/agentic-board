@@ -330,7 +330,7 @@ Add your own public repos (or another developer's) as `skill-clone` entries in
 | **M1** (current) | Cross-account GitHub Projects & issues governance | `gh-account` |
 | **M2** (shipped) | **TMDL diff review** — breaking schema-change detection wired into the review gate (the surviving slice of the old PBIP/Fabric git-ops idea) | `tmdl-review` |
 | **M3** (current) | **BI toolkit provisioning** — *reference / install / monitor* the Microsoft Fabric + Power BI tooling ecosystem by profile (`/skills bootstrap bi`, `/skills freshness`), rather than rebuild it. See [Toolkit provisioning](#toolkit-provisioning-skills-ops) | `skills-ops` |
-| **M4** (in progress) | BI release automation — a **release checklist spec for BI artifacts** (`references/bi-release-checklist.md`) and **changelog generation** from board Done issues (`/board changelog`) | `gh-account` |
+| **M4** (shipped) | BI release automation — a **release checklist spec for BI artifacts** (`references/bi-release-checklist.md`) and **changelog generation** from board Done issues (`/board changelog`) | `gh-account` |
 | **M5** | Knowledge-ops — per-project references registry by domain (`knowledge/registry.json` + generated `KNOWLEDGE.md`), `/knowledge add` + `harvest`; Phase 2 wiki publish + capture-in-handoff | `gh-account` |
 
 ---
