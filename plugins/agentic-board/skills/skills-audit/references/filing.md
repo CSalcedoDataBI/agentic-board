@@ -22,6 +22,11 @@ prompt Y").
 | `file` + ownerRepo = current project | the project's own board | `project-scan` / `projects-admin` issue flow on that repo |
 | `local` | nowhere — in-session report | hand it to the user to file upstream themselves |
 
+`local` includes every plugin skill whose owner could not be verified (no manifest, unreadable
+manifest, or a plugin that only *names* itself `agentic-board` without declaring this tool's repo):
+an empty or non-`owner/repo` `ownerRepo` means "do not file". A finding's `paths` and `copies` are
+local evidence; never paste them into an issue.
+
 ## 3. Create the sanitized issue (tool-owned skills)
 
 Load the tool account via `gh-account` and file to a CONSTANT target — never resolved from the

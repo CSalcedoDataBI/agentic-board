@@ -11,26 +11,40 @@
     Returns { scope, ownerRepo, filing('file'|'local'), note }. It does NOT create
     anything — the filing recipe (references/filing.md) does, after the human gate.
 
+    ownerRepo is ALWAYS an `owner/repo` or $null — never a plugin or marketplace name. FAIL CLOSED:
+    anything that is not positively established as the tool's own is `local` (nothing is filed).
+
+    -PluginRepo is the repo the plugin's OWN manifest (plugin.json repository/homepage) declares.
+    When the caller passes it (even empty), a plugin is the tool's only if its name is the tool's
+    AND that declared repo is the tool repo: a name alone (a plugin can call itself anything) or a
+    missing manifest never routes a finding to the tool's board. Callers that do not pass it
+    (legacy, name-only) keep the old name-only check.
+
     EXAMPLE
-      Resolve-SkillOwner -Scope plugin -Plugin agentic-board
+      Resolve-SkillOwner -Scope plugin -Plugin agentic-board -PluginRepo CSalcedoDataBI/agentic-board
       Resolve-SkillOwner -Scope project -CurrentRepo CSalcedoDataBI/agentic-board
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('plugin','personal','project')][string]$Scope,
     [string]$Plugin,
+    [string]$PluginRepo,
     [string]$CurrentRepo,
     [string]$ToolRepo = 'CSalcedoDataBI/agentic-board'
 )
 
 switch ($Scope) {
     'plugin' {
-        if ($Plugin -in 'agentic-board','agentic-bi-ops') {   # accept the deprecated alias too
+        $verified = $PSBoundParameters.ContainsKey('PluginRepo')
+        $declared = if ($PluginRepo -match '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { $PluginRepo } else { $null }
+        $isToolName = $Plugin -in 'agentic-board','agentic-bi-ops'   # accept the deprecated alias too
+        if ($isToolName -and (-not $verified -or ($declared -and $declared -ieq $ToolRepo))) {
             [pscustomobject]@{ scope=$Scope; ownerRepo=$ToolRepo; filing='file'
                 note='This tool. File a sanitized issue on its own board (abios-feedback flow).' }
         } else {
-            [pscustomobject]@{ scope=$Scope; ownerRepo=$Plugin; filing='local'
-                note="Third-party plugin '$Plugin'. Do NOT open an issue in someone else's repo — local report only; hand it to the user to file upstream." }
+            $why = if ($Plugin) { "Plugin '$Plugin' is not established as this tool's" } else { 'The plugin of this skill could not be identified' }
+            [pscustomobject]@{ scope=$Scope; ownerRepo=$declared; filing='local'
+                note="$why. Do NOT open an issue in someone else's repo (or a guessed one) — local report only; hand it to the user to file upstream." }
         }
     }
     'project' {
