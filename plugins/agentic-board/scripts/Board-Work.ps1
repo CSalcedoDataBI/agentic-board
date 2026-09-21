@@ -3554,9 +3554,13 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         $spHere = try { Get-RepoFromOrigin } catch { '' }
         $spRepo = if ($Repo) { $Repo } else { $spHere }
         $spLive = @(Read-SessionRegistry | ForEach-Object { $_.branch })
+        # An unreadable registry must not read as "no live sessions" (Read-SessionRegistry returns @() on a parse error).
+        $spLiveOk = $true
+        $spRegPath = Get-SessionRegistryPath
+        if ($spRegPath -and (Test-Path -LiteralPath $spRegPath)) { try { $null = Get-Content -LiteralPath $spRegPath -Raw | ConvertFrom-Json } catch { $spLiveOk = $false } }
         $spBase = if ($spHere) { Resolve-IssueBaseRef $spHere -NoFetch } else { '' }
         $spPlan = @(Get-StateOfPlay -Repo $spRepo -HereRepo $spHere -Items $items -BoardTruncated ([bool]$read.Truncated) `
-                                    -StateDir (Get-AbiosStateDir -NoCreate) -LiveBranches $spLive -BaseRef $spBase)
+                                    -StateDir (Get-AbiosStateDir -NoCreate) -LiveBranches $spLive -LiveKnown $spLiveOk -BaseRef $spBase)
         foreach ($spLine in (Format-StateOfPlay -Findings $spPlan -Repo $spRepo)) {
             Write-Host $spLine.Text -ForegroundColor $spLine.Color
         }

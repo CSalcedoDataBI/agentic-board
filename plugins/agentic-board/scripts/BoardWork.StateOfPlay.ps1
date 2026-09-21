@@ -153,7 +153,11 @@ function Get-OffBoardFindings {
     if ($BoardTruncated) {
         return @(New-StateFinding -Source 'offboard' -Group 'unknown' -Text 'La lectura del board se corto, asi que no puedo decir que issues abiertos faltan en el.')
     }
-    if ($mine.Count -eq 0) {
+    # Another project's board is the only reason to skip: it HAS issues, just none of this repo's. A
+    # board with no issue at all is a board this repo simply has not been put on yet - every open
+    # issue is off it, and saying "no comparo" there would hide exactly that.
+    $anyIssue = @($Items | Where-Object { $_ -and $_.content -and $_.content.number -and $_.content.type -ne 'DraftIssue' })
+    if ($mine.Count -eq 0 -and $anyIssue.Count -gt 0) {
         return @(New-StateFinding -Source 'offboard' -Group 'skipped' -Text "Issues fuera del board: no comparo, este board no tiene ningun item de $Repo.")
     }
     $onBoard = @{}
@@ -430,7 +434,7 @@ function Get-StateOfPlay {
     param(
         [string]$Repo = '', [string]$HereRepo = '',
         [object[]]$Items = @(), [bool]$BoardTruncated = $false,
-        [string]$StateDir = '', [string[]]$LiveBranches = @(), [string]$BaseRef = ''
+        [string]$StateDir = '', [string[]]$LiveBranches = @(), [bool]$LiveKnown = $true, [string]$BaseRef = ''
     )
     $f = @()
     $f += @(Get-BoardInFlightFindings -Items $Items)
@@ -464,7 +468,11 @@ function Get-StateOfPlay {
     }
 
     $wt = Read-StateWorktreeVerdicts -Repo $Repo
-    if ($wt.Ok) { $f += @(Get-MergedWorktreeFindings -Rows $wt.Rows -LiveBranches $LiveBranches) }
+    if (-not $LiveKnown) {
+        # Without the live-session list a merged worktree could belong to a session still working it.
+        $f += New-StateFinding -Source 'worktree' -Group 'unknown' -Text 'No pude leer el registro de sesiones vivas, asi que no ofrezco limpiar worktrees (uno podria tener una sesion trabajandolo).'
+    }
+    elseif ($wt.Ok) { $f += @(Get-MergedWorktreeFindings -Rows $wt.Rows -LiveBranches $LiveBranches) }
     else        { $f += New-StateFinding -Source 'worktree' -Group 'unknown' -Text "No pude listar los worktrees ($($wt.Error))." }
 
     $rel = Get-UnreleasedFinding -Delta (Read-StateReleaseDelta -BaseRef $BaseRef)

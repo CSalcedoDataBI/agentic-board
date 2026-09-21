@@ -108,6 +108,11 @@ Describe 'Get-OffBoardFindings' {
     It 'is UNKNOWN when the open-issue read failed' {
         (@(Get-OffBoardFindings -OpenIssues @() -Items $script:BoardItems -Repo 'o/r' -OpenVerified $false))[0].Group | Should -Be 'unknown'
     }
+    It 'compares against a board with NO issues at all: every open issue is then off it' {
+        $f = @(Get-OffBoardFindings -OpenIssues @((New-OpenIssue 10), (New-OpenIssue 11)) -Items @() -Repo 'o/r')
+        $f[0].Group | Should -Be 'offboard'
+        $f[0].Text  | Should -Match '#10 #11'
+    }
     It 'is skipped (not a false all-clear, not a false list) when the board tracks none of this repo' {
         $f = @(Get-OffBoardFindings -OpenIssues @((New-OpenIssue 9)) -Items @((New-Item2 1 'Backlog' 'other/repo')) -Repo 'o/r')
         $f[0].Group | Should -Be 'skipped'
@@ -394,6 +399,18 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
         (@($f | Where-Object { $_.Source -eq 'worktree' })).Count | Should -Be 0
     }
 
+    It 'without the live-session list it does not offer to clean any worktree (unknown instead)' {
+        Push-Location $script:Root
+        try {
+            $f = @(Get-StateOfPlay -Repo 'o/r' -HereRepo 'o/r' -Items $script:Items -BoardTruncated $false `
+                                   -StateDir $script:State -LiveBranches @() -LiveKnown $false -BaseRef 'main')
+        } finally { Pop-Location }
+        $wt = @($f | Where-Object { $_.Source -eq 'worktree' })
+        $wt.Count | Should -Be 1
+        $wt[0].Group | Should -Be 'unknown'
+        $wt[0].Offer | Should -BeNullOrEmpty
+    }
+
     It 'reports a clean repo as clean: same repo, nothing seeded' {
         $cleanRoot = Join-Path $TestDrive 'clean'
         New-Item -ItemType Directory -Path $cleanRoot -Force | Out-Null
@@ -512,6 +529,15 @@ if ($line -match '^pr list') { Write-Output '[]'; exit 0 }
         $out | Should -Match 'Total: 1 pendiente'
         $out.IndexOf('Estado del trabajo') | Should -BeLessThan $out.IndexOf('Total: 1 pendiente')
         $out.IndexOf('Estado del trabajo') | Should -BeLessThan $out.IndexOf('#100')
+    }
+
+    It 'a corrupt sessions.json is reported as unknown, not read as no live sessions' {
+        $dir = Join-Path $script:Repo2 '.agentic-board'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'sessions.json') -Value '{ not json'
+        try { $out = Invoke-Wired } finally { Remove-Item -LiteralPath (Join-Path $dir 'sessions.json') -Force }
+        $out | Should -Match 'No pude leer el registro de sesiones vivas'
+        $out | Should -Match 'Total: 1 pendiente'
     }
 
     It 'never takes the pending list down when the state of play cannot read GitHub' {
