@@ -59,7 +59,7 @@ function Invoke-ClaudeCli {
     # rather than escaped: a name read from a data file must never become a command.
     if ($Executable -match '\.(cmd|bat)$') {
         foreach ($a in $Arguments) {
-            if ($a -notmatch '^[A-Za-z0-9._@:=-]+$') {
+            if ($a -notmatch '^[A-Za-z0-9._@:=/-]+$') {
                 return [pscustomobject]@{ ExitCode = -1; Output = "no ejecuto claude: un argumento tiene caracteres no permitidos ($a)"; TimedOut = $false }
             }
         }

@@ -324,7 +324,9 @@ function Get-SessionPluginState {
         if ($installed.Count -eq 0) { continue }
         $checked++
         $loaded = @($grp.Group | ForEach-Object { $_.Version } | Select-Object -Unique)
-        $installedVersions = @($installed | ForEach-Object { Get-PathLeafText $_.InstallPath; $_.Version } | Where-Object { $_ } | Select-Object -Unique)
+        # The BUILD is the cache folder the entry points at. The version label is only a fallback for an entry with no
+        # usable path: a new build that reuses an old label must not make a session on the old folder read current.
+        $installedVersions = @($installed | ForEach-Object { $leaf = Get-PathLeafText $_.InstallPath; if ($leaf) { $leaf } else { $_.Version } } | Where-Object { $_ } | Select-Object -Unique)
         if (@($loaded | Where-Object { $installedVersions -contains $_ }).Count -gt 0) { continue }
         $target = ($installed | Where-Object { $_.Scope -eq 'user' } | Select-Object -First 1)
         if (-not $target) { $target = $installed[0] }

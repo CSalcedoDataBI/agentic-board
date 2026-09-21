@@ -371,7 +371,7 @@ Describe 'Invoke-ClaudeCli - the real runner, pointed at a harmless program' {
         $bad.Output | Should -Match 'caracteres no permitidos'
         Test-Path -LiteralPath (Join-Path $TestDrive 'ran.txt') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $TestDrive 'pwned.txt') | Should -BeFalse
-        $ok = Invoke-ClaudeCli -Executable $shim -Arguments @('plugin', 'update', 'alpha@mk-a', '--yes')
+        $ok = Invoke-ClaudeCli -Executable $shim -Arguments @('plugin', 'update', 'alpha@mk-a', '--yes', 'scope/plugin')
         $ok.ExitCode | Should -Be 0
         Test-Path -LiteralPath (Join-Path $TestDrive 'ran.txt') | Should -BeTrue
     }

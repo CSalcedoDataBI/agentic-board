@@ -103,7 +103,11 @@ function Write-NoticeState {
     $json = [ordered]@{ sessions = $sessions; checks = $checks } | ConvertTo-Json -Depth 6 -Compress
     $tmp = "$Path.$PID.tmp"
     [System.IO.File]::WriteAllText($tmp, $json)
-    Move-Item -LiteralPath $tmp -Destination $Path -Force
+    # File.Move with overwrite: unlike Move-Item it never drops the file INSIDE a directory that happens to
+    # occupy the path. A failed write throws (it must stop the notice, which would otherwise repeat) into
+    # the caller's catch.
+    try { [System.IO.File]::Move($tmp, $Path, $true) }
+    catch { try { [System.IO.File]::Delete($tmp) } catch { }; throw }
 }
 
 # The whole decision. Returns the notice text to show, or '' for silence. State is written BEFORE the text

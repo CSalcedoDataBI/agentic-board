@@ -186,6 +186,18 @@ Describe 'Get-SessionPluginState - loaded build vs installed build' {
         $st = Get-SessionPluginState -Session $s -Markers (Read-VersionMarkers -ClaudeHome $fx.Root) -InstalledEntries (Get-InstalledPluginEntries -ClaudeHome $fx.Root).Entries
         $st.State | Should -Be 'current'
     }
+    It 'a new build that REUSES the old version label is still stale for a session on the old folder' {
+        # the session loaded folder "1.0" ; the installed entry now points at folder "hash-xyz" but is still labelled version "1.0"
+        $hashDir = Add-FakeBuild $fx -Marketplace 'm' -Plugin 'p' -Version 'hash-xyz'
+        $ent = @($fx.Installed | Where-Object Key -eq 'p@m')[0]
+        $ent.InstallPath = $hashDir; $ent.Version = '1.0'
+        Write-FakeRegistries $fx
+        Add-FakeMarker $fx -Marketplace 'm' -Plugin 'p' -Version '1.0' -ProcId 111 -StartFt $ft
+        $s = (Read-ClaudeSessions -ClaudeHome $fx.Root).Sessions[0]
+        $st = Get-SessionPluginState -Session $s -Markers (Read-VersionMarkers -ClaudeHome $fx.Root) -InstalledEntries (Get-InstalledPluginEntries -ClaudeHome $fx.Root).Entries
+        $st.State | Should -Be 'stale'
+        $st.Stale[0].Installed | Should -Be 'hash-xyz'
+    }
     It 'MCP plugin: a stale plugin that ships an MCP server needs a NEW session' {
         $fx2 = New-Fx
         [void](Add-FakeBuild $fx2 -Marketplace 'm' -Plugin 'srv' -Version '1.0' -Mcp)

@@ -254,6 +254,16 @@ Describe 'the real hook script over real stdin' {
             $r.Stderr | Should -BeNullOrEmpty
         }
     }
+    It 'a state file that cannot be written: exit 0, no notice (it would repeat), and nothing on stderr' {
+        $sc = New-StaleScenario
+        $home_ = Join-Path $TestDrive 'lockedhome'
+        # the state file's path is occupied by a directory, so the atomic replace cannot succeed
+        New-Item -ItemType Directory -Force -Path (Join-Path $home_ '.agentic-board' 'plugin-notices.json') | Out-Null
+        $r = Invoke-HookProcess -Stdin $sc.Payload -ClaudeHome $sc.Fx.Root -HomeDir $home_
+        $r.ExitCode | Should -Be 0
+        $r.Stdout | Should -BeNullOrEmpty
+        $r.Stderr | Should -BeNullOrEmpty
+    }
     It 'a Claude home that does not exist exits 0, silently' {
         $home_ = Join-Path $TestDrive 'nohome'
         New-Item -ItemType Directory -Force -Path $home_ | Out-Null
