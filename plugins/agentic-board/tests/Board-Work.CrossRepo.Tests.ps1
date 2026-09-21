@@ -53,6 +53,11 @@ Describe 'Get-IssueTargetRepos' {
         $r.CrossRepo | Should -BeFalse
         @($r.Repos).Count | Should -Be 0
     }
+    It 'does not take slashed words out of an inline sentence for repositories' {
+        $r = Get-IssueTargetRepos -Body 'Target repos: update the a/b module and configure TCP/IP' -HomeRepo 'x/y'
+        $r.CrossRepo | Should -BeFalse
+        @($r.Repos).Count | Should -Be 0
+    }
     It 'stops the list at a line that is not a repo (no swallowing the rest of the issue)' {
         $body = "Target repos:`n- o/a`n- not a repo at all`n- o/c`n"
         (Get-IssueTargetRepos -Body $body -HomeRepo 'x/y').Repos | Should -Be @('o/a')

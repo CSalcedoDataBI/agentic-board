@@ -52,9 +52,12 @@ function Get-IssueTargetRepos {
         $m = [regex]::Match($lines[$i], $script:TargetReposHeader)
         if (-not $m.Success) { continue }
         # Inline form: `Target repos: a/b, c/d`.
-        foreach ($tok in ($m.Groups['rest'].Value -split '[,\s]+')) {
-            $slug = ConvertTo-RepoSlug $tok
-            if ($slug) { $found.Add($slug) }
+        # ALL-or-nothing: a sentence that merely happens to contain a slashed word ("Target repos:
+        # update the a/b module and TCP/IP") is prose, not a declaration, and must not invent targets.
+        $restTokens = @($m.Groups['rest'].Value -split '[,\s]+' | Where-Object { $_ })
+        $restSlugs  = @($restTokens | ForEach-Object { ConvertTo-RepoSlug $_ })
+        if ($restTokens.Count -gt 0 -and -not ($restSlugs -contains $null) -and @($restSlugs | Where-Object { -not $_ }).Count -eq 0) {
+            foreach ($slug in $restSlugs) { $found.Add($slug) }
         }
         # List form: the items right under the header; a blank line after at least one item, or any
         # non-list line, ends the block.
