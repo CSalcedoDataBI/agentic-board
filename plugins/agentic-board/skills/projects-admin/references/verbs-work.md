@@ -219,6 +219,21 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
     spawning. Add `-Parallel <nums> -Fleet` instead of `-Launch` to probe the available AI CLIs,
     pick one per issue (auto-fallback to `claude` when a choice is unavailable), and launch each
     in its worktree; `-DryRun` shows the probe table without prompting or spawning.
+    **Launch surface (`-Surface`, #710 P1).** `-Surface terminal` (the default) is the wt-tab/pwsh
+    behaviour above, byte-for-byte. `-Surface app` is for a host app (the Claude desktop app's Code
+    tab, an IDE) where the user wants each issue as its own VISIBLE session in the host's own
+    sidebar — a script cannot open one, only the agent can, via the host's session-spawn tool. On
+    `-Surface app` the script creates **no worktree and spawns no process**: it does the board
+    mechanics (Status/assignee/claim) exactly as above, then emits a **dispatch manifest**
+    (`-Json` for raw JSON) — one entry per issue with `issue`, `title`, `repo`, `branch`, a
+    self-contained `briefing`, `ownedPaths` and a shared `runId`. Hand each entry to the host's
+    session-spawn tool (this needs ONE click per task — a host constraint, said plainly, never
+    faked), then record the id it returns: `Board-Work.ps1 -RegisterSession -Issue <n>
+    -HostSessionId <id>`. That id is what keeps the session visible and alive in `-Sessions`: a
+    host-managed row has no PID this script can ever see, so liveness for it is never a PID check
+    (completion is a later channel — a host end-signal + `Fleet-Supervisor.ps1 -Check`, #710 phase
+    3). `-Surface headless` is accepted (so callers can name it) but not yet implemented — it
+    throws rather than silently falling back to a visible terminal.
     Monitor the fleet with `scripts/Board-Work.ps1 -Sessions`, or `-Sessions -Watch -AutoClean`
     to block until every session finishes (PR merged / issue closed / PID dead) and auto-remove
     each worktree + branch + registry entry as it completes (`-DryRun` previews the teardown).
