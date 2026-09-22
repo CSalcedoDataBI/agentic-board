@@ -950,6 +950,10 @@ function Write-SessionRegistryEntry {
     }
     if (-not $trackPid -and $Via -ne 'wt' -and $Via -ne 'app') { return }
     if (-not $trackPid) { $trackPid = 0 }
+    # What the CALLER actually asked for, captured before any carry-forward below can overwrite it -
+    # the host-managed guard has to ask "is THIS write an app-surface write", and an inherited
+    # $Surface would answer "yes" forever once the issue had ever run on that surface.
+    $callerSurface = $Surface
     # Every read-modify-write from here on is ONE critical section (#710 decision 5): two processes
     # racing this function (two parallel launches, a launch racing -RegisterSession) must never both
     # read the same "prev" snapshot and then each write a version that drops the other's fields or
@@ -967,6 +971,15 @@ function Write-SessionRegistryEntry {
         if (-not $Surface -and $prev -and $prev.PSObject.Properties['surface']) { $Surface = "$($prev.surface)" }
         if (-not $RunId -and $prev -and $prev.PSObject.Properties['runId']) { $RunId = "$($prev.runId)" }
         if (-not $HostSessionId -and $prev -and $prev.PSObject.Properties['hostSessionId']) { $HostSessionId = "$($prev.hostSessionId)" }
+        # ...but the host-managed trio is carried forward ONLY while this issue is still on the app
+        # surface (external review round 3). The carry-forward above exists so a later app-surface
+        # write (-RegisterSession, a -RecordPr) keeps what the launch recorded. It must NOT survive a
+        # later ORDINARY start of the same issue: restarting #N in a terminal after it once ran on
+        # -Surface app inherited the stale hostSessionId, Get-SessionLivePid then answered with the
+        # host-managed sentinel, and the new LOCAL session read as alive forever while -Stop and
+        # -Relaunch refused to manage it - they are built to refuse host-managed rows. $Via is
+        # already resolved from $prev above, so an omitted -Via still counts as "same surface".
+        if ($Via -ne 'app' -and $callerSurface -ne 'app') { $Surface = ''; $HostSessionId = ''; $RunId = '' }
         # Cross-repo facts and the PRs already recorded survive a later PID/via-only update (a relaunch).
         $prevPrs = @()
         if ($prev) {
@@ -4035,12 +4048,25 @@ if ($Parallel.Count -gt 0) {
     # header and status line IN FRONT of the manifest, so ConvertFrom-Json failed on it. Write-Host
     # writes to the information stream, but a NATIVE redirect takes the process's stdout HANDLE,
     # which is where the host renders that stream - PowerShell's own stream separation never gets a
-    # say. Shadowing Write-Host for this one flag combination silences it everywhere, including the
+    # say. Shadowing Write-Host for this one flag combination reaches it everywhere, including the
     # nested Invoke-BatchIssueStart / Invoke-IssueStart calls (measured: function lookup walks the
-    # scope chain, so the script-scope definition wins for them too). Errors are untouched: they go
-    # to stderr and still reach the caller, and the exit code still tells the consumer what happened.
+    # scope chain, so the script-scope definition wins for them too).
+    #
+    # It FORWARDS to stderr rather than swallowing (external review round 3, which caught the first
+    # version doing real damage): Invoke-BatchIssueStart reports a failed start with Write-Host, so
+    # a silent shadow turned "issue #N could not start" into nothing at all - no message anywhere,
+    # the issue quietly missing from the manifest. Forwarding keeps the standard CLI split instead:
+    # machine output on stdout, everything a human would read on stderr, colours dropped. The real
+    # cmdlet's parameters are declared so -ForegroundColor and friends bind and are discarded
+    # instead of landing in the message text (measured).
     if ($isAppSurface -and $Json) {
-        function Write-Host { param([Parameter(ValueFromRemainingArguments = $true)] $Ignored) }
+        function Write-Host {
+            param(
+                [Parameter(Position = 0, ValueFromRemainingArguments = $true)] $Object,
+                $ForegroundColor, $BackgroundColor, [switch]$NoNewline, $Separator
+            )
+            [Console]::Error.WriteLine(($Object -join ' '))
+        }
     }
 
     Write-Host "=== Parallel batch-start (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
@@ -4159,6 +4185,14 @@ if ($Parallel.Count -gt 0) {
             Write-Host ""
             Write-Host "Board: $boardUrl" -ForegroundColor Cyan
         }
+        # The exit code must tell a machine consumer what happened (external review round 3). This
+        # path used to exit 0 unconditionally, so a wave where every issue was skipped - not on the
+        # board, blocked, already claimed - came back as an empty manifest and a success: an agent
+        # driving the fleet could not distinguish "nothing to do" from "nothing worked". A run that
+        # was ASKED for issues and dispatched none is a failure; the per-issue reasons are on stderr
+        # (and on stdout in the human path). A PARTIAL wave still exits 0 - the manifest names
+        # exactly what it dispatched, and the skips are reported next to it.
+        if ($entries.Count -eq 0 -and $queue.Count -gt 0) { exit 1 }
         exit 0
     }
 

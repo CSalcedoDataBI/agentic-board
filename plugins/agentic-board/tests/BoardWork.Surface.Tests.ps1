@@ -616,3 +616,102 @@ if ($line -match 'graphql') {
         $manifest[0].runId     | Should -Not -BeNullOrEmpty
     }
 }
+
+Describe 'A later NON-app session never inherits host-managed metadata (review round 3)' {
+    # Write-SessionRegistryEntry carries surface/runId/hostSessionId forward from the previous row
+    # whenever the caller omits them - which is right for an app row being updated, and wrong for a
+    # later ORDINARY start of the same issue. Without this, restarting issue #N in a terminal after
+    # it once ran on -Surface app produced a row that claimed a stale hostSessionId: Get-SessionLivePid
+    # then reports the host-managed sentinel, so the new local session reads as alive FOREVER and
+    # -Stop / -Relaunch refuse to manage it (they are built to refuse host-managed rows).
+    It 'clears surface/hostSessionId/runId when the same issue is restarted in a terminal' {
+        $repo = New-Throwaway 'no-inherit-host'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 91 -Branch 'issue-91-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-1'
+            Register-HostSession -IssueNum 91 -HostSessionId 'host-91' | Out-Null
+            $before = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 91 })[0]
+            $before.hostSessionId | Should -Be 'host-91' -Because 'precondition: the app row is host-managed'
+
+            # Un arranque normal posterior del MISMO issue (worktree local, pid real).
+            Write-SessionRegistryEntry -IssueNum 91 -Branch 'issue-91-x' -WorkPath $repo -Repo 'o/r' -SessionPid $PID -Via 'pwsh'
+            $after = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 91 })[0]
+
+            $after.hostSessionId | Should -BeNullOrEmpty -Because 'a terminal session has a real pid and is not host-managed'
+            $after.surface       | Should -BeNullOrEmpty
+            $after.runId         | Should -BeNullOrEmpty
+            Get-SessionLivePid $after | Should -Not -Be (Get-HostManagedPidMarker) -Because 'it must resolve by its REAL pid, not the host-managed sentinel'
+        } finally { Pop-Location }
+    }
+    It 'still preserves them across an app-surface update (the case the carry-forward exists for)' {
+        $repo = New-Throwaway 'inherit-app'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 92 -Branch 'issue-92-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-2'
+            Register-HostSession -IssueNum 92 -HostSessionId 'host-92' | Out-Null
+            # Una escritura posterior SIN -Via explicito hereda via='app' del prev: sigue siendo app.
+            Write-SessionRegistryEntry -IssueNum 92 -Branch 'issue-92-x' -Repo 'o/r'
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 92 })[0]
+            $row.hostSessionId | Should -Be 'host-92'
+            $row.surface       | Should -Be 'app'
+            $row.runId         | Should -Be 'run-2'
+        } finally { Pop-Location }
+    }
+}
+
+Describe '-Surface app -Json reports failures instead of hiding them (review round 3)' -Tag 'Wired' {
+    # The first version of the Write-Host shadow SWALLOWED output. Invoke-BatchIssueStart reports a
+    # failed start with Write-Host, so "issue #N could not start" became nothing at all: no message
+    # on any stream, the issue quietly absent from the manifest, exit code 0. A machine consumer had
+    # no way to tell a wave that fully dispatched from one that dispatched nothing.
+    It 'sends the human lines to stderr, keeps stdout pure JSON, and exits non-zero when nothing dispatched' {
+        $fake = Join-Path $TestDrive 'fakegh-fail'
+        New-Item -ItemType Directory -Path $fake -Force | Out-Null
+        # Un board valido, pero el issue pedido NO esta en el: todo se salta -> manifiesto vacio.
+        $ghFail = @'
+$a = @($args); $line = $a -join ' '
+function Out-Json($o) { $o | ConvertTo-Json -Depth 10 -Compress }
+if ($line -match 'node\(id:') {
+    Out-Json ([pscustomobject]@{ data = [pscustomobject]@{ node = [pscustomobject]@{
+        items = [pscustomobject]@{ pageInfo = [pscustomobject]@{ hasNextPage = $false; endCursor = '' }; nodes = @() } } } })
+    exit 0
+}
+if ($line -match 'projectV2') {
+    Out-Json ([pscustomobject]@{ data = [pscustomobject]@{ user = [pscustomobject]@{ projectV2 = [pscustomobject]@{
+        id = 'PROJ1'
+        fields = [pscustomobject]@{ nodes = @([pscustomobject]@{ id = 'FSTATUS'; name = 'Status'
+            options = @([pscustomobject]@{ id = 'OPTBACK'; name = 'Backlog' }, [pscustomobject]@{ id = 'OPTPROG'; name = 'In Progress' }) }) } } } } })
+    exit 0
+}
+if ($line -match '^pr list') { Write-Output '[]'; exit 0 }
+[Console]::Error.WriteLine("fakegh: unexpected call: $line"); Write-Output '{}'; exit 0
+'@
+        Set-Content -LiteralPath (Join-Path $fake 'gh.ps1') -Value $ghFail -Encoding UTF8
+
+        $repo = Join-Path $TestDrive 'json-fail'
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        Push-Location $repo
+        git init -q -b main 2>&1 | Out-Null
+        git config user.email t@example.com; git config user.name t; git config commit.gpgsign false
+        git remote add origin https://github.com/o/r.git
+        Set-Content -LiteralPath README.md -Value 'x'; git add README.md; git commit -q -m 'chore: first' 2>&1 | Out-Null
+        Pop-Location
+
+        $outFile = Join-Path $TestDrive 'fail.out'; $errFile = Join-Path $TestDrive 'fail.err'
+        $savedPath = $env:PATH; $savedTok = $env:GH_TOKEN
+        $env:PATH = "$fake$([IO.Path]::PathSeparator)$savedPath"; $env:GH_TOKEN = 'fake-token'
+        try {
+            Push-Location $repo
+            $p = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
+                -ArgumentList @('-NoProfile', '-File', "$script:Script", '-Parallel', '901', '-Surface', 'app', '-Json', '-DryRun', '-ProjectNum', '13', '-Owner', 'o')
+            Pop-Location
+        } finally { $env:PATH = $savedPath; $env:GH_TOKEN = $savedTok }
+
+        $out = (Get-Content -LiteralPath $outFile -Raw)
+        $err = (Get-Content -LiteralPath $errFile -Raw)
+        { $out | ConvertFrom-Json } | Should -Not -Throw -Because "stdout must stay pure JSON, but it was:`n$out"
+        @($out | ConvertFrom-Json).Count | Should -Be 0 -Because 'no issue could start, so the manifest is empty'
+        $err | Should -Match 'SKIP' -Because "the reason must reach SOME stream. stderr was:`n$err"
+        $p.ExitCode | Should -Not -Be 0 -Because 'a run that dispatched nothing is a failure, not an empty success'
+    }
+}
