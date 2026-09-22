@@ -424,3 +424,195 @@ Describe '-Stop / -Relaunch refuse a host-managed session on the real script (ex
         $out | Should -Not -Match 'host-managed'
     }
 }
+
+# ===========================================================================================
+# External review, ROUND 2 (Codex gpt-5.5 + Antigravity gemini-3.1-pro, independently).
+# Three defects, each MEASURED on this machine before it was accepted - see each Describe.
+# (A fourth finding, "ConvertTo-Json -AsArray breaks Windows PowerShell 5.1", was REJECTED:
+#  -AsArray is already used in ten shipped scripts, every entry point in this plugin launches
+#  `pwsh` (7.x), and the repo's only 5.1 concern is PARSE-time encoding - ScriptEncoding.Tests.ps1.
+#  Both reviewers raised it because the review prompt wrongly asserted 5.1 was a runtime target.)
+# ===========================================================================================
+
+Describe 'Invoke-WithSessionRegistryLock survives a holder that DIES while another waits (review round 2)' {
+    # MEASURED, not reasoned: when a process dies holding a named mutex AND another process is
+    # already waiting on it, the waiter's WaitOne raises AbandonedMutexException - and .NET hands
+    # that waiter OWNERSHIP anyway. Uncaught, $owns stays $false, the body never runs, the finally
+    # disposes an owned mutex (abandoning it again) and the whole call throws.
+    #
+    # The waiter must already hold a handle for this to happen at all: if NO handle survives the
+    # holder's death the kernel object is destroyed and the next caller creates a brand-new mutex
+    # with no abandonment to report (measured too - that is why the naive version of this test
+    # passed against the unfixed code and proved nothing). Hence the real two-process race below.
+    It 'runs the body and returns normally when the previous holder was killed mid-write' {
+        $repo = New-Throwaway 'lock-abandon'
+        $flag = Join-Path $TestDrive ('holding-' + [guid]::NewGuid().ToString('N') + '.flag')
+        $holderPath = Join-Path $TestDrive 'surface-lock-holder.ps1'
+        @'
+param([string]$RepoPath, [string]$ScriptPath, [string]$Flag)
+Set-Location -LiteralPath $RepoPath
+$env:ABIOS_BOARDWORK_DOTSOURCE = '1'
+. $ScriptPath
+$env:ABIOS_BOARDWORK_DOTSOURCE = ''
+$p = Get-SessionRegistryPath
+Invoke-WithSessionRegistryLock -Path $p -Body {
+    Set-Content -LiteralPath $Flag -Value 'held'
+    Start-Sleep -Milliseconds 2500
+    [Environment]::Exit(1)   # muere SIN soltar el mutex, con el otro proceso ya esperando
+}
+'@ | Set-Content -LiteralPath $holderPath -Encoding UTF8
+
+        Push-Location $repo
+        try {
+            $p = Get-SessionRegistryPath
+            $holder = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -PassThru -ArgumentList @(
+                '-NoProfile', '-File', $holderPath, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-Flag', $flag)
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            while (-not (Test-Path -LiteralPath $flag) -and $sw.Elapsed.TotalSeconds -lt 30) { Start-Sleep -Milliseconds 50 }
+            (Test-Path -LiteralPath $flag) | Should -BeTrue -Because 'the holder process must have taken the lock before we start waiting'
+
+            # Entramos a esperar MIENTRAS el otro lo tiene: moriremos dentro de su ventana.
+            $result = Invoke-WithSessionRegistryLock -Path $p -TimeoutMs 20000 -Body { 'cuerpo-ejecutado' }
+            $result | Should -Be 'cuerpo-ejecutado' -Because 'an abandoned mutex hands us ownership: the body must still run'
+            $holder.WaitForExit(20000) | Out-Null
+
+            # Y el candado queda USABLE despues: si el finally hubiera soltado mal, esto colgaria.
+            Invoke-WithSessionRegistryLock -Path $p -TimeoutMs 10000 -Body { 'segunda' } | Should -Be 'segunda'
+        } finally { Pop-Location }
+    }
+}
+
+Describe 'Write-SessionRegistryEntry -UpdateOnly never invents a row (review round 2)' {
+    # Register-HostSession validated the row OUTSIDE the lock and then called a writer that appends
+    # unconditionally. If the row vanished in between (auto-clean, -Stop, another fleet process),
+    # the append wrote a GHOST row: empty repo/branch/workPath, sessionPid 0 and a hostSessionId -
+    # which Get-SessionLivePid then reports as permanently alive by the sentinel. -UpdateOnly closes
+    # the window inside the lock, so no ordering of the race can create one.
+    It 'writes nothing at all when the issue has no row' {
+        $repo = New-Throwaway 'updateonly-empty'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 77 -Via 'app' -HostSessionId 'ghost' -UpdateOnly
+            @(Read-SessionRegistryRaw).Count | Should -Be 0 -Because '-UpdateOnly must never create a row'
+        } finally { Pop-Location }
+    }
+    It 'still updates a row that DOES exist' {
+        $repo = New-Throwaway 'updateonly-present'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 78 -Branch 'issue-78-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r9'
+            Write-SessionRegistryEntry -IssueNum 78 -Via 'app' -HostSessionId 'real-id' -UpdateOnly
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 78 })[0]
+            $row.hostSessionId | Should -Be 'real-id'
+            $row.branch        | Should -Be 'issue-78-x' -Because 'an update must preserve the fields it was not given'
+            $row.surface       | Should -Be 'app'
+        } finally { Pop-Location }
+    }
+    It 'Register-HostSession uses it - a row deleted after the check leaves no ghost behind' {
+        $repo = New-Throwaway 'register-ghost'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 79 -Branch 'issue-79-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r9'
+            @(Read-SessionRegistryRaw).Count | Should -Be 1
+            $r = Register-HostSession -IssueNum 79 -HostSessionId 'id-79'
+            $r.Ok | Should -BeTrue
+            @(Read-SessionRegistryRaw).Count | Should -Be 1 -Because 'registering must update the row, never append a second one'
+        } finally { Pop-Location }
+    }
+}
+
+Describe '-Surface app -Json prints a manifest a consumer can actually parse (review round 2)' -Tag 'Wired' {
+    # MEASURED: `pwsh -File script.ps1 -Json > out.txt` from an external shell captures Write-Host
+    # too - the host writes the information stream to the process's stdout handle, and a native
+    # redirect takes the handle, not PowerShell's stream 1. So every batch header and status line
+    # landed in front of the "raw JSON" this flag advertises, and ConvertFrom-Json on it fails.
+    # The whole point of -Surface app is that an AGENT hands the manifest to the host's spawn tool.
+    BeforeAll {
+        $script:FakeJ = Join-Path $TestDrive 'fakegh-json'
+        New-Item -ItemType Directory -Path $script:FakeJ -Force | Out-Null
+        @'
+$a = @($args); $line = $a -join ' '
+function Out-Json($o) { $o | ConvertTo-Json -Depth 10 -Compress }
+if ($line -match '^project field-list') {
+    Out-Json ([pscustomobject]@{ fields = @([pscustomobject]@{ id = 'FSTATUS'; name = 'Status'; type = 'ProjectV2SingleSelectField'
+        options = @([pscustomobject]@{ id = 'OPTBACK'; name = 'Backlog' }, [pscustomobject]@{ id = 'OPTPROG'; name = 'In Progress' }) }) })
+    exit 0
+}
+if ($line -match '^project view') { Out-Json ([pscustomobject]@{ id = 'PROJ1'; number = 13; title = 'board' }); exit 0 }
+if ($line -match '^project item-list') {
+    Out-Json ([pscustomobject]@{ totalCount = 1; items = @([pscustomobject]@{ id = 'i1'; title = 'app surface issue'
+        status = 'Backlog'; labels = @(); content = [pscustomobject]@{ type = 'Issue'; number = 900; title = 'app surface issue'; repository = 'o/r' } }) })
+    exit 0
+}
+if ($line -match '^pr list')    { Write-Output '[]'; exit 0 }
+if ($line -match '^issue view') { Out-Json ([pscustomobject]@{ number = 900; title = 'app surface issue'; state = 'OPEN'; body = ''; url = 'u'; labels = @(); assignees = @() }); exit 0 }
+if ($line -match 'node\(id:') {
+    Out-Json ([pscustomobject]@{ data = [pscustomobject]@{ node = [pscustomobject]@{
+        items = [pscustomobject]@{ pageInfo = [pscustomobject]@{ hasNextPage = $false; endCursor = '' }
+            nodes = @([pscustomobject]@{ id = 'ITEM1'
+                fieldValues = [pscustomobject]@{ nodes = @([pscustomobject]@{ field = [pscustomobject]@{ name = 'Status' }; name = 'Backlog' }) }
+                content = [pscustomobject]@{ __typename = 'Issue'; number = 900; title = 'app surface issue'; state = 'OPEN'; url = 'u'; body = ''
+                    labels = [pscustomobject]@{ nodes = @() }; assignees = [pscustomobject]@{ nodes = @() }
+                    repository = [pscustomobject]@{ nameWithOwner = 'o/r' } } }) } } } })
+    exit 0
+}
+if ($line -match 'projectV2') {
+    Out-Json ([pscustomobject]@{ data = [pscustomobject]@{ user = [pscustomobject]@{ projectV2 = [pscustomobject]@{
+        id = 'PROJ1'
+        fields = [pscustomobject]@{ nodes = @([pscustomobject]@{ id = 'FSTATUS'; name = 'Status'
+            options = @([pscustomobject]@{ id = 'OPTBACK'; name = 'Backlog' }, [pscustomobject]@{ id = 'OPTPROG'; name = 'In Progress' }) }) }
+        items = [pscustomobject]@{ pageInfo = [pscustomobject]@{ hasNextPage = $false; endCursor = '' }
+            nodes = @([pscustomobject]@{ id = 'ITEM1'
+                fieldValues = [pscustomobject]@{ nodes = @([pscustomobject]@{ field = [pscustomobject]@{ name = 'Status' }; name = 'Backlog' }) }
+                content = [pscustomobject]@{ __typename = 'Issue'; number = 900; title = 'app surface issue'; state = 'OPEN'; url = 'u'; body = ''
+                    labels = [pscustomobject]@{ nodes = @() }; assignees = [pscustomobject]@{ nodes = @() }
+                    repository = [pscustomobject]@{ nameWithOwner = 'o/r' } } }) } } } } })
+    exit 0
+}
+if ($line -match 'graphql') {
+    Out-Json ([pscustomobject]@{ data = [pscustomobject]@{ repository = [pscustomobject]@{
+        issue = [pscustomobject]@{ number = 900; title = 'app surface issue'; state = 'OPEN'; url = 'u'; body = ''
+            labels = [pscustomobject]@{ nodes = @() }; assignees = [pscustomobject]@{ nodes = @() }
+            repository = [pscustomobject]@{ nameWithOwner = 'o/r' }
+            timelineItems = [pscustomobject]@{ nodes = @() } }
+        issues = [pscustomobject]@{ pageInfo = [pscustomobject]@{ hasNextPage = $false; endCursor = '' }; nodes = @() }
+        pullRequests = [pscustomobject]@{ pageInfo = [pscustomobject]@{ hasNextPage = $false; endCursor = '' }; nodes = @() } } } })
+    exit 0
+}
+# Cualquier otra llamada: SILENCIO en stdout (solo stderr), para no contaminar el JSON del manifiesto.
+[Console]::Error.WriteLine("fakegh: unexpected call: $line"); Write-Output '{}'; exit 0
+'@ | Set-Content -LiteralPath (Join-Path $script:FakeJ 'gh.ps1') -Encoding UTF8
+
+        $script:RepoJ = Join-Path $TestDrive 'json-purity'
+        New-Item -ItemType Directory -Path $script:RepoJ -Force | Out-Null
+        Push-Location $script:RepoJ
+        git init -q -b main 2>&1 | Out-Null
+        git config user.email t@example.com; git config user.name t; git config commit.gpgsign false
+        git remote add origin https://github.com/o/r.git
+        Set-Content -LiteralPath README.md -Value 'x'
+        git add README.md; git commit -q -m 'chore: first' 2>&1 | Out-Null
+        Pop-Location
+    }
+
+    It 'stdout is valid JSON, with no human output in front of it' {
+        $outFile = Join-Path $TestDrive 'manifest.out'
+        $errFile = Join-Path $TestDrive 'manifest.err'
+        $savedPath = $env:PATH; $savedTok = $env:GH_TOKEN
+        $env:PATH = "$($script:FakeJ)$([IO.Path]::PathSeparator)$savedPath"
+        $env:GH_TOKEN = 'fake-token'
+        try {
+            Push-Location $script:RepoJ
+            Start-Process -FilePath 'pwsh' -WindowStyle Hidden -Wait -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
+                -ArgumentList @('-NoProfile', '-File', "$script:Script", '-Parallel', '900', '-Surface', 'app', '-Json', '-DryRun', '-ProjectNum', '13', '-Owner', 'o')
+            Pop-Location
+        } finally { $env:PATH = $savedPath; $env:GH_TOKEN = $savedTok }
+
+        $raw = (Get-Content -LiteralPath $outFile -Raw)
+        $raw | Should -Not -BeNullOrEmpty -Because "the manifest must reach stdout. stderr was: $(Get-Content -LiteralPath $errFile -Raw)"
+        { $raw | ConvertFrom-Json } | Should -Not -Throw -Because "stdout must be raw JSON, but it was:`n$raw"
+        $manifest = @($raw | ConvertFrom-Json)
+        @($manifest).Count | Should -BeGreaterThan 0 -Because 'a vacuous empty manifest would make this test prove nothing'
+        [int]$manifest[0].issue | Should -Be 900
+        $manifest[0].runId     | Should -Not -BeNullOrEmpty
+    }
+}

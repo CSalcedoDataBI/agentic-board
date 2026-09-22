@@ -923,7 +923,14 @@ function Write-SessionRegistryEntry {
         # Fleet surfaces (#710 P1): where/how this session runs. 'app'/'headless' rows have no pid
         # this script can see - HostSessionId is set later by -RegisterSession, once the agent has
         # actually handed the manifest entry to the host and the host answered with an id.
-        [string]$Surface = '', [string]$HostSessionId = '', [string]$RunId = ''
+        [string]$Surface = '', [string]$HostSessionId = '', [string]$RunId = '',
+        # UPDATE an existing row or do nothing - never create one (external review round 2).
+        # -RegisterSession validates the row it is about to annotate; without this, a row that
+        # disappeared between that check and this write (auto-clean, -Stop, a sibling fleet process)
+        # was silently APPENDED back as a ghost: empty repo/branch/workPath, sessionPid 0 and a
+        # hostSessionId - which Get-SessionLivePid then reports alive FOREVER by the sentinel.
+        # The guard lives INSIDE the lock, so no ordering of that race can produce one.
+        [switch]$UpdateOnly
     )
     $p = Get-SessionRegistryPath
     if (-not $p) { return }
@@ -952,6 +959,7 @@ function Write-SessionRegistryEntry {
         # when a later launch updates only the PID/via. Read RAW: a relaunch after the old
         # PID died must still inherit the prior branch/repo/workPath.
         $prev = @(Read-SessionRegistryRaw | Where-Object { $_.issue -eq $IssueNum }) | Select-Object -First 1
+        if ($UpdateOnly -and -not $prev) { return }
         if (-not $Repo -and $prev) { $Repo = $prev.repo }
         if (-not $Branch -and $prev) { $Branch = $prev.branch }
         if (-not $WorkPath -and $prev) { $WorkPath = $prev.workPath }
@@ -4020,6 +4028,20 @@ if ($Parallel.Count -gt 0) {
         throw "-Surface headless todavia no esta implementado (fases posteriores de #710). Usa -Surface terminal (por defecto) o -Surface app."
     }
     $isAppSurface = ($Surface -eq 'app')
+
+    # -Surface app -Json promises RAW JSON on stdout, for the agent to hand to the host's
+    # session-spawn tool - and it was not delivering it (external review round 2, then measured):
+    # `pwsh -File Board-Work.ps1 ... -Json > out.json` from any external shell captured every batch
+    # header and status line IN FRONT of the manifest, so ConvertFrom-Json failed on it. Write-Host
+    # writes to the information stream, but a NATIVE redirect takes the process's stdout HANDLE,
+    # which is where the host renders that stream - PowerShell's own stream separation never gets a
+    # say. Shadowing Write-Host for this one flag combination silences it everywhere, including the
+    # nested Invoke-BatchIssueStart / Invoke-IssueStart calls (measured: function lookup walks the
+    # scope chain, so the script-scope definition wins for them too). Errors are untouched: they go
+    # to stderr and still reach the caller, and the exit code still tells the consumer what happened.
+    if ($isAppSurface -and $Json) {
+        function Write-Host { param([Parameter(ValueFromRemainingArguments = $true)] $Ignored) }
+    }
 
     Write-Host "=== Parallel batch-start (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
     Write-Host ("  Issues: {0}" -f ($queue -join ', ')) -ForegroundColor DarkGray

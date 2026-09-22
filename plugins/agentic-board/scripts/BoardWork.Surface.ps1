@@ -96,7 +96,23 @@ function Invoke-WithSessionRegistryLock {
     }
     $owns = $false
     try {
-        $owns = $mutex.WaitOne($TimeoutMs)
+        # An ABANDONED mutex is a success, not a failure (external review round 2, both reviewers,
+        # then measured here). If the process holding the lock dies mid-write while THIS process is
+        # already waiting, WaitOne raises AbandonedMutexException - and .NET hands the waiter
+        # OWNERSHIP anyway. Uncaught, $owns stayed $false, the body never ran, the finally disposed
+        # an owned mutex (abandoning it AGAIN for the next waiter) and the whole call threw: one
+        # killed fleet session - exactly what the governor does on purpose - took the next
+        # /board work down with an incomprehensible .NET error.
+        #
+        # This only happens when a waiter already holds a handle: if NO handle survives the holder's
+        # death the kernel object is destroyed and the next caller gets a brand-new mutex with no
+        # abandonment to report. That is why it needs a REAL two-process race to reproduce, and why
+        # the naive single-process test passed against the broken code and proved nothing.
+        #
+        # The state it protects is a JSON file rewritten whole under the lock, so a half-written row
+        # is not a risk here: the previous holder either wrote its file or did not.
+        try { $owns = $mutex.WaitOne($TimeoutMs) }
+        catch [System.Threading.AbandonedMutexException] { $owns = $true }
         if (-not $owns) {
             throw "Timed out after ${TimeoutMs}ms waiting for the sessions.json lock ($name) - another process is holding it far too long."
         }
@@ -174,6 +190,16 @@ function Get-IssueOwnedPaths {
 # Returns { Ok; Message }.
 function Register-HostSession {
     param([Parameter(Mandatory)][int]$IssueNum, [Parameter(Mandatory)][string]$HostSessionId)
+    # Read, VALIDATE and write as ONE critical section (external review round 2). The check used to
+    # sit outside the lock: between "this row exists and its surface is app" and the write, another
+    # process could delete the row (auto-clean, -Stop) or replace it with an ordinary terminal-
+    # surface row for the same issue - and the write went ahead on a snapshot that was no longer
+    # true. A named mutex is re-entrant for the same thread (measured), so the nested lock
+    # Write-SessionRegistryEntry takes below is free; -UpdateOnly closes the delete case even if
+    # the two locks ever derived different names. -NoCreate: a register that finds nothing must not
+    # create .agentic-board/ just to fail (#710 decision 6).
+    $lockPath = Get-SessionRegistryPath -NoCreate
+    return (Invoke-WithSessionRegistryLock -Path $lockPath -Body {
     $prev = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq $IssueNum }) | Select-Object -First 1
     if (-not $prev) {
         return [pscustomobject]@{
@@ -194,9 +220,10 @@ function Register-HostSession {
     # no process this script can ever see). Passing it explicitly, from the row just confirmed above
     # to be 'app', closes that ordering gap without changing Write-SessionRegistryEntry's shared
     # pid-inference order for every OTHER caller.
-    Write-SessionRegistryEntry -IssueNum $IssueNum -HostSessionId $HostSessionId -Via 'app'
+    Write-SessionRegistryEntry -IssueNum $IssueNum -HostSessionId $HostSessionId -Via 'app' -UpdateOnly
     return [pscustomobject]@{
         Ok = $true
         Message = "hostSessionId '$HostSessionId' anotado para el issue #$IssueNum (surface $surface)."
     }
+    })
 }

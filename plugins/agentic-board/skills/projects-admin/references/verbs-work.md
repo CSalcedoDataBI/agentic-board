@@ -226,7 +226,10 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
     `-Surface app` the script creates **no worktree and spawns no process**: it does the board
     mechanics (Status/assignee/claim) exactly as above, then emits a **dispatch manifest**
     (`-Json` for raw JSON) — one entry per issue with `issue`, `title`, `repo`, `branch`, a
-    self-contained `briefing`, `ownedPaths` and a shared `runId`. Hand each entry to the host's
+    self-contained `briefing`, `ownedPaths` and a shared `runId`. With `-Json`, stdout carries the
+    manifest and **nothing else**: the batch's human progress lines are suppressed for that one flag
+    combination, so `ConvertFrom-Json` on the captured output works (errors still go to stderr and
+    the exit code still reports failure). Hand each entry to the host's
     session-spawn tool (this needs ONE click per task — a host constraint, said plainly, never
     faked), then record the id it returns: `Board-Work.ps1 -RegisterSession -Issue <n>
     -HostSessionId <id>`. That id is what keeps the session visible and alive in `-Sessions`: a
