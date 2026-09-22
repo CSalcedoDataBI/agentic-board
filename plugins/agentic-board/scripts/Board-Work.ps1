@@ -954,6 +954,8 @@ function Write-SessionRegistryEntry {
     # the host-managed guard has to ask "is THIS write an app-surface write", and an inherited
     # $Surface would answer "yes" forever once the issue had ever run on that surface.
     $callerSurface = $Surface
+    $callerVia     = $Via
+    $callerWork    = $WorkPath
     # Every read-modify-write from here on is ONE critical section (#710 decision 5): two processes
     # racing this function (two parallel launches, a launch racing -RegisterSession) must never both
     # read the same "prev" snapshot and then each write a version that drops the other's fields or
@@ -970,7 +972,14 @@ function Write-SessionRegistryEntry {
         if (-not $Via -and $prev) { $Via = $prev.via }
         if (-not $Surface -and $prev -and $prev.PSObject.Properties['surface']) { $Surface = "$($prev.surface)" }
         if (-not $RunId -and $prev -and $prev.PSObject.Properties['runId']) { $RunId = "$($prev.runId)" }
-        if (-not $HostSessionId -and $prev -and $prev.PSObject.Properties['hostSessionId']) { $HostSessionId = "$($prev.hostSessionId)" }
+        # A hostSessionId belongs to ONE run (external review round 4). $RunId is already resolved
+        # above, so it is either what THIS caller passed or what the row already had; inheriting the
+        # id only while those match is what separates "the same run writing again" (-RegisterSession,
+        # a -RecordPr - keep it) from "a NEW wave re-dispatching this issue" (a fresh -RunId and no
+        # -HostSessionId yet - the previous run's id names a session that is gone, and keeping it
+        # made the not-yet-dispatched row read as alive by the host-managed sentinel).
+        $prevRunId = if ($prev -and $prev.PSObject.Properties['runId']) { "$($prev.runId)" } else { '' }
+        if (-not $HostSessionId -and $prev -and $prev.PSObject.Properties['hostSessionId'] -and $RunId -eq $prevRunId) { $HostSessionId = "$($prev.hostSessionId)" }
         # ...but the host-managed trio is carried forward ONLY while this issue is still on the app
         # surface (external review round 3). The carry-forward above exists so a later app-surface
         # write (-RegisterSession, a -RecordPr) keeps what the launch recorded. It must NOT survive a
@@ -979,7 +988,17 @@ function Write-SessionRegistryEntry {
         # host-managed sentinel, and the new LOCAL session read as alive forever while -Stop and
         # -Relaunch refused to manage it - they are built to refuse host-managed rows. $Via is
         # already resolved from $prev above, so an omitted -Via still counts as "same surface".
-        if ($Via -ne 'app' -and $callerSurface -ne 'app') { $Surface = ''; $HostSessionId = ''; $RunId = '' }
+        # A write DESCRIBES A LOCAL SESSION when the caller gave it a worktree path, a real spawned
+        # pid, or an explicit non-app -Via. An app row has none of those by construction - the whole
+        # point of that surface is that the host owns the worktree and the process - so any of them
+        # means this issue is now running locally and must not keep the host-managed trio.
+        # Deciding on what the CALLER passed, not on the values inherited above, is the correction
+        # external review rounds 3 and 4 each pushed one step further: comparing the inherited
+        # $Surface never fired at all, and comparing the inherited $Via still missed the two writers
+        # that omit -Via entirely and identify themselves by -WorkPath (Invoke-IssueStart's own
+        # registration, and the shared-branch batch path).
+        $localWrite = ($SessionPid -gt 0) -or [bool]$callerWork -or ($callerVia -and $callerVia -ne 'app')
+        if ($localWrite -and $callerSurface -ne 'app') { $Surface = ''; $HostSessionId = ''; $RunId = '' }
         # Cross-repo facts and the PRs already recorded survive a later PID/via-only update (a relaunch).
         $prevPrs = @()
         if ($prev) {
@@ -4065,7 +4084,14 @@ if ($Parallel.Count -gt 0) {
                 [Parameter(Position = 0, ValueFromRemainingArguments = $true)] $Object,
                 $ForegroundColor, $BackgroundColor, [switch]$NoNewline, $Separator
             )
-            [Console]::Error.WriteLine(($Object -join ' '))
+            # -Separator and -NoNewline are honoured rather than ignored (external review round 4):
+            # nothing in this path uses them today, but a future progress line that did would have
+            # been silently reformatted. [Console]::Error is the process's real stderr, which is
+            # exactly the destination here - this shadow only ever exists in a `pwsh -File` run
+            # started by a consumer that captures the two streams separately.
+            $sep = if ($null -ne $Separator) { "$Separator" } else { ' ' }
+            $text = ($Object -join $sep)
+            if ($NoNewline) { [Console]::Error.Write($text) } else { [Console]::Error.WriteLine($text) }
         }
     }
 

@@ -715,3 +715,147 @@ if ($line -match '^pr list') { Write-Output '[]'; exit 0 }
         $p.ExitCode | Should -Not -Be 0 -Because 'a run that dispatched nothing is a failure, not an empty success'
     }
 }
+
+Describe 'A hostSessionId belongs to ONE run and never outlives it (review round 4)' {
+    # Round 3 stopped a NON-app write from inheriting the host-managed trio. Round 4 found the same
+    # hazard one step further in: a FRESH app-surface launch of an issue that already ran that way
+    # passes a NEW -RunId but no -HostSessionId, so the guard (rightly) does not fire - both sides
+    # are 'app' - and the row inherited the PREVIOUS run's hostSessionId. The new dispatch had not
+    # been handed to the host yet, so it read as alive under an id that belongs to a dead session.
+    # The id is scoped to its run: it survives a write that keeps the runId, never one that changes it.
+    It 'clears the hostSessionId when a new app-surface run re-dispatches the same issue' {
+        $repo = New-Throwaway 'runid-scoped'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 93 -Branch 'issue-93-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-A'
+            Register-HostSession -IssueNum 93 -HostSessionId 'host-A' | Out-Null
+            @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 93 })[0].hostSessionId | Should -Be 'host-A'
+
+            # Una NUEVA ola: mismo issue, runId distinto, sin -HostSessionId (aun no se ha despachado).
+            Write-SessionRegistryEntry -IssueNum 93 -Branch 'issue-93-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-B'
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 93 })[0]
+
+            $row.runId         | Should -Be 'run-B'
+            $row.surface       | Should -Be 'app'
+            $row.hostSessionId | Should -BeNullOrEmpty -Because 'the new run has no host session yet - the old id belongs to a session that is gone'
+            Get-SessionLivePid $row | Should -Not -Be (Get-HostManagedPidMarker) -Because 'a run not yet registered with the host must not read as alive'
+        } finally { Pop-Location }
+    }
+    It 'keeps it across a write that does NOT change the run (the update path)' {
+        $repo = New-Throwaway 'runid-same'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 94 -Branch 'issue-94-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-C'
+            Register-HostSession -IssueNum 94 -HostSessionId 'host-C' | Out-Null
+            Write-SessionRegistryEntry -IssueNum 94 -Branch 'issue-94-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-C'
+            @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 94 })[0].hostSessionId | Should -Be 'host-C'
+        } finally { Pop-Location }
+    }
+}
+
+Describe 'Host-managed metadata dies on any write that describes a LOCAL session (review round 4)' {
+    # Rounds 3 and 4 each moved this decision one step earlier. The last gap: two writers register a
+    # local session WITHOUT passing -Via at all (Invoke-IssueStart's own registration and the
+    # shared-branch batch path) - they identify themselves by -WorkPath. Deciding on the INHERITED
+    # $Via therefore still read 'app' for them, and the stale hostSessionId survived a perfectly
+    # ordinary local restart.
+    It 'clears them for a write identified only by -WorkPath, with no -Via at all' {
+        $repo = New-Throwaway 'local-by-workpath'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 95 -Branch 'issue-95-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-D'
+            Register-HostSession -IssueNum 95 -HostSessionId 'host-D' | Out-Null
+            @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 95 })[0].hostSessionId | Should -Be 'host-D'
+
+            # Exactamente la forma que usan Invoke-IssueStart y el lote de rama compartida: sin -Via.
+            Write-SessionRegistryEntry -IssueNum 95 -Branch 'issue-95-x' -WorkPath $repo -Repo 'o/r'
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 95 })[0]
+
+            $row.hostSessionId | Should -BeNullOrEmpty -Because 'a row with a worktree path is a LOCAL session, whatever the previous row said'
+            $row.surface       | Should -BeNullOrEmpty
+            $row.runId         | Should -BeNullOrEmpty
+            Get-SessionLivePid $row | Should -Not -Be (Get-HostManagedPidMarker)
+        } finally { Pop-Location }
+    }
+    It 'clears them for a write identified only by a real spawned pid' {
+        $repo = New-Throwaway 'local-by-pid'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 96 -Branch 'issue-96-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-E'
+            Register-HostSession -IssueNum 96 -HostSessionId 'host-E' | Out-Null
+            Write-SessionRegistryEntry -IssueNum 96 -SessionPid $PID
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 96 })[0]
+            $row.hostSessionId | Should -BeNullOrEmpty
+            $row.surface       | Should -BeNullOrEmpty
+        } finally { Pop-Location }
+    }
+    It 'a pure metadata update (no pid, no worktree, no via) still keeps them' {
+        $repo = New-Throwaway 'meta-update-keeps'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 97 -Branch 'issue-97-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-F'
+            Register-HostSession -IssueNum 97 -HostSessionId 'host-F' | Out-Null
+            Write-SessionRegistryEntry -IssueNum 97 -Branch 'issue-97-x' -Repo 'o/r'
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 97 })[0]
+            $row.hostSessionId | Should -Be 'host-F'
+            $row.surface       | Should -Be 'app'
+        } finally { Pop-Location }
+    }
+}
+
+Describe 'Add-SessionPullRequest writes under the same lock as everyone else (review round 4)' {
+    # It was the ONE remaining read-modify-write of sessions.json outside Invoke-WithSessionRegistryLock,
+    # which made this phase's own headline claim ("every read-modify-write goes through the lock")
+    # false. Two REAL processes, one recording PRs and one registering sessions: unlocked, each
+    # writes back a snapshot taken before the other's write and rows are lost.
+    It 'no row and no PR is lost when a PR writer and a session writer run at once' {
+        $repo = New-Throwaway 'pr-lock-race'
+        $prWriter = Join-Path $TestDrive 'pr-writer.ps1'
+        $seedCount = 20
+        @'
+param([string]$RepoPath, [string]$ScriptPath, [int]$StartIssue, [int]$Count)
+Set-Location -LiteralPath $RepoPath
+$env:ABIOS_BOARDWORK_DOTSOURCE = '1'
+. $ScriptPath
+$env:ABIOS_BOARDWORK_DOTSOURCE = ''
+for ($i = 0; $i -lt $Count; $i++) {
+    $n = $StartIssue + $i
+    Add-SessionPullRequest -IssueNum $n -Repo 'o/r' -Number (7000 + $n) | Out-Null
+}
+'@ | Set-Content -LiteralPath $prWriter -Encoding UTF8
+
+        $sessWriter = Join-Path $TestDrive 'sess-writer.ps1'
+        @'
+param([string]$RepoPath, [string]$ScriptPath, [int]$StartIssue, [int]$Count)
+Set-Location -LiteralPath $RepoPath
+$env:ABIOS_BOARDWORK_DOTSOURCE = '1'
+. $ScriptPath
+$env:ABIOS_BOARDWORK_DOTSOURCE = ''
+for ($i = 0; $i -lt $Count; $i++) {
+    $n = $StartIssue + $i
+    Write-SessionRegistryEntry -IssueNum $n -Branch "issue-$n-x" -WorkPath "C:/w/$n" -Repo 'o/r' -SessionPid (30000 + $n) -Via 'pwsh'
+}
+'@ | Set-Content -LiteralPath $sessWriter -Encoding UTF8
+
+        Push-Location $repo
+        try {
+            # Semilla: las filas sobre las que el escritor de PRs va a trabajar.
+            for ($n = 1; $n -le $seedCount; $n++) {
+                Write-SessionRegistryEntry -IssueNum $n -Branch "issue-$n-x" -WorkPath "C:/w/$n" -Repo 'o/r' -SessionPid (10000 + $n) -Via 'pwsh'
+            }
+            @(Read-SessionRegistryRaw).Count | Should -Be $seedCount -Because 'precondition: the seed rows exist'
+
+            $p1 = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-File', $prWriter,   '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '1',    '-Count', "$seedCount")
+            $p2 = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-File', $sessWriter, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '6000', '-Count', "$seedCount")
+            $p1.WaitForExit(120000) | Out-Null
+            $p2.WaitForExit(120000) | Out-Null
+            $p1.HasExited | Should -BeTrue
+            $p2.HasExited | Should -BeTrue
+
+            $rows = @(Read-SessionRegistryRaw)
+            $rows.Count | Should -Be ($seedCount * 2) -Because 'an unlocked PR writer writes back a stale snapshot and drops the other process rows'
+            $withPr = @($rows | Where-Object { [int]$_.issue -le $seedCount -and @($_.prs).Count -gt 0 })
+            $withPr.Count | Should -Be $seedCount -Because 'every seeded row must have kept its PR'
+        } finally { Pop-Location }
+    }
+}
