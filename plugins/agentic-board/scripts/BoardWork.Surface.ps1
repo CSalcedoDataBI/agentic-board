@@ -103,6 +103,16 @@ function New-DispatchManifestEntry {
     }
 }
 
+# Serialize a manifest-entry array to a JSON string, always an array even when empty. PURE - the
+# same "an empty pipeline emits nothing" footgun this repo already guards in
+# Remove-SessionRegistryEntry and Fleet-Ownership's ConvertTo-OwnershipJson: piping @() into
+# ConvertTo-Json produces NO output, which would hand a JSON consumer nothing at all instead of "[]".
+function ConvertTo-DispatchManifestJson {
+    param([object[]]$Entries = @())
+    if (@($Entries).Count -eq 0) { return '[]' }
+    return ($Entries | ConvertTo-Json -Depth 6 -AsArray)
+}
+
 # Whatever Fleet-Ownership already has on record for this issue, so a dispatched session's manifest
 # entry carries the same "these are my files" fact a terminal-surface session declares for itself
 # with `Fleet-Ownership.ps1 -Claim` (the phase-4 overlap check is what actually gates on this - here

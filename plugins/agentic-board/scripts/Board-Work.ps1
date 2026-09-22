@@ -4102,7 +4102,7 @@ if ($Parallel.Count -gt 0) {
             }
         }
         if ($Json) {
-            $entries | ConvertTo-Json -Depth 6 -AsArray
+            ConvertTo-DispatchManifestJson -Entries $entries
         } else {
             Write-Host ""
             Write-Host ("===== MANIFIESTO DE DESPACHO (surface app, runId {0}) =====" -f $runId) -ForegroundColor Cyan

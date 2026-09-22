@@ -237,6 +237,21 @@ Describe 'New-DispatchManifestEntry (pure)' {
     }
 }
 
+Describe 'ConvertTo-DispatchManifestJson (pure)' {
+    It 'prints "[]" for an empty manifest, not nothing (the piped-empty-array footgun)' {
+        ConvertTo-DispatchManifestJson -Entries @() | Should -Be '[]'
+        ConvertTo-DispatchManifestJson | Should -Be '[]'
+    }
+    It 'round-trips a real manifest through ConvertFrom-Json' {
+        $e = New-DispatchManifestEntry -Issue 1 -Title 't' -Repo 'o/r' -Branch 'b' -Briefing 'x' -RunId 'r1'
+        $json = ConvertTo-DispatchManifestJson -Entries @($e)
+        $parsed = @($json | ConvertFrom-Json)
+        $parsed.Count | Should -Be 1
+        $parsed[0].issue | Should -Be 1
+        $parsed[0].runId | Should -Be 'r1'
+    }
+}
+
 Describe 'Get-IssueOwnedPaths (#710 P1)' {
     It 'returns empty for an issue nobody claimed, and never creates .agentic-board/' {
         $repo = New-Throwaway 'owned-empty'
