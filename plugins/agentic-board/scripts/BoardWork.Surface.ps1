@@ -33,6 +33,23 @@
 # would otherwise do that (Show-SessionFleet) branch on hostSessionId first instead.
 function Get-HostManagedPidMarker { return 1 }
 
+# Is this row one whose PROCESS belongs to the host rather than to this script? The answer is the
+# SURFACE, not the presence of a hostSessionId (external review round 6). Between the dispatch and
+# the agent handing the manifest entry to the host's spawn tool there is a real window in which the
+# row exists, is on the app surface, and has no id yet - and judging that row by a pid made it read
+# as a DEAD session: it vanished from `-Sessions` (Read-SessionRegistry keeps only rows whose live
+# pid is > 0), `-Watch` reported the wave finished before it had started, and -AutoClean was free to
+# remove the very row -RegisterSession was about to write to. A row is on the app surface until a
+# write that DESCRIBES A LOCAL SESSION clears it, so this never keeps an ordinary session alive.
+# The hostSessionId clause stays for rows written before `surface` existed.
+function Test-HostManagedSession {
+    param([object]$Session)
+    if (-not $Session) { return $false }
+    if ("$($Session.hostSessionId)".Trim()) { return $true }
+    if ($Session.PSObject.Properties['surface'] -and "$($Session.surface)" -eq 'app') { return $true }
+    return $false
+}
+
 # Canonicalize the DIRECTORY of a path before it becomes a lock name (external review round 1,
 # repeating #291's lesson): two different STRINGS can name the SAME file on Windows - an 8.3 short
 # form vs the long form (this very sandbox runs under `C:\Users\CRISTO~1\...`), or a different drive

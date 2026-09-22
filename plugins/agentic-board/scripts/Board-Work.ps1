@@ -827,7 +827,7 @@ function Test-SessionStartConsistent {
 #     permanently alive here instead. The marker is NOT a real process id (Get-HostManagedPidMarker).
 function Get-SessionLivePid {
     param([object]$Session)
-    if ("$($Session.hostSessionId)".Trim()) { return Get-HostManagedPidMarker }
+    if (Test-HostManagedSession $Session) { return Get-HostManagedPidMarker }
     $stored = 0
     try { $stored = [int]$Session.sessionPid } catch { }
     $isWt = ("$($Session.via)" -eq 'wt' -and $Session.issue)
@@ -2319,7 +2319,8 @@ function Show-SessionFleet {
         $cli = if ($s.cli) { $s.cli } else { "claude" }
         Write-Host ("  #{0,-4} {1}  [{2}]" -f $s.issue, $s.branch, $cli) -ForegroundColor Yellow
         $hostSessionId = "$($s.hostSessionId)".Trim()
-        if ($hostSessionId) {
+        if (Test-HostManagedSession $s) {
+            if (-not $hostSessionId) { $hostSessionId = "(pendiente de registrar)" }
             # Host-managed surface (#710 P1): sessionPid here is Get-HostManagedPidMarker, NOT a
             # real Windows process - never hand it to Get-Process (Get-SessionMetrics would just
             # report it dead, which is exactly the false "PID muerto" this branch exists to avoid).
@@ -3339,7 +3340,7 @@ if ($Stop -gt 0) {
     # via Get-HostManagedPidMarker, NOT a real pid - Stop-ProcessTree must never be handed that
     # sentinel (it would build a kill command for a process that is not this session's, if it
     # exists at all). The host owns this process; only the host can stop it.
-    if ("$($sess.hostSessionId)".Trim()) {
+    if (Test-HostManagedSession $sess) {
         Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): detenla desde el host - no hay proceso local que -Stop pueda matar." -f $Stop, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
         exit 0
     }
@@ -3356,7 +3357,7 @@ if ($Relaunch -gt 0) {
     # Host-managed (#710 P1, external review round 1): same reason as -Stop above - the sentinel pid
     # must never reach Stop-ProcessTree, and there is no local worktree this script controls to
     # relaunch a session into (the host created it, and only the host can relaunch it).
-    if ("$($sess.hostSessionId)".Trim()) {
+    if (Test-HostManagedSession $sess) {
         Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): relanzala desde el host - no hay proceso ni worktree local que -Relaunch pueda controlar." -f $Relaunch, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
         exit 0
     }
@@ -4226,7 +4227,10 @@ if ($Parallel.Count -gt 0) {
                 Write-Host ""
                 Write-Host "Esta herramienta no puede abrir sesiones del host por si misma: entrega CADA entrada a la" -ForegroundColor Yellow
                 Write-Host "herramienta de sesiones del host (un clic por tarea) y registra el id que devuelva con:" -ForegroundColor Yellow
-                Write-Host "  /board work -RegisterSession -Issue <n> -HostSessionId <id>" -ForegroundColor DarkGray
+                # El runId va SIEMPRE en la instruccion impresa (external review round 6): sin el,
+                # seguir esta linea al pie de la letra salta la comprobacion de corrida y un id de
+                # una ola anterior puede quedar anotado sobre la fila de la ola actual.
+                Write-Host ("  /board work -RegisterSession -Issue <n> -HostSessionId <id> -RunId {0}" -f $runId) -ForegroundColor DarkGray
             }
             if ($DryRun) {
                 Write-Host ""

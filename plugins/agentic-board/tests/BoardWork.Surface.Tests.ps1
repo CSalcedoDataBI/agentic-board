@@ -144,8 +144,17 @@ Describe 'Get-SessionLivePid treats a hostSessionId row as permanently alive (#7
         $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; hostSessionId = 'abc-123' }
         Get-SessionLivePid $s | Should -Be (Get-HostManagedPidMarker)
     }
-    It 'falls through to the ordinary pid logic when hostSessionId is empty' {
-        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; hostSessionId = '' }
+    It 'ALSO returns it for an app-surface row not yet registered (external review round 6)' {
+        # This assertion is the REVERSE of what it said in P1, on purpose. Judging a not-yet-
+        # registered app row by a pid made it read as a DEAD session in the window between the
+        # dispatch and the host answering: it vanished from -Sessions, -Watch called the wave
+        # finished before it started, and -AutoClean could remove the row -RegisterSession was
+        # about to write to. The SURFACE decides whose process it is, not the id.
+        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; surface = 'app'; hostSessionId = '' }
+        Get-SessionLivePid $s | Should -Be (Get-HostManagedPidMarker)
+    }
+    It 'falls through to the ordinary pid logic for a non-app row with no hostSessionId' {
+        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'pwsh'; surface = ''; hostSessionId = '' }
         Get-SessionLivePid $s | Should -Be 0
     }
     It 'falls through when the row has no hostSessionId property at all (a pre-P1 row)' {
@@ -168,11 +177,24 @@ Describe 'Read-SessionRegistry keeps a host-managed session alive (real sessions
         $row.Count | Should -Be 1
         $row[0].sessionPid | Should -Be (Get-HostManagedPidMarker)
     }
-    It 'the SAME row before -RegisterSession (no hostSessionId yet) does not read as live' {
+    It 'the SAME row BEFORE -RegisterSession is still live - it is pending, not finished (round 6)' {
+        # The dispatch writes this row; the agent hands the entry to the host; only then does an id
+        # come back. Everything in that window is PENDING. Reading it as finished let -Watch end the
+        # wave before it began and let -AutoClean delete the row the registration needed.
         Push-Location $script:Repo
         try {
             Write-SessionRegistryEntry -IssueNum 42 -Branch 'issue-42-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run1'
             $live = @(Read-SessionRegistry | Where-Object { [int]$_.issue -eq 42 })
+        } finally { Pop-Location }
+        $live.Count | Should -Be 1
+        $live[0].sessionPid  | Should -Be (Get-HostManagedPidMarker)
+        "$($live[0].hostSessionId)" | Should -BeNullOrEmpty -Because 'it is live but NOT yet registered'
+    }
+    It 'an ordinary local row with a dead pid is still pruned - this did not become a blanket amnesty' {
+        Push-Location $script:Repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 43 -Branch 'issue-43-x' -WorkPath $script:Repo -Repo 'o/r' -SessionPid 999999 -Via 'pwsh'
+            $live = @(Read-SessionRegistry | Where-Object { [int]$_.issue -eq 43 })
         } finally { Pop-Location }
         $live.Count | Should -Be 0
     }
@@ -615,6 +637,20 @@ if ($line -match 'graphql') {
         [int]$manifest[0].issue | Should -Be 900
         $manifest[0].runId     | Should -Not -BeNullOrEmpty
     }
+
+    It 'the HUMAN manifest prints the register command WITH the runId (review round 6)' {
+        # A human who copies this line must get the runId guard too: without it the registration
+        # skips the run check, and an id from an earlier wave can be stamped onto the current row.
+        $savedPath = $env:PATH; $savedTok = $env:GH_TOKEN
+        $env:PATH = "$($script:FakeJ)$([IO.Path]::PathSeparator)$savedPath"
+        $env:GH_TOKEN = 'fake-token'
+        try {
+            Push-Location $script:RepoJ
+            $out = pwsh -NoProfile -File $script:Script -Parallel 900 -Surface app -DryRun -ProjectNum 13 -Owner o 2>&1 | Out-String
+            Pop-Location
+        } finally { $env:PATH = $savedPath; $env:GH_TOKEN = $savedTok }
+        $out | Should -Match '-RegisterSession -Issue <n> -HostSessionId <id> -RunId \S+'
+    }
 }
 
 Describe 'A later NON-app session never inherits host-managed metadata (review round 3)' {
@@ -738,7 +774,9 @@ Describe 'A hostSessionId belongs to ONE run and never outlives it (review round
             $row.runId         | Should -Be 'run-B'
             $row.surface       | Should -Be 'app'
             $row.hostSessionId | Should -BeNullOrEmpty -Because 'the new run has no host session yet - the old id belongs to a session that is gone'
-            Get-SessionLivePid $row | Should -Not -Be (Get-HostManagedPidMarker) -Because 'a run not yet registered with the host must not read as alive'
+            # It IS still live: it is PENDING registration, not finished (external review round 6).
+            # What must not survive is the previous run's id, which is the assertion above.
+            Get-SessionLivePid $row | Should -Be (Get-HostManagedPidMarker) -Because 'a freshly dispatched app row is pending, and pending is not dead'
         } finally { Pop-Location }
     }
     It 'keeps it across a write that does NOT change the run (the update path)' {
