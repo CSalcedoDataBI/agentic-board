@@ -3237,6 +3237,14 @@ if ($Reap -or $KillAll) {
 if ($Stop -gt 0) {
     $sess = @(Read-SessionRegistry | Where-Object { $_.issue -eq $Stop }) | Select-Object -First 1
     if (-not $sess) { Write-Host "  No hay sesion viva registrada para #$Stop." -ForegroundColor DarkYellow; exit 0 }
+    # Host-managed (#710 P1, external review round 1): Read-SessionRegistry reports this row alive
+    # via Get-HostManagedPidMarker, NOT a real pid - Stop-ProcessTree must never be handed that
+    # sentinel (it would build a kill command for a process that is not this session's, if it
+    # exists at all). The host owns this process; only the host can stop it.
+    if ("$($sess.hostSessionId)".Trim()) {
+        Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): detenla desde el host - no hay proceso local que -Stop pueda matar." -f $Stop, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
+        exit 0
+    }
     $r = Stop-ProcessTree -TargetPid ([int]$sess.sessionPid) -DryRun:(-not $Force)
     if ($r.Refused)  { Write-Host ("  #{0} PID {1} PROTEGIDO: {2}" -f $Stop, $r.Pid, $r.Reason) -ForegroundColor DarkYellow; exit 0 }
     if (-not $Force) { Write-Host ("  #{0} -> {1}`n  (re-ejecuta con -Force para matar)" -f $Stop, $r.Command) -ForegroundColor Cyan; exit 0 }
@@ -3247,6 +3255,13 @@ if ($Stop -gt 0) {
 if ($Relaunch -gt 0) {
     $sess = @(Read-SessionRegistry | Where-Object { $_.issue -eq $Relaunch }) | Select-Object -First 1
     if (-not $sess) { Write-Host "  No hay sesion registrada para #$Relaunch." -ForegroundColor DarkYellow; exit 0 }
+    # Host-managed (#710 P1, external review round 1): same reason as -Stop above - the sentinel pid
+    # must never reach Stop-ProcessTree, and there is no local worktree this script controls to
+    # relaunch a session into (the host created it, and only the host can relaunch it).
+    if ("$($sess.hostSessionId)".Trim()) {
+        Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): relanzala desde el host - no hay proceso ni worktree local que -Relaunch pueda controlar." -f $Relaunch, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
+        exit 0
+    }
     $cli = if ($sess.cli) { $sess.cli } else { 'claude' }
     if (-not $Force) {
         Write-Host ("  Relaunch #{0}: mataria PID {1} y relanzaria [{2}] en {3}." -f $Relaunch, $sess.sessionPid, $cli, $sess.workPath) -ForegroundColor Cyan
@@ -3811,7 +3826,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         $spLive = @(Read-SessionRegistry | ForEach-Object { $_.branch })
         # An unreadable registry must not read as "no live sessions" (Read-SessionRegistry returns @() on a parse error).
         $spLiveOk = $true
-        $spRegPath = Get-SessionRegistryPath
+        $spRegPath = Get-SessionRegistryPath -NoCreate
         if ($spRegPath -and (Test-Path -LiteralPath $spRegPath)) { try { $null = Get-Content -LiteralPath $spRegPath -Raw | ConvertFrom-Json } catch { $spLiveOk = $false } }
         $spBase = if ($spHere) { Resolve-IssueBaseRef $spHere -NoFetch } else { '' }
         $spPlan = @(Get-StateOfPlay -Repo $spRepo -HereRepo $spHere -Items $items -BoardTruncated ([bool]$read.Truncated) `

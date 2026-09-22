@@ -33,16 +33,44 @@
 # would otherwise do that (Show-SessionFleet) branch on hostSessionId first instead.
 function Get-HostManagedPidMarker { return 1 }
 
+# Canonicalize the DIRECTORY of a path before it becomes a lock name (external review round 1,
+# repeating #291's lesson): two different STRINGS can name the SAME file on Windows - an 8.3 short
+# form vs the long form (this very sandbox runs under `C:\Users\CRISTO~1\...`), or a different drive
+# alias - and hashing the raw string would give the SAME sessions.json two DIFFERENT mutex names
+# depending on which caller's path happened to be short or long, defeating the lock exactly when it
+# matters (two DIFFERENT processes reaching the same file through two different path forms). Only
+# the FILESYSTEM can expand a short name (Get-Item; `(Resolve-Path).Path` is NOT a substitute - see
+# Resolve-GitPathForm's header for the same fact, measured, elsewhere in this file's caller). The
+# directory is canonicalized, then the leaf filename is rejoined: every real caller passes a path
+# whose PARENT directory already exists (Get-SessionRegistryPath just created it, or
+# Remove-SessionRegistryEntry only reaches here after Test-Path proved the file itself exists), so
+# there is always something on disk to canonicalize even before sessions.json's first-ever write.
+function Resolve-LockPathForm {
+    param([string]$Path)
+    if (-not $Path) { return '' }
+    $dir = Split-Path $Path -Parent
+    if (-not $dir) { return $Path }
+    try { return (Join-Path (Get-Item -LiteralPath $dir -ErrorAction Stop).FullName (Split-Path $Path -Leaf)) }
+    catch { return $Path }
+}
+
 # Serialize every read-modify-write of sessions.json through one named OS mutex, so two processes
 # (two parallel `/board work` launches, a launch racing a -RegisterSession, -Watch's teardown racing
 # a live launch) never interleave a read and a write and drop each other's row (#710 decision 5).
-# The mutex name is derived from the resolved sessions.json PATH, not a fixed string, so two
+# The mutex name is derived from the CANONICALIZED sessions.json path, not a fixed string, so two
 # different repos (two different state dirs) never block each other.
 #
 # "Global\" needs no special privilege on an ordinary desktop session; it is only rejected under a
 # locked-down Terminal Services session, where a "Local\" (session-scoped) mutex still serializes
-# every process this fleet actually spawns (they all run in the same interactive session) - so a
-# UnauthorizedAccessException falls back to that instead of failing the whole operation closed.
+# every process this fleet actually spawns - so an UnauthorizedAccessException falls back to that
+# instead of failing the whole operation closed. Accepted, bounded risk (external review round 1):
+# if two SIBLING processes of the SAME fleet run under genuinely different Windows security
+# contexts, one could pick Global and the other Local, splitting the lock. This tool has no
+# multi-user or cross-session deployment - every process in a fleet is spawned by the SAME
+# interactive user session on ONE machine - so in practice a fleet either ALL gets Global or ALL
+# falls back to Local together; failing the whole run closed here would make the lock (and every
+# -Parallel launch) simply not work on any genuinely restricted host, which is worse than this
+# narrow, currently-unreachable-by-this-tool's-own-usage risk.
 #
 # $Body runs ONCE, holding the lock, and its return value is passed through. A $Path that cannot be
 # resolved (no state dir - outside a git repo) runs $Body unlocked: there is no shared file to
@@ -54,8 +82,9 @@ function Invoke-WithSessionRegistryLock {
         [int]$TimeoutMs = 15000
     )
     if (-not $Path) { return (& $Body) }
+    $canonical = Resolve-LockPathForm $Path
     $hash = [System.BitConverter]::ToString(
-        [System.Security.Cryptography.MD5]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Path.ToLowerInvariant()))
+        [System.Security.Cryptography.MD5]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($canonical.ToLowerInvariant()))
     ).Replace('-', '')
     $name = "Global\agentic-board-sessions-$hash"
     $mutex = $null
@@ -138,7 +167,11 @@ function Get-IssueOwnedPaths {
 # Record the id the host's session-spawn tool returned for an issue already started on
 # `-Surface app` (`-RegisterSession -Issue <n> -HostSessionId <id>`). Refuses to invent a row for an
 # issue that was never started that way - the same "never invent a session" rule
-# Add-SessionPullRequest already follows for -RecordPr. Returns { Ok; Message }.
+# Add-SessionPullRequest already follows for -RecordPr - AND refuses a row that was started on a
+# DIFFERENT surface (external review, round 1): without this a `-RegisterSession` against an
+# ordinary terminal/wt/pwsh session would tag it host-managed, and Get-SessionLivePid would then
+# report it alive FOREVER by the sentinel instead of its real (and possibly long-dead) pid.
+# Returns { Ok; Message }.
 function Register-HostSession {
     param([Parameter(Mandatory)][int]$IssueNum, [Parameter(Mandatory)][string]$HostSessionId)
     $prev = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq $IssueNum }) | Select-Object -First 1
@@ -148,8 +181,20 @@ function Register-HostSession {
             Message = "el issue #$IssueNum no tiene sesion registrada (arrancalo primero con -Parallel ... -Surface app): no invento una fila para anotar el hostSessionId."
         }
     }
-    Write-SessionRegistryEntry -IssueNum $IssueNum -HostSessionId $HostSessionId
     $surface = if ($prev.PSObject.Properties['surface']) { "$($prev.surface)" } else { '' }
+    if ($surface -ne 'app') {
+        return [pscustomobject]@{
+            Ok = $false
+            Message = "la sesion del issue #$IssueNum no se arranco con -Surface app (surface actual: '$surface') - -RegisterSession solo aplica a esa surface."
+        }
+    }
+    # -Via 'app' explicit (external review, round 1): Write-SessionRegistryEntry decides whether to
+    # infer a parent-process pid BEFORE it preserves $prev.via inside its lock - an empty -Via here
+    # would have it infer a REAL pid for a row that must stay pid-less (a host-managed session has
+    # no process this script can ever see). Passing it explicitly, from the row just confirmed above
+    # to be 'app', closes that ordering gap without changing Write-SessionRegistryEntry's shared
+    # pid-inference order for every OTHER caller.
+    Write-SessionRegistryEntry -IssueNum $IssueNum -HostSessionId $HostSessionId -Via 'app'
     return [pscustomobject]@{
         Ok = $true
         Message = "hostSessionId '$HostSessionId' anotado para el issue #$IssueNum (surface $surface)."

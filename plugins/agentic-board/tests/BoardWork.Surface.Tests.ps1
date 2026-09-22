@@ -49,6 +49,32 @@ Describe 'Invoke-WithSessionRegistryLock (single-process behaviour)' {
     }
 }
 
+Describe 'Resolve-LockPathForm canonicalizes the lock name (external review round 1)' {
+    It 'the SAME real file resolves to the SAME canonical form through a short (8.3) and a long path' {
+        $repo = New-Throwaway 'CanonPathTest'
+        $long = Join-Path $repo '.agentic-board'
+        New-Item -ItemType Directory -Path $long -Force | Out-Null
+        $file = Join-Path $long 'sessions.json'
+        Set-Content -LiteralPath $file -Value '[]'
+        # Build an 8.3 short form of the SAME directory the way %TEMP%-derived paths do in the wild
+        # (this repo's own comments document Windows actually doing this - CRISTO~1 for Cristobal).
+        $fsObj = New-Object -ComObject Scripting.FileSystemObject
+        $shortDir = $fsObj.GetFolder($long).ShortPath
+        if ($shortDir -and $shortDir -ne $long) {
+            $shortFile = Join-Path $shortDir 'sessions.json'
+            (Resolve-LockPathForm $file) | Should -Be (Resolve-LockPathForm $shortFile)
+        } else {
+            Set-ItResult -Skipped -Because 'this filesystem/host did not produce a distinct 8.3 short form to compare against'
+        }
+    }
+    It 'falls back to the raw path when the parent directory cannot be resolved' {
+        Resolve-LockPathForm 'Z:\does\not\exist\sessions.json' | Should -Be 'Z:\does\not\exist\sessions.json'
+    }
+    It 'returns empty for an empty path' {
+        Resolve-LockPathForm '' | Should -Be ''
+    }
+}
+
 Describe 'sessions.json lock survives TWO REAL processes writing at once (#710 decision 5)' {
     It 'every row from both processes survives - no read-modify-write clobbers the other''s rows' {
         $repo = New-Throwaway 'lock-concurrency'
@@ -215,6 +241,34 @@ Describe 'Register-HostSession (#710 P1)' {
         $r.Message | Should -Match 'abc'
         $row.hostSessionId | Should -Be 'abc'
     }
+    # External review round 1, finding 1: Write-SessionRegistryEntry decides whether to infer a
+    # parent-process pid BEFORE it resolves $prev.via inside its lock. Register-HostSession must pass
+    # -Via 'app' explicitly, or a host-managed row would silently end up with a REAL launcher pid.
+    It 'keeps sessionPid 0 after registering - never infers the launcher/parent pid' {
+        Push-Location $script:Repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 6 -Branch 'issue-6-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r1'
+            Register-HostSession -IssueNum 6 -HostSessionId 'def' | Out-Null
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 6 })[0]
+        } finally { Pop-Location }
+        $row.sessionPid | Should -Be 0
+        $row.via | Should -Be 'app'
+    }
+    # External review round 1, finding 2: refuse to repurpose a row from a DIFFERENT surface (a
+    # normal terminal/wt/pwsh session) as host-managed - Get-SessionLivePid would then report its
+    # real, possibly long-dead pid as permanently alive via the sentinel instead.
+    It 'refuses to register a hostSessionId on a non-app-surface row' {
+        Push-Location $script:Repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 7 -Branch 'issue-7-x' -WorkPath 'C:/w' -Repo 'o/r' -SessionPid 4242 -Via 'pwsh'
+            $r = Register-HostSession -IssueNum 7 -HostSessionId 'nope'
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 7 })[0]
+        } finally { Pop-Location }
+        $r.Ok | Should -BeFalse
+        $r.Message | Should -Match "no se arranco con -Surface app"
+        "$($row.hostSessionId)" | Should -Be ''
+        $row.sessionPid | Should -Be 4242
+    }
 }
 
 Describe 'New-DispatchManifestEntry (pure)' {
@@ -331,5 +385,42 @@ Describe 'Get-SessionBriefing -HostManaged (#710 P1)' {
     It 'without -HostManaged, keeps naming the worktree path exactly as before' {
         $b = Get-SessionBriefing 55 'o/r' 'issue-55-x' 'C:/work/issue-55'
         $b | Should -Match 'on branch issue-55-x in this worktree \(C:/work/issue-55\)'
+    }
+}
+
+Describe '-Stop / -Relaunch refuse a host-managed session on the real script (external review round 1, finding 3)' {
+    # Both modes sit BEFORE the GH_TOKEN check (local-only, no network) - a fake -TokenVar never
+    # gets reached, same as the -RecordPr-on-the-real-script test in Board-Work.CrossRepo.Tests.ps1.
+    It '-Stop never hands the host-managed pid sentinel to Stop-ProcessTree' {
+        $repo = New-Throwaway 'stop-host'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 61 -Branch 'issue-61-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r1'
+            Register-HostSession -IssueNum 61 -HostSessionId 'stop-host-id' | Out-Null
+            $out = pwsh -NoProfile -File $script:Script -Stop 61 -Force -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
+        } finally { Pop-Location }
+        $out | Should -Match 'host-managed'
+        $out | Should -Not -Match 'PID 1\b'
+    }
+    It '-Relaunch never tries to kill or relaunch a host-managed session' {
+        $repo = New-Throwaway 'relaunch-host'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 62 -Branch 'issue-62-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r1'
+            Register-HostSession -IssueNum 62 -HostSessionId 'relaunch-host-id' | Out-Null
+            $out = pwsh -NoProfile -File $script:Script -Relaunch 62 -Force -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 62 })[0]
+        } finally { Pop-Location }
+        $out | Should -Match 'host-managed'
+        $row.hostSessionId | Should -Be 'relaunch-host-id' -Because 'a refused relaunch must leave the registry row untouched'
+    }
+    It '-Stop on an ordinary (non-host-managed) session is unaffected - still previews the real pid' {
+        $repo = New-Throwaway 'stop-plain'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 63 -Branch 'issue-63-x' -WorkPath $repo -Repo 'o/r' -SessionPid $PID -Via 'pwsh'
+            $out = pwsh -NoProfile -File $script:Script -Stop 63 -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
+        } finally { Pop-Location }
+        $out | Should -Not -Match 'host-managed'
     }
 }
