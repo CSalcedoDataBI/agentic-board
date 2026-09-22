@@ -41,9 +41,15 @@ function Get-HostManagedPidMarker { return [int]::MaxValue }
 # How long a DISPATCHED but not yet registered app row stays "pending" before it is treated as
 # abandoned (external review round 7). Without a bound, an agent that crashed between the dispatch
 # and -RegisterSession left a row that was permanently alive, never reaped, and refused by -Stop:
-# a ghost only a hand edit of sessions.json could remove. Thirty minutes is far longer than the
-# seconds a host takes to answer, and far shorter than a workday.
-function Get-PendingAppSessionGraceMinutes { return 30 }
+# a ghost only a hand edit of sessions.json could remove.
+#
+# TWELVE HOURS, not the thirty minutes this started at (external review round 8). The clock starts
+# at DISPATCH, and on this surface the host needs ONE CLICK PER TASK from the user - that is the
+# host constraint #710 states plainly and refuses to fake. A five-issue wave clicked through over a
+# morning, or left while its owner goes to lunch, is a perfectly ordinary dispatch; expiring it
+# would delete live work to tidy up a rare crash. Twelve hours still bounds the ghost to one
+# working day, which is all the bound was ever for.
+function Get-PendingAppSessionGraceMinutes { return 720 }
 
 # Is this app-surface row still WITHIN that window? A row with a real hostSessionId is not pending
 # at all and never asks this. An unparseable/absent stamp is treated as still pending - the same

@@ -3362,6 +3362,12 @@ if ($Stop -gt 0) {
         }
         Remove-SessionRegistryEntry -IssueNum $Stop -Outcome 'pending-dispatch-cancelled'
         Write-Host ("  #{0} fila pendiente quitada (nunca se registro con el host)." -f $Stop) -ForegroundColor Green
+        # El despacho ya habia movido el issue a In Progress y lo habia asignado. Quitar la fila es
+        # lo unico que -Stop puede hacer sin token (es un modo LOCAL por contrato), asi que decirlo
+        # es obligatorio: callarlo dejaba el board reclamado para siempre sin que nadie lo supiera
+        # (external review round 8). -Unlock es el paso que lo revierte en uno solo.
+        Write-Host ("  OJO: en el board el issue #{0} sigue En Progreso y asignado - quitar la fila no toca GitHub." -f $Stop) -ForegroundColor DarkYellow
+        Write-Host ("       Para liberarlo: /board work -Unlock {0} -ProjectNum <n>" -f $Stop) -ForegroundColor DarkGray
         exit 0
     }
     $r = Stop-ProcessTree -TargetPid ([int]$sess.sessionPid) -DryRun:(-not $Force)

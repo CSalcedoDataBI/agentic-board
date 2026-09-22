@@ -1092,3 +1092,38 @@ Describe '-Stop can clear a pending dispatch, and still refuses a registered one
         $rows.Count | Should -Be 1 -Because 'a refused stop must not remove the row either'
     }
 }
+
+Describe 'The pending window fits how the app surface is actually used (review round 8)' {
+    # The clock starts at DISPATCH, and this surface needs ONE CLICK PER TASK from the user - the
+    # host constraint #710 states plainly. A wave clicked through over a morning, or left while its
+    # owner goes to lunch, is an ordinary dispatch: a thirty-minute bound would have deleted live
+    # work to tidy up a rare crash.
+    It 'a dispatch two hours old is still pending - a human clicking through a wave is normal' {
+        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; surface = 'app'; hostSessionId = ''
+                                started = (Get-Date).AddHours(-2).ToString('yyyy-MM-dd HH:mm:ss') }
+        Get-SessionLivePid $s | Should -Be (Get-HostManagedPidMarker)
+    }
+    It 'a dispatch from yesterday is stale - the bound is one working day, not forever' {
+        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; surface = 'app'; hostSessionId = ''
+                                started = (Get-Date).AddHours(-13).ToString('yyyy-MM-dd HH:mm:ss') }
+        Get-SessionLivePid $s | Should -Be 0
+    }
+}
+
+Describe '-Stop on a pending row says what it did NOT undo (review round 8)' {
+    # The dispatch had already moved the issue to In Progress and assigned it. -Stop is a LOCAL mode
+    # by contract - no token, nothing written to GitHub - so removing the row is all it can do, and
+    # saying so is not optional: staying quiet left the board claimed forever with nobody aware.
+    It 'names the board claim it cannot release, and the one step that does' {
+        $repo = New-Throwaway 'stop-pending-says'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 74 -Branch 'issue-74-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r-say'
+            $out = pwsh -NoProfile -File $script:Script -Stop 74 -Force -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
+            $rows = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 74 })
+        } finally { Pop-Location }
+        $rows.Count | Should -Be 0
+        $out | Should -Match 'sigue En Progreso'
+        $out | Should -Match '-Unlock 74'
+    }
+}

@@ -238,9 +238,12 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
     the issue is refused instead of stamping a dead session's id onto the live row.
     Between the dispatch and that registration the row is **pending**, not finished: it stays in
     `-Sessions` (marked *pendiente de registrar*) so `-Watch` does not call the wave over before it
-    began. A dispatch never registered goes stale after 30 minutes and is cleaned up like any other
-    finished session; `-Stop <n> -Force` removes a pending row at any time, while a row the host has
-    actually answered for is still refused — that process belongs to the host, not to this tool. That id is what keeps the session visible and alive in `-Sessions`: a
+    began. A dispatch never registered goes stale after **12 hours** — long enough for a wave the
+    user clicks through over a morning, short enough to bound a crash to one working day — and is
+    then cleaned up like any other finished session. `-Stop <n> -Force` removes a pending row at any
+    time and says plainly that the board still shows the issue In Progress and assigned (stopping is
+    local and never writes to GitHub; `-Unlock <n>` is what releases it). A row the host has actually
+    answered for is still refused — that process belongs to the host, not to this tool. That id is what keeps the session visible and alive in `-Sessions`: a
     host-managed row has no PID this script can ever see, so liveness for it is never a PID check
     (completion is a later channel — a host end-signal + `Fleet-Supervisor.ps1 -Check`, #710 phase
     3). `-Surface headless` is accepted (so callers can name it) but not yet implemented — it
