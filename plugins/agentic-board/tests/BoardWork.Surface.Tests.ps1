@@ -859,3 +859,123 @@ for ($i = 0; $i -lt $Count; $i++) {
         } finally { Pop-Location }
     }
 }
+
+Describe 'Reading sessions.json never reads as empty while another process writes (review round 5)' {
+    # MEASURED before this was accepted: a writer's Set-Content holds the file EXCLUSIVELY while it
+    # rewrites it, so a read landing in that window fails - and it fails as a NON-TERMINATING error,
+    # which `catch` never sees. Get-Content printed "the process cannot access the file" to the
+    # console, returned nothing, and the caller read that as "no sessions at all": 395 of 1910
+    # concurrent reads (21%) at 60 rows. That is -Watch deciding the fleet finished while it is
+    # running, and -Stop answering "no such session" about a live one.
+    It 'every read during a continuous writer still sees the seeded rows' {
+        $repo = New-Throwaway 'read-race'
+        $seed = 40
+        $writer = Join-Path $TestDrive 'read-race-writer.ps1'
+        @'
+param([string]$RepoPath, [string]$ScriptPath, [int]$Rounds)
+Set-Location -LiteralPath $RepoPath
+$env:ABIOS_BOARDWORK_DOTSOURCE = '1'
+. $ScriptPath
+$env:ABIOS_BOARDWORK_DOTSOURCE = ''
+for ($i = 0; $i -lt $Rounds; $i++) {
+    Write-SessionRegistryEntry -IssueNum 9999 -Branch "churn-$i" -WorkPath "C:/w/9999" -Repo 'o/r' -SessionPid 24680 -Via 'pwsh'
+}
+'@ | Set-Content -LiteralPath $writer -Encoding UTF8
+
+        Push-Location $repo
+        try {
+            for ($n = 1; $n -le $seed; $n++) {
+                Write-SessionRegistryEntry -IssueNum $n -Branch "issue-$n-x" -WorkPath "C:/w/$n" -Repo 'o/r' -SessionPid (11000 + $n) -Via 'pwsh'
+            }
+            @(Read-SessionRegistryRaw).Count | Should -Be $seed -Because 'precondition: the seed rows are there before the race'
+
+            $p = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -PassThru -ArgumentList @(
+                '-NoProfile', '-File', $writer, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-Rounds', '120')
+
+            $reads = 0; $short = 0
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            while (-not $p.HasExited -and $sw.Elapsed.TotalSeconds -lt 120) {
+                $rows = @(Read-SessionRegistryRaw)
+                $reads++
+                # El escritor solo toca el issue 9999, asi que las filas sembradas SIEMPRE estan.
+                if (@($rows | Where-Object { [int]$_.issue -le $seed }).Count -ne $seed) { $short++ }
+            }
+            $p.WaitForExit(60000) | Out-Null
+            $p.HasExited | Should -BeTrue
+            $reads | Should -BeGreaterThan 20 -Because 'the race must actually have been exercised, not skipped'
+            $short | Should -Be 0 -Because "a read that lands inside a write must still see the $seed seeded rows ($short of $reads reads did not)"
+        } finally { Pop-Location }
+    }
+}
+
+Describe 'Register-HostSession refuses an id from an older run (review round 5)' {
+    # A hostSessionId is scoped to ONE run. A registration that arrives LATE - the host answered
+    # slowly, or the agent got to it after a newer wave had already re-dispatched the same issue -
+    # would otherwise stamp the old run's id onto the new run's row, and that row then reads as a
+    # live host session that does not exist. The manifest carries the runId precisely so the
+    # registration can be checked against it.
+    It 'rejects a registration whose runId is not the row current run' {
+        $repo = New-Throwaway 'register-wrong-run'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 98 -Branch 'issue-98-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-NEW'
+            $r = Register-HostSession -IssueNum 98 -HostSessionId 'id-from-old-wave' -RunId 'run-OLD'
+            $r.Ok      | Should -BeFalse
+            $r.Message | Should -Match 'otra corrida'
+            $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 98 })[0]
+            $row.hostSessionId | Should -BeNullOrEmpty -Because 'a refused registration must leave the row untouched'
+        } finally { Pop-Location }
+    }
+    It 'accepts it when the runId matches' {
+        $repo = New-Throwaway 'register-right-run'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 99 -Branch 'issue-99-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-NEW'
+            $r = Register-HostSession -IssueNum 99 -HostSessionId 'id-current' -RunId 'run-NEW'
+            $r.Ok | Should -BeTrue
+            @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 99 })[0].hostSessionId | Should -Be 'id-current'
+        } finally { Pop-Location }
+    }
+    It 'still accepts a caller that has no runId to give (backwards compatible)' {
+        $repo = New-Throwaway 'register-no-run'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 100 -Branch 'issue-100-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-NEW'
+            (Register-HostSession -IssueNum 100 -HostSessionId 'id-no-run').Ok | Should -BeTrue
+        } finally { Pop-Location }
+    }
+}
+
+Describe 'An early failure in -Surface app -Json never lands on stdout (review round 5)' -Tag 'Wired' {
+    # The shadow used to be installed inside the -Parallel block, AFTER validation and the token
+    # check. A failure before that point - no token, a bad option combination - still printed human
+    # text to stdout through the top-level trap, so the one caller that cannot recover from it (a
+    # machine parsing the manifest) got a broken document instead of an empty one plus a reason.
+    It 'a missing token reports on stderr and leaves stdout empty, not human text' {
+        $repo = Join-Path $TestDrive 'early-fail'
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        Push-Location $repo
+        git init -q -b main 2>&1 | Out-Null
+        git config user.email t@example.com; git config user.name t; git config commit.gpgsign false
+        git remote add origin https://github.com/o/r.git
+        Set-Content -LiteralPath README.md -Value 'x'; git add README.md; git commit -q -m 'chore: first' 2>&1 | Out-Null
+        Pop-Location
+
+        $outFile = Join-Path $TestDrive 'early.out'; $errFile = Join-Path $TestDrive 'early.err'
+        $savedTok = $env:GH_TOKEN
+        $env:GH_TOKEN = ''
+        try {
+            Push-Location $repo
+            $p = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
+                -ArgumentList @('-NoProfile', '-File', "$script:Script", '-Parallel', '902', '-Surface', 'app', '-Json',
+                                '-ProjectNum', '13', '-Owner', 'o', '-TokenVar', 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST')
+            Pop-Location
+        } finally { $env:GH_TOKEN = $savedTok }
+
+        $out = (Get-Content -LiteralPath $outFile -Raw)
+        $err = (Get-Content -LiteralPath $errFile -Raw)
+        $p.ExitCode | Should -Not -Be 0 -Because 'the run failed'
+        $out | Should -Not -Match 'ERROR:' -Because "stdout must stay machine-readable, but it was:`n$out"
+        $err | Should -Match 'ERROR:' -Because "the reason must reach stderr, but stderr was:`n$err"
+    }
+}

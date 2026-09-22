@@ -233,7 +233,9 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
     asked for (a partial wave exits 0; the manifest names exactly what it dispatched). Hand each entry to the host's
     session-spawn tool (this needs ONE click per task — a host constraint, said plainly, never
     faked), then record the id it returns: `Board-Work.ps1 -RegisterSession -Issue <n>
-    -HostSessionId <id>`. That id is what keeps the session visible and alive in `-Sessions`: a
+    -HostSessionId <id> -RunId <the runId of that same manifest entry>`. Pass the `runId`: a
+    session id belongs to ONE run, and a registration that arrives after a newer wave re-dispatched
+    the issue is refused instead of stamping a dead session's id onto the live row. That id is what keeps the session visible and alive in `-Sessions`: a
     host-managed row has no PID this script can ever see, so liveness for it is never a PID check
     (completion is a later channel — a host end-signal + `Fleet-Supervisor.ps1 -Check`, #710 phase
     3). `-Surface headless` is accepted (so callers can name it) but not yet implemented — it

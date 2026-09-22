@@ -189,7 +189,16 @@ function Get-IssueOwnedPaths {
 # report it alive FOREVER by the sentinel instead of its real (and possibly long-dead) pid.
 # Returns { Ok; Message }.
 function Register-HostSession {
-    param([Parameter(Mandatory)][int]$IssueNum, [Parameter(Mandatory)][string]$HostSessionId)
+    param(
+        [Parameter(Mandatory)][int]$IssueNum,
+        [Parameter(Mandatory)][string]$HostSessionId,
+        # The manifest entry's runId (external review round 5). A hostSessionId is scoped to ONE
+        # run, so a registration that arrives LATE - the host answered slowly, the agent got round
+        # to it after a newer wave re-dispatched the same issue - must not stamp its id onto the
+        # newer run's row. Optional for compatibility with a caller that has no runId to hand, and
+        # verified whenever it is supplied; the manifest always carries one, so the skill passes it.
+        [string]$RunId = ''
+    )
     # Read, VALIDATE and write as ONE critical section (external review round 2). The check used to
     # sit outside the lock: between "this row exists and its surface is app" and the write, another
     # process could delete the row (auto-clean, -Stop) or replace it with an ordinary terminal-
@@ -212,6 +221,13 @@ function Register-HostSession {
         return [pscustomobject]@{
             Ok = $false
             Message = "la sesion del issue #$IssueNum no se arranco con -Surface app (surface actual: '$surface') - -RegisterSession solo aplica a esa surface."
+        }
+    }
+    $rowRunId = if ($prev.PSObject.Properties['runId']) { "$($prev.runId)" } else { '' }
+    if ($RunId -and $RunId -ne $rowRunId) {
+        return [pscustomobject]@{
+            Ok = $false
+            Message = "el issue #$IssueNum ya pertenece a otra corrida (la fila dice '$rowRunId', tu manifiesto dice '$RunId'): no anoto un id de sesion de una corrida anterior sobre la actual."
         }
     }
     # -Via 'app' explicit (external review, round 1): Write-SessionRegistryEntry decides whether to

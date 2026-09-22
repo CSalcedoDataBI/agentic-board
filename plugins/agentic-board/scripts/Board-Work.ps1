@@ -193,6 +193,10 @@ param(
     [switch]$RegisterSession,
     [int]   $Issue         = 0,
     [string]$HostSessionId = "",
+    # With -RegisterSession: the runId from the SAME manifest entry this id belongs to. Optional,
+    # and verified when given: a registration that arrives after a newer wave re-dispatched the
+    # issue must not stamp an old run's session id onto the new row.
+    [string]$RunId         = "",
     [switch]$Fleet,
     [switch]$Sessions,
     [switch]$Watch,
@@ -747,7 +751,12 @@ function Get-SessionRegistryPath {
 function Read-SessionRegistry {
     $p = Get-SessionRegistryPath -NoCreate
     if (-not $p -or -not (Test-Path $p)) { return @() }
-    try { $entries = @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return @() }
+    # Locked and fail-loud for the same measured reason as Read-SessionRegistryRaw - see its header.
+    $entries = Invoke-WithSessionRegistryLock -Path $p -Body {
+        try { return @(Get-Content $p -Raw -ErrorAction Stop | ConvertFrom-Json) } catch { return $null }
+    }
+    if ($null -eq $entries) { return @() }
+    $entries = @($entries)
     # Filter out entries whose session process is dead - callers only ever want live
     # sessions. This is a READ-ONLY view: it does NOT rewrite the file. The old version
     # persisted the pruned list on every read, which silently deleted a dead-PID session
@@ -2738,10 +2747,22 @@ function Get-SessionLiveStatus {
 # loop must use this: a dead host PID is a COMPLETION signal (#135), so pruning it before the
 # loop sees it would drop the session before -AutoClean could remove its worktree/branch
 # (Codex review, PR #269). Returns @() when the registry is absent/unreadable.
+# Reads take the lock too (external review round 5, then MEASURED). A writer's Set-Content holds the
+# file exclusively while it rewrites it, so a read that lands in that window fails - and it fails as
+# a NON-TERMINATING error, which `catch` never sees: Get-Content printed "the process cannot access
+# the file" straight to the user's console, returned nothing, and the caller read that as "no
+# sessions at all". Measured on this machine at 60 rows: 395 of 1910 concurrent reads, 21%, came
+# back without the data. That is -Watch deciding the fleet has finished while it is running, and
+# -Stop / -Relaunch answering "that session does not exist" about a live one. -ErrorAction Stop
+# makes any remaining failure a real exception the catch can answer for, instead of console noise
+# plus a silently empty list. The mutex is re-entrant for the same thread, so the readers that
+# already run inside a writer's lock are unaffected.
 function Read-SessionRegistryRaw {
     $p = Get-SessionRegistryPath -NoCreate
     if (-not $p -or -not (Test-Path $p)) { return @() }
-    try { return @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return @() }
+    return (Invoke-WithSessionRegistryLock -Path $p -Body {
+        try { return @(Get-Content $p -Raw -ErrorAction Stop | ConvertFrom-Json) } catch { return @() }
+    })
 }
 
 # Remove one issue's entry from sessions.json (raw read, so a dead-PID pruning pass does
@@ -3230,6 +3251,43 @@ function Invoke-BatchIssueStart {
 # =======================================================================
 if ($env:ABIOS_BOARDWORK_DOTSOURCE) { return }
 
+# -Surface app -Json promises RAW JSON on stdout, for the agent to hand to the host's
+# session-spawn tool - and it was not delivering it (external review round 2, then measured):
+# `pwsh -File Board-Work.ps1 ... -Json > out.json` from any external shell captured every batch
+# header and status line IN FRONT of the manifest, so ConvertFrom-Json failed on it. Write-Host
+# writes to the information stream, but a NATIVE redirect takes the process's stdout HANDLE,
+# which is where the host renders that stream - PowerShell's own stream separation never gets a
+# say. Shadowing Write-Host for this one flag combination reaches it everywhere, including the
+# nested Invoke-BatchIssueStart / Invoke-IssueStart calls (measured: function lookup walks the
+# scope chain, so the script-scope definition wins for them too).
+#
+# It FORWARDS to stderr rather than swallowing (external review round 3, which caught the first
+# version doing real damage): Invoke-BatchIssueStart reports a failed start with Write-Host, so
+# a silent shadow turned "issue #N could not start" into nothing at all - no message anywhere,
+# the issue quietly missing from the manifest. Forwarding keeps the standard CLI split instead:
+# machine output on stdout, everything a human would read on stderr, colours dropped.
+#
+# It is installed HERE, before the trap and before every validation and the token check (external
+# review round 5): installed later, an early failure - no token, mutually exclusive options - still
+# printed human text to stdout through the trap and broke the raw-JSON contract for the very
+# callers that cannot recover from it.
+if ($Surface -eq 'app' -and $Json) {
+    function Write-Host {
+        param(
+            [Parameter(Position = 0, ValueFromRemainingArguments = $true)] $Object,
+            $ForegroundColor, $BackgroundColor, [switch]$NoNewline, $Separator
+        )
+        # -Separator and -NoNewline are honoured rather than ignored (external review round 4):
+        # nothing in this path uses them today, but a future progress line that did would have
+        # been silently reformatted. [Console]::Error is the process's real stderr, which is
+        # exactly the destination here - this shadow only ever exists in a `pwsh -File` run
+        # started by a consumer that captures the two streams separately.
+        $sep = if ($null -ne $Separator) { "$Separator" } else { ' ' }
+        $text = ($Object -join $sep)
+        if ($NoNewline) { [Console]::Error.Write($text) } else { [Console]::Error.WriteLine($text) }
+    }
+}
+
 # ── Top-level error boundary (#485): any unhandled exception becomes a clean
 # one-line message on stdout so the caller always sees what failed — never a
 # silent exit 1 or a raw PowerShell stack dump going to stderr only.
@@ -3357,7 +3415,7 @@ if ($RecordPr) {
 if ($RegisterSession) {
     if ($Issue -le 0)        { Write-Host "  -RegisterSession necesita -Issue <numero>." -ForegroundColor Red; exit 1 }
     if (-not $HostSessionId) { Write-Host "  -RegisterSession necesita -HostSessionId <id> (el id que devolvio la herramienta del host)." -ForegroundColor Red; exit 1 }
-    $rec = Register-HostSession -IssueNum $Issue -HostSessionId $HostSessionId
+    $rec = Register-HostSession -IssueNum $Issue -HostSessionId $HostSessionId -RunId $RunId
     if (-not $rec.Ok) { Write-Host "  NO registrado: $($rec.Message)" -ForegroundColor Red; exit 1 }
     Write-Host "  OK  $($rec.Message)" -ForegroundColor Green
     exit 0
@@ -4060,40 +4118,6 @@ if ($Parallel.Count -gt 0) {
         throw "-Surface headless todavia no esta implementado (fases posteriores de #710). Usa -Surface terminal (por defecto) o -Surface app."
     }
     $isAppSurface = ($Surface -eq 'app')
-
-    # -Surface app -Json promises RAW JSON on stdout, for the agent to hand to the host's
-    # session-spawn tool - and it was not delivering it (external review round 2, then measured):
-    # `pwsh -File Board-Work.ps1 ... -Json > out.json` from any external shell captured every batch
-    # header and status line IN FRONT of the manifest, so ConvertFrom-Json failed on it. Write-Host
-    # writes to the information stream, but a NATIVE redirect takes the process's stdout HANDLE,
-    # which is where the host renders that stream - PowerShell's own stream separation never gets a
-    # say. Shadowing Write-Host for this one flag combination reaches it everywhere, including the
-    # nested Invoke-BatchIssueStart / Invoke-IssueStart calls (measured: function lookup walks the
-    # scope chain, so the script-scope definition wins for them too).
-    #
-    # It FORWARDS to stderr rather than swallowing (external review round 3, which caught the first
-    # version doing real damage): Invoke-BatchIssueStart reports a failed start with Write-Host, so
-    # a silent shadow turned "issue #N could not start" into nothing at all - no message anywhere,
-    # the issue quietly missing from the manifest. Forwarding keeps the standard CLI split instead:
-    # machine output on stdout, everything a human would read on stderr, colours dropped. The real
-    # cmdlet's parameters are declared so -ForegroundColor and friends bind and are discarded
-    # instead of landing in the message text (measured).
-    if ($isAppSurface -and $Json) {
-        function Write-Host {
-            param(
-                [Parameter(Position = 0, ValueFromRemainingArguments = $true)] $Object,
-                $ForegroundColor, $BackgroundColor, [switch]$NoNewline, $Separator
-            )
-            # -Separator and -NoNewline are honoured rather than ignored (external review round 4):
-            # nothing in this path uses them today, but a future progress line that did would have
-            # been silently reformatted. [Console]::Error is the process's real stderr, which is
-            # exactly the destination here - this shadow only ever exists in a `pwsh -File` run
-            # started by a consumer that captures the two streams separately.
-            $sep = if ($null -ne $Separator) { "$Separator" } else { ' ' }
-            $text = ($Object -join $sep)
-            if ($NoNewline) { [Console]::Error.Write($text) } else { [Console]::Error.WriteLine($text) }
-        }
-    }
 
     Write-Host "=== Parallel batch-start (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
     Write-Host ("  Issues: {0}" -f ($queue -join ', ')) -ForegroundColor DarkGray
