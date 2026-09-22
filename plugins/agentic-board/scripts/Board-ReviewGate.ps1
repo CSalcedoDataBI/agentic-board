@@ -46,6 +46,11 @@
                 no code change can clear it, so a caller must stop re-pushing and
                 report `not evaluated` instead of burning its budget. A real failing
                 check, or any other blocker, keeps exit 1.
+
+    Multi-PR exit codes (#487, -PullRequests / -Issue only; the single -PR codes above are
+    untouched): the RUN exits 0 only when every PR passed; 1 when any PR is blocked; 4 when any PR
+    could not be read/classified (or none was given) and nothing is blocked; 3 when a PR was
+    CI-not-evaluated; 2 when a PR is unreviewed. Ranking, worst first: 1, 4, 3, 2, 0.
            2 -> gate UNREVIEWED (#510): nothing is wrong, but nobody looked.
                 Distinct from 0 on purpose - `claude-review` reported a passing
                 check having left zero reviews, and a caller reading only the
@@ -63,7 +68,20 @@
     owner/name of the repository. Mandatory.
 
 .PARAMETER PR
-    Pull request number to gate. Mandatory unless -InstallRuleset.
+    Pull request number to gate. Mandatory unless -InstallRuleset (or the multi-PR form below).
+
+.PARAMETER PullRequests
+    Multi-PR form (#487): gate SEVERAL PRs, each written `owner/name#n` (or a bare number, taken in
+    -Repo). Every PR is judged by the SAME single-PR gate described here (it runs as its own process
+    with your switches forwarded), so a PR can only ever be judged as strictly as before; the run then
+    prints one verdict per PR and a RUN verdict: all pass = pass; any block = block; anything that
+    could not be read = unknown - never a pass. Cannot be combined with -PR, -InstallRuleset or
+    -RecordReview (record a review one PR at a time). See "Multi-PR exit codes" below.
+
+.PARAMETER Issue
+    Multi-PR form (#487): gate every PR recorded for this issue's session (the `prs` field that
+    `Board-Work.ps1 -RecordPr` writes to sessions.json). An issue with no session or no recorded PR
+    is an unknown (exit 4), never a pass.
 
 .PARAMETER InstallRuleset
     Install the require-PR ruleset on the repo's default branch (idempotent).
@@ -140,6 +158,8 @@
 .EXAMPLE
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -InstallRuleset
+    .\Board-ReviewGate.ps1 -PullRequests 'o/site-a#5','o/site-b#9'
+    .\Board-ReviewGate.ps1 -Issue 271
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -EnableCopilot
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RecordReview -Reviewer 'codex/gpt-5.5' -Summary '4 rondas, 12 hallazgos, todos corregidos'
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -AllowUnreviewed
@@ -147,10 +167,19 @@
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RecordReview -Reviewer 'codex-rescue' -Summary '...' -RolloutPath 'C:\Users\me\.codex\sessions\2026\08\20\rollout-...-01a02004….jsonl' -ThreadId '01a02004…'
     .\Board-ReviewGate.ps1 -Repo CSalcedoDataBI/agentic-board -PR 50 -RequireIndependentReviewer -PreferCodexRescue
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Single')]
 param(
-    [Parameter(Mandatory)][string]$Repo,
+    # Two parameter sets, so the classic `-Repo x -PR n` call binds exactly as before ('Single' is the
+    # default and still requires -Repo) and the multi-PR selectors (#487) cannot be mixed with -PR.
+    [Parameter(ParameterSetName = 'Single', Mandatory)]
+    [Parameter(ParameterSetName = 'Multi')]
+    [string]$Repo = "",
+    [Parameter(ParameterSetName = 'Single')]
     [int]   $PR = 0,
+    [Parameter(ParameterSetName = 'Multi')]
+    [string[]]$PullRequests = @(),
+    [Parameter(ParameterSetName = 'Multi')]
+    [int]   $Issue = 0,
     [switch]$InstallRuleset,
     [int]   $TimeoutMinutes = 6,
     # Ceiling for the CI wait (#562). The old `--watch` could hang forever on a queued workflow.
@@ -637,8 +666,111 @@ function Test-NoChecksIsBenign {
     return ($SecondsSinceFirstSeen -ge $GraceSeconds)
 }
 
+# ── Multi-PR mode (#487) ───────────────────────────────────────────────────────
+# One verdict per PR plus a run verdict. This block ONLY orchestrates: each PR is judged by the
+# unchanged single-PR gate below, run as its own process with the caller's switches forwarded, so
+# a PR the single gate blocks is a block here too. The aggregation can only escalate.
+. (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
+. (Join-Path $PSScriptRoot 'BoardWork.CrossRepo.ps1')
+$script:GateScriptPath = $PSCommandPath
+
+# The ONE place the single-PR gate is spawned (a seam: tests replace it). Returns its exit code;
+# $null when the process could not be started. The child's output streams straight to the host.
+function Invoke-GateChild {
+    param([string[]]$ChildArgs)
+    $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    try {
+        & $exe -NoProfile -File $script:GateScriptPath @ChildArgs | Out-Host
+        return $LASTEXITCODE
+    } catch { return $null }
+}
+
+# Gate several PRs and return the RUN exit code. -Bound = the caller's $PSBoundParameters.
+function Invoke-GateMulti {
+    param(
+        [string[]]$Specs = @(), [int]$Issue = 0, [string]$DefaultRepo = '',
+        [System.Collections.IDictionary]$Bound = @{}, [string]$StateDir = ''
+    )
+    if ($Issue -gt 0 -and @($Specs).Count -gt 0) {
+        Write-Host "Usa -PullRequests O -Issue, no los dos: no se cual de las dos listas es la buena." -ForegroundColor Red
+        return 4
+    }
+    $specList = @($Specs)
+    if ($Issue -gt 0) {
+        $p = if ($StateDir) { Join-Path $StateDir 'sessions.json' } else { '' }
+        if (-not $p -or -not (Test-Path -LiteralPath $p)) {
+            Write-Host "No hay registro de sesiones (sessions.json): el issue #$Issue no tiene PRs anotados, asi que no hay nada que aprobar." -ForegroundColor Red
+            return 4
+        }
+        try { $entries = @(Get-Content -LiteralPath $p -Raw | ConvertFrom-Json) }
+        catch { Write-Host "sessions.json ilegible ($($_.Exception.Message)): no puedo saber que PRs tiene el issue #$Issue." -ForegroundColor Red; return 4 }
+        $specList = @(Get-RecordedPullRequests -Entries $entries -Issue $Issue)
+        if ($specList.Count -eq 0) {
+            Write-Host "El issue #$Issue no tiene ningun PR anotado (Board-Work -RecordPr): no hay nada que aprobar." -ForegroundColor Red
+            return 4
+        }
+    }
+    if ($specList.Count -eq 0) { Write-Host "No hay ningun PR que revisar." -ForegroundColor Red; return 4 }
+
+    $refs = @(); $seen = @{}
+    foreach ($s in $specList) {
+        $r = Resolve-GatePullRequest -Spec $s -DefaultRepo $DefaultRepo
+        if (-not $r) {
+            Write-Host "No entiendo '$s': espero owner/name#numero (o un numero con -Repo)." -ForegroundColor Red
+            return 4
+        }
+        $k = "$($r.Repo)#$($r.Number)".ToLowerInvariant()
+        if ($seen.ContainsKey($k)) { continue }
+        $seen[$k] = $true; $refs += $r
+    }
+
+    $rows = @(); $i = 0
+    foreach ($r in $refs) {
+        $i++
+        Write-Host ""
+        Write-Host ("=== [{0}/{1}] {2}#{3} ===" -f $i, $refs.Count, $r.Repo, $r.Number) -ForegroundColor Cyan
+        $code = Invoke-GateChild -ChildArgs (Get-GateChildArgs -Repo $r.Repo -Number $r.Number -Bound $Bound)
+        $rows += [pscustomobject]@{ Ref = "$($r.Repo)#$($r.Number)"; Code = $code; Verdict = (Get-GateVerdictName $code) }
+    }
+
+    $run = Get-GateRunVerdict -Verdicts @($rows | ForEach-Object { $_.Verdict })
+    Write-Host ""
+    Write-Host "===== VEREDICTO POR PR =====" -ForegroundColor Cyan
+    foreach ($row in $rows) {
+        $label = switch ($row.Verdict) {
+            'pass'             { 'APROBADO' }
+            'block'            { 'BLOQUEADO' }
+            'unreviewed'       { 'SIN REVISAR' }
+            'ci-not-evaluated' { 'CI NO SE EVALUO' }
+            default            { 'DESCONOCIDO (no se pudo saber, no cuenta como aprobado)' }
+        }
+        $color = if ($row.Verdict -eq 'pass') { 'Green' } elseif ($row.Verdict -eq 'block') { 'Red' } else { 'Yellow' }
+        Write-Host ("  {0,-40} {1}  (exit {2})" -f $row.Ref, $label, $(if ($null -eq $row.Code) { '?' } else { $row.Code })) -ForegroundColor $color
+    }
+    $passed = @($rows | Where-Object { $_.Verdict -eq 'pass' }).Count
+    Write-Host ""
+    $runLabel = switch ($run.Name) {
+        'pass'             { "GATE APROBADO: los $($rows.Count) PR(s) pasaron." }
+        'block'            { "GATE BLOQUEADO: al menos un PR esta bloqueado ($passed de $($rows.Count) pasaron)." }
+        'ci-not-evaluated' { "GATE BLOQUEADO, CI NO EVALUADO en al menos un PR ($passed de $($rows.Count) pasaron)." }
+        'unreviewed'       { "RUN SIN REVISAR: al menos un PR no tiene revision ($passed de $($rows.Count) pasaron)." }
+        default            { "GATE DESCONOCIDO: no pude saber el estado de al menos un PR ($passed de $($rows.Count) pasaron). No es un aprobado." }
+    }
+    Write-Host $runLabel -ForegroundColor $(if ($run.Name -eq 'pass') { 'Green' } elseif ($run.Name -eq 'block') { 'Red' } else { 'Yellow' })
+    return $run.ExitCode
+}
+
 # Dot-source guard: tests set $env:ABIOS_REVIEWGATE_DOTSOURCE to load the pure helper only.
 if ($env:ABIOS_REVIEWGATE_DOTSOURCE) { return }
+
+if ($PSCmdlet.ParameterSetName -eq 'Multi') {
+    if ($InstallRuleset -or $RecordReview) {
+        Write-Host "-PullRequests / -Issue no se combinan con -InstallRuleset ni -RecordReview: registra cada revision PR por PR." -ForegroundColor Red
+        exit 4
+    }
+    $multiState = Get-AbiosStateDir -NoCreate
+    exit (Invoke-GateMulti -Specs $PullRequests -Issue $Issue -DefaultRepo $Repo -Bound $PSBoundParameters -StateDir "$multiState")
+}
 
 # gh must fail closed on the sites that DRIVE the gate verdict and the ruleset write (#303/#316):
 # a false-empty review read reads as "0 unresolved -> GATE PASSED" and authorizes a merge. The
