@@ -141,6 +141,11 @@ function Add-SessionPullRequest {
     if (-not $p -or -not (Test-Path -LiteralPath $p)) {
         return [pscustomobject]@{ Ok = $false; Message = "no hay registro de sesiones (sessions.json): el issue #$IssueNum no tiene sesion registrada donde anotar el PR." }
     }
+    # One critical section, like every other read-modify-write of sessions.json (#710 decision 5,
+    # external review round 4 - this was the one writer still outside the lock). Unlocked, a session
+    # recording its PR while -RegisterSession was adding the host id wrote back the pre-registration
+    # snapshot and ERASED hostSessionId, after which the app session stopped reading as live.
+    return (Invoke-WithSessionRegistryLock -Path $p -Body {
     try { $entries = @(Get-Content -LiteralPath $p -Raw | ConvertFrom-Json) }
     catch { return [pscustomobject]@{ Ok = $false; Message = "sessions.json ilegible ($($_.Exception.Message)): no lo toco." } }
     $mine = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
@@ -157,6 +162,7 @@ function Add-SessionPullRequest {
     }
     $out | ConvertTo-Json -Depth 5 -AsArray | Set-Content -LiteralPath $p
     [pscustomobject]@{ Ok = $true; Message = "PR $Repo#$Number anotado en la sesion del issue #$IssueNum." }
+    })
 }
 
 # ------------------------------------------------------------------------- dashboard

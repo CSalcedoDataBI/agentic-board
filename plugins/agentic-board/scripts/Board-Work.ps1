@@ -71,7 +71,29 @@
     With -Parallel: after starting each worktree, spawn one visible Claude
     session per worktree (Windows Terminal tab, or a pwsh window as fallback),
     each briefed to work its own issue to a PR + review gate. With -DryRun it
-    only previews the launch commands.
+    only previews the launch commands. Ignored on -Surface app (see -Surface).
+
+.PARAMETER Surface
+    With -Parallel: where each issue's session runs (#710). 'terminal' (default) is
+    today's wt-tab/pwsh-window behaviour. 'app' creates NO worktree and spawns NO
+    process - it emits a dispatch manifest (-Json for raw JSON) for the agent to hand
+    to the host's own session-spawn tool, one entry per issue with issue/title/repo/
+    branch/briefing/ownedPaths/runId. Register the id it returns with -RegisterSession.
+    'headless' is accepted but not yet implemented (throws rather than silently
+    falling back to a visible terminal).
+
+.PARAMETER Json
+    With -Parallel -Surface app: print the dispatch manifest as raw JSON.
+
+.PARAMETER RegisterSession
+    Record the id the host's session-spawn tool returned for an issue already started
+    on -Surface app. Requires -Issue and -HostSessionId. Local only - no token.
+
+.PARAMETER Issue
+    With -RegisterSession: the issue number whose session is being registered.
+
+.PARAMETER HostSessionId
+    With -RegisterSession: the id the host's session-spawn tool returned.
 
 .PARAMETER Sessions
     Monitor mode: list the LIVE parallel-session fleet from
@@ -154,6 +176,27 @@ param(
     [ValidateSet('on', 'off', 'auto', 'show')]
     [string] $PreferGroupedPRs = '',
     [switch]$Launch,
+    # Fleet launch surface (#710 P1): 'terminal' (default) is today's wt-tab/pwsh-window behaviour,
+    # byte-for-byte. 'app' does everything -Parallel does today EXCEPT create a worktree and EXCEPT
+    # spawn a process - it emits a dispatch manifest instead (one entry per issue, self-contained),
+    # for the agent to hand to the host's OWN session-spawn tool (a script cannot open one). 'headless'
+    # is accepted here (so callers can name it) but not yet dispatchable - implemented in a later
+    # phase; see BoardWork.Surface.ps1's header.
+    [ValidateSet('terminal', 'app', 'headless')]
+    [string]$Surface = 'terminal',
+    # With -Parallel -Surface app: emit the dispatch manifest as raw JSON on stdout instead of a
+    # human-readable listing, so the agent can parse it directly.
+    [switch]$Json,
+    # Record the id the host's session-spawn tool returned for an issue already started on
+    # -Surface app (requires -Issue and -HostSessionId). Local only: no token, nothing written to
+    # GitHub, refuses to invent a row for an issue that was never started that way.
+    [switch]$RegisterSession,
+    [int]   $Issue         = 0,
+    [string]$HostSessionId = "",
+    # With -RegisterSession: the runId from the SAME manifest entry this id belongs to. Optional,
+    # and verified when given: a registration that arrives after a newer wave re-dispatched the
+    # issue must not stamp an old run's session id onto the new row.
+    [string]$RunId         = "",
     [switch]$Fleet,
     [switch]$Sessions,
     [switch]$Watch,
@@ -247,6 +290,10 @@ $ErrorActionPreference = "Stop"
 # The "state of play" printed before the pending list (#660): what is in flight, stale, off-board
 # or due, read from the executing sources rather than from the board's own opinion.
 . (Join-Path $PSScriptRoot 'BoardWork.StateOfPlay.ps1')
+
+# Fleet launch "surfaces" (#710 P1): the sessions.json lock, the dispatch-manifest builder for
+# -Surface app, and -RegisterSession's registry write.
+. (Join-Path $PSScriptRoot 'BoardWork.Surface.ps1')
 
 # NOTE: the GH_TOKEN check lives in the main-entry guard below (after every function
 # is defined) so the pure helpers can be dot-sourced for unit tests without a token
@@ -687,18 +734,29 @@ function Show-StatusSchemaWarning([string[]]$OptionNames, [int]$num) {
 # clone's .git (git rev-parse --git-common-dir) so every worktree sees the same one.
 # Session identity = the PARENT process of this script (the long-lived Claude/host
 # process), because the script's own PID dies as soon as it returns.
-function Get-AbiosDir { Get-AbiosStateDir }
+# -NoCreate: don't create .agentic-board/ just to answer "what is its path" (#710 decision 6) - a
+# read-only listing (-Sessions, -Watch's poll) used to create the state dir on every call, which
+# left an empty .agentic-board/ behind after a plain "is anything running?" check outside any real
+# session. Every caller that only READS passes -NoCreate; a caller that is about to WRITE (create the
+# registry row a launch/start needs) omits it, same as before.
+function Get-AbiosDir { param([switch]$NoCreate) Get-AbiosStateDir -NoCreate:$NoCreate }
 
 function Get-SessionRegistryPath {
-    $dir = Get-AbiosDir
+    param([switch]$NoCreate)
+    $dir = Get-AbiosDir -NoCreate:$NoCreate
     if (-not $dir) { return $null }
     return (Join-Path $dir "sessions.json")
 }
 
 function Read-SessionRegistry {
-    $p = Get-SessionRegistryPath
+    $p = Get-SessionRegistryPath -NoCreate
     if (-not $p -or -not (Test-Path $p)) { return @() }
-    try { $entries = @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return @() }
+    # Locked and fail-loud for the same measured reason as Read-SessionRegistryRaw - see its header.
+    $entries = Invoke-WithSessionRegistryLock -Path $p -Body {
+        try { return @(Get-Content $p -Raw -ErrorAction Stop | ConvertFrom-Json) } catch { return $null }
+    }
+    if ($null -eq $entries) { return @() }
+    $entries = @($entries)
     # Filter out entries whose session process is dead - callers only ever want live
     # sessions. This is a READ-ONLY view: it does NOT rewrite the file. The old version
     # persisted the pruned list on every read, which silently deleted a dead-PID session
@@ -760,8 +818,24 @@ function Test-SessionStartConsistent {
 #     the launching shell's parent). It is found by its tab shell instead: the `pwsh` running
 #     launch-<issue>.ps1 (Find-WtTabShell, #413). That covers an entry registered before the tab
 #     shell was up, and one whose stored PID was recycled.
+#  3. A host-managed session (`-Surface app`/`headless`, #710 P1) has a hostSessionId once
+#     -RegisterSession ran, and NO pid this script can ever see - the host owns the process, not this
+#     script's launch path. Reporting it "dead" the moment it has no pid is exactly the #520 bug for
+#     these sessions: it would prune a session that is really running (Read-SessionRegistry) or read
+#     its absent pid as "process terminated" (Get-SessionLiveStatus). Completion for these is a later
+#     channel (a host end-signal + Fleet-Supervisor, #710 phase 3), never a pid check - so report it
+#     permanently alive here instead. The marker is NOT a real process id (Get-HostManagedPidMarker).
 function Get-SessionLivePid {
     param([object]$Session)
+    # A row whose process belongs to the host is never judged by a pid - but a DISPATCHED row that
+    # was never registered is only pending for a bounded time (external review round 7). Past that
+    # window it reads as dead like anything else, so -AutoClean can remove the leftover instead of
+    # leaving a ghost nothing can clear.
+    if (Test-HostManagedSession $Session) {
+        if ("$($Session.hostSessionId)".Trim()) { return Get-HostManagedPidMarker }
+        if (Test-PendingAppSessionFresh -Session $Session) { return Get-HostManagedPidMarker }
+        return 0
+    }
     $stored = 0
     try { $stored = [int]$Session.sessionPid } catch { }
     $isWt = ("$($Session.via)" -eq 'wt' -and $Session.issue)
@@ -862,7 +936,18 @@ function Write-SessionRegistryEntry {
         [int]$SessionPid = 0, [string]$Via = "", [string]$Cli = 'claude',
         [string]$FleetSession = '',
         # Cross-repo (#487): where the issue's work actually goes. Absent = the classic single repo.
-        [string[]]$TargetRepos = @(), [bool]$CrossRepo = $false
+        [string[]]$TargetRepos = @(), [bool]$CrossRepo = $false,
+        # Fleet surfaces (#710 P1): where/how this session runs. 'app'/'headless' rows have no pid
+        # this script can see - HostSessionId is set later by -RegisterSession, once the agent has
+        # actually handed the manifest entry to the host and the host answered with an id.
+        [string]$Surface = '', [string]$HostSessionId = '', [string]$RunId = '',
+        # UPDATE an existing row or do nothing - never create one (external review round 2).
+        # -RegisterSession validates the row it is about to annotate; without this, a row that
+        # disappeared between that check and this write (auto-clean, -Stop, a sibling fleet process)
+        # was silently APPENDED back as a ghost: empty repo/branch/workPath, sessionPid 0 and a
+        # hostSessionId - which Get-SessionLivePid then reports alive FOREVER by the sentinel.
+        # The guard lives INSIDE the lock, so no ordering of that race can produce one.
+        [switch]$UpdateOnly
     )
     $p = Get-SessionRegistryPath
     if (-not $p) { return }
@@ -870,62 +955,109 @@ function Write-SessionRegistryEntry {
     # actual worktree session, not the launcher); otherwise the PARENT of this script
     # (the long-lived host session, since the script's own PID dies on return).
     #
-    # EXCEPT a `wt` launch (#557): the launching shell's parent is one long-lived process shared by
-    # EVERY session of the batch, so recording it made a crashed agent read as alive and, once
-    # that shell exited, dropped the whole fleet from view. A wt entry with no resolved PID keeps
-    # sessionPid 0 ("not known yet"): Get-SessionLivePid finds its tab shell by launch script.
+    # EXCEPT a `wt` launch (#557) or an 'app'-surface session (#710): the launching shell's parent
+    # is one long-lived process shared by EVERY session of the batch, so recording it made a crashed
+    # agent read as alive and, once that shell exited, dropped the whole fleet from view. An 'app'
+    # session is never launched by THIS process at all - it has no pid to record, ever (that is the
+    # whole point of the surface: the host spawns it). Both keep sessionPid 0 ("not known this way"):
+    # Get-SessionLivePid resolves a wt entry by its tab shell, and an app entry by hostSessionId.
     $trackPid = $SessionPid
-    if ($trackPid -le 0 -and $Via -ne 'wt') {
+    if ($trackPid -le 0 -and $Via -ne 'wt' -and $Via -ne 'app') {
         try { $trackPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
     }
-    if (-not $trackPid -and $Via -ne 'wt') { return }
+    if (-not $trackPid -and $Via -ne 'wt' -and $Via -ne 'app') { return }
     if (-not $trackPid) { $trackPid = 0 }
-    # Preserve fields already recorded for this issue (e.g. repo set at start time)
-    # when a later launch updates only the PID/via. Read RAW: a relaunch after the old
-    # PID died must still inherit the prior branch/repo/workPath.
-    $prev = @(Read-SessionRegistryRaw | Where-Object { $_.issue -eq $IssueNum }) | Select-Object -First 1
-    if (-not $Repo -and $prev) { $Repo = $prev.repo }
-    if (-not $Branch -and $prev) { $Branch = $prev.branch }
-    if (-not $WorkPath -and $prev) { $WorkPath = $prev.workPath }
-    if (-not $Via -and $prev) { $Via = $prev.via }
-    # Cross-repo facts and the PRs already recorded survive a later PID/via-only update (a relaunch).
-    $prevPrs = @()
-    if ($prev) {
-        if ($prev.PSObject.Properties['prs']) { $prevPrs = @($prev.prs) }
-        if (-not $TargetRepos -or @($TargetRepos).Count -eq 0) {
-            if ($prev.PSObject.Properties['targetRepos']) { $TargetRepos = @($prev.targetRepos) }
-            if (-not $CrossRepo -and $prev.PSObject.Properties['crossRepo']) { $CrossRepo = [bool]$prev.crossRepo }
+    # What the CALLER actually asked for, captured before any carry-forward below can overwrite it -
+    # the host-managed guard has to ask "is THIS write an app-surface write", and an inherited
+    # $Surface would answer "yes" forever once the issue had ever run on that surface.
+    $callerSurface = $Surface
+    $callerVia     = $Via
+    $callerWork    = $WorkPath
+    # Every read-modify-write from here on is ONE critical section (#710 decision 5): two processes
+    # racing this function (two parallel launches, a launch racing -RegisterSession) must never both
+    # read the same "prev" snapshot and then each write a version that drops the other's fields or
+    # the other's row entirely.
+    Invoke-WithSessionRegistryLock -Path $p -Body {
+        # Preserve fields already recorded for this issue (e.g. repo set at start time)
+        # when a later launch updates only the PID/via. Read RAW: a relaunch after the old
+        # PID died must still inherit the prior branch/repo/workPath.
+        $prev = @(Read-SessionRegistryRaw | Where-Object { $_.issue -eq $IssueNum }) | Select-Object -First 1
+        if ($UpdateOnly -and -not $prev) { return }
+        if (-not $Repo -and $prev) { $Repo = $prev.repo }
+        if (-not $Branch -and $prev) { $Branch = $prev.branch }
+        if (-not $WorkPath -and $prev) { $WorkPath = $prev.workPath }
+        if (-not $Via -and $prev) { $Via = $prev.via }
+        if (-not $Surface -and $prev -and $prev.PSObject.Properties['surface']) { $Surface = "$($prev.surface)" }
+        if (-not $RunId -and $prev -and $prev.PSObject.Properties['runId']) { $RunId = "$($prev.runId)" }
+        # A hostSessionId belongs to ONE run (external review round 4). $RunId is already resolved
+        # above, so it is either what THIS caller passed or what the row already had; inheriting the
+        # id only while those match is what separates "the same run writing again" (-RegisterSession,
+        # a -RecordPr - keep it) from "a NEW wave re-dispatching this issue" (a fresh -RunId and no
+        # -HostSessionId yet - the previous run's id names a session that is gone, and keeping it
+        # made the not-yet-dispatched row read as alive by the host-managed sentinel).
+        $prevRunId = if ($prev -and $prev.PSObject.Properties['runId']) { "$($prev.runId)" } else { '' }
+        if (-not $HostSessionId -and $prev -and $prev.PSObject.Properties['hostSessionId'] -and $RunId -eq $prevRunId) { $HostSessionId = "$($prev.hostSessionId)" }
+        # ...but the host-managed trio is carried forward ONLY while this issue is still on the app
+        # surface (external review round 3). The carry-forward above exists so a later app-surface
+        # write (-RegisterSession, a -RecordPr) keeps what the launch recorded. It must NOT survive a
+        # later ORDINARY start of the same issue: restarting #N in a terminal after it once ran on
+        # -Surface app inherited the stale hostSessionId, Get-SessionLivePid then answered with the
+        # host-managed sentinel, and the new LOCAL session read as alive forever while -Stop and
+        # -Relaunch refused to manage it - they are built to refuse host-managed rows. $Via is
+        # already resolved from $prev above, so an omitted -Via still counts as "same surface".
+        # A write DESCRIBES A LOCAL SESSION when the caller gave it a worktree path, a real spawned
+        # pid, or an explicit non-app -Via. An app row has none of those by construction - the whole
+        # point of that surface is that the host owns the worktree and the process - so any of them
+        # means this issue is now running locally and must not keep the host-managed trio.
+        # Deciding on what the CALLER passed, not on the values inherited above, is the correction
+        # external review rounds 3 and 4 each pushed one step further: comparing the inherited
+        # $Surface never fired at all, and comparing the inherited $Via still missed the two writers
+        # that omit -Via entirely and identify themselves by -WorkPath (Invoke-IssueStart's own
+        # registration, and the shared-branch batch path).
+        $localWrite = ($SessionPid -gt 0) -or [bool]$callerWork -or ($callerVia -and $callerVia -ne 'app')
+        if ($localWrite -and $callerSurface -ne 'app') { $Surface = ''; $HostSessionId = ''; $RunId = '' }
+        # Cross-repo facts and the PRs already recorded survive a later PID/via-only update (a relaunch).
+        $prevPrs = @()
+        if ($prev) {
+            if ($prev.PSObject.Properties['prs']) { $prevPrs = @($prev.prs) }
+            if (-not $TargetRepos -or @($TargetRepos).Count -eq 0) {
+                if ($prev.PSObject.Properties['targetRepos']) { $TargetRepos = @($prev.targetRepos) }
+                if (-not $CrossRepo -and $prev.PSObject.Properties['crossRepo']) { $CrossRepo = [bool]$prev.crossRepo }
+            }
         }
-    }
-    # NOTE: fleetSession is deliberately NOT carried forward. It is a per-LAUNCH
-    # fingerprint, not stable session identity - a later marker-less update (e.g. an
-    # in-place re-start of an issue that was previously fleet-launched) must NOT keep
-    # advertising the old marker, or the reaper would target a fingerprint that no
-    # longer matches the tracked process. Every fleet launch writes it explicitly.
-    # Rebuild from the RAW registry (remove ONLY the issue being written), not the
-    # dead-PID-filtered view - otherwise starting/relaunching one issue would silently
-    # drop other issues' finished-but-uncleaned sessions before -Watch/-AutoClean can
-    # tear down their worktrees (Codex review, PR #269). The file self-tidies via
-    # Remove-SessionRegistryEntry (auto-clean), not as a side-effect of unrelated writes.
-    $entries = @(Read-SessionRegistryRaw | Where-Object { $_.issue -ne $IssueNum })
-    $entries += [PSCustomObject]@{
-        issue        = $IssueNum
-        repo         = $Repo
-        branch       = $Branch
-        workPath     = $WorkPath
-        sessionPid   = $trackPid
-        via          = $Via
-        cli          = $Cli
-        fleetSession = $FleetSession
-        crossRepo    = [bool]($CrossRepo -or @($TargetRepos).Count -gt 0)
-        targetRepos  = @($TargetRepos)
-        prs          = @($prevPrs)
-        host         = $env:COMPUTERNAME
-        # Seconds, not minutes (#568): this stamp is the start of every duration the tool can
-        # ever compute about its own runs; minute granularity threw away the precision for free.
-        started      = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-    }
-    $entries | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p
+        # NOTE: fleetSession is deliberately NOT carried forward. It is a per-LAUNCH
+        # fingerprint, not stable session identity - a later marker-less update (e.g. an
+        # in-place re-start of an issue that was previously fleet-launched) must NOT keep
+        # advertising the old marker, or the reaper would target a fingerprint that no
+        # longer matches the tracked process. Every fleet launch writes it explicitly.
+        # Rebuild from the RAW registry (remove ONLY the issue being written), not the
+        # dead-PID-filtered view - otherwise starting/relaunching one issue would silently
+        # drop other issues' finished-but-uncleaned sessions before -Watch/-AutoClean can
+        # tear down their worktrees (Codex review, PR #269). The file self-tidies via
+        # Remove-SessionRegistryEntry (auto-clean), not as a side-effect of unrelated writes.
+        $entries = @(Read-SessionRegistryRaw | Where-Object { $_.issue -ne $IssueNum })
+        $entries += [PSCustomObject]@{
+            issue         = $IssueNum
+            repo          = $Repo
+            branch        = $Branch
+            workPath      = $WorkPath
+            sessionPid    = $trackPid
+            via           = $Via
+            cli           = $Cli
+            fleetSession  = $FleetSession
+            crossRepo     = [bool]($CrossRepo -or @($TargetRepos).Count -gt 0)
+            targetRepos   = @($TargetRepos)
+            prs           = @($prevPrs)
+            surface       = $Surface
+            hostSessionId = $HostSessionId
+            runId         = $RunId
+            host          = $env:COMPUTERNAME
+            # Seconds, not minutes (#568): this stamp is the start of every duration the tool can
+            # ever compute about its own runs; minute granularity threw away the precision for free.
+            started       = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+        }
+        $entries | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p
+    } | Out-Null
 }
 
 # -- Branch-drift guard ---------------------------------------------------------
@@ -1537,7 +1669,12 @@ function Invoke-IssueStart {
         [switch] $BaseCurrent,
         [switch] $DryRunStart,
         [switch] $IgnoreBlocked,
-        [switch] $TakeOver
+        [switch] $TakeOver,
+        # -Surface app (#710 P1): do the board mechanics (Status/assignee/claim) but create NO
+        # worktree - the host owns that. $result.workPath stays "" (never written to the session
+        # registry from here); the caller records the dispatch-manifest row itself once it knows
+        # the run's runId.
+        [switch] $SkipWorktree
     )
     $result = [PSCustomObject]@{
         issue = $IssueNum; title = ""; repo = ""; branch = ""; workPath = ""
@@ -1661,7 +1798,10 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
     }
 
     # -- Execute: work branch (only if cwd is a clone of the issue's repo) -------
-    if ($MakeBranch) {
+    # -SkipWorktree (#710 P1, -Surface app): the host creates the worktree, not this script - so
+    # this block is skipped entirely and $result.workPath stays "". The caller records the session
+    # registry row itself once it knows the run's runId (see the -Surface app branch of MODE 5).
+    if ($MakeBranch -and -not $SkipWorktree) {
         $result.workPath = New-IssueWorkspace -repo $repo -issueNum $IssueNum -branchName $branchName `
                                               -PreferWorktree:$PreferWorktree -Base $Base -BaseCurrent:$BaseCurrent
         if ($result.workPath) {
@@ -1790,7 +1930,12 @@ function Get-SessionBriefing {
         # repos the issue names itself). The session is told this worktree is its base, not the
         # destination, and to open one PR per target repo.
         [string[]]$TargetRepos = @(),
-        [switch]$CrossRepo
+        [switch]$CrossRepo,
+        # -Surface app (#710 P1): this session's worktree does not exist yet when the briefing is
+        # composed - the host creates it, not this script (that is the whole point of the surface).
+        # $workPath is typically empty here; the "on branch X in this worktree (Y)" sentence below
+        # would otherwise read as "in this worktree ()".
+        [switch]$HostManaged
     )
     if (-not $ScriptsDir) { $ScriptsDir = $PSScriptRoot }
     $isCross = ($CrossRepo -or @($TargetRepos).Count -gt 0)
@@ -1844,11 +1989,19 @@ function Get-SessionBriefing {
         "Your full brief for this run is at $BriefFile - read it FIRST and follow it; where it " +
         "conflicts with the generic steps below, it overrides them. "
     } else { "" }
+    # Host-managed (#710 P1): the host created THIS session's worktree - never claim one this
+    # script planned (there may not even be one at this exact path yet).
+    $worktreeClause = if ($HostManaged) {
+        "on branch $branch. Your host application created this session's own worktree for you - " +
+        "you are already inside it. Never create another worktree or switch branches. "
+    } else {
+        "on branch $branch in this worktree ($workPath). "
+    }
     return ($briefLine +
             "You are running AUTONOMOUSLY - permissions are pre-approved, so work this " +
             "task end-to-end WITHOUT stopping to ask for confirmation. " +
             "Pick up GitHub issue #$issueNum in $repo. It is already In Progress and claimed, " +
-            "on branch $branch in this worktree ($workPath). " +
+            $worktreeClause +
             "COMMIT WITH AN EXPLICIT PATHSPEC - 'git commit -m <message> -- <paths>' - never a bare 'git commit' after 'git add': " +
             "a bare commit takes whatever else is staged in the index, and if another session ever touches this folder your branch " +
             "ends up carrying its files under your message. " +
@@ -2173,11 +2326,20 @@ function Show-SessionFleet {
         $via = if ($s.via) { $s.via } else { "-" }
         $cli = if ($s.cli) { $s.cli } else { "claude" }
         Write-Host ("  #{0,-4} {1}  [{2}]" -f $s.issue, $s.branch, $cli) -ForegroundColor Yellow
-        # Live CPU/RAM for the tracked PID (mockable Get-Process behind Get-SessionMetrics).
-        # Best-effort: a provider exception or a bad pid must never crash the dashboard loop.
-        $metric = "metricas n/d"
-        try { $metric = Format-SessionMetric (Get-SessionMetrics ([int]$s.sessionPid)) } catch { }
-        Write-Host ("        PID {0} via {1} | {2} | host {3} | desde {4}" -f $s.sessionPid, $via, $metric, $s.host, $s.started) -ForegroundColor DarkGray
+        $hostSessionId = "$($s.hostSessionId)".Trim()
+        if (Test-HostManagedSession $s) {
+            if (-not $hostSessionId) { $hostSessionId = "(pendiente de registrar)" }
+            # Host-managed surface (#710 P1): sessionPid here is Get-HostManagedPidMarker, NOT a
+            # real Windows process - never hand it to Get-Process (Get-SessionMetrics would just
+            # report it dead, which is exactly the false "PID muerto" this branch exists to avoid).
+            Write-Host ("        host-session {0} [{1}] | host {2} | desde {3}" -f $hostSessionId, "$($s.surface)", $s.host, $s.started) -ForegroundColor DarkGray
+        } else {
+            # Live CPU/RAM for the tracked PID (mockable Get-Process behind Get-SessionMetrics).
+            # Best-effort: a provider exception or a bad pid must never crash the dashboard loop.
+            $metric = "metricas n/d"
+            try { $metric = Format-SessionMetric (Get-SessionMetrics ([int]$s.sessionPid)) } catch { }
+            Write-Host ("        PID {0} via {1} | {2} | host {3} | desde {4}" -f $s.sessionPid, $via, $metric, $s.host, $s.started) -ForegroundColor DarkGray
+        }
         if ($s.workPath) { Write-Host ("        {0}" -f $s.workPath) -ForegroundColor DarkGray }
         # Cross-repo (#487): the row says where the work goes and which PRs the session really has
         # live, in as many repos as it opened them. The by-branch lookup below only ever finds a PR
@@ -2594,10 +2756,22 @@ function Get-SessionLiveStatus {
 # loop must use this: a dead host PID is a COMPLETION signal (#135), so pruning it before the
 # loop sees it would drop the session before -AutoClean could remove its worktree/branch
 # (Codex review, PR #269). Returns @() when the registry is absent/unreadable.
+# Reads take the lock too (external review round 5, then MEASURED). A writer's Set-Content holds the
+# file exclusively while it rewrites it, so a read that lands in that window fails - and it fails as
+# a NON-TERMINATING error, which `catch` never sees: Get-Content printed "the process cannot access
+# the file" straight to the user's console, returned nothing, and the caller read that as "no
+# sessions at all". Measured on this machine at 60 rows: 395 of 1910 concurrent reads, 21%, came
+# back without the data. That is -Watch deciding the fleet has finished while it is running, and
+# -Stop / -Relaunch answering "that session does not exist" about a live one. -ErrorAction Stop
+# makes any remaining failure a real exception the catch can answer for, instead of console noise
+# plus a silently empty list. The mutex is re-entrant for the same thread, so the readers that
+# already run inside a writer's lock are unaffected.
 function Read-SessionRegistryRaw {
-    $p = Get-SessionRegistryPath
+    $p = Get-SessionRegistryPath -NoCreate
     if (-not $p -or -not (Test-Path $p)) { return @() }
-    try { return @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return @() }
+    return (Invoke-WithSessionRegistryLock -Path $p -Body {
+        try { return @(Get-Content $p -Raw -ErrorAction Stop | ConvertFrom-Json) } catch { return @() }
+    })
 }
 
 # Remove one issue's entry from sessions.json (raw read, so a dead-PID pruning pass does
@@ -2607,27 +2781,33 @@ function Read-SessionRegistryRaw {
 # wall-clock cost vanished the moment it finished - "nobody, including the tool, knows whether
 # a run takes 2 minutes or 40" was literally unanswerable. sessions-history.jsonl keeps the row
 # with `ended` and the outcome; best-effort - an archive failure never blocks the cleanup.
+#
+# The read-modify-write below is lock-protected like Write-SessionRegistryEntry (#710 decision 5):
+# a teardown racing another process's launch/relaunch must never read a snapshot the other one is
+# about to overwrite (that would resurrect the row this call just archived).
 function Remove-SessionRegistryEntry {
     param([int]$IssueNum, [string]$Outcome = '')
-    $p = Get-SessionRegistryPath
+    $p = Get-SessionRegistryPath -NoCreate
     if (-not $p -or -not (Test-Path $p)) { return }
-    try { $entries = @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return }
-    $gone = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
-    $kept = @($entries | Where-Object { [int]$_.issue -ne $IssueNum })
-    try {
-        $histPath = Join-Path (Split-Path $p -Parent) 'sessions-history.jsonl'
-        foreach ($g in $gone) {
-            $row = [ordered]@{}
-            foreach ($prop in $g.PSObject.Properties) { $row[$prop.Name] = $prop.Value }
-            $row['ended']   = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-            $row['outcome'] = "$Outcome"
-            Add-Content -LiteralPath $histPath -Encoding UTF8 -Value (([pscustomobject]$row) | ConvertTo-Json -Compress -Depth 4)
-        }
-    } catch { }
-    # An EMPTY list must be written explicitly: piping @() into ConvertTo-Json emits nothing, so
-    # Set-Content never ran and the LAST entry of the registry could never be pruned (#555 - the
-    # legacy entries that finally drain are exactly the ones that used to sit there forever).
-    if (@($kept).Count -eq 0) { Set-Content -LiteralPath $p -Value '[]' } else { $kept | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p }
+    Invoke-WithSessionRegistryLock -Path $p -Body {
+        try { $entries = @(Get-Content $p -Raw -ErrorAction Stop | ConvertFrom-Json) } catch { return }
+        $gone = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
+        $kept = @($entries | Where-Object { [int]$_.issue -ne $IssueNum })
+        try {
+            $histPath = Join-Path (Split-Path $p -Parent) 'sessions-history.jsonl'
+            foreach ($g in $gone) {
+                $row = [ordered]@{}
+                foreach ($prop in $g.PSObject.Properties) { $row[$prop.Name] = $prop.Value }
+                $row['ended']   = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+                $row['outcome'] = "$Outcome"
+                Add-Content -LiteralPath $histPath -Encoding UTF8 -Value (([pscustomobject]$row) | ConvertTo-Json -Compress -Depth 4)
+            }
+        } catch { }
+        # An EMPTY list must be written explicitly: piping @() into ConvertTo-Json emits nothing, so
+        # Set-Content never ran and the LAST entry of the registry could never be pruned (#555 - the
+        # legacy entries that finally drain are exactly the ones that used to sit there forever).
+        if (@($kept).Count -eq 0) { Set-Content -LiteralPath $p -Value '[]' } else { $kept | ConvertTo-Json -Depth 4 -AsArray | Set-Content $p }
+    } | Out-Null
 }
 
 # Parse `git worktree list --porcelain` into objects. The porcelain format is a blank-line
@@ -3056,12 +3236,14 @@ function Invoke-SessionWatch {
 function Invoke-BatchIssueStart {
     param(
         [int]$IssueNum, $Ctx, [string]$Owner, [string]$Base,
-        [switch]$BaseCurrent, [switch]$DryRun, [switch]$IgnoreBlocked, [switch]$TakeOver
+        [switch]$BaseCurrent, [switch]$DryRun, [switch]$IgnoreBlocked, [switch]$TakeOver,
+        # -Surface app (#710 P1): forwarded to Invoke-IssueStart - board mechanics only, no worktree.
+        [switch]$SkipWorktree
     )
     try {
         return Invoke-IssueStart -IssueNum $IssueNum -Ctx $Ctx -Owner $Owner -MakeBranch -PreferWorktree `
                                  -Base $Base -BaseCurrent:$BaseCurrent -DryRunStart:$DryRun `
-                                 -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver
+                                 -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver -SkipWorktree:$SkipWorktree
     } catch {
         Write-Host ("  SKIP #{0}: error al iniciar - {1}" -f $IssueNum, $_.Exception.Message) -ForegroundColor Red
         return [PSCustomObject]@{
@@ -3077,6 +3259,43 @@ function Invoke-BatchIssueStart {
 # calls, no side effects - so the pure helpers can be unit-tested in isolation.
 # =======================================================================
 if ($env:ABIOS_BOARDWORK_DOTSOURCE) { return }
+
+# -Surface app -Json promises RAW JSON on stdout, for the agent to hand to the host's
+# session-spawn tool - and it was not delivering it (external review round 2, then measured):
+# `pwsh -File Board-Work.ps1 ... -Json > out.json` from any external shell captured every batch
+# header and status line IN FRONT of the manifest, so ConvertFrom-Json failed on it. Write-Host
+# writes to the information stream, but a NATIVE redirect takes the process's stdout HANDLE,
+# which is where the host renders that stream - PowerShell's own stream separation never gets a
+# say. Shadowing Write-Host for this one flag combination reaches it everywhere, including the
+# nested Invoke-BatchIssueStart / Invoke-IssueStart calls (measured: function lookup walks the
+# scope chain, so the script-scope definition wins for them too).
+#
+# It FORWARDS to stderr rather than swallowing (external review round 3, which caught the first
+# version doing real damage): Invoke-BatchIssueStart reports a failed start with Write-Host, so
+# a silent shadow turned "issue #N could not start" into nothing at all - no message anywhere,
+# the issue quietly missing from the manifest. Forwarding keeps the standard CLI split instead:
+# machine output on stdout, everything a human would read on stderr, colours dropped.
+#
+# It is installed HERE, before the trap and before every validation and the token check (external
+# review round 5): installed later, an early failure - no token, mutually exclusive options - still
+# printed human text to stdout through the trap and broke the raw-JSON contract for the very
+# callers that cannot recover from it.
+if ($Surface -eq 'app' -and $Json) {
+    function Write-Host {
+        param(
+            [Parameter(Position = 0, ValueFromRemainingArguments = $true)] $Object,
+            $ForegroundColor, $BackgroundColor, [switch]$NoNewline, $Separator
+        )
+        # -Separator and -NoNewline are honoured rather than ignored (external review round 4):
+        # nothing in this path uses them today, but a future progress line that did would have
+        # been silently reformatted. [Console]::Error is the process's real stderr, which is
+        # exactly the destination here - this shadow only ever exists in a `pwsh -File` run
+        # started by a consumer that captures the two streams separately.
+        $sep = if ($null -ne $Separator) { "$Separator" } else { ' ' }
+        $text = ($Object -join $sep)
+        if ($NoNewline) { [Console]::Error.Write($text) } else { [Console]::Error.WriteLine($text) }
+    }
+}
 
 # ── Top-level error boundary (#485): any unhandled exception becomes a clean
 # one-line message on stdout so the caller always sees what failed — never a
@@ -3125,6 +3344,32 @@ if ($Reap -or $KillAll) {
 if ($Stop -gt 0) {
     $sess = @(Read-SessionRegistry | Where-Object { $_.issue -eq $Stop }) | Select-Object -First 1
     if (-not $sess) { Write-Host "  No hay sesion viva registrada para #$Stop." -ForegroundColor DarkYellow; exit 0 }
+    # Host-managed (#710 P1, external review round 1): Read-SessionRegistry reports this row alive
+    # via Get-HostManagedPidMarker, NOT a real pid - Stop-ProcessTree must never be handed that
+    # sentinel (it would build a kill command for a process that is not this session's, if it
+    # exists at all). The host owns this process; only the host can stop it.
+    if (Test-HostManagedSession $sess) {
+        if ("$($sess.hostSessionId)".Trim()) {
+            Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): detenla desde el host - no hay proceso local que -Stop pueda matar." -f $Stop, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
+            exit 0
+        }
+        # Despachada pero nunca registrada: no hay sesion del host que detener, solo una fila
+        # pendiente. Refusarla dejaba al usuario sin forma de quitarla (external review round 7),
+        # asi que -Stop la des-registra, que es exactamente lo unico que hay que deshacer aqui.
+        if (-not $Force) {
+            Write-Host ("  #{0} esta despachada en surface {1} pero nunca se registro: no hay proceso que matar. -Force quita la fila pendiente." -f $Stop, "$($sess.surface)") -ForegroundColor Cyan
+            exit 0
+        }
+        Remove-SessionRegistryEntry -IssueNum $Stop -Outcome 'pending-dispatch-cancelled'
+        Write-Host ("  #{0} fila pendiente quitada (nunca se registro con el host)." -f $Stop) -ForegroundColor Green
+        # El despacho ya habia movido el issue a In Progress y lo habia asignado. Quitar la fila es
+        # lo unico que -Stop puede hacer sin token (es un modo LOCAL por contrato), asi que decirlo
+        # es obligatorio: callarlo dejaba el board reclamado para siempre sin que nadie lo supiera
+        # (external review round 8). -Unlock es el paso que lo revierte en uno solo.
+        Write-Host ("  OJO: en el board el issue #{0} sigue En Progreso y asignado - quitar la fila no toca GitHub." -f $Stop) -ForegroundColor DarkYellow
+        Write-Host ("       Para liberarlo: /board work -Unlock {0} -ProjectNum <n>" -f $Stop) -ForegroundColor DarkGray
+        exit 0
+    }
     $r = Stop-ProcessTree -TargetPid ([int]$sess.sessionPid) -DryRun:(-not $Force)
     if ($r.Refused)  { Write-Host ("  #{0} PID {1} PROTEGIDO: {2}" -f $Stop, $r.Pid, $r.Reason) -ForegroundColor DarkYellow; exit 0 }
     if (-not $Force) { Write-Host ("  #{0} -> {1}`n  (re-ejecuta con -Force para matar)" -f $Stop, $r.Command) -ForegroundColor Cyan; exit 0 }
@@ -3135,6 +3380,13 @@ if ($Stop -gt 0) {
 if ($Relaunch -gt 0) {
     $sess = @(Read-SessionRegistry | Where-Object { $_.issue -eq $Relaunch }) | Select-Object -First 1
     if (-not $sess) { Write-Host "  No hay sesion registrada para #$Relaunch." -ForegroundColor DarkYellow; exit 0 }
+    # Host-managed (#710 P1, external review round 1): same reason as -Stop above - the sentinel pid
+    # must never reach Stop-ProcessTree, and there is no local worktree this script controls to
+    # relaunch a session into (the host created it, and only the host can relaunch it).
+    if (Test-HostManagedSession $sess) {
+        Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): relanzala desde el host - no hay proceso ni worktree local que -Relaunch pueda controlar." -f $Relaunch, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
+        exit 0
+    }
     $cli = if ($sess.cli) { $sess.cli } else { 'claude' }
     if (-not $Force) {
         Write-Host ("  Relaunch #{0}: mataria PID {1} y relanzaria [{2}] en {3}." -f $Relaunch, $sess.sessionPid, $cli, $sess.workPath) -ForegroundColor Cyan
@@ -3177,6 +3429,21 @@ if ($RecordPr) {
     if ($ForIssue -le 0)   { Write-Host "  -RecordPr necesita -ForIssue <numero del issue de la sesion>." -ForegroundColor Red; exit 1 }
     $rec = Add-SessionPullRequest -IssueNum $ForIssue -Repo $ref.Repo -Number $ref.Number
     if (-not $rec.Ok) { Write-Host "  NO anotado: $($rec.Message)" -ForegroundColor Red; exit 1 }
+    Write-Host "  OK  $($rec.Message)" -ForegroundColor Green
+    exit 0
+}
+
+# =======================================================================
+# REGISTER-SESSION MODE: -RegisterSession -Issue <n> -HostSessionId <id>  -> record the id the
+# host's session-spawn tool returned for an issue already started on -Surface app (#710 P1). Local
+# only: no token, nothing written to GitHub. Refuses to invent a row for an issue that was never
+# started that way - the same "never invent a session" rule -RecordPr follows above.
+# =======================================================================
+if ($RegisterSession) {
+    if ($Issue -le 0)        { Write-Host "  -RegisterSession necesita -Issue <numero>." -ForegroundColor Red; exit 1 }
+    if (-not $HostSessionId) { Write-Host "  -RegisterSession necesita -HostSessionId <id> (el id que devolvio la herramienta del host)." -ForegroundColor Red; exit 1 }
+    $rec = Register-HostSession -IssueNum $Issue -HostSessionId $HostSessionId -RunId $RunId
+    if (-not $rec.Ok) { Write-Host "  NO registrado: $($rec.Message)" -ForegroundColor Red; exit 1 }
     Write-Host "  OK  $($rec.Message)" -ForegroundColor Green
     exit 0
 }
@@ -3684,7 +3951,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         $spLive = @(Read-SessionRegistry | ForEach-Object { $_.branch })
         # An unreadable registry must not read as "no live sessions" (Read-SessionRegistry returns @() on a parse error).
         $spLiveOk = $true
-        $spRegPath = Get-SessionRegistryPath
+        $spRegPath = Get-SessionRegistryPath -NoCreate
         if ($spRegPath -and (Test-Path -LiteralPath $spRegPath)) { try { $null = Get-Content -LiteralPath $spRegPath -Raw | ConvertFrom-Json } catch { $spLiveOk = $false } }
         $spBase = if ($spHere) { Resolve-IssueBaseRef $spHere -NoFetch } else { '' }
         $spPlan = @(Get-StateOfPlay -Repo $spRepo -HereRepo $spHere -Items $items -BoardTruncated ([bool]$read.Truncated) `
@@ -3871,23 +4138,43 @@ if ($Parallel.Count -gt 0) {
     $queue = @(Get-ParallelQueue $Parallel)
     if ($queue.Count -eq 0) { throw "-Parallel no recibio numeros de issue validos." }
 
+    # -Surface headless (#710 P1): accepted so callers can NAME it, but not yet dispatchable - a
+    # later phase. Refuse loudly, before touching the board, rather than silently falling back to a
+    # visible terminal (the exact "never fake it" rule #710 states for this surface).
+    if ($Surface -eq 'headless') {
+        throw "-Surface headless todavia no esta implementado (fases posteriores de #710). Usa -Surface terminal (por defecto) o -Surface app."
+    }
+    $isAppSurface = ($Surface -eq 'app')
+
     Write-Host "=== Parallel batch-start (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
     Write-Host ("  Issues: {0}" -f ($queue -join ', ')) -ForegroundColor DarkGray
     if ($DryRun) { Write-Host "  Modo DRY-RUN - planifica sin mutar el board ni tocar git." -ForegroundColor Gray }
+    if ($isAppSurface) { Write-Host "  Surface: app - sin worktree local, sin proceso local; se emite un manifiesto de despacho." -ForegroundColor DarkGray }
     Write-Host ""
 
     $ctx = Resolve-BoardStatus $Owner $ProjectNum
+
+    # All -Launch/-Fleet/-Surface app sessions arm the brake by default (#598). -AllowMerge is the
+    # explicit opt-in for autonomous merging; an expert contract that allows merging is honoured via
+    # an explicit -StopAtPR:$false. See Resolve-LaunchBrake for the logic. Computed here (not only
+    # right before -Launch/-Fleet below) because the -Surface app manifest's briefing needs it too.
+    $launchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
+        -StopAtPRBound $PSBoundParameters.ContainsKey('StopAtPR') `
+        -StopAtPR ([bool]$StopAtPR)
 
     # The base is resolved per issue inside New-IssueWorkspace, which shares one code path
     # with single -Start (#294). This path used to hardcode origin/main, which silently
     # based every worktree on the wrong branch in a repo whose default is master - and it
     # ignored -BaseCurrent entirely, honouring a base the caller had not asked for.
+    #
+    # -SkipWorktree on -Surface app (#710 P1): board mechanics only (Status/assignee/claim) - the
+    # host creates the worktree, this script never does for this surface.
     $results = @()
     foreach ($n in $queue) {
         Write-Host ("--- #{0} ---" -f $n) -ForegroundColor Cyan
         $r = Invoke-BatchIssueStart -IssueNum $n -Ctx $ctx -Owner $Owner `
                                     -Base $Base -BaseCurrent:$BaseCurrent -DryRun:$DryRun `
-                                    -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver
+                                    -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver -SkipWorktree:$isAppSurface
         $results += $r
         Write-Host ""
     }
@@ -3911,8 +4198,12 @@ if ($Parallel.Count -gt 0) {
     if ($DryRun) {
         Write-Host ("DRY-RUN: {0} se iniciarian, {1} se saltarian. Ningun cambio hecho." -f $planned.Count, $skipped.Count) -ForegroundColor Gray
     } else {
-        Write-Host ("Iniciados: {0} / {1}. Worktrees listos, uno por issue." -f $started.Count, $queue.Count) -ForegroundColor Yellow
-        if ($started.Count -gt 0 -and -not $Launch -and -not $Fleet) {
+        if ($isAppSurface) {
+            Write-Host ("Iniciados: {0} / {1}. Sin worktree local (surface app) - el manifiesto sigue abajo." -f $started.Count, $queue.Count) -ForegroundColor Yellow
+        } else {
+            Write-Host ("Iniciados: {0} / {1}. Worktrees listos, uno por issue." -f $started.Count, $queue.Count) -ForegroundColor Yellow
+        }
+        if ($started.Count -gt 0 -and -not $Launch -and -not $Fleet -and -not $isAppSurface) {
             Write-Host ""
             Write-Host "Cada worktree tiene su rama y su claim. Trabaja cada issue en su carpeta:" -ForegroundColor Cyan
             foreach ($r in $started) {
@@ -3924,12 +4215,66 @@ if ($Parallel.Count -gt 0) {
         }
     }
 
-    # All -Launch/-Fleet sessions arm the brake by default (#598). -AllowMerge is the
-    # explicit opt-in for autonomous merging; an expert contract that allows merging
-    # is honoured via an explicit -StopAtPR:$false. See Resolve-LaunchBrake for the logic.
-    $launchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
-        -StopAtPRBound $PSBoundParameters.ContainsKey('StopAtPR') `
-        -StopAtPR ([bool]$StopAtPR)
+    # =====================================================================
+    # -Surface app (#710 P1): the host owns the worktree AND the process - this script creates
+    # NEITHER. It emits a dispatch manifest instead (one entry per issue: issue, title, repo,
+    # branch, a self-contained briefing, ownedPaths, runId), for the agent to hand to the host's
+    # OWN session-spawn tool (a script cannot open one - see BoardWork.Surface.ps1's header). The
+    # id the host returns is recorded later with -RegisterSession. -DryRun mutates NOTHING here:
+    # $manifestSource is $planned (no board write, no session row), and the briefing/ownedPaths
+    # reads below are read-only.
+    # =====================================================================
+    if ($isAppSurface) {
+        $runId = New-FleetRunId
+        $manifestSource = if ($DryRun) { $planned } else { $started }
+        $entries = @()
+        foreach ($r in $manifestSource) {
+            $briefing = Get-SessionBriefing $r.issue $r.repo $r.branch '' -StopAtPR:$launchBrake -BriefFile $BriefFile `
+                                            -TargetRepos @($r.targetRepos) -CrossRepo:([bool]$r.crossRepo) -HostManaged
+            $owned = @(Get-IssueOwnedPaths -IssueNum $r.issue)
+            $entries += (New-DispatchManifestEntry -Issue $r.issue -Title $r.title -Repo $r.repo -Branch $r.branch `
+                                                    -Briefing $briefing -OwnedPaths $owned -RunId $runId)
+            if (-not $DryRun) {
+                # No pid, no worktree: this row exists so -RegisterSession has something to attach
+                # the hostSessionId to, and so -Sessions/Fleet-* see the run even before that happens.
+                Write-SessionRegistryEntry -IssueNum $r.issue -Branch $r.branch -Repo $r.repo -Via 'app' `
+                                           -Surface 'app' -RunId $runId -TargetRepos @($r.targetRepos) -CrossRepo:([bool]$r.crossRepo)
+            }
+        }
+        if ($Json) {
+            ConvertTo-DispatchManifestJson -Entries $entries
+        } else {
+            Write-Host ""
+            Write-Host ("===== MANIFIESTO DE DESPACHO (surface app, runId {0}) =====" -f $runId) -ForegroundColor Cyan
+            if ($entries.Count -eq 0) {
+                Write-Host "  (ningun issue arranco - nada que despachar)" -ForegroundColor DarkGray
+            } else {
+                foreach ($e in $entries) { Write-Host ("  #{0,-4} {1}  -> rama {2}" -f $e.issue, $e.title, $e.branch) -ForegroundColor Gray }
+                Write-Host ""
+                Write-Host "Esta herramienta no puede abrir sesiones del host por si misma: entrega CADA entrada a la" -ForegroundColor Yellow
+                Write-Host "herramienta de sesiones del host (un clic por tarea) y registra el id que devuelva con:" -ForegroundColor Yellow
+                # El runId va SIEMPRE en la instruccion impresa (external review round 6): sin el,
+                # seguir esta linea al pie de la letra salta la comprobacion de corrida y un id de
+                # una ola anterior puede quedar anotado sobre la fila de la ola actual.
+                Write-Host ("  /board work -RegisterSession -Issue <n> -HostSessionId <id> -RunId {0}" -f $runId) -ForegroundColor DarkGray
+            }
+            if ($DryRun) {
+                Write-Host ""
+                Write-Host "Modo DRY-RUN - ningun cambio ejecutado (ni worktree, ni sesion registrada)." -ForegroundColor Gray
+            }
+            Write-Host ""
+            Write-Host "Board: $boardUrl" -ForegroundColor Cyan
+        }
+        # The exit code must tell a machine consumer what happened (external review round 3). This
+        # path used to exit 0 unconditionally, so a wave where every issue was skipped - not on the
+        # board, blocked, already claimed - came back as an empty manifest and a success: an agent
+        # driving the fleet could not distinguish "nothing to do" from "nothing worked". A run that
+        # was ASKED for issues and dispatched none is a failure; the per-issue reasons are on stderr
+        # (and on stdout in the human path). A PARTIAL wave still exits 0 - the manifest names
+        # exactly what it dispatched, and the skips are reported next to it.
+        if ($entries.Count -eq 0 -and $queue.Count -gt 0) { exit 1 }
+        exit 0
+    }
 
     # -- Launch: one visible session per worktree. -Fleet probes CLIs and picks one
     # per issue (fallback claude); plain -Launch keeps the shipped claude-only path.

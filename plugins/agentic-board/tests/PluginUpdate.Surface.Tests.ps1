@@ -36,21 +36,39 @@ Describe '/board plugins is discoverable' {
 
 Describe 'dot-sourcing Board-Work.ps1 cannot silently reset a parameter of these scripts' {
     # The scripts load Board-Work.ps1 (for Test-SessionStartConsistent) with its documented guard. Its
-    # param() block runs in the caller's scope, so a parameter name shared with it would be reset - and only
-    # the ones the caller passed are replayed afterwards. This pins the precondition: the only shared name is
-    # DryRun, which is a switch with the same default on both sides.
-    It 'shares no parameter name with Board-Work.ps1 except DryRun' {
+    # param() block runs in the CALLER's scope, so a parameter name shared with it is RESET there. TWO
+    # things together make that harmless, and this Describe demands BOTH - neither alone is enough:
+    #   * the shared name is a [switch] on both sides, so the value it is reset to ($false) IS its
+    #     default: a caller who did not pass it cannot tell the difference; and
+    #   * the caller replays $PSBoundParameters after the dot-source, so a caller who DID pass it
+    #     gets it back.
+    # A shared string/int/array parameter has no such guarantee - its default on the two sides may
+    # differ - so it still fails outright. This started as "the only shared name is DryRun"; 'Json'
+    # joined it when the fleet launch surface added -Json to Board-Work.ps1 (#710, phase P1), which is
+    # a legitimate second instance of exactly the same safe shape, not a new hazard. Measured before
+    # this test was widened: `Get-PluginSessionMap.ps1 -Json` still prints parseable JSON.
+    It 'shares only SWITCH parameter names with Board-Work.ps1' {
         $common = [System.Management.Automation.Cmdlet]::CommonParameters + [System.Management.Automation.Cmdlet]::OptionalCommonParameters
-        $bw = @((Get-Command (Join-Path $script:Plugin 'scripts' 'Board-Work.ps1')).Parameters.Keys | Where-Object { $common -notcontains $_ })
+        $bwCmd = Get-Command (Join-Path $script:Plugin 'scripts' 'Board-Work.ps1')
+        $bw = @($bwCmd.Parameters.Keys | Where-Object { $common -notcontains $_ })
         foreach ($n in 'Update-AllPlugins.ps1', 'Get-PluginSessionMap.ps1', 'Remove-OldPluginVersions.ps1') {
-            $own = @((Get-Command (Join-Path $script:Plugin 'scripts' $n)).Parameters.Keys | Where-Object { $common -notcontains $_ })
-            $shared = @($own | Where-Object { $bw -contains $_ -and $_ -ne 'DryRun' })
-            $shared | Should -BeNullOrEmpty -Because "$n would have '$($shared -join ', ')' reset by dot-sourcing Board-Work.ps1"
+            $ownCmd = Get-Command (Join-Path $script:Plugin 'scripts' $n)
+            $own = @($ownCmd.Parameters.Keys | Where-Object { $common -notcontains $_ })
+            $shared = @($own | Where-Object { $bw -contains $_ })
+            $notSwitch = @($shared | Where-Object {
+                $ownCmd.Parameters[$_].ParameterType.Name -ne 'SwitchParameter' -or
+                $bwCmd.Parameters[$_].ParameterType.Name -ne 'SwitchParameter'
+            })
+            $notSwitch | Should -BeNullOrEmpty -Because "$n would have '$($notSwitch -join ', ')' reset by dot-sourcing Board-Work.ps1 to a value that is NOT its own default"
         }
     }
-    It 'the one shared name, DryRun, is a switch in both' {
-        (Get-Command (Join-Path $script:Plugin 'scripts' 'Board-Work.ps1')).Parameters['DryRun'].ParameterType.Name | Should -Be 'SwitchParameter'
-        (Get-Command (Join-Path $script:Plugin 'scripts' 'Update-AllPlugins.ps1')).Parameters['DryRun'].ParameterType.Name | Should -Be 'SwitchParameter'
+    It 'replays what the caller passed, so even a shared switch survives the dot-source' {
+        # Without this replay the switch half of the rule above is not enough: a caller who DID pass
+        # -Json/-DryRun would silently lose it the moment Board-Work.ps1's param() block ran.
+        foreach ($n in 'Update-AllPlugins.ps1', 'Get-PluginSessionMap.ps1', 'Remove-OldPluginVersions.ps1') {
+            $src = Get-Content (Join-Path $script:Plugin 'scripts' $n) -Raw
+            $src | Should -Match 'PSBoundParameters\.Keys' -Because "$n dot-sources Board-Work.ps1 and must replay what the caller passed"
+        }
     }
 }
 

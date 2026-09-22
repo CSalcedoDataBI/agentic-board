@@ -219,6 +219,35 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
     spawning. Add `-Parallel <nums> -Fleet` instead of `-Launch` to probe the available AI CLIs,
     pick one per issue (auto-fallback to `claude` when a choice is unavailable), and launch each
     in its worktree; `-DryRun` shows the probe table without prompting or spawning.
+    **Launch surface (`-Surface`, #710 P1).** `-Surface terminal` (the default) is the wt-tab/pwsh
+    behaviour above, byte-for-byte. `-Surface app` is for a host app (the Claude desktop app's Code
+    tab, an IDE) where the user wants each issue as its own VISIBLE session in the host's own
+    sidebar — a script cannot open one, only the agent can, via the host's session-spawn tool. On
+    `-Surface app` the script creates **no worktree and spawns no process**: it does the board
+    mechanics (Status/assignee/claim) exactly as above, then emits a **dispatch manifest**
+    (`-Json` for raw JSON) — one entry per issue with `issue`, `title`, `repo`, `branch`, a
+    self-contained `briefing`, `ownedPaths` and a shared `runId`. With `-Json`, stdout carries the
+    manifest and **nothing else**, so `ConvertFrom-Json` on the captured output works: every human
+    line the batch would print — including the reason an issue was skipped — goes to **stderr**
+    instead, and the **exit code is non-zero when the run dispatched nothing** while issues were
+    asked for (a partial wave exits 0; the manifest names exactly what it dispatched). Hand each entry to the host's
+    session-spawn tool (this needs ONE click per task — a host constraint, said plainly, never
+    faked), then record the id it returns: `Board-Work.ps1 -RegisterSession -Issue <n>
+    -HostSessionId <id> -RunId <the runId of that same manifest entry>`. Pass the `runId`: a
+    session id belongs to ONE run, and a registration that arrives after a newer wave re-dispatched
+    the issue is refused instead of stamping a dead session's id onto the live row.
+    Between the dispatch and that registration the row is **pending**, not finished: it stays in
+    `-Sessions` (marked *pendiente de registrar*) so `-Watch` does not call the wave over before it
+    began. A dispatch never registered goes stale after **12 hours** — long enough for a wave the
+    user clicks through over a morning, short enough to bound a crash to one working day — and is
+    then cleaned up like any other finished session. `-Stop <n> -Force` removes a pending row at any
+    time and says plainly that the board still shows the issue In Progress and assigned (stopping is
+    local and never writes to GitHub; `-Unlock <n>` is what releases it). A row the host has actually
+    answered for is still refused — that process belongs to the host, not to this tool. That id is what keeps the session visible and alive in `-Sessions`: a
+    host-managed row has no PID this script can ever see, so liveness for it is never a PID check
+    (completion is a later channel — a host end-signal + `Fleet-Supervisor.ps1 -Check`, #710 phase
+    3). `-Surface headless` is accepted (so callers can name it) but not yet implemented — it
+    throws rather than silently falling back to a visible terminal.
     Monitor the fleet with `scripts/Board-Work.ps1 -Sessions`, or `-Sessions -Watch -AutoClean`
     to block until every session finishes (PR merged / issue closed / PID dead) and auto-remove
     each worktree + branch + registry entry as it completes (`-DryRun` previews the teardown).
