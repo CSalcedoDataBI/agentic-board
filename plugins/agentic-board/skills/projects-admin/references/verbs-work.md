@@ -235,7 +235,12 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
     faked), then record the id it returns: `Board-Work.ps1 -RegisterSession -Issue <n>
     -HostSessionId <id> -RunId <the runId of that same manifest entry>`. Pass the `runId`: a
     session id belongs to ONE run, and a registration that arrives after a newer wave re-dispatched
-    the issue is refused instead of stamping a dead session's id onto the live row. That id is what keeps the session visible and alive in `-Sessions`: a
+    the issue is refused instead of stamping a dead session's id onto the live row.
+    Between the dispatch and that registration the row is **pending**, not finished: it stays in
+    `-Sessions` (marked *pendiente de registrar*) so `-Watch` does not call the wave over before it
+    began. A dispatch never registered goes stale after 30 minutes and is cleaned up like any other
+    finished session; `-Stop <n> -Force` removes a pending row at any time, while a row the host has
+    actually answered for is still refused — that process belongs to the host, not to this tool. That id is what keeps the session visible and alive in `-Sessions`: a
     host-managed row has no PID this script can ever see, so liveness for it is never a PID check
     (completion is a later channel — a host end-signal + `Fleet-Supervisor.ps1 -Check`, #710 phase
     3). `-Surface headless` is accepted (so callers can name it) but not yet implemented — it

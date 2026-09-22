@@ -827,7 +827,15 @@ function Test-SessionStartConsistent {
 #     permanently alive here instead. The marker is NOT a real process id (Get-HostManagedPidMarker).
 function Get-SessionLivePid {
     param([object]$Session)
-    if (Test-HostManagedSession $Session) { return Get-HostManagedPidMarker }
+    # A row whose process belongs to the host is never judged by a pid - but a DISPATCHED row that
+    # was never registered is only pending for a bounded time (external review round 7). Past that
+    # window it reads as dead like anything else, so -AutoClean can remove the leftover instead of
+    # leaving a ghost nothing can clear.
+    if (Test-HostManagedSession $Session) {
+        if ("$($Session.hostSessionId)".Trim()) { return Get-HostManagedPidMarker }
+        if (Test-PendingAppSessionFresh -Session $Session) { return Get-HostManagedPidMarker }
+        return 0
+    }
     $stored = 0
     try { $stored = [int]$Session.sessionPid } catch { }
     $isWt = ("$($Session.via)" -eq 'wt' -and $Session.issue)
@@ -2782,7 +2790,7 @@ function Remove-SessionRegistryEntry {
     $p = Get-SessionRegistryPath -NoCreate
     if (-not $p -or -not (Test-Path $p)) { return }
     Invoke-WithSessionRegistryLock -Path $p -Body {
-        try { $entries = @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return }
+        try { $entries = @(Get-Content $p -Raw -ErrorAction Stop | ConvertFrom-Json) } catch { return }
         $gone = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
         $kept = @($entries | Where-Object { [int]$_.issue -ne $IssueNum })
         try {
@@ -3341,7 +3349,19 @@ if ($Stop -gt 0) {
     # sentinel (it would build a kill command for a process that is not this session's, if it
     # exists at all). The host owns this process; only the host can stop it.
     if (Test-HostManagedSession $sess) {
-        Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): detenla desde el host - no hay proceso local que -Stop pueda matar." -f $Stop, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
+        if ("$($sess.hostSessionId)".Trim()) {
+            Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): detenla desde el host - no hay proceso local que -Stop pueda matar." -f $Stop, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
+            exit 0
+        }
+        # Despachada pero nunca registrada: no hay sesion del host que detener, solo una fila
+        # pendiente. Refusarla dejaba al usuario sin forma de quitarla (external review round 7),
+        # asi que -Stop la des-registra, que es exactamente lo unico que hay que deshacer aqui.
+        if (-not $Force) {
+            Write-Host ("  #{0} esta despachada en surface {1} pero nunca se registro: no hay proceso que matar. -Force quita la fila pendiente." -f $Stop, "$($sess.surface)") -ForegroundColor Cyan
+            exit 0
+        }
+        Remove-SessionRegistryEntry -IssueNum $Stop -Outcome 'pending-dispatch-cancelled'
+        Write-Host ("  #{0} fila pendiente quitada (nunca se registro con el host)." -f $Stop) -ForegroundColor Green
         exit 0
     }
     $r = Stop-ProcessTree -TargetPid ([int]$sess.sessionPid) -DryRun:(-not $Force)

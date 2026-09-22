@@ -31,7 +31,30 @@
 # would prune it from -Sessions or mark it "process terminated" the moment it has no real pid to
 # check). It is not a real Windows process id: nothing may ever pass it to Get-Process - callers that
 # would otherwise do that (Show-SessionFleet) branch on hostSessionId first instead.
-function Get-HostManagedPidMarker { return 1 }
+# NOT 1 (external review round 7): 1 is a REAL process id - the System/init process - and this
+# sentinel is written into sessions.json, which other scripts read. A consumer that has not learned
+# about host-managed rows and does the obvious thing with sessionPid would have aimed Get-Process,
+# or worse Stop-Process, at it. [int]::MaxValue can never be a Windows process id (they are
+# multiples of 4 well below it), so the same naive consumer simply finds nothing.
+function Get-HostManagedPidMarker { return [int]::MaxValue }
+
+# How long a DISPATCHED but not yet registered app row stays "pending" before it is treated as
+# abandoned (external review round 7). Without a bound, an agent that crashed between the dispatch
+# and -RegisterSession left a row that was permanently alive, never reaped, and refused by -Stop:
+# a ghost only a hand edit of sessions.json could remove. Thirty minutes is far longer than the
+# seconds a host takes to answer, and far shorter than a workday.
+function Get-PendingAppSessionGraceMinutes { return 30 }
+
+# Is this app-surface row still WITHIN that window? A row with a real hostSessionId is not pending
+# at all and never asks this. An unparseable/absent stamp is treated as still pending - the same
+# fail-open choice the rest of this file makes about a fact it cannot establish, because deleting
+# somebody's live dispatch on a bad timestamp is the worse error.
+function Test-PendingAppSessionFresh {
+    param([object]$Session, [datetime]$Now = (Get-Date))
+    $stamp = [datetime]::MinValue
+    if (-not [datetime]::TryParse("$($Session.started)", [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$stamp)) { return $true }
+    return (($Now - $stamp).TotalMinutes -le (Get-PendingAppSessionGraceMinutes))
+}
 
 # Is this row one whose PROCESS belongs to the host rather than to this script? The answer is the
 # SURFACE, not the presence of a hostSessionId (external review round 6). Between the dispatch and

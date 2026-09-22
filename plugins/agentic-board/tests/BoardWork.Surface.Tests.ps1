@@ -1017,3 +1017,78 @@ Describe 'An early failure in -Surface app -Json never lands on stdout (review r
         $err | Should -Match 'ERROR:' -Because "the reason must reach stderr, but stderr was:`n$err"
     }
 }
+
+Describe 'A pending app session is bounded, and removable (review round 7)' {
+    # Round 6 made a dispatched-but-unregistered row PENDING so -Watch would not call the wave
+    # finished before it started. Unbounded, that created the opposite ghost: an agent that died
+    # between the dispatch and -RegisterSession left a row that was permanently alive, never reaped,
+    # and refused by -Stop - removable only by hand-editing sessions.json.
+    It 'the host-managed sentinel is not a real process id' {
+        # 1 is the System/init process, and this value is WRITTEN INTO sessions.json for other
+        # scripts to read: a consumer that had not learned about host-managed rows would have aimed
+        # Get-Process - or Stop-Process - at pid 1.
+        Get-HostManagedPidMarker | Should -Be ([int]::MaxValue)
+        Get-Process -Id (Get-HostManagedPidMarker) -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+    }
+    It 'a freshly dispatched row is pending (live)' {
+        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; surface = 'app'; hostSessionId = ''
+                                started = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') }
+        Get-SessionLivePid $s | Should -Be (Get-HostManagedPidMarker)
+    }
+    It 'the same row reads as DEAD once the grace window has passed' {
+        $old = (Get-Date).AddMinutes(-(Get-PendingAppSessionGraceMinutes) - 5).ToString('yyyy-MM-dd HH:mm:ss')
+        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; surface = 'app'; hostSessionId = ''
+                                started = $old }
+        Get-SessionLivePid $s | Should -Be 0
+    }
+    It 'a REGISTERED app row is never bounded - it stays alive however old it is' {
+        $old = (Get-Date).AddDays(-3).ToString('yyyy-MM-dd HH:mm:ss')
+        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; surface = 'app'; hostSessionId = 'host-x'
+                                started = $old }
+        Get-SessionLivePid $s | Should -Be (Get-HostManagedPidMarker)
+    }
+    It 'an unreadable timestamp keeps the row pending - it never deletes a dispatch on a bad stamp' {
+        $s = [pscustomobject]@{ issue = 1; sessionPid = 0; via = 'app'; surface = 'app'; hostSessionId = ''
+                                started = 'no es una fecha' }
+        Get-SessionLivePid $s | Should -Be (Get-HostManagedPidMarker)
+    }
+}
+
+Describe '-Stop can clear a pending dispatch, and still refuses a registered one (review round 7)' {
+    It '-Stop -Force removes a row that was dispatched but never registered' {
+        $repo = New-Throwaway 'stop-pending'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 71 -Branch 'issue-71-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r-pend'
+            @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 71 }).Count | Should -Be 1
+            $out = pwsh -NoProfile -File $script:Script -Stop 71 -Force -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
+            $rows = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 71 })
+        } finally { Pop-Location }
+        $out  | Should -Match 'pendiente'
+        $out  | Should -Not -Match 'PID'
+        $rows.Count | Should -Be 0 -Because 'the pending row is the only thing there was to undo'
+    }
+    It '-Stop without -Force only explains, and leaves the pending row alone' {
+        $repo = New-Throwaway 'stop-pending-dry'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 72 -Branch 'issue-72-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r-pend'
+            $out = pwsh -NoProfile -File $script:Script -Stop 72 -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
+            $rows = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 72 })
+        } finally { Pop-Location }
+        $out | Should -Match '-Force'
+        $rows.Count | Should -Be 1
+    }
+    It '-Stop still REFUSES a registered host session - the host owns that process' {
+        $repo = New-Throwaway 'stop-registered'
+        Push-Location $repo
+        try {
+            Write-SessionRegistryEntry -IssueNum 73 -Branch 'issue-73-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'r-reg'
+            Register-HostSession -IssueNum 73 -HostSessionId 'host-73' -RunId 'r-reg' | Out-Null
+            $out = pwsh -NoProfile -File $script:Script -Stop 73 -Force -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
+            $rows = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 73 })
+        } finally { Pop-Location }
+        $out | Should -Match 'detenla desde el host'
+        $rows.Count | Should -Be 1 -Because 'a refused stop must not remove the row either'
+    }
+}
