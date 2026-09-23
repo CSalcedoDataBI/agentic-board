@@ -1,4 +1,45 @@
-# Changelog
+﻿# Changelog
+
+
+## [0.41.0] - 2026-09-22
+The fleet stops assuming one issue is one repo, one worktree and one PR — and gains a launch surface
+for running issues where you are actually looking. Plus a read-only audit of what this repo's CI
+really costs.
+### Added
+- **`/board work -Parallel … -Surface terminal|app|headless` (#710, phase 1 of six).** `terminal` is
+  the default and is byte-for-byte the old behaviour. `app` does the board mechanics
+  (Status/assignee/claim) and then creates **no worktree and spawns no process**: it emits a dispatch
+  manifest — one self-contained entry per issue — for the agent to hand to the host application's own
+  session-spawn tool, and the id that comes back is recorded with `-RegisterSession`. A script cannot
+  open a host session; only the agent can, so the surface is honest about needing one click per task.
+  `headless` is accepted so callers can name it but refuses to dispatch, rather than silently falling
+  back to a visible terminal. **This is phase 1: the completion channel, the pre-dispatch independence
+  check, the wave hand-off, the run roll-up and `-MaxSessions` are later phases — #710 stays open.**
+- **Cross-repo issues (#487).** An issue whose work lands in OTHER repositories is detected (a
+  `cross-repo` label or a target-repos list in the body), briefed accordingly — the worktree is the
+  base of operations, one PR per target repo, `Refs` and never `Closes`, because a `Closes #n` in
+  another repo closes THAT repo's issue — and its PRs are recorded per session. The review gate can
+  take several PRs at once, and the issue closes only when all of them have merged.
+- **`/board work` opens with a state of play (#660).** Before the pending list it reports the other
+  kinds of open work the board query alone never showed: an in-flight run marker, issues already In
+  Progress or In Review, open PRs, live sessions and an unreleased changelog. A source it cannot read
+  is reported as unknown and never takes the pending list down with it.
+- **A read-only audit of this repo's Actions cost (#614)**, measured from the workflows that really
+  ship rather than estimated: which jobs have no timeout, which run on a multiplier-priced runner,
+  which lack concurrency cancellation, and which artifacts keep the 90-day default.
+### Changed
+- **Every read *and* write of `sessions.json` is serialised through one named OS mutex.** Parallel
+  visible sessions made two long-standing races reachable: two processes writing at once dropped each
+  other's rows, and a read landing inside a write failed as a *non-terminating* error the `catch`
+  never saw — measured at 21% of reads during writes, which reads as "no sessions at all" and had
+  `-Watch` calling a fleet finished while it was running. Both are proven with real multi-process
+  tests; an abandoned mutex (a session killed mid-write) is now a success, not a crash.
+- **A read-only listing no longer creates `.agentic-board/`** just to answer "is anything running".
+- **The skills audit no longer pairs a skill with its own copies, lints each skill once, and routes
+  every finding by the plugin's real identity** (Refs #462); the Triggers lint accepts `Triggers - x`.
+### Fixed
+- **The autonomy brake no longer loses a push to a quoted `&` or a mid-command redirection (#707).**
+- **The README roadmap row for M4 said "current" for a module that had shipped (#4).**
 
 ## [0.40.0] - 2026-09-21
 Plugin updates now reach you: one command updates every plugin on the machine, shows which open
