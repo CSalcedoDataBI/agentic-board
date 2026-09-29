@@ -124,7 +124,7 @@ function Format-ClosingSummaryPrompt {
     if (-not $Blocks -or $Blocks.Count -eq 0) { throw "Format-ClosingSummaryPrompt: no blocks supplied - the closing-summary contract cannot be empty." }
     $lines = @(
         '**Closing summary — required (#491).** End your reply to the user with these four blocks,'
-        'in this order, with these exact headings. Never drop one: when a block has nothing in it,'
+        'in this order, with these headings. Never drop one: when a block has nothing in it,'
         'write its when-empty sentence instead. A silent block is indistinguishable from an answer'
         'that got cut off, which is the failure this contract exists to remove.'
         ''
@@ -138,7 +138,10 @@ function Format-ClosingSummaryPrompt {
     }
     $lines += @(
         ''
-        'Write them in the language the user is speaking, in words a BI professional can act on.'
+        'The headings and sentences above are the English reference. Always write them in the'
+        'language the user is speaking - translate the headings too (a user writing in Spanish gets'
+        'Spanish headings) - keeping the same four blocks in the same order, in words a BI'
+        'professional can act on.'
         'This block is generated from the shared renderer — to change the wording, change the'
         'renderer, not this text.'
     )

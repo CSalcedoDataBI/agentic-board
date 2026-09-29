@@ -121,12 +121,12 @@ function Format-BrakeViolations {
     param([object[]]$Violations)
     $lines = @()
     foreach ($v in @($Violations)) {
-        $who = if ($v.mergedBy) { " por $($v.mergedBy)" } else { '' }
+        $who = if ($v.mergedBy) { " by $($v.mergedBy)" } else { '' }
         $when = if ($v.mergedAt) { " ($($v.mergedAt))" } else { '' }
-        $lines += "  #$($v.issue) $($v.pr) MERGEADO$who$when - la corrida tenia el freno armado (merge = irreversible)"
+        $lines += "  #$($v.issue) $($v.pr) MERGED$who$when - the run had the brake armed (merge = irreversible)"
     }
     if ($lines.Count -gt 0) {
-        $lines += "  Si mergeaste tu tras revisar, es lo esperado. Si no, el freno fue saltado: mira .agentic-board/denials.jsonl del worktree (auto-clean lo conserva, #518)."
+        $lines += "  If you merged it yourself after review, that is expected. If not, the brake was bypassed: check .agentic-board/denials.jsonl in the worktree (auto-clean keeps it, #518)."
     }
     return @($lines)
 }
@@ -290,12 +290,12 @@ function Publish-StallSignals {
                 Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
             }
             if ($exit -eq 0) {
-                if (-not $Quiet) { Write-Host ("  OK  senal [abios-stall] publicada en #{0}" -f $s.issue) -ForegroundColor Green }
+                if (-not $Quiet) { Write-Host ("  OK  [abios-stall] signal posted on #{0}" -f $s.issue) -ForegroundColor Green }
             } elseif (-not $Quiet) {
-                Write-Host ("  WARN no pude publicar la senal de estancamiento en #{0}" -f $s.issue) -ForegroundColor DarkYellow
+                Write-Host ("  WARN could not post the stall signal on #{0}" -f $s.issue) -ForegroundColor DarkYellow
             }
         } catch {
-            if (-not $Quiet) { Write-Host ("  WARN no pude publicar la senal de estancamiento en #{0}: {1}" -f $s.issue, $_) -ForegroundColor DarkYellow }
+            if (-not $Quiet) { Write-Host ("  WARN could not post the stall signal on #{0}: {1}" -f $s.issue, $_) -ForegroundColor DarkYellow }
         }
     }
 }
@@ -317,9 +317,9 @@ if ($Json) {
     $verdict | ConvertTo-Json -Depth 6; return
 }
 
-Write-Host "=== Supervisor del fleet ===" -ForegroundColor Cyan
+Write-Host "=== Fleet supervisor ===" -ForegroundColor Cyan
 if ($sessions.Count -eq 0) {
-    Write-Host "  (no hay sesiones vivas registradas)" -ForegroundColor DarkGray
+    Write-Host "  (no live sessions registered)" -ForegroundColor DarkGray
     return
 }
 foreach ($s in ($sessions | Sort-Object issue)) {
@@ -328,18 +328,18 @@ foreach ($s in ($sessions | Sort-Object issue)) {
     Write-Host ("  #{0,-4} {1,-9} {2,4}min  {3}" -f $s.issue, $tag, $s.ageMin, $s.pr) -ForegroundColor $color
 }
 Write-Host ""
-Write-Host ("Veredicto: {0}" -f $verdict.reason) -ForegroundColor Cyan
+Write-Host ("Verdict: {0}" -f $verdict.reason) -ForegroundColor Cyan
 if (@($verdict.brakeViolations).Count -gt 0) {
-    Write-Host ("  FRENO: {0} sesion(es) con el freno armado tienen su PR MERGEADO:" -f @($verdict.brakeViolations).Count) -ForegroundColor Red
+    Write-Host ("  BRAKE: {0} brake-armed session(s) have their PR MERGED:" -f @($verdict.brakeViolations).Count) -ForegroundColor Red
     foreach ($l in (Format-BrakeViolations $verdict.brakeViolations)) { Write-Host $l -ForegroundColor Red }
 }
 if (@($verdict.stalled).Count -gt 0) {
-    Write-Host ("  Estancados: {0}" -f ((@($verdict.stalled).issue) -join ', ')) -ForegroundColor Red
-    Write-Host "  Sugerencia: re-planifica el fleet o retoma con /board work -Start <n> -TakeOver." -ForegroundColor DarkYellow
+    Write-Host ("  Stalled: {0}" -f ((@($verdict.stalled).issue) -join ', ')) -ForegroundColor Red
+    Write-Host "  Suggestion: re-plan the fleet or take over with /board work -Start <n> -TakeOver." -ForegroundColor DarkYellow
     if ($Post) { Publish-StallSignals -Stalled @($verdict.stalled) -ThresholdMin $ThresholdMin -BoardNum $ProjectNum }
 }
 if ($verdict.shouldStop) {
-    Write-Host "  >> STOP: el fleet deberia detenerse." -ForegroundColor Magenta
+    Write-Host "  >> STOP: the fleet should stop." -ForegroundColor Magenta
 } else {
-    Write-Host "  >> CONTINUE: hay trabajo en curso." -ForegroundColor DarkGray
+    Write-Host "  >> CONTINUE: work is in progress." -ForegroundColor DarkGray
 }

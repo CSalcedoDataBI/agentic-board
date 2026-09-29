@@ -93,7 +93,7 @@ Describe 'Fleet supervisor detects a brake-armed run whose PR merged (#517)' {
     }
     It 'names the issue, the PR, who merged and how to judge it' {
         $text = (Format-BrakeViolations @(Get-BrakeViolations @((New-FleetSess -Issue 9 -MergedBy 'alice')))) -join "`n"
-        $text | Should -Match '#9 #109 MERGEADO por alice'
+        $text | Should -Match '#9 #109 MERGED by alice'
         $text | Should -Match 'denials\.jsonl'
     }
     It 'a violation without who/when (GitHub omitted them, or a legacy row) is still flagged, and the report does not invent an actor' {
@@ -102,8 +102,8 @@ Describe 'Fleet supervisor detects a brake-armed run whose PR merged (#517)' {
         $v.Count | Should -Be 1
         $v[0].mergedBy | Should -BeNullOrEmpty
         $text = (Format-BrakeViolations $v) -join "`n"
-        $text | Should -Match '#4 #104 MERGEADO - la corrida'
-        $text | Should -Not -Match ' por '
+        $text | Should -Match '#4 #104 MERGED - the run'
+        $text | Should -Not -Match ' by '
     }
     It 'Get-SessionBrakeInfo reads the REAL marker of the session''s worktree' {
         $armed = Get-SessionBrakeInfo -WorkPath (New-ArmedDir @('merge'))

@@ -185,12 +185,12 @@ Describe 'codeExceptions - declared plumbing is judged by reading (#567)' {
 Describe 'visualGroups - the owner approves SECTIONS, not file rows (#567)' {
     It 'groups visual paths by top-level directory' {
         $r = Get-WorkClass -ChangedPaths @('pages/a.html','pages/b.html','themes/x.theme.json','logo.png') -Policy (New-WorkClassPolicy)
-        $r.visualGroups | Should -Be @('(raiz)','pages','themes')
+        $r.visualGroups | Should -Be @('(root)','pages','themes')
     }
     It 'the reason names the sections so the approval is a batch decision' {
         $r = Get-WorkClass -ChangedPaths @('pages/a.html','pages/b.html') -Policy (New-WorkClassPolicy)
         $r.reason | Should -Match 'pages'
-        $r.reason | Should -Match '1 seccion'
+        $r.reason | Should -Match '1 section'
     }
 }
 

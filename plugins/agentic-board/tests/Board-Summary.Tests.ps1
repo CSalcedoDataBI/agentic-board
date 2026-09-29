@@ -26,17 +26,17 @@ BeforeAll {
 Describe 'Format-ClosingSummary — the four blocks' {
     It 'renders all four blocks even when only one has content' {
         $s = Format-ClosingSummary -Did @('algo')
-        foreach ($h in 'Que encontre', 'Que hice', 'Que queda pendiente', 'Que necesito de ti') {
+        foreach ($h in 'What I found', 'What I did', 'What is left', 'What I need from you') {
             $s | Should -Match ([regex]::Escape($h))
         }
     }
 
     It 'keeps the four blocks in the contract order, whatever order the caller passes them' {
         $s = Format-ClosingSummary -NeedFromYou @('d') -Pending @('c') -Did @('b') -Found @('a')
-        $idxFound   = $s.IndexOf('Que encontre')
-        $idxDid     = $s.IndexOf('Que hice')
-        $idxPending = $s.IndexOf('Que queda pendiente')
-        $idxNeed    = $s.IndexOf('Que necesito de ti')
+        $idxFound   = $s.IndexOf('What I found')
+        $idxDid     = $s.IndexOf('What I did')
+        $idxPending = $s.IndexOf('What is left')
+        $idxNeed    = $s.IndexOf('What I need from you')
         $idxFound   | Should -BeLessThan $idxDid
         $idxDid     | Should -BeLessThan $idxPending
         $idxPending | Should -BeLessThan $idxNeed
@@ -62,7 +62,7 @@ Describe 'Format-ClosingSummary — an empty block says so out loud' {
     It 'never leaves a block blank: every empty block gets an explicit sentence' {
         $s = Format-ClosingSummary
         # No block may be followed immediately by the next block's heading.
-        $s | Should -Not -Match 'Que encontre\s*\r?\n\s*\r?\n?\s*Que hice'
+        $s | Should -Not -Match 'What I found\s*\r?\n\s*\r?\n?\s*What I did'
         # Four blocks, four "nothing" sentences.
         @(($s -split "`n") | Where-Object { $_ -match '^\s*-\s' }).Count | Should -Be 4
     }
@@ -70,13 +70,13 @@ Describe 'Format-ClosingSummary — an empty block says so out loud' {
     It 'states plainly that nothing is expected from the reader when that block is empty' {
         $s = Format-ClosingSummary -Did @('algo')
         # The reader must be able to close the terminal knowing they owe nothing.
-        $s | Should -Match '(?s)Que necesito de ti.*Nada'
+        $s | Should -Match '(?s)What I need from you.*Nothing'
     }
 
     It 'still asks for action when the block has content' {
         $s = Format-ClosingSummary -NeedFromYou @('Revisar el PR')
         $s | Should -Match 'Revisar el PR'
-        $s | Should -Not -Match '(?s)Que necesito de ti.*Nada'
+        $s | Should -Not -Match '(?s)What I need from you.*Nothing'
     }
 }
 

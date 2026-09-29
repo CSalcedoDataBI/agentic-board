@@ -3,38 +3,39 @@ description: "Auto-expert mode — take a tracked plan and execute it autonomous
 ---
 You are running the agentic-board /expert command (typed as `/agentic-board:expert`).
 
-**If $ARGUMENTS is empty or only whitespace, do NOT run anything yet.** Show this menu and wait
-for the user to pick (they can answer with just the number):
+**If $ARGUMENTS is empty or only whitespace, do NOT run anything yet.** Show this menu, translated
+into the language the user is speaking (keep the verbs, arguments and numbering exactly as they
+are), and wait for the user to pick (they can answer with just the number):
 
 ```
-¿Qué quieres hacer con el auto-experto?
+What do you want to do with the auto-expert?
 
-1. config          → definir el CONTRATO (rol experto, autonomía, definition-of-done, evidencia,
-                     auto-uso del board, presupuesto). No ejecuta nada; deja todo revisable.
-2. auto <issue>    → ejecutar el plan de forma AUTÓNOMA: adopta el rol experto, investiga,
-                     construye, prueba dejando evidencia, se auto-usa agentic-board para el
-                     trabajo lateral que encuentra, y FRENA antes de lo irreversible (merge/
-                     deploy/refresh/publish/delete) — deja el PR listo para tu OK.
-2a. auto -Epic <n>  → CAMINAR el épico completo, ola por ola: despacha los sub-issues LISTOS
-                     (abiertos, sin PR, sin bloqueadores abiertos), una sesión autónoma cada uno.
-                     Idempotente: mergeas los PRs de la ola y re-ejecutas el mismo comando para
-                     la siguiente. Un comando por OLA en vez de un lanzamiento por sub-issue.
-2b. auto <issue> de punta a punta
-                   → REGISTRA tu orden de terminarlo — pero HOY NO SE CIERRA SOLO. El
-                     mecanismo que lo permitía tenía dos agujeros que no podía defender
-                     (issue #541), así que está cerrado: toda ruta de merge está negada para
-                     todo run. La sesión deja el PR listo y el cierre lo haces tú, igual que
-                     sin la orden. Se te avisa al lanzar; no falla en silencio.
-3. roles [why "<texto>"]
-                   → ver el CATÁLOGO de roles efectivo (fábrica + tu global `~/.agentic-board/` +
-                     el local de este proyecto, marcando cuál sobreescribe a cuál y cuántas
-                     skills engancha de verdad). Con `why` explica qué rol ganó para un texto de
-                     plan y por qué keyword.
+1. config          → define the CONTRACT (expert role, autonomy, definition-of-done, evidence,
+                     board self-use, budget). Runs nothing; leaves everything reviewable.
+2. auto <issue>    → run the plan AUTONOMOUSLY: takes on the expert role, researches,
+                     builds, tests while recording evidence, uses agentic-board itself for the
+                     side work it finds, and BRAKES before anything irreversible (merge/
+                     deploy/refresh/publish/delete) — leaves the PR ready for your OK.
+2a. auto -Epic <n>  → WALK the whole epic, wave by wave: dispatches the READY sub-issues
+                     (open, no PR, no open blockers), one autonomous session each.
+                     Idempotent: you merge the wave's PRs and re-run the same command for
+                     the next one. One command per WAVE instead of one launch per sub-issue.
+2b. auto <issue> end to end
+                   → RECORDS your order to finish it — but TODAY IT DOES NOT CLOSE ITSELF. The
+                     mechanism that allowed it had two holes it could not defend
+                     (issue #541), so it is shut: every merge route is refused for
+                     every run. The session leaves the PR ready and you do the close, same as
+                     without the order. You are told at launch; it does not fail silently.
+3. roles [why "<text>"]
+                   → show the effective role CATALOG (factory + your global `~/.agentic-board/` +
+                     this project's local one, marking which overrides which and how many
+                     skills it really hooks). With `why` it explains which role won for a plan
+                     text and by which keyword.
 4. verify <issue> <pr>
-                   → COMPROBAR que el run dejó su evidencia de verdad, en vez de decir que la
-                     dejó: lee los tres artefactos (archivo versionado, bloque en el PR,
-                     comentario en el issue) y responde COMPLETO o INCOMPLETO nombrando qué
-                     falta. Falla cerrado: lo que no se puede leer cuenta como ausente.
+                   → CHECK that the run really left its evidence, instead of saying it
+                     did: reads the three artifacts (versioned file, block in the PR,
+                     comment on the issue) and answers COMPLETE or INCOMPLETE naming what is
+                     missing. Fails closed: what cannot be read counts as absent.
 ```
 
 First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (default
@@ -123,18 +124,21 @@ Every response about a board operation must end with the board URL:
 
 <!-- BEGIN:closing-summary - generated by Update-Docs.ps1 from the renderer; do not edit -->
 **Closing summary — required (#491).** End your reply to the user with these four blocks,
-in this order, with these exact headings. Never drop one: when a block has nothing in it,
+in this order, with these headings. Never drop one: when a block has nothing in it,
 write its when-empty sentence instead. A silent block is indistinguishable from an answer
 that got cut off, which is the failure this contract exists to remove.
 
 | # | Heading | When there is nothing to say |
 |---|---|---|
-| 1 | **Que encontre** | Nada fuera de lo esperado. |
-| 2 | **Que hice** | Nada — no se cambio nada. |
-| 3 | **Que queda pendiente** | Nada — no quedo trabajo abierto. |
-| 4 | **Que necesito de ti** | Nada — esto quedo listo. |
+| 1 | **What I found** | Nothing unexpected. |
+| 2 | **What I did** | Nothing - nothing was changed. |
+| 3 | **What is left** | Nothing - no open work. |
+| 4 | **What I need from you** | Nothing - this is done. |
 
-Write them in the language the user is speaking, in words a BI professional can act on.
+The headings and sentences above are the English reference. Always write them in the
+language the user is speaking - translate the headings too (a user writing in Spanish gets
+Spanish headings) - keeping the same four blocks in the same order, in words a BI
+professional can act on.
 This block is generated from the shared renderer — to change the wording, change the
 renderer, not this text.
 <!-- END:closing-summary -->

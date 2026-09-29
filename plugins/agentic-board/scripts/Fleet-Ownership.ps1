@@ -204,7 +204,7 @@ function Remove-OwnershipClaim {
 function Show-Ownership {
     param([object[]]$Claims)
     if (-not $Claims -or @($Claims).Count -eq 0) {
-        Write-Host "  (sin claims de propiedad)" -ForegroundColor DarkGray
+        Write-Host "  (no ownership claims)" -ForegroundColor DarkGray
         return
     }
     foreach ($c in @($Claims | Sort-Object { [int]$_.issue })) {
@@ -230,17 +230,17 @@ if ($path -and $live.Count -ne $existing.Count) {
 
 if ($List) {
     if ($Json) { $live | ConvertTo-Json -Depth 6 -AsArray; return }
-    Write-Host "=== Propiedad de archivos del fleet ===" -ForegroundColor Cyan
+    Write-Host "=== Fleet file ownership ===" -ForegroundColor Cyan
     Show-Ownership $live
-    Write-Host ("Total: {0} claim(s) viva(s)." -f @($live).Count) -ForegroundColor Cyan
+    Write-Host ("Total: {0} live claim(s)." -f @($live).Count) -ForegroundColor Cyan
     return
 }
 
-if ($Issue -le 0) { throw "Especifica -Issue <n> (o usa -List)." }
+if ($Issue -le 0) { throw "Pass -Issue <n> (or use -List)." }
 
 if ($Release) {
     Remove-OwnershipClaim -Path $path -Issue $Issue
-    Write-Host ("  OK  Claim de #{0} liberado." -f $Issue) -ForegroundColor Green
+    Write-Host ("  OK  Claim for #{0} released." -f $Issue) -ForegroundColor Green
     return
 }
 
@@ -253,12 +253,12 @@ $prospect  = New-Ownership -Issue $Issue -Branch $Branch -Paths $Paths -SessionP
 $conflicts = @(Find-OwnershipConflicts $live $prospect)
 
 if ($conflicts.Count -gt 0) {
-    Write-Host ("  WARN #{0} solaparia archivos con otra(s) sesion(es):" -f $Issue) -ForegroundColor Yellow
+    Write-Host ("  WARN #{0} would overlap files with other session(s):" -f $Issue) -ForegroundColor Yellow
     foreach ($c in $conflicts) {
-        Write-Host ("      #{0} ({1}) ya reclamo: {2}" -f $c.issue, $c.branch, (@($c.paths) -join ', ')) -ForegroundColor Red
+        Write-Host ("      #{0} ({1}) already claimed: {2}" -f $c.issue, $c.branch, (@($c.paths) -join ', ')) -ForegroundColor Red
     }
 } else {
-    Write-Host ("  OK  #{0}: sin solapamiento con otras sesiones." -f $Issue) -ForegroundColor Green
+    Write-Host ("  OK  #{0}: no overlap with other sessions." -f $Issue) -ForegroundColor Green
 }
 
 if ($Check) {
@@ -266,15 +266,15 @@ if ($Check) {
 }
 
 if ($Claim) {
-    if (-not $Paths -or @($Paths).Count -eq 0) { throw "-Claim requiere -Paths <archivos>." }
+    if (-not $Paths -or @($Paths).Count -eq 0) { throw "-Claim needs -Paths <files>." }
     Write-Ownership -Path $path -Claim $prospect
-    Write-Host ("  OK  #{0} reclamo {1} archivo(s) en la registry." -f $Issue, @($prospect.paths).Count) -ForegroundColor Green
+    Write-Host ("  OK  #{0} claimed {1} file(s) in the registry." -f $Issue, @($prospect.paths).Count) -ForegroundColor Green
     if ($path) { Write-Host ("      {0}" -f $path) -ForegroundColor DarkGray }
     return
 }
 
-Write-Host "Uso:" -ForegroundColor DarkGray
-Write-Host "  ownership del fleet: -Claim  -Issue <n> -Paths <a,b> [-Branch <x>]" -ForegroundColor DarkGray
-Write-Host "  ownership del fleet: -Check  -Issue <n> -Paths <a,b>   (exit 1 si hay conflicto)" -ForegroundColor DarkGray
-Write-Host "  ownership del fleet: -List [-Json]" -ForegroundColor DarkGray
-Write-Host "  ownership del fleet: -Release -Issue <n>" -ForegroundColor DarkGray
+Write-Host "Usage:" -ForegroundColor DarkGray
+Write-Host "  fleet ownership: -Claim  -Issue <n> -Paths <a,b> [-Branch <x>]" -ForegroundColor DarkGray
+Write-Host "  fleet ownership: -Check  -Issue <n> -Paths <a,b>   (exit 1 on conflict)" -ForegroundColor DarkGray
+Write-Host "  fleet ownership: -List [-Json]" -ForegroundColor DarkGray
+Write-Host "  fleet ownership: -Release -Issue <n>" -ForegroundColor DarkGray

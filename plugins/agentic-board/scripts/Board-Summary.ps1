@@ -18,16 +18,16 @@
       - **The order never changes**, whatever order the caller passes the blocks in. The value
         of a fixed shape is that the eye stops reading and starts scanning.
 
-    Wording is Spanish and unaccented, matching the existing console surface (Board-Work and
-    friends already print "sesion", "Iniciados"): this file is the renderer, not the place to
-    change the console's language or its encoding conventions.
+    Wording is plain unaccented English, like the rest of the console surface (#751). An agent
+    writing the summary in chat translates the headings into the user's language (the generated
+    closing-summary block in commands/*.md says so); what a script prints stays English.
 
     Pure formatting behind a dot-source guard ($env:ABIOS_BOARDSUMMARY_DOTSOURCE); the writer
     half is one thin function.
 
 .EXAMPLE
     . .\Board-Summary.ps1
-    Write-ClosingSummary -Title 'Listo' -Did 'Abri el PR #489' -NeedFromYou 'Revisar y mergear'
+    Write-ClosingSummary -Title 'Done' -Did 'Opened PR #489' -NeedFromYou 'Review and merge'
 #>
 [CmdletBinding()]
 param()
@@ -38,10 +38,10 @@ $ErrorActionPreference = "Stop"
 
 # The contract. Order is meaning here — do not reorder without changing the tests that pin it.
 $script:ClosingSummaryBlocks = @(
-    @{ Key = 'Found';       Label = 'Que encontre';        Empty = 'Nada fuera de lo esperado.' }
-    @{ Key = 'Did';         Label = 'Que hice';            Empty = 'Nada — no se cambio nada.' }
-    @{ Key = 'Pending';     Label = 'Que queda pendiente'; Empty = 'Nada — no quedo trabajo abierto.' }
-    @{ Key = 'NeedFromYou'; Label = 'Que necesito de ti';  Empty = 'Nada — esto quedo listo.' }
+    @{ Key = 'Found';       Label = 'What I found';         Empty = 'Nothing unexpected.' }
+    @{ Key = 'Did';         Label = 'What I did';           Empty = 'Nothing - nothing was changed.' }
+    @{ Key = 'Pending';     Label = 'What is left';         Empty = 'Nothing - no open work.' }
+    @{ Key = 'NeedFromYou'; Label = 'What I need from you'; Empty = 'Nothing - this is done.' }
 )
 
 function Get-ClosingSummaryBlocks {
