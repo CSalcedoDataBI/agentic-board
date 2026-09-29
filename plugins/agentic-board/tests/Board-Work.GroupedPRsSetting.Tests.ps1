@@ -172,8 +172,10 @@ Describe 'the /board menu shows the setting (#681)' {
         $script:Board | Should -Match 'scripts/Board-Work\.ps1 -PreferGroupedPRs show'
         $script:Board | Should -Match 'print\s+`auto \(por defecto\)`'
     }
-    It 'the menu keeps its 24 numbered entries (the sub-line is not a 25th option)' {
-        @([regex]::Matches($script:Menu, '(?m)^\d+\. ')).Count | Should -Be 24
+    # 25 since #736 added `transcripts`. The point of the count is unchanged: an indented sub-line
+    # (like the PreferGroupedPRs one under `work`) is never an extra numbered option.
+    It 'the menu keeps its 25 numbered entries (the sub-lines are not extra options)' {
+        @([regex]::Matches($script:Menu, '(?m)^\d+\. ')).Count | Should -Be 25
     }
     It 'the work reference documents show and the three values in one place' {
         $ref = Get-Content -LiteralPath (Join-Path $script:Plugin 'skills' 'projects-admin' 'references' 'verbs-work.md') -Raw
