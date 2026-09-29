@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Merge a gated PR for /board work step 5d - handling the pr-before-merge ruleset.
 
@@ -140,14 +140,14 @@ if (-not $DryRun) {
 # best-effort: it silently no-ops when the branch is checked out (here, or in another worktree) or
 # the merge came from the UI/another machine. That silent miss is how merged branches pile up (#302
 # finding #2). Verify it, and when the local branch survived, say so and point at the single-session
-# teardown (cerrar-ciclo) that finishes the job - never report a cleanup that did not happen.
+# teardown (close-cycle) that finishes the job - never report a cleanup that did not happen.
 function Show-LocalBranchCleanupHint {
     param([string]$Branch)
     if (-not $Branch) { return }
     git rev-parse --verify --quiet "refs/heads/$Branch" 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Host ("  NOTA: la rama local '{0}' sigue aqui - --delete-branch no la borra si esta checkouteada." -f $Branch) -ForegroundColor DarkYellow
-        Write-Host  "        Cierrala con:  /board cerrar-ciclo" -ForegroundColor DarkGray
+        Write-Host  "        Cierrala con:  /board close-cycle" -ForegroundColor DarkGray
     }
 }
 

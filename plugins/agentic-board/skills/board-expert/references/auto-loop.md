@@ -54,7 +54,7 @@ guiding principle: **total self-use of agentic-board — never improvise your ow
 | Record work / findings | `/board issue`, `/board plan`, `/board triage` |
 | Report progress / evidence | `/board update`, `/board changelog`, `[abios-evidence]` |
 | Survive budget / interruption | `/board handoff -Save` |
-| Clean up | `/board doctor`, `/board cerrar-ciclo` |
+| Clean up | `/board doctor`, `/board close-cycle` |
 
 The rendered brief (`Format-AutoBrief`) carries this exact table, and `Expert-Auto.Passthrough.Tests.ps1` fails
 whenever the two disagree — in either direction — so a capability added here without the brief

@@ -1,5 +1,5 @@
 ---
-description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/cerrar-ciclo/telemetry/triage/complete/bi-checklist/plugins/actions-cost. Defaults to the CSalcedoDataBI account.
+description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/plugins/actions-cost. Defaults to the CSalcedoDataBI account.
 ---
 You are running the agentic-board /board command.
 
@@ -31,7 +31,7 @@ just the number):
 15. changelog       → generar un bloque de CHANGELOG (Added/Changed/Fixed) desde los issues Done
 16. handoff         → guardar/retomar contexto entre sesiones (save/resume) para continuar días después
 17. doctor          → auditar ramas y worktrees locales (mergeadas, estancadas, fantasma) y limpiarlos
-18. cerrar-ciclo    → clasificar la RAMA ACTUAL y enrutarla (commitear/PR/gate/merge/limpiar) — cierra la sesión individual
+18. close-cycle     → clasificar la RAMA ACTUAL y enrutarla (commitear/PR/gate/merge/limpiar) — cierra la sesión individual
 19. telemetry       → medir cómo se comportó la herramienta en tus sesiones reales (barrido incremental)
 20. triage          → llenar Type/Area/Estimate por evidencia + PROPONER Priority (con confirmación) en los pendientes
 21. complete        → verificar que el board quedó full (0 pendientes) — PASS/FAIL, útil para CI o cierre
@@ -92,8 +92,10 @@ improvise the recipe from this summary:
   file; refusal rules when no issue is linked). Full contract: `references/verbs-handoff.md`.
 - **doctor** — audit local branches/worktrees against git reality (never `git branch --merged`
   here: this repo squash-merges). Full contract: `references/verbs-doctor.md`.
-- **cerrar-ciclo** — classify the CURRENT branch and route it (commit/PR/gate/merge/teardown);
-  performs exactly ONE action. Full contract: `references/verbs-cerrar-ciclo.md`.
+- **close-cycle** — classify the CURRENT branch and route it (commit/PR/gate/merge/teardown);
+  performs exactly ONE action. Full contract: `references/verbs-close-cycle.md`. The old Spanish
+  name `cerrar-ciclo` is a deprecated alias (#733): accept it, run `close-cycle`, and tell the user
+  the new name in one line. It will be removed in a later release.
 - **telemetry** — the incremental field sweep over real session transcripts (watermarks, four
   mechanical signals, read-only). Full contract: `references/verbs-telemetry.md`.
 - **triage** — fill Type/Area/Estimate from evidence and PROPOSE Priority (never write it

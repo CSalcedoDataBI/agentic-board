@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Show pending work across boards and start working an issue (single or parallel).
 
@@ -221,7 +221,9 @@ param(
     # Cross-repo issues (#487): close the issue of this session ONLY when every PR recorded for it is
     # MERGED. Shows the list first; without -Force (or with -DryRun) it closes nothing.
     [int]   $CloseCrossRepo = 0,
-    # cerrar-ciclo: classify the CURRENT branch and route it to the right disposition (#302).
+    # close-cycle: classify the CURRENT branch and route it to the right disposition (#302).
+    # -CloseCycle is the name that matches the verb (#733); -CloseLoop stays for existing callers.
+    [Alias('CloseCycle')]
     [switch]$CloseLoop,
     [switch]$Reap,
     [switch]$KillAll,
@@ -277,7 +279,7 @@ $ErrorActionPreference = "Stop"
 # Board reads that report their own truncation (#484). A capped item-list returns exit 0 and a
 # SHORT list, which this script used to print as "sin pendientes" over a board full of Backlog.
 . (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
-# owner/name resolver from origin (dot-safe regex) - cerrar-ciclo (#302) resolves the current repo.
+# owner/name resolver from origin (dot-safe regex) - close-cycle (#302) resolves the current repo.
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
 
 # Per-repo preferences (#662) - today: whether related issues should share one PR.
@@ -2649,8 +2651,8 @@ function Get-SessionCompletion {
     return [pscustomobject]@{ done = $false; reason = 'en progreso'; merged = $false }
 }
 
-# Classify the CURRENT branch's disposition for cerrar-ciclo (#302/#650), and route it. PURE:
-# every fact is an argument. cerrar-ciclo PERFORMS the disposition's action - it does not merge
+# Classify the CURRENT branch's disposition for close-cycle (#302/#650), and route it. PURE:
+# every fact is an argument. close-cycle PERFORMS the disposition's action - it does not merge
 # (that keeps the review gate; "ship it" vs "stop for today" stays the human's call), but every
 # other step it can safely take on its own, it takes, asking first only where a genuine choice
 # exists (reopen a closed PR and keep going, or discard the work).
@@ -3640,7 +3642,7 @@ if ($CloseLoop) {
     $repo = $Repo
     if (-not $repo) { try { $repo = Get-RepoFromOrigin } catch { $repo = '' } }
     $curBranch = (git branch --show-current 2>$null)
-    if (-not $curBranch) { throw "HEAD detached - cerrar-ciclo opera sobre la rama actual." }
+    if (-not $curBranch) { throw "HEAD detached - close-cycle opera sobre la rama actual." }
 
     $baseRef      = Resolve-IssueBaseRef $repo
     $defaultShort = if ($baseRef -match '/') { ($baseRef -split '/', 2)[1] } else { $baseRef }
@@ -3680,7 +3682,7 @@ if ($CloseLoop) {
     $entry    = @(Read-SessionRegistryRaw | Where-Object { $_.branch -eq $curBranch }) | Select-Object -First 1
     $issueNum = if ($entry) { [int]$entry.issue } elseif ($curBranch -match '^issue-(\d+)') { [int]$Matches[1] } else { 0 }
 
-    Write-Host ("=== cerrar-ciclo  ({0})  rama {1} ===" -f $(if ($repo) { $repo } else { '(repo desconocido)' }), $curBranch) -ForegroundColor Cyan
+    Write-Host ("=== close-cycle  ({0})  rama {1} ===" -f $(if ($repo) { $repo } else { '(repo desconocido)' }), $curBranch) -ForegroundColor Cyan
     Write-Host ""
     Write-Host ("  Estado: {0}" -f $disp.State) -ForegroundColor Yellow
     Write-Host ("  {0}" -f $disp.Summary)

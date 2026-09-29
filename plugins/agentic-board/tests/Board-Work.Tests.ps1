@@ -1,4 +1,4 @@
-﻿#Requires -Modules Pester
+#Requires -Modules Pester
 <#  Pester tests for Board-Work.ps1 - the /board work driver.
 
     Board-Work.ps1 is a side-effecting command (gh + Write-Host), so it exposes a
@@ -2465,7 +2465,7 @@ Describe 'Resolve-StatusOptionId (every Status WRITE is vocabulary-aware, PR #27
     }
 }
 
-Describe 'Get-CloseLoopDisposition (cerrar-ciclo router #302/#650)' {
+Describe 'Get-CloseLoopDisposition (close-cycle router #302/#650)' {
     It 'on the default branch -> nothing to close' {
         $d = Get-CloseLoopDisposition -OnDefault $true
         $d.State  | Should -Be 'on-default'
