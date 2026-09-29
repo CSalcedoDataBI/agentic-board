@@ -1,6 +1,41 @@
 ﻿# Changelog
 
 
+## [0.42.0] - 2026-09-29
+Close every session of a repo and leave nothing dangling, and an English-only command surface.
+### Added
+- **`/board close-cycle --all` (#734).** It sweeps every session of the current repo instead of only
+  the current branch. It plans first, asks for one confirmation, and then gives each branch ONE
+  disposition, reusing the `/board doctor` inventory:
+  - merged at the tip: torn down;
+  - commits with no PR: **parked** as a draft PR labelled `parked`, so the default branch knows the
+    work exists without merging it. The PR says `Refs #n`, never a closing keyword;
+  - uncommitted work: committed as WIP, then parked;
+  - empty: deleted;
+  - a closed-unmerged PR or an unreadable state: left for a human.
+
+  It then decides which host-app sessions may be **archived**: only those whose work is resolved,
+  whose folder is gone, or that have no branch and sat idle for `-IdleDays`. Running, pinned and
+  unresolved sessions are kept. `-Scope repo` is the default and never reaches into another repo;
+  `-Scope orphans` covers the sessions no repo owns, and `-Scope all` sweeps the whole machine.
+
+  Guards found by dry-running it against a real machine:
+  - Timestamps are read culture-invariantly: an es-CO re-parse had turned 10 September into
+    9 October.
+  - A repo the token cannot read is never counted as "scanned with nothing pending".
+  - Parking publishes, so it only happens in repos of `-Owner`: a client repo is never handed a
+    draft PR under the personal identity.
+  - An open PR with unpushed commits is pushed before its session is archived, because the host
+    removes the worktree when it archives.
+- A CommandSurface test rejects Spanish verb, menu, parameter and alias names (#733).
+### Changed
+- **BREAKING (command name): `/board cerrar-ciclo` is now `/board close-cycle` (#733).** The old name
+  still works as a deprecated alias for one release: the router runs `close-cycle` and names the new
+  command. `Board-Work.ps1 -CloseCycle` is an alias of `-CloseLoop`, which keeps working.
+### Fixed
+- Restored the UTF-8 BOM that the #733 rename dropped from five scripts. Windows PowerShell 5.1 could
+  not parse `Expert-Auto.ps1` without it (#742).
+
 ## [0.41.0] - 2026-09-22
 The fleet stops assuming one issue is one repo, one worktree and one PR — and gains a launch surface
 for running issues where you are actually looking. Plus a read-only audit of what this repo's CI
