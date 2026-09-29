@@ -1,5 +1,5 @@
 ---
-description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/plugins/actions-cost. Defaults to the CSalcedoDataBI account.
+description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/plugins/actions-cost/transcripts. Defaults to the CSalcedoDataBI account.
 ---
 You are running the agentic-board /board command.
 
@@ -41,6 +41,8 @@ just the number):
 23. plugins         → actualizar TODOS los plugins instalados y ver qué sesiones abiertas siguen con una versión vieja
                       (plugins = actualizar | plugins sessions = mapa de sesiones | plugins clean = borrar versiones viejas sin uso)
 24. actions-cost    → auditar el costo de GitHub Actions de este repo (solo lectura): minutos MEDIDOS + reglas de costo sobre los workflows
+25. transcripts     → comprimir transcripts de sesiones viejas en un archivo con índice (libera disco) y recuperarlos igualitos
+                      (transcripts = plan | transcripts --force = comprimir | transcripts find <texto> | transcripts restore <id>)
 
 ── otros comandos (se tipean) ──────────────────────────────────
 /scan       → escanear ESTE proyecto por trabajo sin trackear (TODOs, checklists, planes) → issues + plan
@@ -115,6 +117,10 @@ improvise the recipe from this summary:
   setup, the required-check deadlock trap). Every finding carries file:line; whatever it cannot measure is
   listed with the reason, never reported as clean. Writes nothing and has no fix mode. Full contract:
   `references/verbs-actions-cost.md`.
+- **transcripts** — compress OLD session transcripts (`~/.claude/projects`) into an indexed archive
+  and restore them byte for byte (`find` searches the index). Never touches a transcript the desktop
+  app still shows or a running session's. Plan by default; compresses only with `--force`. Needs no
+  GitHub token: skip the account step above for this verb. Full contract: `references/verbs-transcripts.md`.
 
 The short verbs run directly:
 
