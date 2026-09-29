@@ -33,6 +33,7 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
 
      | Finding | On a yes, you… |
      |---|---|
+     | Parked work (draft PR labelled `parked`) | resume the one the user names: `git switch <branch>` (in a worktree if the current tree is busy, as `work` does), and tell them the PR is still a draft — they mark it ready when it is |
      | Run still `active` but its queue/epic is closed | `Board-RunLedger.ps1 -Close -Epic <n>` (marks the marker closed and updates the ledger comment) |
      | Epic open with every sub-issue closed | close the epic issue (`gh issue close <n> --reason completed`) and let `Board-Fill` move it to Done |
      | Worktrees of branches already merged | `/board doctor -Fix` — per-branch confirmation, dirty worktrees kept |
