@@ -93,8 +93,8 @@ follow it exactly:
 | `/board close-cycle` | `references/verbs-close-cycle.md` |
 | `/board telemetry` | `references/verbs-telemetry.md` |
 | `/board triage` | `references/verbs-triage.md` |
-| `/board plugins` (update every plugin; `sessions` map; `clean` old builds) | `references/verbs-plugins.md` |
 | `/board actions-cost` (read-only, MEASURED audit of a repo's Actions cost: usage endpoint + workflow rules) | `references/verbs-actions-cost.md` |
+| Machine housekeeping — sessions sweep, transcripts, disk, plugins (NOT board work) | the **`/cleanup`** command and its `cleanup-ops` skill (`/board plugins` and `/board close-cycle --all` are one-release aliases routed there) |
 
 ---
 ## Routing table

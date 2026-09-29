@@ -411,7 +411,7 @@ function Format-PluginUpdateReport {
         $msg = "Sesiones abiertas: $($s.Live). $($s.Stale) siguen con una version vieja de algun plugin"
         $msg += ", $none al dia, $($s.NoData) sin datos para comprobarlo"
         if ($s.UnknownLiveness -gt 0) { $msg += " (y $($s.UnknownLiveness) mas que no pude confirmar que sigan abiertas)" }
-        & $add ($msg + '. Para ver cuales: /board plugins sessions') $(if ($s.Stale -gt 0) { 'Yellow' } else { 'Gray' })
+        & $add ($msg + '. Para ver cuales: /cleanup plugins sessions') $(if ($s.Stale -gt 0) { 'Yellow' } else { 'Gray' })
         if ($s.Stale -gt 0) {
             & $add '  En cada una: escribe /reload-plugins (skills, comandos y hooks). Si el plugin trae un servidor MCP, abre una sesion nueva.' 'Gray'
         }
@@ -424,7 +424,7 @@ function Format-PluginUpdateReport {
         if ($c.Ran) {
             & $add ("Versiones viejas: se borraron {0}{1}." -f $c.Removed, $(if ($c.Failed -gt 0) { ", $($c.Failed) no se pudieron borrar" } else { '' })) $(if ($c.Failed -gt 0) { 'Red' } else { 'Gray' })
         } elseif ($c.Candidates -gt 0) {
-            & $add ("Versiones viejas sin uso: {0} (unos {1}). No se borra nada solo: para limpiarlas usa /board plugins clean (o repite esto con -Clean)." -f $c.Candidates, (Format-Megabytes $c.Bytes)) 'Gray'
+            & $add ("Versiones viejas sin uso: {0} (unos {1}). No se borra nada solo: para limpiarlas usa /cleanup plugins clean (o repite esto con -Clean)." -f $c.Candidates, (Format-Megabytes $c.Bytes)) 'Gray'
         }
     }
     return @($acc)

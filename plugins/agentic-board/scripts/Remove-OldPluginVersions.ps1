@@ -49,7 +49,7 @@ function Format-CleanupReport {
         & $add 'No hay versiones viejas sin uso que borrar.' 'Green'
     } elseif (-not $executed) {
         $total = [long](($rm | Measure-Object SizeBytes -Sum).Sum)
-        & $add ("Versiones viejas que nadie usa: {0} (unos {1}). NO se ha borrado nada; para borrarlas usa /board plugins clean -Execute." -f $rm.Count, (Format-CleanupMegabytes $total)) 'Cyan'
+        & $add ("Versiones viejas que nadie usa: {0} (unos {1}). NO se ha borrado nada; para borrarlas usa /cleanup plugins clean -Execute." -f $rm.Count, (Format-CleanupMegabytes $total)) 'Cyan'
         foreach ($i in $rm) { & $add ("  {0}@{1}  version {2}  ({3})" -f $i.Plugin, $i.Marketplace, $i.Version, (Format-CleanupMegabytes $i.SizeBytes)) 'Gray' }
     } else {
         $freed = [long](($Removed | Measure-Object SizeBytes -Sum).Sum)

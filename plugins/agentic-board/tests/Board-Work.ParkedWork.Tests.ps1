@@ -1,7 +1,7 @@
 ﻿#Requires -Modules Pester
 <#  Tests for the parked-work ledger in the /board work state of play (#735).
 
-    `/board close-cycle --all` parks unmerged work as a DRAFT PR labelled `parked`, so the default
+    `/cleanup sessions` parks unmerged work as a DRAFT PR labelled `parked`, so the default
     branch knows it exists without merging it. That is only half a ledger: the other half is that
     `/board work` - the command you run to pick up work - SHOWS it first, with what it is and how to
     resume it. Otherwise parked work is just another draft PR nobody remembers. #>

@@ -1,5 +1,5 @@
 ﻿#Requires -Modules Pester
-<#  Pester tests for Board-CloseCycleSweep.ps1 - `/board close-cycle --all` (#734).
+<#  Pester tests for Cleanup-Sessions.ps1 - `/cleanup sessions` (#734).
 
     The sweep closes every session on the machine, not only the current branch, and leaves
     nothing dangling: each branch gets ONE disposition, and each host-app session is archived
@@ -8,7 +8,7 @@
 
 BeforeAll {
     $env:ABIOS_SWEEP_DOTSOURCE = '1'
-    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Board-CloseCycleSweep.ps1' | Resolve-Path) }
+    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Cleanup-Sessions.ps1' | Resolve-Path) }
     finally { $env:ABIOS_SWEEP_DOTSOURCE = '' }
 
     function script:Act {
