@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Show pending work across boards and start working an issue (single or parallel).
 

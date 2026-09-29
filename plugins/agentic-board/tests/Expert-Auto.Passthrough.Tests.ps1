@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for the Expert-Auto fixes of #472 (-TakeOver/-IgnoreBlocked passthrough), #499
     (-Owner/-Repo), #473 (issue comments in the brief) and #554 (capability map vs auto-loop.md).
 
