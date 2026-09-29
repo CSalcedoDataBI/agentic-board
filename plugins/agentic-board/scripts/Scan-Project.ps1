@@ -537,7 +537,7 @@ function Show-ScanPlan($Plan) {
     }
     Write-Host ""
     Write-Host "Plan saved: $PlanFile"
-    Write-Host "Apply all: Scan-Project.ps1 -Apply   |   some rows: -Apply -Rows 1,3,5   |   rehearse: -Apply -DryRun"
+    Write-Host "Next: /scan apply (all rows), /scan apply rows 1,3,5 (some), or /scan apply --dry-run (rehearse)"
 }
 
 # ------------------------------------------------------------------------ PLAN
@@ -569,7 +569,7 @@ if (-not $Apply) {
 }
 
 # ----------------------------------------------------------------------- APPLY
-if (-not (Test-Path -LiteralPath $PlanFile)) { throw "No plan at $PlanFile. Run Scan-Project.ps1 first (it plans and writes nothing to GitHub)." }
+if (-not (Test-Path -LiteralPath $PlanFile)) { throw "No plan at $PlanFile. Run /scan first (it plans and writes nothing to GitHub)." }
 if (-not $Repo) { throw 'Could not resolve the current repo (owner/name). Pass -Repo.' }
 $plan = Get-Content -LiteralPath $PlanFile -Raw | ConvertFrom-Json
 if ($plan.repo -and $plan.repo -ne $Repo) { throw "The plan is for $($plan.repo), not $Repo. Run the plan again here." }

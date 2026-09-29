@@ -18,6 +18,10 @@ the `gh-account` skill.
    fields, `-NoFill` to skip the final fill). Report the board, the issues, the epic and anything
    that failed.
 
+Arguments: `/scan apply` → `-Apply`; `/scan apply rows 1,3,5` → `-Apply -Rows 1,3,5`;
+`/scan apply --dry-run` → `-Apply -DryRun`; `--bare-board` → `-BareBoard`; `--no-fill` → `-NoFill`.
+An `apply` typed by the user IS the confirmation for the plan already shown.
+
 Rerunning is safe: the plan file remembers every issue created, and items an open issue already
 tracks are skipped. `-Apply -DryRun` rehearses step 3 and writes nothing.
 
