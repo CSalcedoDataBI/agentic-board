@@ -113,7 +113,7 @@ Describe 'Invoke-BatchIssueStart (a fail-closed throw must not abort the -Parall
         $r = Invoke-BatchIssueStart -IssueNum 7 -Ctx $script:Ctx -Owner 'me'
         $r.started | Should -BeFalse
         $r.issue   | Should -Be 7
-        $r.skipped | Should -Match 'error al iniciar'
+        $r.skipped | Should -Match 'error while starting'
     }
     It 'passes a successful start straight through' {
         Mock Invoke-IssueStart { [pscustomobject]@{ issue = 5; started = $true; skipped = ''; workPath = 'wp' } }
@@ -860,14 +860,14 @@ Describe 'Invoke-IssueStart safety refusals + dry-run' {
         Mock Get-BoardItem { New-FakeItem -State 'CLOSED' }
         $r = Invoke-IssueStart -IssueNum 1 -Ctx $script:Ctx -Owner 'me'
         $r.started | Should -BeFalse
-        $r.skipped | Should -Match 'CERRADO'
+        $r.skipped | Should -Match 'CLOSED'
     }
 
     It 'skips an issue that is not on the board' {
         Mock Get-BoardItem { $null }
         $r = Invoke-IssueStart -IssueNum 1 -Ctx $script:Ctx -Owner 'me'
         $r.started | Should -BeFalse
-        $r.skipped | Should -Match 'no esta en el board'
+        $r.skipped | Should -Match 'not on the board'
     }
 
     It 'skips a blocked issue (and reports the blocker)' {
@@ -875,7 +875,7 @@ Describe 'Invoke-IssueStart safety refusals + dry-run' {
         Mock Get-IssueBlockers { @("label 'blocked' presente") }
         $r = Invoke-IssueStart -IssueNum 1 -Ctx $script:Ctx -Owner 'me'
         $r.started | Should -BeFalse
-        $r.skipped | Should -Match 'BLOQUEADO'
+        $r.skipped | Should -Match 'BLOCKED'
         $r.skipped | Should -Match 'blocked'
     }
 
@@ -891,7 +891,7 @@ Describe 'Invoke-IssueStart safety refusals + dry-run' {
         Mock Get-BoardItem { New-FakeItem -Status 'In Progress' -Assignees @('bob') }
         $r = Invoke-IssueStart -IssueNum 1 -Ctx $script:Ctx -Owner 'me'
         $r.started | Should -BeFalse
-        $r.skipped | Should -Match 'OCUPADO'
+        $r.skipped | Should -Match 'BUSY'
     }
 
     It '-TakeOver overrides the lock (reaches the plan instead of skipping)' {
@@ -915,7 +915,7 @@ Describe 'Invoke-IssueStart safety refusals + dry-run' {
         Mock Get-IssueLinkedWork { [pscustomobject]@{ prs = @([pscustomobject]@{ number = 9; state = 'MERGED' }); commits = @() } }
         $r = Invoke-IssueStart -IssueNum 1 -Ctx $script:Ctx -Owner 'me'
         $r.started | Should -BeFalse
-        $r.skipped | Should -Match 'YA TRABAJADO'
+        $r.skipped | Should -Match 'ALREADY WORKED'
         $r.skipped | Should -Match 'MERGED'
     }
 
@@ -924,7 +924,7 @@ Describe 'Invoke-IssueStart safety refusals + dry-run' {
         Mock Get-IssueLinkedWork { [pscustomobject]@{ prs = @(); commits = @([pscustomobject]@{ sha = 'abcdef1234' }) } }
         $r = Invoke-IssueStart -IssueNum 1 -Ctx $script:Ctx -Owner 'me'
         $r.started | Should -BeFalse
-        $r.skipped | Should -Match 'YA TRABAJADO'
+        $r.skipped | Should -Match 'ALREADY WORKED'
     }
 
     It '-TakeOver overrides the PR/commit refusal (reaches the plan)' {
@@ -939,11 +939,11 @@ Describe 'Invoke-IssueStart safety refusals + dry-run' {
 Describe 'Format-ClaimFingerprint (single source of the [abios-claim] format)' {
     It 'builds a claim line with the branch tail' {
         $s = Format-ClaimFingerprint -Note 'claim' -Computer 'BOX' -ProcessId 42 -Date '2026-07-13 10:00' -Branch 'issue-1-x'
-        $s | Should -Be '[abios-claim] claim por sesion Claude en BOX (PID 42) - 2026-07-13 10:00 - rama issue-1-x'
+        $s | Should -Be '[abios-claim] claim by Claude session on BOX (PID 42) - 2026-07-13 10:00 - branch issue-1-x'
     }
     It 'omits the branch tail when no branch is given (LOCK/UNLOCK)' {
         $s = Format-ClaimFingerprint -Note 'LOCK' -Computer 'BOX' -ProcessId 42 -Date '2026-07-13 10:00'
-        $s | Should -Be '[abios-claim] LOCK por sesion Claude en BOX (PID 42) - 2026-07-13 10:00'
+        $s | Should -Be '[abios-claim] LOCK by Claude session on BOX (PID 42) - 2026-07-13 10:00'
         $s | Should -Not -Match 'rama'
     }
 }
@@ -964,7 +964,7 @@ Describe 'Get-PriorWorkRefusal (PR/commit-aware -Start refusal, #236)' {
     }
     It 'refuses on an OPEN PR (mid-flight)' {
         $r = Get-PriorWorkRefusal -Prs @([pscustomobject]@{ number = 7; state = 'OPEN' }) -Commits @()
-        $r | Should -Match 'abierto'
+        $r | Should -Match 'open PR'
         $r | Should -Match '#7'
     }
     It 'ignores a CLOSED-unmerged PR (abandoned attempt must not block)' {
@@ -1538,7 +1538,7 @@ Describe 'Format-SessionMetric (dashboard cell)' {
         $s | Should -Match '12'
     }
     It 'renders a dead marker when the PID is gone' {
-        Format-SessionMetric ([pscustomobject]@{ Alive=$false }) | Should -Match 'muerto'
+        Format-SessionMetric ([pscustomobject]@{ Alive=$false }) | Should -Match 'dead'
     }
 }
 
@@ -1653,11 +1653,11 @@ Describe 'Get-SessionCompletion (watch completion predicate, #135)' {
     }
     It 'is done when the issue is CLOSED' {
         $r = Get-SessionCompletion -PrState 'OPEN' -IssueState 'CLOSED' -PidAlive $true
-        $r.done | Should -BeTrue; $r.reason | Should -Match 'cerrado'
+        $r.done | Should -BeTrue; $r.reason | Should -Match 'closed'
     }
     It 'is done when the host PID is dead' {
         $r = Get-SessionCompletion -PrState '' -IssueState 'OPEN' -PidAlive $false
-        $r.done | Should -BeTrue; $r.reason | Should -Match 'termin'
+        $r.done | Should -BeTrue; $r.reason | Should -Match 'ended'
     }
     It 'is NOT done while the PR is open, the issue open, and the PID alive' {
         (Get-SessionCompletion -PrState 'OPEN' -IssueState 'OPEN' -PidAlive $true).done | Should -BeFalse
@@ -1679,7 +1679,7 @@ Describe 'Get-SessionCompletion (watch completion predicate, #135)' {
         $r = Get-SessionCompletion -PrState 'MERGED' -IssueState 'OPEN' -PidAlive $false `
             -PrHeadOid 'old111' -BranchTip 'new999'
         $r.done   | Should -BeTrue
-        $r.reason | Should -Match 'termin'
+        $r.reason | Should -Match 'ended'
         $r.merged | Should -BeFalse
     }
     # `merged` licenses the branch force-delete downstream (#273) - only a landed PR whose
@@ -1800,7 +1800,7 @@ Describe 'Invoke-SessionCleanup (teardown plan, #135)' {
         Mock Find-WtTabShell { return $null }   # no shell running; deterministic
         $acts = @(Invoke-SessionCleanup -Session $s -DryRun)
         ($acts -join ' ') | Should -Not -Match 'kill PID 4321'   # host PID is never killed
-        ($acts -join ' ') | Should -Match 'no encontrado'        # tab shell not running
+        ($acts -join ' ') | Should -Match 'not found'        # tab shell not running
         ($acts -join ' ') | Should -Match 'prune #8'
     }
     It 'kills the pwsh tab shell for a wt session when found by launch script name - #413' {
@@ -1872,7 +1872,7 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
         Test-Path $script:Work2 | Should -BeTrue                      # folder survives: the handle
         ((git worktree list --porcelain) -join "`n") | Should -Not -Match 'issue-21-h'  # git let go
         ($acts -join ' ') | Should -Not -Match 'FAIL'
-        ($acts -join ' ') | Should -Match 'NOTA'                      # litter is reported...
+        ($acts -join ' ') | Should -Match 'NOTE'                      # litter is reported...
         # Parenthesised: Pester binds -Match to the literal '[regex]::Escape' otherwise.
         ($acts -join ' ') | Should -Match ([regex]::Escape($script:Work2))  # ...with its path
         ($acts -join ' ') | Should -Match 'branch -D issue-21-h'
@@ -1994,7 +1994,7 @@ Describe 'Invoke-SessionCleanup does not discard a dirty worktree (#276)' {
         'work in progress' | Set-Content (Join-Path $script:Work 'scratch.txt')   # untracked
         $acts = @(Invoke-SessionCleanup -Session (New-Session))
         ($acts -join ' ') | Should -Match 'WARN'
-        ($acts -join ' ') | Should -Match 'scratch|sin commitear|worktree'
+        ($acts -join ' ') | Should -Match 'scratch|uncommitted|worktree'
         ($acts -join ' ') | Should -Match '#20'
         Test-Path (Join-Path $script:Work 'scratch.txt') | Should -BeTrue   # the work survives
     }
@@ -2049,7 +2049,7 @@ Describe 'Invoke-SessionCleanup does not discard a dirty worktree (#276)' {
         # Assert the EXIT-CODE branch specifically. Matching a bare 'WARN' would pass even
         # without the guard, because 2>&1 puts git's error text in the output and that alone
         # reads as "dirty" - an accident, not the guard. Pin the message so it stays honest.
-        ($acts -join ' ') | Should -Match 'no pude comprobar'
+        ($acts -join ' ') | Should -Match 'could not check'
         ($acts -join ' ') | Should -Not -Match 'prune #20'
         Test-Path $script:Work | Should -BeTrue
         Should -Invoke Remove-SessionRegistryEntry -Times 0 -Exactly
@@ -2228,7 +2228,7 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
         $script:t = 0
         $r = Invoke-SessionWatch -TimeoutSec 5 `
             -ReadSessions { @([pscustomobject]@{ issue = 1 }) } `
-            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'en progreso' } } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'in progress' } } `
             -Now  { $script:t += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t) } `
             -Sleep { param($sec) }
         $r.timedOut | Should -BeTrue
@@ -2239,7 +2239,7 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
         $script:supervised = 0
         Invoke-SessionWatch -TimeoutSec 100 -SuperviseEvery 2 `
             -ReadSessions { @([pscustomobject]@{ issue = 1 }) } `
-            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'en progreso' } } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'in progress' } } `
             -Now  { $script:t2 += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t2) } `
             -Sleep { param($sec) } `
             -Supervise { $script:supervised++ } | Out-Null
@@ -2251,7 +2251,7 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
         $script:supervised2 = 0
         Invoke-SessionWatch -TimeoutSec 50 -SuperviseEvery 0 `
             -ReadSessions { @([pscustomobject]@{ issue = 1 }) } `
-            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'en progreso' } } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $false; reason = 'in progress' } } `
             -Now  { $script:t3 += 10; [datetime]::new(2026,1,1,0,0,0).AddSeconds($script:t3) } `
             -Sleep { param($sec) } `
             -Supervise { $script:supervised2++ } | Out-Null
@@ -2261,7 +2261,7 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
         Mock Invoke-SessionCleanup { @('mock teardown') }
         $r = Invoke-SessionWatch -AutoClean `
             -ReadSessions { @([pscustomobject]@{ issue = 7 }) } `
-            -GetStatus    { param($s) [pscustomobject]@{ done = $true; reason = 'issue cerrado' } } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $true; reason = 'issue closed' } } `
             -Now { Get-Date } -Sleep { param($sec) }
         Should -Invoke Invoke-SessionCleanup -Times 1 -Exactly
         $r.cleaned | Should -Contain 7
@@ -2289,7 +2289,7 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
         Mock Invoke-SessionCleanup { $script:seen = $PrMerged; @('mock teardown') }
         Invoke-SessionWatch -AutoClean `
             -ReadSessions { @([pscustomobject]@{ issue = 7 }) } `
-            -GetStatus    { param($s) [pscustomobject]@{ done = $true; reason = 'proceso terminado'; merged = $false } } `
+            -GetStatus    { param($s) [pscustomobject]@{ done = $true; reason = 'process ended'; merged = $false } } `
             -Now { Get-Date } -Sleep { param($sec) } | Out-Null
         $script:seen | Should -BeFalse
     }
@@ -2304,7 +2304,7 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
 
     # --- #414: skip re-polling, stale prune, rate-limit protection ---
 
-    It 'does not re-poll a session that was already reported LISTO in a prior cycle (#414)' {
+    It 'does not re-poll a session that was already reported DONE in a prior cycle (#414)' {
         # GetStatus cycles: first call done, second call should not happen for the same issue.
         $script:callCount = @{}
         $script:cycle414 = 0
@@ -2325,7 +2325,7 @@ Describe 'Invoke-SessionWatch (DI poll loop, #135)' {
                 else {
                     $n = $script:callCount['43']
                     if ($n -ge 2) { [pscustomobject]@{ done = $true; reason = 'PR merged'; merged = $true } }
-                    else          { [pscustomobject]@{ done = $false; reason = 'en progreso'; merged = $false } }
+                    else          { [pscustomobject]@{ done = $false; reason = 'in progress'; merged = $false } }
                 }
             } `
             -Now { [datetime]::new(2026,1,1) } `

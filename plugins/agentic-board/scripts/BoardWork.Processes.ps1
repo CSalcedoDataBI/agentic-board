@@ -71,11 +71,11 @@ function Stop-ProcessTree {
         [switch]$DryRun
     )
     if ($TargetPid -le 0) {
-        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = 'PID invalido' }
+        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = 'invalid PID' }
     }
     if (-not $ParentMap) { try { $ParentMap = Get-ProcessParentMap } catch { $ParentMap = @{} } }
     if (-not $ParentMap -or $ParentMap.Count -eq 0) {
-        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = 'sin mapa de procesos - fail-closed' }
+        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = 'no process map - fail-closed' }
     }
     # Full guard = live self+ancestors (always) UNION any caller-supplied protected PIDs.
     $fullGuard = @(@(Get-AncestorChain $SelfPid $ParentMap) + @($Guard)) | Select-Object -Unique
@@ -84,7 +84,7 @@ function Stop-ProcessTree {
     $subtree = @($TargetPid) + @(Get-DescendantPids $TargetPid $ParentMap)
     $blocked = @($subtree | Where-Object { $fullGuard -contains $_ })
     if ($blocked.Count -gt 0) {
-        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = ("el arbol incluye PID(s) protegido(s): {0}" -f ($blocked -join ',')) }
+        return [PSCustomObject]@{ Pid = $TargetPid; Refused = $true; Killed = $false; Reason = ("the tree includes protected PID(s): {0}" -f ($blocked -join ',')) }
     }
     $cmd = "taskkill /PID $TargetPid /T /F"
     if ($DryRun) {
@@ -202,7 +202,7 @@ function Invoke-FleetReap {
         try { $liveGuard = @(Read-SessionRegistry | ForEach-Object { [int]$_.sessionPid }) } catch { $liveGuard = $null }
         if ($null -eq $liveGuard) {
             return @(@($Candidates) | ForEach-Object {
-                [PSCustomObject]@{ Pid = [int]$_.ProcessId; Refused = $true; Killed = $false; Reason = 'no se pudo leer el registro de sesiones - fail-closed' }
+                [PSCustomObject]@{ Pid = [int]$_.ProcessId; Refused = $true; Killed = $false; Reason = 'could not read the session registry - fail-closed' }
             })
         }
         $fullGuard = @(@($Guard) + $liveGuard) | Select-Object -Unique

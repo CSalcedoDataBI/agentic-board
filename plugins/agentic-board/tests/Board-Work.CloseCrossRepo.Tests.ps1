@@ -26,7 +26,7 @@ Describe 'Get-IssueClosureVerdict' {
     It 'never closes on the first merged PR while another is open' {
         $v = Get-IssueClosureVerdict -Prs @((P 'o/a' 5), (P 'o/b' 9)) -States @{ 'o/a#5' = 'MERGED'; 'o/b#9' = 'OPEN' }
         $v.CanClose | Should -BeFalse
-        $v.Reason | Should -Match 'siguen sin mergear: o/b#9'
+        $v.Reason | Should -Match 'still unmerged: o/b#9'
     }
     It 'a PR closed WITHOUT merging is not merged' {
         (Get-IssueClosureVerdict -Prs @((P 'o/a' 5)) -States @{ 'o/a#5' = 'CLOSED' }).CanClose | Should -BeFalse
@@ -34,18 +34,18 @@ Describe 'Get-IssueClosureVerdict' {
     It 'never closes when a PR state is unknown (absent or empty from the read)' {
         $v = Get-IssueClosureVerdict -Prs @((P 'o/a' 5), (P 'o/b' 9)) -States @{ 'o/a#5' = 'MERGED' }
         $v.CanClose | Should -BeFalse
-        $v.Reason | Should -Match 'no pude leer el estado de: o/b#9'
+        $v.Reason | Should -Match 'could not read the state of: o/b#9'
         (Get-IssueClosureVerdict -Prs @((P 'o/a' 5)) -States @{ 'o/a#5' = '' }).CanClose | Should -BeFalse
     }
     It 'never closes when no PR is recorded (an empty list is not "all merged")' {
         $v = Get-IssueClosureVerdict -Prs @() -States @{}
         $v.CanClose | Should -BeFalse
-        $v.Reason | Should -Match 'ningun PR anotado'
+        $v.Reason | Should -Match 'no PR recorded'
     }
     It 'never closes while a declared target repo has no recorded PR' {
         $v = Get-IssueClosureVerdict -Prs @((P 'o/a' 5)) -States @{ 'o/a#5' = 'MERGED' } -TargetRepos @('o/a', 'o/b')
         $v.CanClose | Should -BeFalse
-        $v.Reason | Should -Match 'sin PR anotado: o/b'
+        $v.Reason | Should -Match 'with no recorded PR: o/b'
     }
     It 'closes when every declared target has a merged PR (case-insensitive repo match)' {
         (Get-IssueClosureVerdict -Prs @((P 'O/A' 5), (P 'o/b' 9)) -States @{ 'O/A#5' = 'MERGED'; 'o/b#9' = 'MERGED' } -TargetRepos @('o/a', 'o/b')).CanClose | Should -BeTrue
@@ -60,8 +60,8 @@ Describe 'Format-ClosurePlanLines' {
         $t = (Format-ClosurePlanLines -IssueNum 271 -Repo 'home/site' -Prs $prs -States $st -Verdict $v) -join "`n"
         $t | Should -Match 'home/site#271'
         $t | Should -Match 'o/a#5 \[MERGED\]'
-        $t | Should -Match 'o/b#9 \[estado desconocido\]'
-        $t | Should -Match 'NO se cierra'
+        $t | Should -Match 'o/b#9 \[unknown state\]'
+        $t | Should -Match 'NOT closing'
     }
 }
 
@@ -127,7 +127,7 @@ if ($line -match '^issue close ') { exit 0 }
         $r.Code | Should -Be 0
         $r.Text | Should -Match 'o/a#5 \[MERGED\]'
         $r.Text | Should -Match 'o/b#9 \[MERGED\]'
-        $r.Text | Should -Match 'No cerre nada'
+        $r.Text | Should -Match 'Nothing closed'
         $r.Closed | Should -Be 0
     }
     It 'closes the issue with -Force when EVERY recorded PR is merged, and says which PRs' {
@@ -136,21 +136,21 @@ if ($line -match '^issue close ') { exit 0 }
         $r.Code | Should -Be 0
         $r.Closed | Should -Be 1
         (@($r.Calls | Where-Object { $_ -match '^issue close 271 --repo home/site --reason completed' }).Count) | Should -Be 1
-        $r.Text | Should -Match 'cerrado'
+        $r.Text | Should -Match 'closed \(all its PRs were merged\)'
     }
     It 'never closes on the first merged PR while another is still open, even with -Force' {
         $d = New-SessionRepo 'c3' @('o/a', 'o/b') $script:Two
         $r = Invoke-Close -RepoDir $d -States 'o/a#5=MERGED;o/b#9=OPEN' -Extra @('-Force')
         $r.Code | Should -Be 1
         $r.Closed | Should -Be 0
-        $r.Text | Should -Match 'siguen sin mergear: o/b#9'
+        $r.Text | Should -Match 'still unmerged: o/b#9'
     }
     It 'never closes when a PR state cannot be read, even with -Force' {
         $d = New-SessionRepo 'c4' @('o/a', 'o/b') $script:Two
         $r = Invoke-Close -RepoDir $d -States 'o/a#5=MERGED' -Extra @('-Force')
         $r.Code | Should -Be 1
         $r.Closed | Should -Be 0
-        $r.Text | Should -Match 'no pude leer el estado'
+        $r.Text | Should -Match 'could not read the state'
     }
     It 'never closes a PR closed without merging' {
         $d = New-SessionRepo 'c5' @('o/a', 'o/b') $script:Two
@@ -163,7 +163,7 @@ if ($line -match '^issue close ') { exit 0 }
         $r = Invoke-Close -RepoDir $d -States 'o/a#5=MERGED;o/b#9=MERGED' -Extra @('-Force')
         $r.Code | Should -Be 1
         $r.Closed | Should -Be 0
-        $r.Text | Should -Match 'sin PR anotado: o/c'
+        $r.Text | Should -Match 'with no recorded PR: o/c'
     }
     It 'never closes an issue with no recorded PR' {
         $d = New-SessionRepo 'c7' @('o/a') @()
@@ -177,13 +177,13 @@ if ($line -match '^issue close ') { exit 0 }
         $r = Invoke-Close -RepoDir $d -States '' -Extra @('-Force')
         $r.Code | Should -Be 1
         $r.Closed | Should -Be 0
-        $r.Text | Should -Match 'no hay registro de sesiones|no tiene sesion registrada'
+        $r.Text | Should -Match 'no session registry|has no recorded session'
     }
     It 'says a session is missing (not that a repo is missing) when the registry has other issues only' {
         $d = New-SessionRepo 'c8b' @('o/a') @()
         $r = Invoke-Close -RepoDir $d -States '' -Extra @('-Force') -Issue 999
         $r.Code | Should -Be 1
-        $r.Text | Should -Match 'no tiene sesion registrada'
+        $r.Text | Should -Match 'has no recorded session'
     }
     It 'never closes when sessions.json is unreadable, and says so' {
         $d = New-SessionRepo 'c8c' @('o/a') @()
@@ -192,14 +192,14 @@ if ($line -match '^issue close ') { exit 0 }
         $r = Invoke-Close -RepoDir $d -States '' -Extra @('-Force')
         $r.Code | Should -Be 1
         $r.Closed | Should -Be 0
-        $r.Text | Should -Match 'ilegible'
+        $r.Text | Should -Match 'unreadable'
     }
     It 'leaves an issue that is already closed alone' {
         $d = New-SessionRepo 'c9' @('o/a', 'o/b') $script:Two
         $r = Invoke-Close -RepoDir $d -States 'o/a#5=MERGED;o/b#9=MERGED' -Extra @('-Force') -IssueState 'CLOSED'
         $r.Code | Should -Be 0
         $r.Closed | Should -Be 0
-        $r.Text | Should -Match 'ya esta'
+        $r.Text | Should -Match 'is already'
     }
     It '-DryRun with -Force still closes nothing' {
         $d = New-SessionRepo 'c10' @('o/a', 'o/b') $script:Two
@@ -209,7 +209,7 @@ if ($line -match '^issue close ') { exit 0 }
 }
 
 Describe 'Show-SessionFleet reports whether the issue may be closed' {
-    It 'says LISTO PARA CERRAR only when every recorded PR is merged' {
+    It 'says READY TO CLOSE only when every recorded PR is merged' {
         $script:Rows = @([pscustomobject]@{ issue = 271; repo = 'home/site'; branch = 'issue-271-x'; workPath = 'C:/w'; sessionPid = 1; via = 'pwsh'; cli = 'claude'
                                             host = 'h'; started = 's'; crossRepo = $true; targetRepos = @('o/a', 'o/b')
                                             prs = @((P 'o/a' 5), (P 'o/b' 9)) })
@@ -218,10 +218,10 @@ Describe 'Show-SessionFleet reports whether the issue may be closed' {
         Mock Get-LogTailLines { @() }
         Mock Get-SessionPrStates { @{ 'o/a#5' = 'MERGED'; 'o/b#9' = 'OPEN' } }
         $one = & { Show-SessionFleet } 6>&1 | Out-String
-        $one | Should -Match 'Todavia no se cierra: siguen sin mergear: o/b#9'
-        $one | Should -Not -Match 'LISTO PARA CERRAR'
+        $one | Should -Match 'Not closable yet: still unmerged: o/b#9'
+        $one | Should -Not -Match 'READY TO CLOSE'
         Mock Get-SessionPrStates { @{ 'o/a#5' = 'MERGED'; 'o/b#9' = 'MERGED' } }
         $two = & { Show-SessionFleet } 6>&1 | Out-String
-        $two | Should -Match 'LISTO PARA CERRAR'
+        $two | Should -Match 'READY TO CLOSE'
     }
 }

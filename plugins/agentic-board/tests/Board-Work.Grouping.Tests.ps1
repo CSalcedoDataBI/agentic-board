@@ -350,18 +350,18 @@ Describe 'Show-GroupingOffer - what each posture actually says' {
         # The repo asked for grouping. Silence here is indistinguishable from "auto had nothing
         # to say", so the standing preference would look like it was ignored.
         $text = Get-OfferText -Suggestions @() -Posture 'always'
-        $text | Should -Match 'no hay dos pendientes que se solapen'
+        $text | Should -Match 'no two pending issues overlap'
     }
 
     It 'under never, suppresses the offer even when groups exist' {
         $text = Get-OfferText -Suggestions $script:OneGroup -Posture 'never'
-        $text | Should -Match 'un PR por issue'
-        $text | Should -Not -Match 'Se pueden juntar'
+        $text | Should -Match 'one PR per issue'
+        $text | Should -Not -Match 'These can be merged into fewer PRs'
     }
 
     It 'under auto, presents the group with its evidence' {
         $text = Get-OfferText -Suggestions $script:OneGroup -Posture 'auto'
-        $text | Should -Match 'Se pueden juntar'
+        $text | Should -Match 'These can be merged into fewer PRs'
         $text | Should -Match 'Board-Work\.ps1'
         $text | Should -Match '#1, #2'
     }
@@ -373,27 +373,27 @@ Describe 'Show-GroupingOffer - what each posture actually says' {
         $foreign = @([pscustomobject]@{ reason = 'area'; evidence = 'Work'; repo = 'owner/elsewhere'; issues = @(1, 2); dropped = @() })
         $text = (Show-GroupingOffer -Suggestions $foreign -Posture 'auto' -CurrentRepo 'owner/here' 6>&1 | Out-String)
         $text | Should -Match 'owner/elsewhere'
-        $text | Should -Match 'el PR va alli'
+        $text | Should -Match 'the PR goes there'
     }
 
     It 'does NOT add that note for a group of the current repo' {
         $mine = @([pscustomobject]@{ reason = 'area'; evidence = 'Work'; repo = 'owner/here'; issues = @(1, 2); dropped = @() })
         $text = (Show-GroupingOffer -Suggestions $mine -Posture 'auto' -CurrentRepo 'owner/here' 6>&1 | Out-String)
-        $text | Should -Not -Match 'el PR va alli'
+        $text | Should -Not -Match 'the PR goes there'
     }
 
     It 'stays quiet about repos when there is no current repo to compare against' {
         # Outside a clone there is no "here", so calling a group foreign would be an invention.
         $foreign = @([pscustomobject]@{ reason = 'area'; evidence = 'Work'; repo = 'owner/elsewhere'; issues = @(1, 2); dropped = @() })
         $text = (Show-GroupingOffer -Suggestions $foreign -Posture 'auto' -CurrentRepo '' 6>&1 | Out-String)
-        $text | Should -Not -Match 'el PR va alli'
+        $text | Should -Not -Match 'the PR goes there'
     }
 
     It 'names the issues it held back for size instead of dropping them silently' {
         $capped = @([pscustomobject]@{ reason = 'file'; evidence = 'Board-Work.ps1'; issues = @(1, 2, 3, 4); dropped = @(5, 6) })
         $text = Get-OfferText -Suggestions $capped -Posture 'auto'
         $text | Should -Match '#5, #6'
-        $text | Should -Match 'revisable'
+        $text | Should -Match 'reviewable'
     }
 
     It 'counts the groups it did not print rather than truncating in silence' {
@@ -401,7 +401,7 @@ Describe 'Show-GroupingOffer - what each posture actually says' {
             [pscustomobject]@{ reason = 'area'; evidence = "A$_"; issues = @($_, $_ + 100); dropped = @() }
         }
         $text = Get-OfferText -Suggestions $many -Posture 'auto'
-        $text | Should -Match 'y 3 grupo\(s\) mas'
+        $text | Should -Match 'and 3 more group\(s\)'
     }
 }
 

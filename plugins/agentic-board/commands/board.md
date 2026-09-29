@@ -5,60 +5,64 @@ You are running the agentic-board /board command.
 
 **If $ARGUMENTS is empty or only whitespace, do NOT start any work yet.** The one thing you run
 first is the read-only `scripts/Board-Work.ps1 -PreferGroupedPRs show` (no GitHub token, writes no
-preference): its first line is `PRs agrupados: <valor> (<fuente>)`. Put that text in the sub-line under
-`1. work` below, in place of `<valor del repo>` (#681). If it fails or the cwd is not a git repo,
-print `auto (por defecto)`. Then show this menu and wait for the user to pick (they can answer with
-just the number):
+preference): its first line is `Grouped PRs: <value> (<source>)`. Put that text in the sub-line under
+`1. work` below, in place of `<repo value>` (#681). If it fails or the cwd is not a git repo,
+print `auto (default)`. Then show this menu and wait for the user to pick (they can answer with
+just the number).
+
+Show this menu translated into the user's language (keep the verbs, flags, command names and
+numbers exactly as written; translate only the descriptions and headings):
 
 ```
-¿Qué quieres hacer con el board?
+What do you want to do with the board?
 
-1. work             → ver qué issues están pendientes y empezar a trabajar (los relacionados van juntos en un solo PR)
-                      PRs agrupados en este repo: <valor del repo> — cambiar con: work -PreferGroupedPRs on|off|auto
-2. plan             → planificar (o tomar un plan existente) y convertir sus tareas en epic + issues
-3. fill --dry-run   → ver qué gaps hay (assignees, Status, Priority, Size, Type) SIN cambiar nada
-4. fill --auto      → llenar todos los gaps automáticamente (convierte drafts a issues reales)
-5. fill             → llenar gaps pidiendo confirmación antes de ejecutar
-6. init             → crear/configurar el board de este repo
-7. add <url>        → añadir un issue/PR al board
-8. move             → cambiar el Status de un item
-9. field            → crear campos o llenar un campo en todos los items por regla
-10. bulk            → mover/cerrar/etiquetar muchos items a la vez
-11. automate        → instalar CI que sincroniza el board solo
-12. templates       → instalar issue forms (bug/feature/task) + PR template en el repo actual
-13. labels          → aplicar la taxonomia de labels (bug/docs/refactor/chore/blocked/...) al repo
-14. update          → publicar un status update del board (progreso de alto nivel)
-15. changelog       → generar un bloque de CHANGELOG (Added/Changed/Fixed) desde los issues Done
-16. handoff         → guardar/retomar contexto entre sesiones (save/resume) para continuar días después
-17. doctor          → auditar ramas y worktrees locales (mergeadas, estancadas, fantasma) y limpiarlos
-18. close-cycle     → clasificar la RAMA ACTUAL y enrutarla (commitear/PR/gate/merge/limpiar) — cierra la sesión individual
-19. telemetry       → medir cómo se comportó la herramienta en tus sesiones reales (barrido incremental)
-20. triage          → llenar Type/Area/Estimate por evidencia + PROPONER Priority (con confirmación) en los pendientes
-21. complete        → verificar que el board quedó full (0 pendientes) — PASS/FAIL, útil para CI o cierre
-22. bi-checklist    → mostrar el checklist de release para artefactos BI (modelos/reportes)
-23. actions-cost    → auditar el costo de GitHub Actions de este repo (solo lectura): minutos MEDIDOS + reglas de costo sobre los workflows
+1. work             → see which issues are pending and start working (related ones go together in a single PR)
+                      Grouped PRs in this repo: <repo value> — change with: work -PreferGroupedPRs on|off|auto
+2. plan             → plan (or take an existing plan) and turn its tasks into an epic + issues
+3. fill --dry-run   → see which gaps exist (assignees, Status, Priority, Size, Type) WITHOUT changing anything
+4. fill --auto      → fill every gap automatically (converts drafts into real issues)
+5. fill             → fill gaps, asking for confirmation before executing
+6. init             → create/configure this repo's board
+7. add <url>        → add an issue/PR to the board
+8. move             → change an item's Status
+9. field            → create fields or fill one field on every item by rule
+10. bulk            → move/close/label many items at once
+11. automate        → install CI that keeps the board in sync by itself
+12. templates       → install issue forms (bug/feature/task) + PR template in the current repo
+13. labels          → apply the label taxonomy (bug/docs/refactor/chore/blocked/...) to the repo
+14. update          → post a board status update (high-level progress)
+15. changelog       → generate a CHANGELOG block (Added/Changed/Fixed) from the Done issues
+16. handoff         → save/resume context between sessions (save/resume) to continue days later
+17. doctor          → audit local branches and worktrees (merged, stale, phantom) and clean them up
+18. close-cycle     → classify the CURRENT BRANCH and route it (commit/PR/gate/merge/clean up) — closes the individual session
+19. telemetry       → measure how the tool behaved in your real sessions (incremental sweep)
+20. triage          → fill Type/Area/Estimate from evidence + PROPOSE Priority (with confirmation) on pending items
+21. complete        → verify the board is fully worked (0 pending) — PASS/FAIL, useful for CI or wrap-up
+22. bi-checklist    → show the release checklist for BI artifacts (models/reports)
+23. actions-cost    → audit this repo's GitHub Actions cost (read-only): MEASURED minutes + cost rules over the workflows
 
-── otros comandos (se tipean) ──────────────────────────────────
-/scan       → escanear ESTE proyecto por trabajo sin trackear (TODOs, checklists, planes) → issues + plan
-/skills     → ciclo de vida de Agent Skills (organize / audit / bootstrap [bi] / freshness)
-/knowledge  → registro de referencias externas por dominio (add / harvest / wiki)
-/tools      → catálogo unificado de herramientas externas: navegar, investigar e instalar (individual o todas)
-/expert     → auto-experto: toma un plan y lo ejecuta SOLO (config = define el contrato, auto = corre autónomo)
-/cleanup    → mantenimiento de la máquina: sesiones, transcripts, disco y plugins (no es trabajo del board)
+── other commands (typed) ──────────────────────────────────────
+/scan       → scan THIS project for untracked work (TODOs, checklists, plans) → issues + plan
+/skills     → Agent Skills lifecycle (organize / audit / bootstrap [bi] / freshness)
+/knowledge  → registry of external references by domain (add / harvest / wiki)
+/tools      → unified catalog of external tools: browse, research and install (one or all)
+/expert     → auto-expert: takes a plan and runs it ON ITS OWN (config = define the contract, auto = run autonomously)
+/cleanup    → machine housekeeping: sessions, transcripts, disk and plugins (not board work)
 
-── canal de feedback (NO se tipea — se dispara solo) ───────────
-abios-feedback → ¿bug o mejora para ESTA herramienta? DILO en lenguaje natural
-                 (p.ej. "esto es una mejora para agentic-board") y la skill lo captura
-                 como issue SANITIZADO en el repo del tool. No es un comando: no se tipea.
+── feedback channel (NOT typed — it fires on its own) ──────────
+abios-feedback → bug or improvement for THIS tool? SAY IT in natural language
+                 (e.g. "this is an improvement for agentic-board") and the skill captures it
+                 as a SANITIZED issue in the tool's repo. It is not a command: it is not typed.
 ```
 
-If the user picks one of the **otros comandos**, do NOT run a board sub-action — tell them it is a
+If the user picks one of the **other commands**, do NOT run a board sub-action — tell them it is a
 separate command and to invoke it directly (`/scan`, `/skills`, `/knowledge`, `/tools`, `/cleanup`); this menu
 lists them only so the whole tool is discoverable from one entry point.
 
 `abios-feedback` is DIFFERENT: it is an internal skill, NOT a typeable command — it is never typed
 with a slash. It fires on its own when the user describes a bug/improvement for THIS tool (e.g.
-"esto es una mejora para agentic-board"). It matters because users assume the plugin has no feedback
+"this is an improvement for agentic-board", or in Spanish "esto es una mejora para agentic-board").
+It matters because users assume the plugin has no feedback
 channel — it does, and it sanitizes private data before filing to the tool's own public board. If a
 user asks to "run" it, invoke the `abios-feedback` skill for them; never tell them to type a slash
 command that does not exist.

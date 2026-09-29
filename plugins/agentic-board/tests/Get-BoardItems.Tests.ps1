@@ -161,9 +161,9 @@ Describe 'Regression: no caller may state an absence off a possibly-short read' 
         placement is covered by the helper's own behavioural tests above plus the live check on the
         291-item board; what these add is "nobody deleted the guard". #>
 
-    It 'Board-Work consults the truncation flag before its "Sin pendientes"' {
+    It 'Board-Work consults the truncation flag before its "Nothing pending"' {
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1') -Raw
-        $t | Should -Match 'Sin pendientes'          # the all-clear still exists...
+        $t | Should -Match 'Nothing pending'          # the all-clear still exists...
         $t | Should -Match 'if \(\$truncWarn\)'      # ...and so does the guard on it
     }
     It 'Board-Triage consults it before its "(no pending items)"' {

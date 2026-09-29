@@ -56,7 +56,7 @@ Describe 'Get-OpenPrFindings - a parked PR is not counted twice' {
     It 'leaves parked PRs out of the generic open-PR line' {
         $f = @(Get-OpenPrFindings -Prs @((New-Pr 1 'a' @('parked')), (New-Pr 2 'b' @('bug') $false)))
         $f.Count | Should -Be 1
-        $f[0].Text | Should -Match '^1 PR'
+        $f[0].Text | Should -Match '^1 open PR'
         $f[0].Text | Should -Not -Match 'PR #1 '
     }
     It 'says nothing about open PRs when every open PR is parked (the parked group already did)' {
@@ -65,14 +65,14 @@ Describe 'Get-OpenPrFindings - a parked PR is not counted twice' {
 }
 
 Describe 'Format-StateOfPlay - parked work comes first' {
-    It 'prints the parked group before "En curso"' {
+    It 'prints the parked group before "In flight"' {
         $findings = @(
-            (New-StateFinding -Source 'pr' -Group 'inflight' -Text '1 PR(s) abiertos: PR #2.')
-            (New-StateFinding -Source 'parked' -Group 'parked' -Text '1 trabajo(s) aparcado(s): PR #1.' -Offer 'retomar uno')
+            (New-StateFinding -Source 'pr' -Group 'inflight' -Text '1 open PR(s): PR #2.')
+            (New-StateFinding -Source 'parked' -Group 'parked' -Text '1 piece(s) of work parked: PR #1.' -Offer 'resume one')
         )
         $text = @(Format-StateOfPlay -Findings $findings -Repo 'o/r' | ForEach-Object Text)
-        $iParked = [array]::IndexOf($text, @($text | Where-Object { $_ -match 'aparcado' -and $_ -match ':$' })[0])
-        $iFlight = [array]::IndexOf($text, '  En curso:')
+        $iParked = [array]::IndexOf($text, @($text | Where-Object { $_ -match 'Parked' -and $_ -match ':$' })[0])
+        $iFlight = [array]::IndexOf($text, '  In flight:')
         $iParked | Should -BeGreaterThan 0
         $iParked | Should -BeLessThan $iFlight
     }
