@@ -7,6 +7,7 @@
     { "name": "docs",     "color": "0075ca", "description": "Documentation only" },
     { "name": "refactor", "color": "cfd3d7", "description": "Code change without behavior change" },
     { "name": "chore",    "color": "fef2c0", "description": "Maintenance, tooling, housekeeping" },
+    { "name": "spike",    "color": "d4c5f9", "description": "Time-boxed research or an open question to answer" },
     { "name": "blocked",  "color": "b60205", "description": "Cannot start: waiting on another issue or external dependency" },
     { "name": "roadmap",  "color": "5319e7", "description": "Top-level milestone / epic" },
     { "name": "plan",     "color": "0e8a16", "description": "Tracked plan epic" },

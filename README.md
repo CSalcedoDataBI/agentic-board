@@ -110,8 +110,8 @@ one door, not a wall of commands.
 | `/docs` | Publish all wiki pages (product docs + knowledge registry) in a single push; or check DeepWiki indexing status for this repo. |
 | `/expert` | Auto-expert mode — take a tracked plan and execute it autonomously through a specialized expert persona (research, build, test with recorded evidence, self-drive the board), stopping only at the irreversible line. Three verbs: config (define the contract), auto (run it) and roles (browse the role catalog this project can extend, and explain why a plan matched). |
 | `/knowledge` | Manage the project knowledge references registry by domain (add/harvest/list/gen/wiki). Versioned in knowledge/registry.json + generated KNOWLEDGE.md. |
-| `/scan` | Scan the CURRENT project for untracked work (code TODOs, doc checklists/pending, plans/specs) and turn the chosen items into issues + a board plan. Targets the current repo, not the tool's. |
-| `/skills` | Manage the Agent Skills lifecycle — organize/catalog, audit for failures, bootstrap best-practice toolkits by profile (quality or bi = Microsoft Fabric / Power BI), or check installed-tool freshness. Part of the skills-ops module. |
+| `/scan` | One command from untracked work to a ready board - scan the CURRENT repo (code TODOs, doc checklists, plans), propose priority, order, dependencies and PR batches, then on one confirmation create a standard board, labelled issues, a plan epic and fill every gap. |
+| `/skills` | Manage the Agent Skills lifecycle - create a new skill or improve one through a full pipeline (prior art, author, pressure test, audit gate, trigger eval), organize/catalog, audit for failures, bootstrap best-practice toolkits by profile (quality or bi = Microsoft Fabric / Power BI), or check installed-tool freshness. |
 | `/tools` | Browse, research and install the project's referenced external tools from one unified catalog — it merges the knowledge registry (references) with the installable toolkit presets. Install one tool or all missing at once, kind-aware (skill-clone preserves LICENSE; a plugin surfaces its own install command, never cherry-picked). |
 <!-- END:commands -->
 

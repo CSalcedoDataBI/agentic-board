@@ -1,27 +1,36 @@
 ---
-description: Manage the Agent Skills lifecycle — organize/catalog, audit for failures, bootstrap best-practice toolkits by profile (quality or bi = Microsoft Fabric / Power BI), or check installed-tool freshness. Part of the skills-ops module.
+description: Manage the Agent Skills lifecycle - create a new skill or improve one through a full pipeline (prior art, author, pressure test, audit gate, trigger eval), organize/catalog, audit for failures, bootstrap best-practice toolkits by profile (quality or bi = Microsoft Fabric / Power BI), or check installed-tool freshness.
 ---
 You are running the agentic-board /skills command.
 
-**If $ARGUMENTS is empty or only whitespace, do NOT run anything yet.** Show this menu and wait
-for the user to pick (they can answer with just the number):
+**If $ARGUMENTS is empty or only whitespace, do NOT run anything yet.** Show this menu, translated
+into the user's language, and wait for them to pick (a number is enough):
 
 ```
-¿Qué quieres hacer con tus skills?
+What do you want to do with your skills?
 
-1. organize   → catálogo + salud de tus skills (lint, near-duplicates, misplaced) y, si quieres,
-                reorganizar un repo/monorepo a .claude/skills/<proyecto>/<skill>/ sin mezclar
-2. audit      → detectar skills que fallan (descripción, triggers, solapes) + eval de triggering,
-                y abrir un issue SANEADO en el repo dueño de la skill (jamás en tu proyecto privado)
-3. bootstrap [perfil] → instalar el toolkit de un perfil sin duplicar lo que ya tienes:
-                `quality` (skill-creator, writing-skills, skill-improver, second-opinion) o
-                `bi` (ecosistema Microsoft Fabric / Power BI, ej. microsoft/skills-for-fabric)
-4. freshness  → revisar si las herramientas instaladas (skill-clone) siguen al día con su upstream
-                (SHA local vs último commit) — SOLO reporta, no reinstala nada
+1. create <name>  → a new skill through the full pipeline: overlap and public prior art first,
+                    where it lives, write it, pressure-test it, audit gate, trigger eval
+2. improve <name> → raise an existing skill to standard: audit, fix loop until the gate passes,
+                    re-test, trigger eval
+3. organize       → catalog + health of your skills (lint, near-duplicates, misplaced) and,
+                    optionally, reorganize a repo/monorepo into .claude/skills/<project>/<skill>/
+4. audit          → find failing skills (description, triggers, overlaps) + trigger eval, and file
+                    a SANITIZED issue in the repo that owns the skill (never your private project)
+5. bootstrap [profile] → install a profile's toolkit without duplicating what you have:
+                    `quality` (skill-creator, writing-skills, skill-improver, second-opinion) or
+                    `bi` (Microsoft Fabric / Power BI ecosystem, e.g. microsoft/skills-for-fabric)
+6. freshness      → check whether installed tools (skill-clone) are behind their upstream
+                    (local SHA vs latest commit) - report only, reinstalls nothing
 ```
 
 When they answer (number or name), invoke the matching skill and follow it:
 
+- **create / improve** → the `skills-create` skill. `Skill-Pipeline.ps1 -Mode create|improve -Name <n>`
+  plans (toolkit, overlap with installed skills, public prior art, scope with its reason, stages);
+  `Skill-Pipeline.ps1 -Verify -Name <n>` is the audit gate that ends the fix loop (non-zero exit
+  while a high or medium finding remains). Writing is done by `skill-creator`, pressure tests by
+  `writing-skills`, fixes by `skill-improver`, the trigger eval by `skills-audit`.
 - **organize** → the `skills-organize` skill. Report mode is read-only (catalog + health via
   `Get-SkillInventory.ps1`); reorganize mode is propose→confirm→`git mv` via
   `Move-SkillsLayout.ps1` (dry-run first, clean git tree required, exact revert printed). Only
