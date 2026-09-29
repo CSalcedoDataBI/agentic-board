@@ -56,7 +56,7 @@ to the raw transcript if the ledger has a gap. Claude Code keeps that transcript
 Before #737 the hook copied the whole transcript into `<repo>/.agentic-board/compact-snapshots/`.
 That was a verbatim duplicate (1.7 GB on one machine), and it carried the entire context window,
 global CLAUDE.md included, into a repo folder. Nothing is written inside the repo any more. Old
-copies are removed by `/board disk` only when the original transcript still holds them.
+copies are removed by `/cleanup disk` only when the original transcript still holds them.
 
 ## Maintaining the ledger — `Board-RunLedger.ps1`
 

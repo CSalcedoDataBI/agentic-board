@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    /board transcripts: compress old session transcripts into an indexed archive, and restore
+    /cleanup transcripts: compress old session transcripts into an indexed archive, and restore
     them byte for byte (#736).
 
 .DESCRIPTION
@@ -19,7 +19,7 @@
         (claude-code-sessions/.../local_*.json, read-only here) naming its `cliSessionId` and
         whether it `isArchived`. A transcript whose app session is not archived is never touched:
         the sidebar would keep a session that no longer opens. Archive the session first
-        (`/board close-cycle --all`), or restore it later with -Restore.
+        (`/cleanup sessions`), or restore it later with -Restore.
 
     The original is deleted only after the zip has been read back and its transcript hashes to
     the same SHA-256. Plan only by default; -Force compresses.
@@ -49,11 +49,11 @@
     Emit the plan / outcome as JSON.
 
 .EXAMPLE
-    .\Board-Transcripts.ps1                      # plan: what would be compressed, and how much it frees
-    .\Board-Transcripts.ps1 -Force               # compress the eligible ones (30 days and older)
-    .\Board-Transcripts.ps1 -OlderThanDays 14 -Force
-    .\Board-Transcripts.ps1 -Find "fabric-apps"  # search the archive
-    .\Board-Transcripts.ps1 -Restore 06f53bb7-b5eb-49fd-a3f8-8fa4cbee130b
+    .\Cleanup-Transcripts.ps1                      # plan: what would be compressed, and how much it frees
+    .\Cleanup-Transcripts.ps1 -Force               # compress the eligible ones (30 days and older)
+    .\Cleanup-Transcripts.ps1 -OlderThanDays 14 -Force
+    .\Cleanup-Transcripts.ps1 -Find "fabric-apps"  # search the archive
+    .\Cleanup-Transcripts.ps1 -Restore 06f53bb7-b5eb-49fd-a3f8-8fa4cbee130b
 #>
 [CmdletBinding()]
 param(
@@ -276,9 +276,9 @@ function Write-ArchiveIndex([object[]]$Rows) {
 if ($Find) {
     $hits = @(Read-ArchiveIndex | Where-Object { "$($_.title) $($_.cwd) $($_.gitBranch) $($_.sessionId)" -like "*$Find*" })
     if ($Json) { @($hits) | ConvertTo-Json -Depth 4; exit 0 }
-    Write-Host "=== Transcripts archivados que coinciden con '$Find' ($($hits.Count)) ===" -ForegroundColor Cyan
+    Write-Host "=== Archived transcripts matching '$Find' ($($hits.Count)) ===" -ForegroundColor Cyan
     foreach ($h in $hits) { Write-Host ("  {0}  {1,-40}  {2}  [{3}]" -f $h.sessionId, $h.title, $h.cwd, $h.lastTs) }
-    if ($hits.Count) { Write-Host "  Para recuperar uno: /board transcripts restore <sessionId>" -ForegroundColor DarkGray }
+    if ($hits.Count) { Write-Host "  To restore one: /cleanup transcripts restore <sessionId>" -ForegroundColor DarkGray }
     exit 0
 }
 
@@ -296,7 +296,7 @@ if ($Restore.Count -gt 0) {
     Write-ArchiveIndex $idx
     if ($Json) { @($out) | ConvertTo-Json -Depth 4; exit 0 }
     foreach ($o in $out) {
-        if ($o.Ok) { Write-Host "  OK  restaurado $($o.SessionId) -> $($o.Path)" -ForegroundColor Green }
+        if ($o.Ok) { Write-Host "  OK  restored $($o.SessionId) -> $($o.Path)" -ForegroundColor Green }
         else { Write-Host "  NO  $($o.SessionId): $($o.Error)" -ForegroundColor Yellow }
     }
     exit 0
@@ -385,30 +385,30 @@ if ($Json) {
     exit 0
 }
 
-$mode = if ($Force) { 'EJECUTADO' } else { 'PLAN - no se cambio nada' }
+$mode = if ($Force) { 'EXECUTED' } else { 'PLAN - nothing changed' }
 Write-Host ""
-Write-Host "=== /board transcripts  ($mode) ===" -ForegroundColor Cyan
-Write-Host ("  {0} transcripts ocupan {1}. Archivo: {2}" -f $rows.Count, (& $mb (($rows | Measure-Object Bytes -Sum).Sum)), $ArchiveDir) -ForegroundColor DarkGray
+Write-Host "=== /cleanup transcripts  ($mode) ===" -ForegroundColor Cyan
+Write-Host ("  {0} transcripts take {1}. Archive: {2}" -f $rows.Count, (& $mb (($rows | Measure-Object Bytes -Sum).Sum)), $ArchiveDir) -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "  Cuanto se liberaria segun la antiguedad (solo lo que se puede comprimir):" -ForegroundColor Yellow
+Write-Host "  What each age threshold would free (only what may be compressed):" -ForegroundColor Yellow
 foreach ($s in $savings) {
-    $mark = if ($s.Days -eq $OlderThanDays) { '  <- el umbral actual' } else { '' }
-    Write-Host ("    {0,3} dias o mas: {1,5} transcripts, {2}{3}" -f $s.Days, $s.Count, (& $mb $s.Bytes), $mark)
+    $mark = if ($s.Days -eq $OlderThanDays) { '  <- the current threshold' } else { '' }
+    Write-Host ("    {0,3} days or older: {1,5} transcripts, {2}{3}" -f $s.Days, $s.Count, (& $mb $s.Bytes), $mark)
 }
 Write-Host ""
-Write-Host "  Se conservan:" -ForegroundColor DarkGray
+Write-Host "  Kept:" -ForegroundColor DarkGray
 foreach ($g in @($rows | Where-Object { -not $_.Archive } | Group-Object { $_.Reason -replace '\d+', 'N' -replace "\('.*'\)", "('...')" } | Sort-Object Count -Descending)) {
     Write-Host ("    {0,5}  {1}" -f $g.Count, $g.Name) -ForegroundColor DarkGray
 }
-if ($appBad -gt 0) { Write-Host "    ($appBad archivo(s) de sesiones de la app ilegibles: las sesiones de la app sin identificar se conservan)" -ForegroundColor DarkGray }
+if ($appBad -gt 0) { Write-Host "    ($appBad app session file(s) unreadable: unmapped app sessions are kept)" -ForegroundColor DarkGray }
 Write-Host ""
 if ($Force) {
     $freed = [long](($done | Measure-Object OrigBytes -Sum).Sum) - [long](($done | Measure-Object ZipBytes -Sum).Sum)
-    Write-Host ("  Comprimidos {0} transcripts; liberados {1}." -f $done.Count, (& $mb $freed)) -ForegroundColor Green
+    Write-Host ("  Compressed {0} transcripts; freed {1}." -f $done.Count, (& $mb $freed)) -ForegroundColor Green
     foreach ($f in $failed) { Write-Host "  NO  $($f.SessionId): $($f.Error)" -ForegroundColor Yellow }
-    Write-Host "  Buscar uno: /board transcripts find <texto>   Recuperarlo: /board transcripts restore <sessionId>" -ForegroundColor DarkGray
+    Write-Host "  Find one: /cleanup transcripts find <text>   Restore it: /cleanup transcripts restore <sessionId>" -ForegroundColor DarkGray
 } else {
-    Write-Host ("  Con el umbral de {0} dias se comprimirian {1} transcripts ({2}). Corre con -Force para hacerlo." -f $OlderThanDays, $eligible.Count, (& $mb (($eligible | Measure-Object Bytes -Sum).Sum))) -ForegroundColor Yellow
+    Write-Host ("  At {0} days, {1} transcripts ({2}) would be compressed. Run with -Force to do it." -f $OlderThanDays, $eligible.Count, (& $mb (($eligible | Measure-Object Bytes -Sum).Sum))) -ForegroundColor Yellow
 }
 Write-Host ""
 exit 0

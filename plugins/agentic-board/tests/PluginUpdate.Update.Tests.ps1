@@ -242,7 +242,7 @@ Describe 'the report ends with how many open sessions still run old builds' {
         $r.Sessions.Stale | Should -Be 1
         $text = Get-ReportText $r
         $text | Should -Match 'Sesiones abiertas: 1\. 1 siguen con una version vieja'
-        $text | Should -Match '/board plugins sessions'
+        $text | Should -Match '/cleanup plugins sessions'
     }
     It 'a session with no record of what it loaded is reported as "sin datos", not as up to date' {
         $fx = New-UpdateFx

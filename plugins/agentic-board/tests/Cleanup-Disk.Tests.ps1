@@ -1,5 +1,5 @@
-#Requires -Modules Pester
-<#  Pester tests for Board-Disk.ps1 - `/board disk` (#737).
+﻿#Requires -Modules Pester
+<#  Pester tests for Cleanup-Disk.ps1 - `/cleanup disk` (#737).
 
     One plan-first report of what fills the disk, and one --force that cleans only what is provably
     safe. The rule under test that matters most: an old compaction snapshot (a copy of a transcript)
@@ -8,7 +8,7 @@
 
 BeforeAll {
     $env:ABIOS_DISK_DOTSOURCE = '1'
-    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Disk.ps1' | Resolve-Path) }
+    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Cleanup-Disk.ps1' | Resolve-Path) }
     finally { $env:ABIOS_DISK_DOTSOURCE = '' }
     function script:Snap([string]$Sid = 's1', [long]$Bytes = 100, [string]$Head = 'AAA') {
         [pscustomobject]@{ SessionId = $Sid; Bytes = $Bytes; Head = $Head }

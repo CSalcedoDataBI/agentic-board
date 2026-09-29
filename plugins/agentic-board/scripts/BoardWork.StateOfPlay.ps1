@@ -54,7 +54,7 @@ function Get-BoardInFlightFindings {
         -Text ("El board tiene {0} item(s) en progreso o en review: {1}." -f $nums.Count, (Format-StateNumberList $nums)))
 }
 
-# Is this PR parked work? `/board close-cycle --all` parks unmerged work as a draft PR with this
+# Is this PR parked work? `/cleanup sessions` parks unmerged work as a draft PR with this
 # label (#734). Label names are case-insensitive on GitHub, so the match is too.
 function Test-ParkedPr {
     param($Pr)

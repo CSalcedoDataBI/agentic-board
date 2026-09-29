@@ -1,12 +1,12 @@
-<#
+﻿<#
 .SYNOPSIS
-    /board disk: one plan-first report of what fills the disk, and one --force that cleans only
+    /cleanup disk: one plan-first report of what fills the disk, and one --force that cleans only
     what is provably safe (#737).
 
 .DESCRIPTION
     Measured on the reporter's machine on 2026-09-29, ~/.claude held about 5.6 GB. The biggest
     items were:
-      * projects            2.8 GB  session transcripts          -> /board transcripts (#736)
+      * projects            2.8 GB  session transcripts          -> /cleanup transcripts (#736)
       * compact-snapshots   1.7 GB  copies of those transcripts  -> cleaned here
       * plugins             0.7 GB  old cached plugin builds     -> cleaned here (plugins clean)
       * markitdown-venv     0.4 GB  a third-party tool           -> reported, never touched
@@ -18,11 +18,11 @@
         original transcript still exists, starts the same and is at least as long - or was
         compressed into the transcript archive and covers it. Otherwise it may be the last copy
         and is kept.
-      * Old plugin builds: exactly `/board plugins clean -Execute` (Get-VersionCleanupPlan +
+      * Old plugin builds: exactly `/cleanup plugins clean -Execute` (Get-VersionCleanupPlan +
         Invoke-PluginCleanup, re-verified right before deleting).
       * This repo's .agentic-board/ state: exactly Clear-AbiosState.ps1 -Force.
     Transcripts are only REPORTED here: they have their own verb, their own confirmation and a
-    restore path (/board transcripts). Nothing outside ~/.claude and this repo is touched.
+    restore path (/cleanup transcripts). Nothing outside ~/.claude and this repo is touched.
 
 .PARAMETER Force
     Clean. Without it nothing is written.
@@ -131,7 +131,7 @@ $clearState = Join-Path $PSScriptRoot 'Clear-AbiosState.ps1'
 
 # --- 4. transcripts (reported only) -------------------------------------------
 $tr = $null
-try { $tr = (& (Join-Path $PSScriptRoot 'Board-Transcripts.ps1') -Json -ClaudeHome $ClaudeHome 6>$null) -join "`n" | ConvertFrom-Json } catch { $tr = $null }
+try { $tr = (& (Join-Path $PSScriptRoot 'Cleanup-Transcripts.ps1') -Json -ClaudeHome $ClaudeHome 6>$null) -join "`n" | ConvertFrom-Json } catch { $tr = $null }
 
 # --- 5. what else is big and not ours -----------------------------------------
 $topDirs = @(Get-ChildItem -LiteralPath $home_ -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Bytes = (& $dirBytes $_.FullName) } })
@@ -168,28 +168,28 @@ if ($Json) {
     exit 0
 }
 
-$mode = if ($Force) { 'EJECUTADO' } else { 'PLAN - no se cambio nada' }
+$mode = if ($Force) { 'EXECUTED' } else { 'PLAN - nothing changed' }
 Write-Host ""
-Write-Host "=== /board disk  ($mode) ===" -ForegroundColor Cyan
+Write-Host "=== /cleanup disk  ($mode) ===" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  1. Copias de transcripts de compactaciones: $($snapRows.Count) ($(& $mb (($snapRows | Measure-Object Bytes -Sum).Sum)))" -ForegroundColor Yellow
-Write-Host ("     Borrables (el transcript original las contiene): {0}, {1}" -f $snapDel.Count, (& $mb $snapDelBytes))
-foreach ($g in @($snapKeep | Group-Object Reason)) { Write-Host ("     Se conservan {0}: {1}" -f $g.Count, $g.Name) -ForegroundColor DarkGray }
+Write-Host "  1. Compaction copies of transcripts: $($snapRows.Count) ($(& $mb (($snapRows | Measure-Object Bytes -Sum).Sum)))" -ForegroundColor Yellow
+Write-Host ("     Deletable (the original transcript holds them): {0}, {1}" -f $snapDel.Count, (& $mb $snapDelBytes))
+foreach ($g in @($snapKeep | Group-Object Reason)) { Write-Host ("     Kept {0}: {1}" -f $g.Count, $g.Name) -ForegroundColor DarkGray }
 Write-Host ""
-if ($pluginPlan.Ok) { Write-Host ("  2. Versiones viejas de plugins que nadie usa: {0}, {1}" -f $pluginRemovable.Count, (& $mb $plugBytes)) -ForegroundColor Yellow }
-else { Write-Host "  2. Versiones viejas de plugins: no pude planear ($($pluginPlan.Reason)) - no se toca nada" -ForegroundColor Yellow }
+if ($pluginPlan.Ok) { Write-Host ("  2. Old plugin builds nobody uses: {0}, {1}" -f $pluginRemovable.Count, (& $mb $plugBytes)) -ForegroundColor Yellow }
+else { Write-Host "  2. Old plugin builds: could not plan ($($pluginPlan.Reason)) - nothing is touched" -ForegroundColor Yellow }
 Write-Host ""
-if ($repoRoot) { Write-Host "  3. Estado temporal de este repo (.agentic-board: briefings, logs viejos): lo limpia el mismo reaper de /board doctor" -ForegroundColor Yellow }
-else { Write-Host "  3. Estado temporal: no estoy dentro de un repo, se omite" -ForegroundColor DarkGray }
+if ($repoRoot) { Write-Host "  3. This repo's temporary state (.agentic-board: old briefings, logs): cleaned by the same reaper /board doctor uses" -ForegroundColor Yellow }
+else { Write-Host "  3. Temporary state: not inside a repo, skipped" -ForegroundColor DarkGray }
 Write-Host ""
 if ($tr) {
     $t30 = @($tr.thresholds | Where-Object Days -eq 30)[0]
-    Write-Host ("  4. Transcripts de sesiones: {0} ({1}). Con 30 dias se comprimirian {2} ({3})." -f $tr.transcripts, (& $mb $tr.totalBytes), $t30.Count, (& $mb $t30.Bytes)) -ForegroundColor Yellow
-    Write-Host "     Tienen su propio verbo, con confirmacion y forma de recuperarlos: /board transcripts" -ForegroundColor DarkGray
-} else { Write-Host "  4. Transcripts: no pude medirlos - usa /board transcripts" -ForegroundColor DarkGray }
+    Write-Host ("  4. Session transcripts: {0} ({1}). At 30 days, {2} ({3}) would be compressed." -f $tr.transcripts, (& $mb $tr.totalBytes), $t30.Count, (& $mb $t30.Bytes)) -ForegroundColor Yellow
+    Write-Host "     They have their own verb, with a confirmation and a restore path: /cleanup transcripts" -ForegroundColor DarkGray
+} else { Write-Host "  4. Transcripts: could not measure them - use /cleanup transcripts" -ForegroundColor DarkGray }
 if ($unmanaged.Count) {
     Write-Host ""
-    Write-Host "  Tambien ocupan espacio, pero no son de esta herramienta (no se tocan):" -ForegroundColor DarkGray
+    Write-Host "  Also taking space, but not this tool's (never touched):" -ForegroundColor DarkGray
     foreach ($u in $unmanaged) { Write-Host ("     {0,-24} {1}" -f $u.Name, (& $mb $u.Bytes)) -ForegroundColor DarkGray }
 }
 Write-Host ""
@@ -197,11 +197,11 @@ if ($Force) {
     $del = @($snapRows | Where-Object Outcome -eq 'deleted')
     $freed = [long](($del | Measure-Object Bytes -Sum).Sum)
     if ($pluginOut) { $freed += [long]((@($pluginOut.Removed) | Measure-Object SizeBytes -Sum).Sum) }
-    Write-Host ("  Liberados {0}: {1} copia(s) de transcripts, {2} version(es) de plugins; estado temporal del repo limpiado." -f (& $mb $freed), $del.Count, $(if ($pluginOut) { @($pluginOut.Removed).Count } else { 0 })) -ForegroundColor Green
+    Write-Host ("  Freed {0}: {1} transcript copy(ies), {2} plugin build(s); this repo's temporary state cleaned." -f (& $mb $freed), $del.Count, $(if ($pluginOut) { @($pluginOut.Removed).Count } else { 0 })) -ForegroundColor Green
     foreach ($f in @($snapRows | Where-Object { $_.Outcome -like 'failed*' })) { Write-Host "  NO  $($f.Path): $($f.Outcome)" -ForegroundColor Yellow }
     if ($pluginOut) { foreach ($f in @($pluginOut.Failed)) { Write-Host "  NO  $($f.Path): $($f.FailReason)" -ForegroundColor Yellow } }
 } else {
-    Write-Host ("  Con -Force se liberarian unos {0} (copias + plugins). Los transcripts van aparte." -f (& $mb ($snapDelBytes + $plugBytes))) -ForegroundColor Yellow
+    Write-Host ("  With -Force about {0} would be freed (copies + plugins). Transcripts are separate." -f (& $mb ($snapDelBytes + $plugBytes))) -ForegroundColor Yellow
 }
 Write-Host ""
 exit 0

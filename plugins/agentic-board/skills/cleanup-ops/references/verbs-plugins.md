@@ -1,4 +1,4 @@
-# /board plugins — update every plugin, find the sessions still on an old build (full recipe)
+# /cleanup plugins — update every plugin, find the sessions still on an old build (full recipe)
 
 Loaded on demand by /board (#573). Epic #711 (#712-#715). This verb needs **no GitHub token**: it
 only talks to the local `claude` CLI and reads files under `~/.claude` (or `CLAUDE_CONFIG_DIR`).
@@ -14,9 +14,9 @@ deletes superseded builds only after 14 days.
 
 | Typed | Runs | What it does |
 |---|---|---|
-| `/board plugins` (or `plugins update`) | `scripts/Update-AllPlugins.ps1` | refresh every marketplace, update every installed plugin, report what changed |
-| `/board plugins sessions` | `scripts/Get-PluginSessionMap.ps1` | list open sessions and the plugins each still runs on an old build |
-| `/board plugins clean` | `scripts/Remove-OldPluginVersions.ps1` | list (or with `-Execute` delete) old cached builds nobody uses |
+| `/cleanup plugins` (or `plugins update`) | `scripts/Update-AllPlugins.ps1` | refresh every marketplace, update every installed plugin, report what changed |
+| `/cleanup plugins sessions` | `scripts/Get-PluginSessionMap.ps1` | list open sessions and the plugins each still runs on an old build |
+| `/cleanup plugins clean` | `scripts/Remove-OldPluginVersions.ps1` | list (or with `-Execute` delete) old cached builds nobody uses |
 
 Run the script for the action; pass the user's flags through. Never improvise the recipe from this table.
 
@@ -131,7 +131,7 @@ inconclusive one.
 
 **Honest limit:** only a session that started with a build that already contains this hook can show the
 notice (or one that has since run `/reload-plugins`, which loads new hooks). Older sessions are covered by
-`/board plugins sessions`. The shim reads only the first payload line: if Claude Code ever sends the session
+`/cleanup plugins sessions`. The shim reads only the first payload line: if Claude Code ever sends the session
 id after a very long first-line field, or pretty-prints the payload over several lines, the shim stays silent
 (never wrong, but the notice is then lost).
 ## Known limits (say them, do not hide them)

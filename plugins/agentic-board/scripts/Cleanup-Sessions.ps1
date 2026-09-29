@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    /board close-cycle --all: close every session on the machine and leave nothing dangling (#734).
+    /cleanup sessions: close every session on the machine and leave nothing dangling (#734).
 
 .DESCRIPTION
     `/board close-cycle` closes the CURRENT branch. This is the sweep over all of them, for the
@@ -57,10 +57,10 @@
     Emit the plan (and, with -Force, the outcome) as JSON for the agent.
 
 .EXAMPLE
-    .\Board-CloseCycleSweep.ps1 -HostSessionsFile s.json               # plan for THIS repo
-    .\Board-CloseCycleSweep.ps1 -HostSessionsFile s.json -Force -Json  # run it for this repo
-    .\Board-CloseCycleSweep.ps1 -Scope orphans -HostSessionsFile s.json  # sessions no repo owns
-    .\Board-CloseCycleSweep.ps1 -Scope all -Root D:\MIS-REPO -HostSessionsFile s.json -Json
+    .\Cleanup-Sessions.ps1 -HostSessionsFile s.json               # plan for THIS repo
+    .\Cleanup-Sessions.ps1 -HostSessionsFile s.json -Force -Json  # run it for this repo
+    .\Cleanup-Sessions.ps1 -Scope orphans -HostSessionsFile s.json  # sessions no repo owns
+    .\Cleanup-Sessions.ps1 -Scope all -Root D:\MIS-REPO -HostSessionsFile s.json -Json
 #>
 [CmdletBinding()]
 param(
@@ -255,7 +255,7 @@ function Select-SweepSessions {
 function New-ParkedPrBody {
     param([string]$Branch, [string]$Reason, [string]$SessionTitle = '', [string]$SessionLink = '')
     $lines = @(
-        'Parked by `/board close-cycle --all` so the default branch knows this work exists.'
+        'Parked by `/cleanup sessions` so the default branch knows this work exists.'
         ''
         "- Branch: ``$Branch``"
         "- Why: $Reason"
@@ -293,7 +293,7 @@ if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (
 
 $doctor = Join-Path $PSScriptRoot 'Board-Doctor.ps1'
 if ($Owner.Count -eq 0) {
-    $me = "$(Invoke-Gh -GhArgs @('api', 'user', '--jq', '.login') -What 'leer la cuenta del token (para saber que repos son tuyos; o pasa -Owner)')".Trim()
+    $me = "$(Invoke-Gh -GhArgs @('api', 'user', '--jq', '.login') -What 'read the token login (to know which repos are yours; or pass -Owner)')".Trim()
     if (-not $me) { throw "Could not read the token's login to know which repos are yours. Pass -Owner <account>." }
     $Owner = @($me)
 }
@@ -419,15 +419,15 @@ if ($Force) {
                         if ($LASTEXITCODE -ne 0) { Set-Failed $it 'git push'; continue }
                         # Invoke-Gh throws on any gh failure, so an unreadable PR list is a failed
                         # step (caught below), never "no PR yet" followed by a duplicate PR.
-                        $openPr = @(Invoke-Gh -GhArgs @('pr', 'list', '--repo', $repo, '--head', $it.Branch, '--state', 'open', '--json', 'number') -Json -What "listar los PRs abiertos de $($it.Branch)")
+                        $openPr = @(Invoke-Gh -GhArgs @('pr', 'list', '--repo', $repo, '--head', $it.Branch, '--state', 'open', '--json', 'number') -Json -What "list the open PRs of $($it.Branch)")
                         if ($openPr.Count -eq 0) {
                             if (-not $labelled[$repo]) {
-                                $null = Invoke-Gh -GhArgs @('label', 'create', 'parked', '--repo', $repo, '--color', 'BFD4F2', '--description', 'Work parked by close-cycle --all: pushed, draft PR, not merged', '--force') -What "crear la etiqueta parked en $repo"
+                                $null = Invoke-Gh -GhArgs @('label', 'create', 'parked', '--repo', $repo, '--color', 'BFD4F2', '--description', 'Work parked by close-cycle --all: pushed, draft PR, not merged', '--force') -What "create the parked label in $repo"
                                 $labelled[$repo] = $true
                             }
                             $hs = Find-HostSession $it.WorktreePath
                             $body = New-ParkedPrBody -Branch $it.Branch -Reason $it.Reason -SessionTitle "$($hs.title)" -SessionLink "$($hs.link)"
-                            $url = Invoke-Gh -GhArgs @('pr', 'create', '--repo', $repo, '--draft', '--base', $it.DefaultBranch, '--head', $it.Branch, '--title', "WIP (parked): $($it.Branch)", '--body', $body, '--label', 'parked') -What "abrir el PR en borrador de $($it.Branch)"
+                            $url = Invoke-Gh -GhArgs @('pr', 'create', '--repo', $repo, '--draft', '--base', $it.DefaultBranch, '--head', $it.Branch, '--title', "WIP (parked): $($it.Branch)", '--body', $body, '--label', 'parked') -What "open the draft PR of $($it.Branch)"
                             $it.Pr = "$(@($url) | Select-Object -Last 1)".Trim()
                         }
                         $it.Outcome = 'done'
@@ -485,32 +485,32 @@ if ($Json) {
 }
 
 $labels = [ordered]@{
-    'teardown' = 'Mergeadas: se borran rama y worktree'; 'park' = 'Con commits sin mergear: push + PR en borrador (parked)'
-    'wip-park' = 'Con cambios sin commitear: commit WIP + PR en borrador (parked)'; 'keep-review' = 'PR abierto: no se toca'
-    'delete-empty' = 'Vacias: se borran (no hay trabajo)'; 'needs-decision' = 'Necesitan tu decision'; 'skip-open' = 'Sesion trabajando: no se tocan'
+    'teardown' = 'Merged: branch and worktree deleted'; 'park' = 'Unmerged commits: push + draft PR (parked)'
+    'wip-park' = 'Uncommitted changes: WIP commit + draft PR (parked)'; 'keep-review' = 'Open PR: left alone'
+    'delete-empty' = 'Empty: deleted (no work on them)'; 'needs-decision' = 'Need your decision'; 'skip-open' = 'A session is working: left alone'
 }
-$mode = if ($Force) { 'EJECUTADO' } else { 'PLAN - no se cambio nada' }
+$mode = if ($Force) { 'EXECUTED' } else { 'PLAN - nothing changed' }
 Write-Host ""
-Write-Host "=== /board close-cycle --all  ($mode) ===" -ForegroundColor Cyan
-Write-Host "    $($repoRoots.Count) repo(s), $($items.Count) rama(s), $($hostSessions.Count) sesion(es) de la app" -ForegroundColor DarkGray
+Write-Host "=== /cleanup sessions  ($mode) ===" -ForegroundColor Cyan
+Write-Host "    $($repoRoots.Count) repo(s), $($items.Count) branch(es), $($hostSessions.Count) app session(s)" -ForegroundColor DarkGray
 foreach ($k in $labels.Keys) {
     $grp = @($items | Where-Object Action -eq $k)
     if ($grp.Count -eq 0) { continue }
     Write-Host ""
     Write-Host "--- $($labels[$k]) ($($grp.Count)) ---" -ForegroundColor Yellow
     foreach ($it in $grp) {
-        $tag = if ($it.Outcome -eq 'failed') { '  [FALLO]' } else { '' }
+        $tag = if ($it.Outcome -eq 'failed') { '  [FAILED]' } else { '' }
         Write-Host ("   {0,-28} {1,-40} {2}{3}" -f (Split-Path $it.RepoRoot -Leaf), $it.Branch, $it.Reason, $tag)
     }
 }
-foreach ($s in $skippedRepos) { Write-Host ("   omitido: {0} ({1})" -f $s.Path, $s.Reason) -ForegroundColor DarkGray }
+foreach ($s in $skippedRepos) { Write-Host ("   skipped: {0} ({1})" -f $s.Path, $s.Reason) -ForegroundColor DarkGray }
 if ($hostSessions.Count -gt 0) {
     Write-Host ""
-    Write-Host "--- Sesiones a archivar ($(@($verdicts | Where-Object Archive).Count)) ---" -ForegroundColor Green
+    Write-Host "--- Sessions to archive ($(@($verdicts | Where-Object Archive).Count)) ---" -ForegroundColor Green
     foreach ($v in @($verdicts | Where-Object Archive)) { Write-Host ("   {0,-45} {1}" -f $v.Title, $v.Reason) }
-    Write-Host "--- Sesiones que se quedan ($(@($verdicts | Where-Object { -not $_.Archive }).Count)) ---" -ForegroundColor DarkGray
+    Write-Host "--- Sessions kept ($(@($verdicts | Where-Object { -not $_.Archive }).Count)) ---" -ForegroundColor DarkGray
     foreach ($v in @($verdicts | Where-Object { -not $_.Archive })) { Write-Host ("   {0,-45} {1}" -f $v.Title, $v.Reason) -ForegroundColor DarkGray }
 }
 Write-Host ""
-if (-not $Force) { Write-Host "Plan solamente. Corre con -Force para ejecutarlo." -ForegroundColor Yellow }
+if (-not $Force) { Write-Host "Plan only. Run with -Force to execute it." -ForegroundColor Yellow }
 exit 0

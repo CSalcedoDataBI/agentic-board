@@ -1,5 +1,5 @@
 ---
-description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/plugins/actions-cost/transcripts. Defaults to the CSalcedoDataBI account.
+description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/actions-cost. Defaults to the CSalcedoDataBI account.
 ---
 You are running the agentic-board /board command.
 
@@ -32,17 +32,11 @@ just the number):
 16. handoff         → guardar/retomar contexto entre sesiones (save/resume) para continuar días después
 17. doctor          → auditar ramas y worktrees locales (mergeadas, estancadas, fantasma) y limpiarlos
 18. close-cycle     → clasificar la RAMA ACTUAL y enrutarla (commitear/PR/gate/merge/limpiar) — cierra la sesión individual
-                      (close-cycle --all = cerrar TODAS las sesiones de ESTE repo: aparcar lo pendiente como PR borrador
-                       y archivar lo resuelto · --all -Scope orphans = sesiones cuya carpeta ya no existe)
 19. telemetry       → medir cómo se comportó la herramienta en tus sesiones reales (barrido incremental)
 20. triage          → llenar Type/Area/Estimate por evidencia + PROPONER Priority (con confirmación) en los pendientes
 21. complete        → verificar que el board quedó full (0 pendientes) — PASS/FAIL, útil para CI o cierre
 22. bi-checklist    → mostrar el checklist de release para artefactos BI (modelos/reportes)
-23. plugins         → actualizar TODOS los plugins instalados y ver qué sesiones abiertas siguen con una versión vieja
-                      (plugins = actualizar | plugins sessions = mapa de sesiones | plugins clean = borrar versiones viejas sin uso)
-24. actions-cost    → auditar el costo de GitHub Actions de este repo (solo lectura): minutos MEDIDOS + reglas de costo sobre los workflows
-25. transcripts     → comprimir transcripts de sesiones viejas en un archivo con índice (libera disco) y recuperarlos igualitos
-                      (transcripts = plan | transcripts --force = comprimir | transcripts find <texto> | transcripts restore <id>)
+23. actions-cost    → auditar el costo de GitHub Actions de este repo (solo lectura): minutos MEDIDOS + reglas de costo sobre los workflows
 
 ── otros comandos (se tipean) ──────────────────────────────────
 /scan       → escanear ESTE proyecto por trabajo sin trackear (TODOs, checklists, planes) → issues + plan
@@ -50,6 +44,7 @@ just the number):
 /knowledge  → registro de referencias externas por dominio (add / harvest / wiki)
 /tools      → catálogo unificado de herramientas externas: navegar, investigar e instalar (individual o todas)
 /expert     → auto-experto: toma un plan y lo ejecuta SOLO (config = define el contrato, auto = corre autónomo)
+/cleanup    → mantenimiento de la máquina: sesiones, transcripts, disco y plugins (no es trabajo del board)
 
 ── canal de feedback (NO se tipea — se dispara solo) ───────────
 abios-feedback → ¿bug o mejora para ESTA herramienta? DILO en lenguaje natural
@@ -58,7 +53,7 @@ abios-feedback → ¿bug o mejora para ESTA herramienta? DILO en lenguaje natura
 ```
 
 If the user picks one of the **otros comandos**, do NOT run a board sub-action — tell them it is a
-separate command and to invoke it directly (`/scan`, `/skills`, `/knowledge`, `/tools`); this menu
+separate command and to invoke it directly (`/scan`, `/skills`, `/knowledge`, `/tools`, `/cleanup`); this menu
 lists them only so the whole tool is discoverable from one entry point.
 
 `abios-feedback` is DIFFERENT: it is an internal skill, NOT a typeable command — it is never typed
@@ -99,28 +94,23 @@ improvise the recipe from this summary:
 - **close-cycle** — classify the CURRENT branch and route it (commit/PR/gate/merge/teardown);
   performs exactly ONE action. Full contract: `references/verbs-close-cycle.md`. The old Spanish
   name `cerrar-ciclo` is a deprecated alias (#733): accept it, run `close-cycle`, and tell the user
-  the new name in one line. It will be removed in a later release. **`close-cycle --all`** sweeps
-  every session of THIS repo instead (scope `repo` by default; `-Scope orphans` for sessions no repo
-  owns): plan first, one confirmation, then park unmerged work as draft PRs and archive the sessions
-  whose work is resolved (same reference file, section `--all`).
+  the new name in one line. It will be removed in a later release.
 - **telemetry** — the incremental field sweep over real session transcripts (watermarks, four
   mechanical signals, read-only). Full contract: `references/verbs-telemetry.md`.
 - **triage** — fill Type/Area/Estimate from evidence and PROPOSE Priority (never write it
   silently). Full contract: `references/verbs-triage.md`.
-- **plugins** — update EVERY installed Claude Code plugin in one pass and report what changed
-  (`plugins`), map the open sessions still running an old build (`plugins sessions`), and safely
-  clean old cached builds nobody uses (`plugins clean`, a listing until `-Execute`). Needs no GitHub
-  token: skip the account step above for this verb. Full contract: `references/verbs-plugins.md`.
 - **actions-cost** — READ-ONLY audit of a repo's GitHub Actions cost: minutes MEASURED from the account
   usage endpoint (never the runs timing endpoint or run wall-clock), plus the cost rules over its
   `.github/workflows` (timeouts, concurrency, duplicate triggers, runners, crons, retention, repeated
   setup, the required-check deadlock trap). Every finding carries file:line; whatever it cannot measure is
   listed with the reason, never reported as clean. Writes nothing and has no fix mode. Full contract:
   `references/verbs-actions-cost.md`.
-- **transcripts** — compress OLD session transcripts (`~/.claude/projects`) into an indexed archive
-  and restore them byte for byte (`find` searches the index). Never touches a transcript the desktop
-  app still shows or a running session's. Plan by default; compresses only with `--force`. Needs no
-  GitHub token: skip the account step above for this verb. Full contract: `references/verbs-transcripts.md`.
+
+**Machine housekeeping is not board work — it moved to `/cleanup` (a separate command).** For one
+release these old spellings still work: route them to the cleanup-ops skill, run the `/cleanup`
+equivalent, and tell the user the new command in one line:
+`/board plugins [sessions|clean]` → `/cleanup plugins [sessions|clean]`;
+`/board close-cycle --all [-Scope …]` → `/cleanup sessions [-Scope …]`.
 
 The short verbs run directly:
 

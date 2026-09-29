@@ -1,5 +1,5 @@
 ﻿#Requires -Modules Pester
-<#  Pester tests for Board-Transcripts.ps1 - `/board transcripts` (#736).
+<#  Pester tests for Cleanup-Transcripts.ps1 - `/cleanup transcripts` (#736).
 
     Old session transcripts (~/.claude/projects/<project>/<sessionId>.jsonl, plus the companion
     <sessionId>/ folder of tool results and subagents) fill the disk. They are compressed into an
@@ -12,7 +12,7 @@
 
 BeforeAll {
     $env:ABIOS_TRANSCRIPTS_DOTSOURCE = '1'
-    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Transcripts.ps1' | Resolve-Path) }
+    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Cleanup-Transcripts.ps1' | Resolve-Path) }
     finally { $env:ABIOS_TRANSCRIPTS_DOTSOURCE = '' }
     $script:Now = [datetime]::SpecifyKind([datetime]'2026-09-29T12:00:00', 'Utc')
     function script:T {

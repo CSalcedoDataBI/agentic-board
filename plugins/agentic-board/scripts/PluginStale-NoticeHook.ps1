@@ -36,7 +36,7 @@
 
     HONEST LIMIT: only a session that started with a build that already contains this hook can show the
     notice. Sessions older than that (and any that never load hooks) are covered by the session map
-    (/board plugins sessions). A session that reloads with /reload-plugins picks the hook up too.
+    (/cleanup plugins sessions). A session that reloads with /reload-plugins picks the hook up too.
 
     Dot-source guard: set $env:ABIOS_PLUGINNOTICE_DOTSOURCE=1 to load the functions without reading stdin.  #>
 [CmdletBinding()]

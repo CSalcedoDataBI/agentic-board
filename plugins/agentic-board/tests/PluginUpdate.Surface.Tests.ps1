@@ -7,26 +7,32 @@
 
 BeforeAll {
     $script:Plugin = Join-Path $PSScriptRoot '..' | Resolve-Path
+    # Plugin updates are machine housekeeping, not board work: they moved from /board to /cleanup.
+    $script:Cleanup = Get-Content (Join-Path $script:Plugin 'commands' 'cleanup.md') -Raw
     $script:Board = Get-Content (Join-Path $script:Plugin 'commands' 'board.md') -Raw
-    $script:Skill = Get-Content (Join-Path $script:Plugin 'skills' 'projects-admin' 'SKILL.md') -Raw
-    $script:Ref = Get-Content (Join-Path $script:Plugin 'skills' 'projects-admin' 'references' 'verbs-plugins.md') -Raw
+    $script:Skill = Get-Content (Join-Path $script:Plugin 'skills' 'cleanup-ops' 'SKILL.md') -Raw
+    $script:Ref = Get-Content (Join-Path $script:Plugin 'skills' 'cleanup-ops' 'references' 'verbs-plugins.md') -Raw
 }
 
-Describe '/board plugins is discoverable' {
-    It 'is a numbered entry in the /board menu' {
-        $script:Board | Should -Match '(?m)^23\.\s+plugins\s'
+Describe '/cleanup plugins is discoverable' {
+    It 'is a numbered entry in the /cleanup menu' {
+        $script:Cleanup | Should -Match '(?m)^\d+\.\s+plugins\s'
     }
-    It 'is named in the /board description (the generated README catalog reads it)' {
-        $script:Board | Should -Match '(?m)^description:.*/plugins(?:/|\.)'
+    It 'is named in the /cleanup description (the generated README catalog reads it)' {
+        $script:Cleanup | Should -Match '(?m)^description:.*plugins'
     }
-    It 'routes to its reference from /board and from the projects-admin skill' {
-        $script:Board | Should -Match 'references/verbs-plugins\.md'
+    It 'routes to its reference from /cleanup and from the cleanup-ops skill' {
+        $script:Cleanup | Should -Match 'references/verbs-plugins\.md'
         $script:Skill | Should -Match 'references/verbs-plugins\.md'
     }
+    It 'the old /board plugins spelling still routes to /cleanup for one release' {
+        $script:Board | Should -Match '/board plugins \[sessions\|clean\]` → `/cleanup plugins'
+        $script:Board | Should -Not -Match '(?m)^\d+\.\s+plugins\s'
+    }
     It 'documents all three actions' {
-        $script:Ref | Should -Match '/board plugins sessions'
-        $script:Ref | Should -Match '/board plugins clean'
-        $script:Ref | Should -Match '(?m)^\|\s*`/board plugins`'
+        $script:Ref | Should -Match '/cleanup plugins sessions'
+        $script:Ref | Should -Match '/cleanup plugins clean'
+        $script:Ref | Should -Match '(?m)^\|\s*`/cleanup plugins`'
     }
     It 'the README catalog is current with the command frontmatter' {
         $out = pwsh -NoProfile -File (Join-Path $script:Plugin 'scripts' 'Update-Docs.ps1') -Check 2>&1 | Out-String
