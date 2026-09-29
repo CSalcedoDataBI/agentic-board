@@ -63,6 +63,13 @@ Describe 'Get-SkillScopeAdvice - where the skill belongs, with the reason' {
         $a.scope | Should -Be 'project'
         $a.reason | Should -Be 'chosen by the user'
     }
+    It 'a name that is not kebab-case never becomes a folder (no path escape)' {
+        foreach ($bad in '../../x', 'a/b', 'a\b', 'My Skill', 'UPPER', '-x', 'x--y', '') {
+            Test-SkillName $bad | Should -BeFalse -Because "'$bad'"
+            { Get-SkillTargetDir -Scope 'personal' -Name $bad -RepoRoot 'D:/r' -ClaudeHome 'C:/h' } | Should -Throw
+        }
+        Test-SkillName 'ai-text-cleaner' | Should -BeTrue
+    }
     It 'the target folder follows the scope' {
         Get-SkillTargetDir -Scope 'project' -Name 'x' -RepoRoot 'D:/r' -ClaudeHome 'C:/h' | Should -Be (Join-Path 'D:/r' '.claude' 'skills' 'x')
         Get-SkillTargetDir -Scope 'personal' -Name 'x' -RepoRoot 'D:/r' -ClaudeHome 'C:/h' | Should -Be (Join-Path 'C:/h' 'skills' 'x')

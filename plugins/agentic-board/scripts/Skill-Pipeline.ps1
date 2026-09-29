@@ -23,8 +23,8 @@
                 last push and license, so a good existing skill is installed instead of rewritten.
               * scope - where the skill belongs and why: this repo's .claude/skills when it is
                 about this repo, ~/.claude/skills otherwise.
-      -Verify Runs the static audit on the named skill and exits non-zero while a high or medium
-              finding remains. It is the exit gate of the audit/improve loop.
+      -Verify Runs the static audit on the named skill and exits non-zero while a high or med(ium)
+              finding remains (severity values high|med, as Invoke-SkillAudit emits them). It is the exit gate of the audit/improve loop.
 
 .PARAMETER Mode
     create | improve.
@@ -111,8 +111,12 @@ function Get-SkillScopeAdvice([string]$Requested, [string]$Name, [string]$Descri
     (& $mk 'personal' 'nothing in it is specific to this repo: a personal skill (~/.claude/skills) works everywhere')
 }
 
+# A skill name is a folder name: kebab-case only, so '../x' or 'a/b' can never leave skills/. PURE.
+function Test-SkillName([string]$Name) { "$Name" -cmatch '^[a-z0-9]+(-[a-z0-9]+)*$' }
+
 # The target folder for a scope. PURE.
 function Get-SkillTargetDir([string]$Scope, [string]$Name, [string]$RepoRoot, [string]$ClaudeHome) {
+    if (-not (Test-SkillName $Name)) { throw "'$Name' is not a kebab-case skill name." }
     if ($Scope -eq 'project') { return (Join-Path $RepoRoot '.claude' 'skills' $Name) }
     Join-Path $ClaudeHome 'skills' $Name
 }
@@ -149,6 +153,7 @@ if ($env:ABIOS_SKILLPIPE_DOTSOURCE) { return }
 
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 if (-not $Name) { throw 'Pass -Name <kebab-case skill name>.' }
+if (-not (Test-SkillName $Name)) { throw "'$Name' is not a skill name: use kebab-case (a-z, 0-9, single dashes). It becomes a folder name." }
 if (-not $Root) { $Root = (git rev-parse --show-toplevel 2>$null) }
 $claudeHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
 
@@ -178,10 +183,10 @@ if ($Verify) {
 
 # ------------------------------------------------------------------------- PLAN
 $installed = Get-InventorySkills
-if ($Mode -eq 'improve' -and -not $Description) {
+if ($Mode -eq 'improve') {
     $me = $installed | Where-Object name -eq $Name | Select-Object -First 1
     if (-not $me) { throw "No installed skill named '$Name' to improve." }
-    $Description = $me.description
+    if (-not $Description) { $Description = $me.description }
 }
 
 $gaps = try { pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Get-SkillGaps.ps1') -Profile quality -Json 2>$null | Out-String | ConvertFrom-Json } catch { $null }
