@@ -25,7 +25,10 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      marker (`.agentic-board/active-run.json`), the epics with every sub-issue closed, the
      worktrees whose branch already merged, the open issues that are not on the board, and the
      `[Unreleased]` CHANGELOG block of the default branch. It also lists what is IN FLIGHT (board
-     items In Progress / In Review, open PRs, a run whose queue is still open). **Read it to the
+     items In Progress / In Review, open PRs, a run whose queue is still open). **Parked work is the
+     first group (#735):** open PRs labelled `parked` — unmerged work `/board close-cycle --all` pushed
+     as a draft PR so the default branch knows it exists — oldest first, with the branch, the issue it
+     belongs to and the command that resumes it; they are not repeated in the open-PR line. **Read it to the
      user in their terms, then act on the findings — never answer with the pending list alone.**
      It is read + offer only: the script changes nothing on GitHub and nothing tracked in the repo (like the rest of the listing it may create the gitignored local state folder), and each finding carries the offer.
      **Never print a command for the user to run** — on a yes, YOU perform the disposition, through
