@@ -116,7 +116,7 @@ Describe 'Remove-BranchAndWorktree never aborts the sweep (#548)' {
         (git branch --list 'issue-2-plain') | Should -BeNullOrEmpty
         $skip = @($script:DoctorSkipped | Where-Object { $_.Branch -eq 'issue-1-half' })
         $skip.Count | Should -Be 1
-        $skip[0].Reason | Should -Match 'a medio borrar'
+        $skip[0].Reason | Should -Match 'half-removed'
         $skip[0].Reason | Should -Match 'robocopy|rm -rf'
     }
 
@@ -195,15 +195,15 @@ Describe 'Get-HalfRemovedWorktrees / Get-DoctorFixSummary (#548)' {
         $half[0].Path | Should -Be 'C:/a'
     }
     It 'names every skipped branch and its reason in the summary, so the run is not read as a no-op' {
-        $s = Get-DoctorFixSummary -Deleted 7 -Skipped @([pscustomobject]@{ Branch = 'issue-8-x'; Reason = 'worktree bloqueado' })
+        $s = Get-DoctorFixSummary -Deleted 7 -Skipped @([pscustomobject]@{ Branch = 'issue-8-x'; Reason = 'worktree locked' })
         $s.HadSkips | Should -BeTrue
-        ($s.Lines -join "`n") | Should -Match '7 rama\(s\) borradas, 1 omitida'
-        ($s.Lines -join "`n") | Should -Match 'issue-8-x\s+worktree bloqueado'
+        ($s.Lines -join "`n") | Should -Match '7 branch\(es\) deleted, 1 skipped'
+        ($s.Lines -join "`n") | Should -Match 'issue-8-x\s+worktree locked'
     }
     It 'reports a clean run as such' {
         $s = Get-DoctorFixSummary -Deleted 3
         $s.HadSkips | Should -BeFalse
-        ($s.Lines -join "`n") | Should -Match '3 rama\(s\) borradas, 0 omitida'
+        ($s.Lines -join "`n") | Should -Match '3 branch\(es\) deleted, 0 skipped'
     }
 }
 
@@ -293,7 +293,7 @@ Describe 'Get-PluginDrift (#482) - content, not the version string' {
         $inst = New-Install 'nosha'
         $d = Get-PluginDrift -InstalledJson (New-InstalledJson $inst -Sha ('a' * 40)) -CandidateRepos @($script:Pub)
         $d.Status | Should -Be 'unverifiable'
-        $d.Reason | Should -Match 'no esta en ningun clon local'
+        $d.Reason | Should -Match 'is not in any local clone'
     }
     It 'says UNVERIFIABLE when the install records no commit at all' {
         $inst = New-Install 'nocommit'
@@ -307,8 +307,8 @@ Describe 'Get-PluginDrift (#482) - content, not the version string' {
         Add-Content -LiteralPath (Join-Path $inst 'scripts/Brake-Guard.ps1') -Value '# patched'
         $lines = Format-PluginDrift -Drift (Get-PluginDrift -InstalledJson (New-InstalledJson $inst) -CandidateRepos @($script:Pub))
         ($lines -join "`n") | Should -Match 'scripts/Brake-Guard.ps1'
-        ($lines -join "`n") | Should -Match 'instalado 0\.27\.0'
-        ($lines -join "`n") | Should -Match 'publicado en ese commit: 0\.27\.0'
+        ($lines -join "`n") | Should -Match 'installed 0\.27\.0'
+        ($lines -join "`n") | Should -Match 'published at that commit: 0\.27\.0'
     }
     It 'Compare-PluginTree: a file whose content differs matches neither spelling' {
         $pub = @{ 'a.ps1' = (Get-GitBlobSha -Bytes ([System.Text.Encoding]::UTF8.GetBytes("one`n"))) }

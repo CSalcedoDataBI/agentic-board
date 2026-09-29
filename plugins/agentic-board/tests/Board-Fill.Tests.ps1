@@ -218,7 +218,7 @@ Describe 'Board-Fill writes the assignee to the item OWN repo (#659)' {
         # GitHub answers 200 and SILENTLY DROPS an assignee it cannot assign on that repo, so the
         # status code alone cannot tell a real assignment from a discarded one.
         $src = Get-Content $script:Script -Raw
-        $src | Should -Match 'verificar la asignacion'
+        $src | Should -Match 'verify the assignment'
         $src | Should -Match 'notcontains \$Owner'
     }
 }

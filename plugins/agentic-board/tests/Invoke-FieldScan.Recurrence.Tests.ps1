@@ -125,17 +125,17 @@ Describe 'Invoke-FieldScan -MatchFiled - recurrence vs new candidate (#476)' {
     It 'prints both sections in the human report' {
         $fr = Join-Path $script:Tmp ('field-' + [guid]::NewGuid().ToString('N'))
         $out = (& pwsh -NoProfile -File $script:Scan -FieldRoot $fr -ProjectsRoot $script:Proj -MatchFiled -CandidatesFile $script:Cands 2>&1 | Out-String)
-        $out | Should -Match 'reincidencia \(ya archivado\)'
+        $out | Should -Match 'recurrence \(already filed\)'
         $out | Should -Match ([regex]::Escape($script:Proj))
-        $out | Should -Match 'candidatos NUEVOS'
-        $out | Should -Match '#10 \[abierto\]'
-        $out | Should -Match '#11 \[cerrado COMPLETED\]'
+        $out | Should -Match 'NEW candidates'
+        $out | Should -Match '#10 \[open\]'
+        $out | Should -Match '#11 \[closed COMPLETED\]'
     }
     It 'a candidates file that cannot be read is REPORTED, and the sweep result is still delivered' {
         $r = Invoke-Scan -Extra @('-MatchFiled', '-CandidatesFile', (Join-Path $script:Tmp 'nope.json'))
         $r.Exit | Should -Be 0
         $j = ScanJson $r
-        $j.recurrenceNote | Should -Match 'no se pudo cotejar'
+        $j.recurrenceNote | Should -Match 'could not match against the filed issues'
         $j.scanned | Should -BeGreaterThan 0
         @($j.recurrence).Count | Should -Be 0
     }

@@ -35,15 +35,15 @@ $stamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
 # stdout into lines and dropped the terminators before any of this runs - but it is
 # unreshaped and untruncated, which is what a restorable backup actually needs.
 $meta   = Invoke-Gh -GhArgs @('project', 'view',       "$Number", '--owner', $Owner, '--format', 'json') `
-                    -What "leer el board #$Number de $Owner" -RawJson -Retries 2
+                    -What "read board #$Number of $Owner" -RawJson -Retries 2
 $fields = Invoke-Gh -GhArgs @('project', 'field-list', "$Number", '--owner', $Owner, '--format', 'json') `
-                    -What "leer los campos del board #$Number" -RawJson -Retries 2
+                    -What "read the fields of board #$Number" -RawJson -Retries 2
 $itemLimit = Get-BoardItemReadLimit
 $items  = Invoke-Gh -GhArgs @('project', 'item-list',  "$Number", '--owner', $Owner, '--format', 'json', '--limit', "$itemLimit") `
-                    -What "leer los items del board #$Number" -RawJson -Retries 2
+                    -What "read the items of board #$Number" -RawJson -Retries 2
 
 $title  = ($meta | ConvertFrom-Json).title
-if (-not $title) { throw "El board #$Number no devolvio un titulo - no hago un backup de algo que no pude leer." }
+if (-not $title) { throw "Board #$Number returned no title - I will not back up something I could not read." }
 
 # This snapshot is the safety net taken BEFORE a destructive board operation, so a partial one is
 # worse than none: it would license the delete it exists to make reversible. A read that stopped at
@@ -51,7 +51,7 @@ if (-not $title) { throw "El board #$Number no devolvio un titulo - no hago un b
 # than through Get-BoardItems because the snapshot must keep gh's own bytes unreshaped.
 $itemCount = @(($items | ConvertFrom-Json).items | Where-Object { $null -ne $_ }).Count
 if ($itemCount -ge $itemLimit) {
-    throw "No escribo el backup del board #$Number - la lectura de items se corto en $itemCount (el tope de lectura), y un backup parcial no es un backup."
+    throw "Not writing the backup of board #$Number - the item read stopped at $itemCount (the read cap), and a partial backup is not a backup."
 }
 $safe   = ($title -replace '[^\w\-]+', '_').Trim('_')
 $base   = Join-Path $BackupDir ("{0}_{1}" -f $safe, $stamp)
@@ -68,24 +68,24 @@ foreach ($f in $snapshotFiles.Keys) { [System.IO.File]::WriteAllText($f, $snapsh
 # zero-byte file was never reachable. What this catches is the write itself going wrong
 # (truncation, a mangled encoding) - the failure a backup can only reveal on restore day.
 foreach ($f in $snapshotFiles.Keys) {
-    if (-not (Test-Path $f)) { throw "El backup no se escribio: $f" }
+    if (-not (Test-Path $f)) { throw "The backup was not written: $f" }
     try   { $null = (Get-Content $f -Raw) | ConvertFrom-Json }
-    catch { throw "El backup quedo ilegible (no parsea como JSON): $f" }
+    catch { throw "The backup is unreadable (does not parse as JSON): $f" }
 }
 
 # restorable live clone (fields/views + draft issues)
 $cloneTitle = "$title $dash backup $stamp"
 try {
     Invoke-Gh -GhArgs @('project', 'copy', "$Number", '--source-owner', $Owner, '--target-owner', $Owner, '--drafts', '--title', $cloneTitle) `
-              -What "clonar el board #$Number" -Retries 2 | Out-Null
+              -What "clone board #$Number" -Retries 2 | Out-Null
 } catch {
     # The snapshot is already on disk and is perfectly good. Dying here without saying so
     # would leave three valid files the caller believes do not exist - so they either re-run
     # and pile up duplicate snapshots, or assume they have no backup at all. Report what
     # exists, report what failed, and still fail: the header promises BOTH halves.
-    Write-Host "Backup PARCIAL:" -ForegroundColor Yellow
+    Write-Host "Backup PARTIAL:" -ForegroundColor Yellow
     Write-Host ("  JSON snapshot OK : {0}.project.json (+ .fields.json, .items.json)" -f $base) -ForegroundColor Yellow
-    Write-Host  "  Live clone FALLO : el snapshot JSON sirve para restaurar; el clon vivo no se creo." -ForegroundColor Yellow
+    Write-Host  "  Live clone FAILED: the JSON snapshot can be used to restore; the live clone was not created." -ForegroundColor Yellow
     throw
 }
 

@@ -80,7 +80,7 @@ Describe '#498 - the board is found through the repository link, not its title' 
             }
             $r = Invoke-Resolve @{ Owner = 'X'; Repo = 'X/widget'; CreateIfMissing = $false }
             $r.Value | Should -Be 9
-            $r.Text  | Should -Match '2 boards vinculados'
+            $r.Text  | Should -Match '2 linked boards'
         }
         It 'the canonical title uses an EM-DASH (U+2014): a hyphenated "<repo> - Roadmap" is NOT canonical (review of #689)' {
             Mock gh {
@@ -121,7 +121,7 @@ Describe '#498 - the board is found through the repository link, not its title' 
                 elseif ($joined -match 'project\s+create'){ '{"number":42}' }
                 else                                       { '' }
             }
-            { Invoke-Resolve @{ Owner = 'X'; Repo = 'X/widget' } } | Should -Throw '*mas de 100 boards*'
+            { Invoke-Resolve @{ Owner = 'X'; Repo = 'X/widget' } } | Should -Throw '*more than 100 linked boards*'
             Should -Invoke gh -ParameterFilter { $args -contains 'create' } -Times 0 -Exactly
         }
         It 'an explicit -Title is checked against the owner-wide list, so a cut-short LINK list does not block creating it' {
@@ -197,7 +197,7 @@ Describe '#498 - the board is found through the repository link, not its title' 
                 }
                 $r = Invoke-Resolve @{ Owner = 'X'; Repo = 'X/widget'; Title = 'Sales'; CreateIfMissing = $false }
                 $r.Value | Should -Be 31
-                $r.Text  | Should -Match 'no pude vincular'
+                $r.Text  | Should -Match 'could not link'
             }
         }
         It 'asks gh for a wide board list, and refuses to create when even that was cut short' {
@@ -210,7 +210,7 @@ Describe '#498 - the board is found through the repository link, not its title' 
                 elseif ($joined -match 'project\s+list')  { $global:CutJson }
                 else                                       { '' }
             }
-            { Invoke-Resolve @{ Owner = 'X'; Repo = 'X/widget' } } | Should -Throw '*la lista se corto*'
+            { Invoke-Resolve @{ Owner = 'X'; Repo = 'X/widget' } } | Should -Throw '*the list was cut short*'
             Should -Invoke gh -ParameterFilter { ($args -contains 'list') -and ($args -contains '--limit') } -Times 1 -Exactly
             Should -Invoke gh -ParameterFilter { $args -contains 'create' } -Times 0 -Exactly
         }
@@ -281,7 +281,7 @@ Describe '#666 - -Title selects; it is never silently ignored' {
         $r.Value | Should -Be 77
         Should -Invoke gh -ParameterFilter { $args -contains 'create' } -Times 1 -Exactly
         Should -Invoke gh -ParameterFilter { $args -contains 'link' }   -Times 1 -Exactly
-        $r.Text | Should -Match "board aparte 'Sales'"
+        $r.Text | Should -Match "separate board 'Sales'"
     }
     It 'never hands back a board whose title merely resembles the request (no "*repo*" heuristic with -Title)' {
         # 'widget scratch' contains the repo name; under the old title heuristic it answered for 'Sales'.

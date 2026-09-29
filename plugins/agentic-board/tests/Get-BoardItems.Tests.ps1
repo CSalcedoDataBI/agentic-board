@@ -181,7 +181,7 @@ Describe 'Regression: no caller may state an absence off a possibly-short read' 
     }
     It 'Backup-Board refuses to write a partial snapshot' {
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Backup-Board.ps1') -Raw
-        $t | Should -Match 'un backup parcial no es un backup'
+        $t | Should -Match 'a partial backup is not a backup'
     }
     It 'Export-BoardSnapshot refuses to publish a truncated "N of M"' {
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Export-BoardSnapshot.ps1') -Raw

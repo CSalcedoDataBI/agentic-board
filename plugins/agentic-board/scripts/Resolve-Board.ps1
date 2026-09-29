@@ -80,7 +80,7 @@ query($o:String!, $r:String!) {
   }
 }'
   $linked = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$linkedQuery",'-f',"o=$($rp[0])",'-f',"r=$($rp[1])") `
-                      -What "leer los boards vinculados a $Repo" -Graphql
+                      -What "read the boards linked to $Repo" -Graphql
   $linkedTruncated = [bool]$linked.data.repository.projectsV2.pageInfo.hasNextPage
   # Only boards of THIS owner: the number is meaningless without the owner it is used with.
   $linkedBoards = @($linked.data.repository.projectsV2.nodes |
@@ -95,7 +95,7 @@ if ($titleGiven) {
   $match = $linkedBoards | Where-Object { $_.title -eq $canonical } | Select-Object -First 1
   if (-not $match) { $match = $linkedBoards | Sort-Object { [int]$_.number } | Select-Object -First 1 }
   if ($linkedBoards.Count -gt 1) {
-    Write-Host ("  WARN {0} tiene {1} boards vinculados ({2}); uso #{3}. Pasa -Title para elegir otro." -f `
+    Write-Host ("  WARN {0} has {1} linked boards ({2}); using #{3}. Pass -Title to pick another." -f `
                 $Repo, $linkedBoards.Count, (($linkedBoards | ForEach-Object { "#$($_.number) '$($_.title)'" }) -join ', '), $match.number) -ForegroundColor DarkYellow
   }
 }
@@ -108,12 +108,12 @@ if (-not $match -and ($titleGiven -or $linkedBoards.Count -eq 0)) {
   # a full page as a cut-short read below.
   $listLimit  = 200
   $projects   = @((Invoke-Gh -GhArgs @('project','list','--owner',$Owner,'--format','json','--limit',"$listLimit") `
-                             -What "listar los boards de $Owner" -Json).projects | Where-Object { $null -ne $_ })
+                             -What "list the boards of $Owner" -Json).projects | Where-Object { $null -ne $_ })
   $candidates = $projects | Where-Object { $_.title -notmatch '(?i)backup' }
   $match = $candidates | Where-Object { $_.title -eq $Title } | Select-Object -First 1
   if (-not $match -and -not $titleGiven) { $match = $candidates | Where-Object { $_.title -like "*$repoName*" } | Select-Object -First 1 }
   if (-not $match -and $projects.Count -ge $listLimit) {
-    throw "$Owner tiene $listLimit boards o mas: la lista se corto y no puedo probar que ninguno es el que busco, asi que no creo otro. Pasa -Title exacto o elige el board a mano."
+    throw "$Owner has $listLimit boards or more: the list was cut short and I cannot prove none is the one I am looking for, so I will not create another. Pass an exact -Title or pick the board by hand."
   }
   # Found by title alone, so nothing yet ties it to THIS repo. The caller asked for exactly this
   # title for this repo, so LINK it: otherwise the next lookup without -Title (which reads the link)
@@ -128,17 +128,17 @@ if (-not $match -and ($titleGiven -or $linkedBoards.Count -eq 0)) {
     if ($doLink) {
       try {
         Invoke-Gh -GhArgs @('project','link',"$($match.number)",'--owner',$Owner,'--repo',$Repo) `
-                  -What "enlazar el board #$($match.number) a $Repo" | Out-Null
+                  -What "link board #$($match.number) to $Repo" | Out-Null
         Write-Host ("  linked board #{0} '{1}' to {2} (it was reused by title and was not linked)." -f $match.number, $match.title, $Repo) -ForegroundColor DarkYellow
       } catch {
-        Write-Host ("  WARN no pude vincular el board #{0} a {1}: {2}" -f $match.number, $Repo, $_.Exception.Message) -ForegroundColor DarkYellow
+        Write-Host ("  WARN could not link board #{0} to {1}: {2}" -f $match.number, $Repo, $_.Exception.Message) -ForegroundColor DarkYellow
       }
     }
   }
   # A board reused through the title HEURISTICS (no -Title) is not linked either. Linking on a guess
   # could attach the repo to the wrong board, so only say how.
   if ($match -and -not $titleGiven) {
-    Write-Host ("  NOTE el board #{0} '{1}' se encontro por titulo, no por vinculo; Board-Work -ListBoards no lo vera hasta vincularlo: gh project link {0} --owner {2} --repo {3}" -f `
+    Write-Host ("  NOTE board #{0} '{1}' was found by title, not by link; Board-Work -ListBoards will not see it until it is linked: gh project link {0} --owner {2} --repo {3}" -f `
                 $match.number, $match.title, $Owner, $Repo) -ForegroundColor DarkYellow
   }
 }
@@ -148,7 +148,7 @@ if (-not $match -and ($titleGiven -or $linkedBoards.Count -eq 0)) {
 # would duplicate it. An explicit -Title is different: it was checked against the owner's whole board
 # list above, so its absence there IS proven.
 if (-not $match -and $linkedTruncated -and -not $titleGiven) {
-  throw "El repo $Repo tiene mas de 100 boards vinculados: no puedo probar que ninguno es el que busco, asi que no creo otro. Pasa -Title exacto o elige el board a mano."
+  throw "Repo $Repo has more than 100 linked boards: I cannot prove none is the one I am looking for, so I will not create another. Pass an exact -Title or pick the board by hand."
 }
 
 if ($match) {
@@ -162,7 +162,7 @@ if (-not $CreateIfMissing) {
   return $null
 }
 if ($linkedBoards.Count -gt 0) {
-  Write-Host ("  {0} ya tiene {1} board(s) vinculado(s) ({2}); creo un board aparte '{3}' porque se pidio por -Title." -f `
+  Write-Host ("  {0} already has {1} linked board(s) ({2}); creating a separate board '{3}' because -Title asked for it." -f `
               $Repo, $linkedBoards.Count, (($linkedBoards | ForEach-Object { "#$($_.number)" }) -join ', '), $Title) -ForegroundColor Yellow
 }
 
@@ -173,11 +173,11 @@ $WhatIfPreference  = $false
 $ConfirmPreference = 'High'
 
 $num = (Invoke-Gh -GhArgs @('project','create','--owner',$Owner,'--title',$Title,'--format','json') `
-                  -What "crear el board '$Title'" -Json).number
+                  -What "create board '$Title'" -Json).number
 Invoke-Gh -GhArgs @('project','link',"$num",'--owner',$Owner,'--repo',$Repo) `
-          -What "enlazar el board #$num a $Repo" | Out-Null
+          -What "link board #$num to $Repo" | Out-Null
 Invoke-Gh -GhArgs @('project','edit',"$num",'--owner',$Owner,'--description',"Roadmap + issue tracking for $Repo. Anchored to that repo.") `
-          -What "describir el board #$num" | Out-Null
+          -What "describe board #$num" | Out-Null
 Write-Host ("CREATED board #{0}: '{1}' (linked to {2})" -f $num, $Title, $Repo) -ForegroundColor Yellow
 
 # Born canonical (#299). `gh project create` seeds GitHub's default Status field (Todo / In Progress /

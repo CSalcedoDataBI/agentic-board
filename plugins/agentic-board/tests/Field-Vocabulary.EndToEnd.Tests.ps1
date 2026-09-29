@@ -165,38 +165,38 @@ Describe 'Board-Fill fills and VERIFIES any board vocabulary, and says so when i
     It "an English board with 'Task Type': the empty type is planned as Feature" -Skip:$script:notWindows {
         Set-FillBoard @((New-FillSS 'F_s' 'Status' @('Backlog', 'Done')), (New-FillSS 'F_p' 'Priority' @('P2')), (New-FillSS 'F_z' 'Size' @('M')), (New-FillSS 'F_t' 'Task Type' @('Bug', 'Feature')))
         $r = Invoke-WithFakeGh $script:Fill @('-Owner', 'o', '-Repo', 'o/r', '-ProjectNum', '5', '-DryRun')
-        $r.Out | Should -Match 'Task Type vacio -> Feature'
-        $r.Out | Should -Not -Match 'ATENCION'
+        $r.Out | Should -Match 'Task Type empty -> Feature'
+        $r.Out | Should -Not -Match 'ATTENTION'
     }
 
     It "a SPANISH board (default Status + Prioridad/Tamano/Tipo): every empty field is detected, 'Feature' becomes 'Funcionalidad' (#509)" -Skip:$script:notWindows {
         Set-FillBoard @((New-FillSS 'F_s' 'Status' @('Todo', 'In Progress', 'Done')), (New-FillSS 'F_p' 'Prioridad' @('P0', 'P1', 'P2', 'P3')),
                         (New-FillSS 'F_z' "Tama$($script:Ntilde)o" @('XS', 'S', 'M', 'L', 'XL')), (New-FillSS 'F_t' 'Tipo' @('Bug', 'Funcionalidad', 'Mejora', 'Tarea')))
         $r = Invoke-WithFakeGh $script:Fill @('-Owner', 'o', '-Repo', 'o/r', '-ProjectNum', '5', '-DryRun')
-        $r.Out | Should -Match 'Prioridad vacio -> P2'
-        $r.Out | Should -Match 'vacio -> M'
-        $r.Out | Should -Match 'Tipo vacio -> Funcionalidad'
+        $r.Out | Should -Match 'Prioridad empty -> P2'
+        $r.Out | Should -Match 'empty -> M'
+        $r.Out | Should -Match 'Tipo empty -> Funcionalidad'
         $r.Out | Should -Match 'Status \[\] -> Todo'
-        $r.Out | Should -Not -Match 'ATENCION'
+        $r.Out | Should -Not -Match 'ATTENTION'
     }
 
     It "a legacy 'Type' board still fills (existing boards keep working)" -Skip:$script:notWindows {
         Set-FillBoard @((New-FillSS 'F_s' 'Status' @('Backlog')), (New-FillSS 'F_t' 'Type' @('Bug', 'Feature')))
         $r = Invoke-WithFakeGh $script:Fill @('-Owner', 'o', '-Repo', 'o/r', '-ProjectNum', '5', '-DryRun')
-        $r.Out | Should -Match 'Type vacio -> Feature'
+        $r.Out | Should -Match 'Type empty -> Feature'
     }
 
-    It 'a board with NONE of the fields says ATENCION and does NOT claim "Board completo" (the false all-clear of #509)' -Skip:$script:notWindows {
+    It 'a board with NONE of the fields says ATTENTION and does NOT claim "Board complete" (the false all-clear of #509)' -Skip:$script:notWindows {
         Set-FillBoard @((New-FillSS 'F_k' 'Kind' @('a', 'b')))
         $r = Invoke-WithFakeGh $script:Fill @('-Owner', 'o', '-Repo', 'o/r', '-ProjectNum', '5', '-DryRun')
-        $r.Out | Should -Match 'ATENCION.*NINGUNO'
-        $r.Out | Should -Match 'NO verifique'
-        $r.Out | Should -Not -Match 'Board completo'
+        $r.Out | Should -Match 'ATTENTION.*NONE'
+        $r.Out | Should -Match 'did NOT verify'
+        $r.Out | Should -Not -Match 'Board complete'
     }
 
     It 'a board missing only some fields warns and does not call itself complete' -Skip:$script:notWindows {
         Set-FillBoard @((New-FillSS 'F_s' 'Status' @('Backlog')), (New-FillSS 'F_p' 'Priority' @('P2')), (New-FillSS 'F_z' 'Size' @('M')))
         $r = Invoke-WithFakeGh $script:Fill @('-Owner', 'o', '-Repo', 'o/r', '-ProjectNum', '5', '-DryRun')
-        $r.Out | Should -Match 'WARN el board no tiene: Type'
+        $r.Out | Should -Match 'WARN the board does not have: Type'
     }
 }
