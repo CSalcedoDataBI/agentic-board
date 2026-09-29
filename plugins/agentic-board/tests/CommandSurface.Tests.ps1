@@ -182,6 +182,69 @@ Describe 'Command surface — no internal vocabulary leaks into Write-Host outpu
     }
 }
 
+Describe 'Command surface — verb and flag names are English (#733)' {
+    <#  `/board cerrar-ciclo` shipped as the one Spanish verb in an English command surface, and
+        the product owner called it out as badly built. Conversation text follows the user's
+        language; NAMES do not. This reads the three places a name is declared - the verb lists in
+        each command's frontmatter, the numbered menu entries, and every script's param block (AST,
+        so a comment or a string never counts) - and rejects any hyphen part that is a Spanish word.
+        A deprecated alias mentioned in routing prose is not a declaration and is not read. #>
+    BeforeAll {
+        $script:SpanishWords = @(
+            'cerrar', 'ciclo', 'abrir', 'reabrir', 'crear', 'borrar', 'limpiar', 'archivar', 'archivo',
+            'sesion', 'sesiones', 'pendiente', 'pendientes', 'revisar', 'actualizar', 'mover', 'llenar',
+            'escanear', 'agregar', 'anadir', 'guardar', 'retomar', 'tarea', 'tareas', 'rama', 'ramas',
+            'descartar', 'buscar', 'listar', 'mostrar', 'ver', 'estado', 'prioridad', 'tablero',
+            'ayuda', 'configurar', 'instalar', 'publicar', 'trabajo', 'todos', 'nuevo', 'salir'
+        )
+        function script:Get-SpanishParts([string]$Name) {
+            @($Name.ToLowerInvariant() -split '[-_]' | Where-Object { $script:SpanishWords -contains $_ })
+        }
+        $script:Declared = @(
+            foreach ($cmd in $script:CommandFiles) {
+                $lines = @(Get-Content -LiteralPath $cmd.FullName)
+                $desc = @($lines | Where-Object { $_ -match '^\s*description:' }) | Select-Object -First 1
+                foreach ($m in [regex]::Matches([string]$desc, '[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)+')) {
+                    foreach ($v in ($m.Value -split '/')) { [pscustomobject]@{ Where = "$($cmd.Name) frontmatter"; Name = $v } }
+                }
+                foreach ($l in $lines) {
+                    if ($l -match '^\s*\d+\.\s+([a-z][a-z0-9-]+)') { [pscustomobject]@{ Where = "$($cmd.Name) menu"; Name = $matches[1] } }
+                }
+            }
+            foreach ($ps in (Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'scripts') -Filter '*.ps1')) {
+                $ast = [System.Management.Automation.Language.Parser]::ParseFile($ps.FullName, [ref]$null, [ref]$null)
+                if ($ast.ParamBlock) {
+                    foreach ($p in $ast.ParamBlock.Parameters) {
+                        [pscustomobject]@{ Where = "$($ps.Name) param"; Name = $p.Name.VariablePath.UserPath }
+                        foreach ($a in @($p.Attributes | Where-Object { $_.TypeName.Name -eq 'Alias' })) {
+                            foreach ($arg in $a.PositionalArguments) { [pscustomobject]@{ Where = "$($ps.Name) alias"; Name = [string]$arg.Value } }
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    It 'the extractor is not vacuous - it sees verbs, menu entries and script params' {
+        @($script:Declared | Where-Object Where -like '*frontmatter').Name | Should -Contain 'close-cycle'
+        @($script:Declared | Where-Object Where -like '*menu').Name | Should -Contain 'close-cycle'
+        @($script:Declared | Where-Object Where -like '*alias').Name | Should -Contain 'CloseCycle'
+    }
+
+    It 'the word check catches the name this rule was written for' {
+        script:Get-SpanishParts 'cerrar-ciclo' | Should -Be @('cerrar', 'ciclo')
+        script:Get-SpanishParts 'close-cycle' | Should -BeNullOrEmpty
+    }
+
+    It 'no declared verb, menu entry, parameter or alias is Spanish' {
+        $violations = foreach ($d in $script:Declared) {
+            $parts = script:Get-SpanishParts $d.Name
+            if ($parts) { "$($d.Where): '$($d.Name)' ($($parts -join ', '))" }
+        }
+        $violations | Should -BeNullOrEmpty -Because "names are English; Spanish belongs in what the agent SAYS, not in what the user TYPES: $($violations -join '; ')"
+    }
+}
+
 # --- discovery scope: every frontmatter the client parses as YAML (#677) --------
 $FrontmatterCases = @(
     foreach ($pattern in @(

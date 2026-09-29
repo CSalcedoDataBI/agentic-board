@@ -90,7 +90,7 @@ The auto-expert does NOT improvise its own tooling — it dogfoods agentic-board
 | Record work / findings | `/board issue`, `/board plan`, `/board triage` |
 | Report progress / evidence | `/board update`, `/board changelog`, `[abios-evidence]` comments |
 | Survive budget / interruption | `/board handoff -Save` |
-| Clean up | `/board doctor`, `/board cerrar-ciclo` |
+| Clean up | `/board doctor`, `/board close-cycle` |
 
 ## Autonomy boundary
 

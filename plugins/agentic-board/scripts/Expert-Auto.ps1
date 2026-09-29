@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     /board expert `auto` — compose the autonomous brief and launch the auto-expert run.
 
@@ -300,7 +300,7 @@ Every need below already has a capability. Reach for it instead of inventing you
 - Record work / findings -> ``/board issue``, ``/board plan``, ``/board triage``
 - Report progress / evidence -> ``/board update``, ``/board changelog``, ``[abios-evidence]`` comment
 - Survive budget / interruption -> ``/board handoff -Save``
-- Clean up -> ``/board doctor``, ``/board cerrar-ciclo``
+- Clean up -> ``/board doctor``, ``/board close-cycle``
 
 ### Self-planning — escalating to an epic
 

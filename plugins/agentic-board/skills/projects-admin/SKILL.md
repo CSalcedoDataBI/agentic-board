@@ -90,7 +90,7 @@ follow it exactly:
 | `/board field` | `references/verbs-field.md` |
 | `/board changelog` | `references/verbs-changelog.md` |
 | `/board handoff` | `references/verbs-handoff.md` |
-| `/board cerrar-ciclo` | `references/verbs-cerrar-ciclo.md` |
+| `/board close-cycle` | `references/verbs-close-cycle.md` |
 | `/board telemetry` | `references/verbs-telemetry.md` |
 | `/board triage` | `references/verbs-triage.md` |
 | `/board plugins` (update every plugin; `sessions` map; `clean` old builds) | `references/verbs-plugins.md` |

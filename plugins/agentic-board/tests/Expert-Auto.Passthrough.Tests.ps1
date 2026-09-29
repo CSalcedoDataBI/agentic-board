@@ -1,4 +1,4 @@
-﻿#Requires -Modules Pester
+#Requires -Modules Pester
 <#  Tests for the Expert-Auto fixes of #472 (-TakeOver/-IgnoreBlocked passthrough), #499
     (-Owner/-Repo), #473 (issue comments in the brief) and #554 (capability map vs auto-loop.md).
 
@@ -205,7 +205,7 @@ Describe 'The brief''s capability map agrees with the docs that describe it (#55
         $script:BriefTokens | Should -Contain '/knowledge add'
     }
     It 'names the four commands the map used to miss' -ForEach @(
-        @{ Cmd = '/skills freshness' }, @{ Cmd = '/board doctor' }, @{ Cmd = '/board cerrar-ciclo' }, @{ Cmd = '/board changelog' }
+        @{ Cmd = '/skills freshness' }, @{ Cmd = '/board doctor' }, @{ Cmd = '/board close-cycle' }, @{ Cmd = '/board changelog' }
     ) {
         $script:BriefTokens | Should -Contain $Cmd
     }
