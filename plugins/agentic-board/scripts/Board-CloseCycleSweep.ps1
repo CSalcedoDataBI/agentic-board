@@ -28,8 +28,15 @@
     SAFE BY DEFAULT: without -Force it only prints the plan. With -Force it runs the git side,
     and a step that fails turns that branch back into "not resolved", so its session is kept.
 
+.PARAMETER Scope
+    repo (default) - only THIS repo: its branches and the sessions that live in it. Run it from
+                     each repo you want to clean; nothing outside it is read for archiving or touched.
+    orphans        - only the sessions no existing repo owns (folder gone, or outside any repo).
+                     No branch of any repo is touched.
+    all            - every repo a session lives in, plus -Root folders. The machine-wide sweep.
+
 .PARAMETER Root
-    Sweep every git repo directly under this folder (e.g. D:\MIS-REPO). Default: the current repo.
+    With -Scope all: also sweep every git repo directly under this folder (e.g. D:\MIS-REPO).
 
 .PARAMETER HostSessionsFile
     JSON array of host-app sessions ({ sessionId, title, cwd, isRunning, lastActivityAt, pinned,
@@ -50,12 +57,15 @@
     Emit the plan (and, with -Force, the outcome) as JSON for the agent.
 
 .EXAMPLE
-    .\Board-CloseCycleSweep.ps1                                   # plan for this repo
-    .\Board-CloseCycleSweep.ps1 -Root D:\MIS-REPO -HostSessionsFile s.json -Json
-    .\Board-CloseCycleSweep.ps1 -Root D:\MIS-REPO -HostSessionsFile s.json -Force -Json
+    .\Board-CloseCycleSweep.ps1 -HostSessionsFile s.json               # plan for THIS repo
+    .\Board-CloseCycleSweep.ps1 -HostSessionsFile s.json -Force -Json  # run it for this repo
+    .\Board-CloseCycleSweep.ps1 -Scope orphans -HostSessionsFile s.json  # sessions no repo owns
+    .\Board-CloseCycleSweep.ps1 -Scope all -Root D:\MIS-REPO -HostSessionsFile s.json -Json
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('repo', 'orphans', 'all')]
+    [string]$Scope            = 'repo',
     [string[]]$Root           = @(),
     [string]$HostSessionsFile = "",
     [int]   $IdleDays         = 7,
@@ -211,6 +221,35 @@ function Get-SweepArchiveVerdict {
     return (& $mk $false "recent (idle $([int]$idle) of $IdleDays day(s))")
 }
 
+# Which host sessions this run may even look at. PURE (the filesystem comes in as scriptblocks).
+#   repo    - the sessions of THIS repo: its root, its worktrees, and worktrees of it that are gone.
+#             The default, so a sweep run in one repo never reaches into another one.
+#   orphans - sessions no existing repo owns: their folder is gone, or it is outside any repo.
+#             Never a session of an existing repo - that one belongs to its repo's own sweep.
+#   all     - every session.
+function Select-SweepSessions {
+    param(
+        [object[]]$Sessions = @(),
+        [ValidateSet('repo', 'orphans', 'all')][string]$Scope = 'repo',
+        [string]$RepoRoot = '',
+        [scriptblock]$MainRepoOf = { param($p) '' },
+        [scriptblock]$PathExists = { param($p) Test-Path -LiteralPath $p }
+    )
+    if ($Scope -eq 'all') { return @($Sessions) }
+    $root = ConvertTo-SweepPath $RepoRoot
+    return @($Sessions | Where-Object {
+        $cwd = ConvertTo-SweepPath $_.cwd
+        $exists = [bool](& $PathExists $_.cwd)
+        $main = if ($exists) { ConvertTo-SweepPath (& $MainRepoOf $_.cwd) } else { '' }
+        if ($Scope -eq 'repo') {
+            ($root -and ($main -eq $root -or $cwd -eq $root -or $cwd.StartsWith("$root\.claude\worktrees\")))
+        } else {
+            $insideGoneWorktree = (-not $exists -and $cwd -match '\\\.claude\\worktrees\\' -and (& $PathExists (($_.cwd -replace '[\\/]\.claude[\\/]worktrees[\\/].*$', ''))))
+            ((-not $exists) -and -not $insideGoneWorktree) -or ($exists -and -not $main)
+        }
+    })
+}
+
 # Body of the draft PR that parks a branch. `Refs`, never a closing keyword: a parked PR is not
 # done work, and a closing keyword would close the issue the day someone merges it by accident.
 function New-ParkedPrBody {
@@ -271,28 +310,36 @@ function Get-MainRepoRoot([string]$Path) {
     return (Resolve-Path -LiteralPath (Split-Path $common -Parent)).Path
 }
 
-$hostSessions = @()
-if ($HostSessionsFile) { $hostSessions = @(Get-Content -LiteralPath $HostSessionsFile -Raw | ConvertFrom-Json) }
+# Every session is read (a running one anywhere must still veto its branch), but only the ones
+# in -Scope are judged for archiving.
+$allSessions = @()
+if ($HostSessionsFile) { $allSessions = @(Get-Content -LiteralPath $HostSessionsFile -Raw | ConvertFrom-Json) }
+$here = Get-MainRepoRoot (Get-Location).Path
+if ($Scope -eq 'repo' -and -not $here) { throw "Not inside a git repository. Run it from the repo to clean, or use -Scope orphans / -Scope all." }
+$hostSessions = @(Select-SweepSessions -Sessions $allSessions -Scope $Scope -RepoRoot $here `
+    -MainRepoOf { param($p) Get-MainRepoRoot $p })
 
 $repoRoots = @()
-foreach ($r in @($Root | Where-Object { $_ })) {
-    foreach ($d in @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction Stop)) {
-        if (Test-Path -LiteralPath (Join-Path $d.FullName '.git')) { $repoRoots += $d.FullName }
+switch ($Scope) {
+    'repo'    { $repoRoots = @($here) }
+    'orphans' { $repoRoots = @() }   # no repo is touched: these sessions belong to none
+    'all' {
+        foreach ($r in @($Root | Where-Object { $_ })) {
+            foreach ($d in @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction Stop)) {
+                if (Test-Path -LiteralPath (Join-Path $d.FullName '.git')) { $repoRoots += $d.FullName }
+            }
+        }
+        # Every repo a session lives in is swept too - otherwise its session could only ever be kept
+        # as "pending work unknown", which is the pile this command exists to empty.
+        foreach ($s in $allSessions) { $m = Get-MainRepoRoot "$($s.cwd)"; if ($m) { $repoRoots += $m } }
+        if ($here) { $repoRoots += $here }
     }
-}
-# Every repo a session lives in is swept too - otherwise its session could only ever be kept
-# as "pending work unknown", which is the pile this command exists to empty.
-foreach ($s in $hostSessions) { $m = Get-MainRepoRoot "$($s.cwd)"; if ($m) { $repoRoots += $m } }
-if (-not $Root -and $hostSessions.Count -eq 0) {
-    $m = Get-MainRepoRoot (Get-Location).Path
-    if (-not $m) { throw "Not inside a git repository (pass -Root <folder> or -HostSessionsFile)." }
-    $repoRoots += $m
 }
 $seen = @{}
 $repoRoots = @(foreach ($r in $repoRoots) { $k = ConvertTo-SweepPath $r; if (-not $seen[$k]) { $seen[$k] = $true; $r } })
 
 # --- which sessions are open --------------------------------------------------
-$openPaths = @($hostSessions | Where-Object { $_.isRunning } | ForEach-Object { ConvertTo-SweepPath $_.cwd })
+$openPaths = @($allSessions | Where-Object { $_.isRunning } | ForEach-Object { ConvertTo-SweepPath $_.cwd })
 foreach ($s in @((Read-ClaudeSessions).Sessions)) {
     # 'unknown' liveness counts as open: a session we cannot prove dead is not swept.
     if ((Get-HolderLiveness -ProcessId $s.Pid -StartFt $s.ProcStart) -ne 'dead') { $openPaths += (ConvertTo-SweepPath $s.Cwd) }

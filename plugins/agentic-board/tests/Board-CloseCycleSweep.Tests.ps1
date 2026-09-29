@@ -172,6 +172,39 @@ Describe 'Get-SweepArchiveVerdict - archive a session only when nothing is left 
     }
 }
 
+Describe 'Select-SweepSessions - run it from one repo without touching the others' {
+    <#  The product owner's rule: never interfere with repos and sessions being worked elsewhere.
+        Each repo runs its own sweep; the sessions no repo owns any more are a separate scope. #>
+    BeforeAll {
+        $script:Sessions = @(
+            [pscustomobject]@{ sessionId = 'here-root'; cwd = 'D:\r\app' }
+            [pscustomobject]@{ sessionId = 'here-wt';   cwd = 'D:\r\app\.claude\worktrees\a' }
+            [pscustomobject]@{ sessionId = 'here-gone'; cwd = 'D:\r\app\.claude\worktrees\gone' }
+            [pscustomobject]@{ sessionId = 'other';     cwd = 'D:\r\other' }
+            [pscustomobject]@{ sessionId = 'moved';     cwd = 'E:\old\app' }
+            [pscustomobject]@{ sessionId = 'home';      cwd = 'C:\Users\me' }
+        )
+        $script:Main = { param($p) switch -Regex ($p) { '^D:\\r\\app(\\\.claude\\worktrees\\a)?$' { 'D:\r\app' } '^D:\\r\\other$' { 'D:\r\other' } default { '' } } }
+        $script:Exists = { param($p) $p -notin @('D:\r\app\.claude\worktrees\gone', 'E:\old\app') }
+        function script:Pick([string]$Scope) {
+            @(Select-SweepSessions -Sessions $script:Sessions -Scope $Scope -RepoRoot 'D:\r\app' -MainRepoOf $script:Main -PathExists $script:Exists).sessionId
+        }
+    }
+    It 'repo: only the sessions of this repo, including its worktrees and its vanished worktrees' {
+        script:Pick 'repo' | Should -Be @('here-root', 'here-wt', 'here-gone')
+    }
+    It 'orphans: only sessions whose folder is gone or that sit outside any repo' {
+        script:Pick 'orphans' | Should -Be @('moved', 'home')
+    }
+    It 'orphans never includes a session of an existing repo - those belong to that repo''s own sweep' {
+        script:Pick 'orphans' | Should -Not -Contain 'other'
+        script:Pick 'orphans' | Should -Not -Contain 'here-root'
+    }
+    It 'all: every session' {
+        (script:Pick 'all').Count | Should -Be 6
+    }
+}
+
 Describe 'New-ParkedPrBody - the draft PR is how main learns the branch exists' {
     It 'refers to the issue from the branch name WITHOUT a closing keyword' {
         $b = New-ParkedPrBody -Branch 'issue-42-fix-x' -Reason 'commits without a PR'

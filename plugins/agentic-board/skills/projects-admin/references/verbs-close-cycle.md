@@ -24,7 +24,7 @@ Loaded on demand by /board (#573).
   Script flag: `-CloseCycle` (alias of the original `-CloseLoop`, which keeps working).
   `Board-Merge` now also NOTES when its `--delete-branch` left the local branch behind and points here.
 
-## `/board close-cycle --all` — close every session and leave nothing dangling (#734)
+## `/board close-cycle --all` — close every session of this repo and leave nothing dangling (#734)
 
 For when the sidebar is full of old sessions and nobody remembers which one still holds work. It runs
 `scripts/Board-CloseCycleSweep.ps1`, which reuses the `/board doctor` inventory. For each local branch
@@ -36,9 +36,14 @@ it chooses **one** disposition, and then decides which host-app sessions may be 
    archived). A long list comes back saved to a file; use that file. A short one: write the JSON array
    to a scratch file. Without a host app (plain terminal), skip `-HostSessionsFile`: only the git side
    is planned.
-2. **Plan (writes nothing):** `Board-CloseCycleSweep.ps1 -HostSessionsFile <file> -Json` (add
-   `-Root <folder>` to also sweep repos no session lives in).
-   - Every repo a session lives in is scanned automatically.
+2. **Plan (writes nothing):** `Board-CloseCycleSweep.ps1 -HostSessionsFile <file> -Json`, run from the
+   repo to clean. **The scope defaults to `repo`**: only this repo's branches and the sessions that live in
+   it (its root, its worktrees, and its worktrees that are gone). It never reaches into another repo or
+   another session's work, so every repo is cleaned from inside itself.
+   - `-Scope orphans`: only the sessions no existing repo owns (folder gone, or outside any repo). No
+     branch is touched. Run it once from anywhere.
+   - `-Scope all [-Root <folder>]`: the machine-wide sweep over every repo a session lives in. Use it
+     only when the user asks for exactly that.
    - Show the user:
      - the counts per action
      - the `needs-decision` rows by name with their reason
