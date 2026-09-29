@@ -46,10 +46,17 @@ mirrored. The ledger only carries what the board cannot.
 - Read-only, offline, never blocks, never throws, always exits 0 (same guarantees as the
   `resume` path it sits beside).
 
-`Compact-PreCompactHook.ps1` (matcher `*` under `PreCompact`) is a **safety net**: it copies
-the transcript into `.agentic-board/compact-snapshots/` before compaction so nothing is
-truly lost if the ledger has a gap. It **never blocks** (blocking risks hitting the hard
-context limit mid-issue) and always exits 0. Snapshots are gitignored (`.agentic-board/`).
+`Compact-PreCompactHook.ps1` (matcher `*` under `PreCompact`) is a **safety net**: before a
+compaction it appends one line to `<ClaudeHome>/agentic-board/compact-markers.jsonl`, with when,
+the trigger, the repo, the session id, and the transcript path and size. That is enough to go back
+to the raw transcript if the ledger has a gap. Claude Code keeps that transcript in
+`~/.claude/projects`, and compaction appends to it rather than truncating it. It **never blocks**
+(blocking risks hitting the hard context limit mid-issue) and always exits 0.
+
+Before #737 the hook copied the whole transcript into `<repo>/.agentic-board/compact-snapshots/`.
+That was a verbatim duplicate (1.7 GB on one machine), and it carried the entire context window,
+global CLAUDE.md included, into a repo folder. Nothing is written inside the repo any more. Old
+copies are removed by `/board disk` only when the original transcript still holds them.
 
 ## Maintaining the ledger — `Board-RunLedger.ps1`
 
@@ -72,7 +79,7 @@ than risk a duplicate, per #316); a gh failure never corrupts the local marker.
 
 ## Enable / disable
 
-The `compact` re-injection and the PreCompact snapshot ship enabled in the plugin
+The `compact` re-injection and the PreCompact marker ship enabled in the plugin
 `hooks/hooks.json`. Both are strict no-ops outside an active run, so there is nothing to
 disable for normal sessions. To turn them off entirely, remove the `compact` `SessionStart`
 entry and the `PreCompact` entry from `hooks/hooks.json`.
