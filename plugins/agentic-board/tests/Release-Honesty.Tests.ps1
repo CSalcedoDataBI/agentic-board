@@ -472,16 +472,16 @@ Describe 'Board-Changelog.ps1 end to end - a fake gh serves the board' {
     }
     It 'a busy issue whose closing PRs were not all read is named for a human, never folded' {
         $script:Out | Should -Not -Match '\(#709\)'
-        $script:Out | Should -Match '#709.*no se pudo establecer cual lo cerro'
+        $script:Out | Should -Match '#709.*could not tell which one closed it'
     }
     It 'does not invent an Added section for an issue it could not classify' {
         $script:Out | Should -Not -Match '### Added'
     }
     It 'names the classified-out issue for a human, with the reason' {
-        $script:Out | Should -Match '#703.*sin Type ni label'
+        $script:Out | Should -Match '#703.*no Type and no label'
     }
     It 'reports the duplicate as not planned and the ranged one as already cited in the summary' {
-        $script:Out | Should -Match '1 ya-citados'
-        $script:Out | Should -Match '1 no-planeados'
+        $script:Out | Should -Match '1 already-cited'
+        $script:Out | Should -Match '1 not-planned'
     }
 }

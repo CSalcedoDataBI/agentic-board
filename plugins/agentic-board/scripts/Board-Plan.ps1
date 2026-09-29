@@ -216,10 +216,10 @@ if (-not $Repo) {
     $originUrl = git remote get-url origin 2>$null
     $Repo = Get-RepoFromOriginUrl $originUrl
 }
-if (-not $Repo) { throw "No pude derivar el repo del origin - pasa -Repo owner/name." }
+if (-not $Repo) { throw "Could not work out the repo from origin - pass -Repo owner/name." }
 if (-not $Owner) { $Owner = ($Repo -split "/")[0] }
 
-Write-Host "=== Board-Plan  '$Title'  ($($Tasks.Count) tareas)  ->  $Repo ===" -ForegroundColor Cyan
+Write-Host "=== Board-Plan  '$Title'  ($($Tasks.Count) tasks)  ->  $Repo ===" -ForegroundColor Cyan
 Write-Host ""
 
 # ── 1. Labels ──────────────────────────────────────────────────────────────────
@@ -246,9 +246,9 @@ $body += "## Tasks (native sub-issues)`n$taskOverview`n`nCreated by /board plan 
 # epic printed "OK Epic #0" and the run carried on creating sub-issues under a parent that does
 # not exist. Nothing below is meaningful if the epic is not real, so fail here and stop.
 $epicUrl = $body | gh issue create --repo $Repo --title $Title --label plan --body-file -
-if ($LASTEXITCODE -ne 0) { throw "gh issue create fallo para el epic (exit $LASTEXITCODE) - no se creo nada. Revisa que '$Repo' exista y que el token tenga acceso." }
+if ($LASTEXITCODE -ne 0) { throw "gh issue create failed for the epic (exit $LASTEXITCODE) - nothing was created. Check that '$Repo' exists and the token has access." }
 $epicNum = Get-IssueNumberFromUrl $epicUrl
-if ($epicNum -le 0) { throw "gh no devolvio la URL del epic (devolvio '$epicUrl') - no se creo nada." }
+if ($epicNum -le 0) { throw "gh did not return the epic URL (it returned '$epicUrl') - nothing was created." }
 Write-Host "  OK  Epic #$epicNum  $Title" -ForegroundColor Green
 Write-Host "      $epicUrl" -ForegroundColor DarkCyan
 
@@ -283,17 +283,17 @@ query($o:String!, $r:String!, $n:Int!) {
     }
     Write-Host ""
     if ($addFail -eq 0) {
-        Write-Host "  OK  $added item(s) registrados en el board #$ProjectNum" -ForegroundColor Green
+        Write-Host "  OK  $added item(s) added to board #$ProjectNum" -ForegroundColor Green
     } else {
         # Say what is true: the issues exist, the board is incomplete.
-        Write-Host "  WARN $added item(s) registrados, $addFail fallaron en el board #$ProjectNum" -ForegroundColor DarkYellow
-        Write-Host "       Los issues SI se crearon - completa el board con /board fill" -ForegroundColor DarkGray
+        Write-Host "  WARN $added item(s) added, $addFail failed on board #$ProjectNum" -ForegroundColor DarkYellow
+        Write-Host "       The issues WERE created - complete the board with /board fill" -ForegroundColor DarkGray
     }
     Write-Host ""
-    Write-Host "Siguiente: /board fill (Priority/Size/Type) y /board work para empezar la primera tarea." -ForegroundColor Cyan
+    Write-Host "Next: /board fill (Priority/Size/Type) and /board work to start the first task." -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
 } else {
     Write-Host ""
-    Write-Host "  WARN $Repo no tiene board vinculado - crea uno con /board init y agrega el epic con /board add $epicUrl" -ForegroundColor DarkYellow
+    Write-Host "  WARN $Repo has no linked board - create one with /board init and add the epic with /board add $epicUrl" -ForegroundColor DarkYellow
 }

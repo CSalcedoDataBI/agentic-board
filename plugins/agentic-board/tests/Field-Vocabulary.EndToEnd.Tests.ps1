@@ -98,7 +98,7 @@ Describe 'Board-Triage writes the type/area/estimate/priority of ANY board vocab
         ($r.Edits -join "`n") | Should -Match '--field-id F_type --single-select-option-id O_Bug'
         ($r.Edits -join "`n") | Should -Match '--field-id F_area --text scripts'
         ($r.Edits -join "`n") | Should -Match '--field-id F_est --number 3'
-        $r.Out | Should -Not -Match 'ATENCION|WARN'
+        $r.Out | Should -Not -Match 'ATTENTION|WARN'
         $p = Invoke-WithFakeGh $script:Triage @('-Number', '5', '-Owner', 'o', '-Pending')
         $p.Out | Should -Match 'Type=Bug'
     }
@@ -125,7 +125,7 @@ Describe 'Board-Triage writes the type/area/estimate/priority of ANY board vocab
         $e | Should -Match '--field-id F_area --text scripts'
         $e | Should -Match '--field-id F_est --number 3'
         $e | Should -Match '--field-id F_prio --single-select-option-id O_P1'
-        $r.Out | Should -Not -Match 'ATENCION|WARN'
+        $r.Out | Should -Not -Match 'ATTENTION|WARN'
         $p = Invoke-WithFakeGh $script:Triage @('-Number', '5', '-Owner', 'o', '-Pending')
         $p.Out | Should -Match 'Type=Bug'          # the Spanish row key 'tipo' is read too
     }
@@ -133,15 +133,15 @@ Describe 'Board-Triage writes the type/area/estimate/priority of ANY board vocab
     It 'a board with NONE of the fields is called out loudly and nothing is written (never a silent no-op)' -Skip:$script:notWindows {
         Set-TriageBoard -Fields @((New-SS 'F_status' 'Status' @('Backlog', 'Done')), (New-SS 'F_kind' 'Kind' @('a', 'b')))
         $r = Invoke-WithFakeGh $script:Triage @('-Number', '5', '-Owner', 'o', '-Issue', '1', '-Type', 'Bug', '-Area', 'x')
-        $r.Out | Should -Match 'ATENCION.*NINGUNO'
-        $r.Out | Should -Match 'busque: Type, Task Type, Tipo'
+        $r.Out | Should -Match 'ATTENTION.*NONE'
+        $r.Out | Should -Match 'looked for: Type, Task Type, Tipo'
         $r.Edits.Count | Should -Be 0
     }
 
     It 'a board missing only SOME of them names the missing ones' -Skip:$script:notWindows {
         Set-TriageBoard -Fields @((New-SS 'F_tt' 'Task Type' @('Bug')), (New-Plain 'F_est' 'Estimate'))
         $r = Invoke-WithFakeGh $script:Triage @('-Number', '5', '-Owner', 'o', '-Issue', '1', '-Type', 'Bug')
-        $r.Out | Should -Match 'WARN el board no tiene: Area, Priority'
+        $r.Out | Should -Match 'WARN the board is missing: Area, Priority'
         $r.Edits.Count | Should -Be 1
     }
 }

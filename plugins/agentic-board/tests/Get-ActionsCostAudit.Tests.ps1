@@ -198,7 +198,7 @@ Describe 'R1 - the same job on pull_request and push' {
         $f = Only $r 'R1'
         $f.Count | Should -Be 1
         $f[0].Severity | Should -Be 'high'
-        $f[0].Message | Should -Match 'cada push a cualquier rama'
+        $f[0].Message | Should -Match 'every push to any branch'
     }
 
     It 'a job whose if: separates the events is not flagged' {
@@ -225,7 +225,7 @@ Describe 'R1 - the same job on pull_request and push' {
     It 'a push to main AND to a wildcard branch reports both overlaps in ONE finding per job' {
         $f = Only (Invoke-Rules @{ 'd.yml' = "on:`n  pull_request:`n  push:`n    branches: [main, 'feature/**']`njobs:`n$script:Ok" }) 'R1'
         $f.Count | Should -Be 1
-        $f[0].Message | Should -Match 'push a main'
+        $f[0].Message | Should -Match 'push to main'
         $f[0].Message | Should -Match 'feature/\*\*'
     }
 
@@ -234,7 +234,7 @@ Describe 'R1 - the same job on pull_request and push' {
         $f = Only (Invoke-Rules @{ 'ci.yml' = $y }) 'R1'
         $f.Count | Should -Be 1
         $f[0].Severity | Should -Be 'high'
-        $f[0].Message | Should -Match 'salvo main'
+        $f[0].Message | Should -Match 'except main'
     }
 
     It 'a push that fires only on a branch the PR gate does not target and cannot be a PR head is quiet' {
@@ -323,7 +323,7 @@ Describe 'R2 - concurrency and cancel-in-progress' {
         $y = "on: pull_request`njobs:`n  a:`n    runs-on: ubuntu-latest`n    timeout-minutes: 5`n    concurrency:`n      group: a`n      cancel-in-progress: true`n    steps:`n      - run: x`n  b:`n    runs-on: ubuntu-latest`n    timeout-minutes: 5`n    steps:`n      - run: x`n"
         $f = Only (Invoke-Rules @{ 'ci.yml' = $y }) 'R2'
         $f.Count | Should -Be 1
-        $f[0].Message | Should -Match 'jobs sin concurrency: b'
+        $f[0].Message | Should -Match 'jobs without concurrency: b'
     }
 
     It 'a release job with its own cancel-in-progress: true is HIGH even when the workflow has no concurrency' {
@@ -398,21 +398,21 @@ Describe 'R4 and the deadlock trap - path filters against required checks' {
         $f = Only (Invoke-Rules @{ 'ci.yml' = $y } $script:Req) 'R4'
         $f.Count | Should -Be 1
         $f[0].Severity | Should -Be 'advice'
-        $f[0].Message | Should -Match 'REQUERIDO'
-        $f[0].Message | Should -Match "No lo anadas"
-        $f[0].Message | Should -Match 'ES el producto'
+        $f[0].Message | Should -Match 'REQUIRED'
+        $f[0].Message | Should -Match "Do not add one"
+        $f[0].Message | Should -Match 'IS the product'
     }
 
     It 'no path filter on a workflow that is not required: says a filter cannot deadlock' {
         $f = Only (Invoke-Rules @{ 'lint.yml' = "on: pull_request`njobs:`n$script:Ok" } $script:Req) 'R4'
-        $f[0].Message | Should -Match 'no puede dejar una PR en deadlock'
+        $f[0].Message | Should -Match 'cannot leave a PR deadlocked'
     }
 
     It 'required checks that could not be read: the advice says verify first, it does not claim safety' {
         $unread = [pscustomobject]@{ Contexts = @(); Complete = $false; Reason = 'HTTP 403' }
         $f = Only (Invoke-Rules @{ 'lint.yml' = "on: pull_request`njobs:`n$script:Ok" } $unread) 'R4'
-        $f[0].Message | Should -Match 'comprueba'
-        $f[0].Message | Should -Not -Match 'no puede dejar una PR en deadlock'
+        $f[0].Message | Should -Match 'check that this workflow is not one'
+        $f[0].Message | Should -Not -Match 'cannot leave a PR deadlocked'
     }
 
     It 'a path-filtered workflow whose job IS a required check is the deadlock trap (HIGH)' {
@@ -441,8 +441,8 @@ Describe 'R4 and the deadlock trap - path filters against required checks' {
         $n = "on: pull_request_target`njobs:`n  test:`n    name: Pester`n    runs-on: ubuntu-latest`n    timeout-minutes: 5`n    steps:`n      - run: x`n"
         $adv = Only (Invoke-Rules @{ 'ci.yml' = $n } $script:Req) 'R4'
         $adv.Count | Should -Be 1
-        $adv[0].Message | Should -Match '^pull_request_target sin paths'
-        $adv[0].Message | Should -Match 'REQUERIDO'
+        $adv[0].Message | Should -Match '^pull_request_target without paths'
+        $adv[0].Message | Should -Match 'REQUIRED'
     }
 
     It 'a matrix job named with an expression is matched by its literal prefix; a name that STARTS with one is not measured' {
@@ -453,9 +453,9 @@ Describe 'R4 and the deadlock trap - path filters against required checks' {
         $r = Invoke-Rules @{ 'ci.yml' = $y } $script:Req
         (Only $r 'TRAP').Count | Should -Be 0
         (Unm $r 'TRAP').Count | Should -Be 1
-        (Unm $r 'TRAP')[0].Reason | Should -Match 'expresion'
+        (Unm $r 'TRAP')[0].Reason | Should -Match 'expression'
         $n = "on: pull_request`njobs:`n  a:`n    name: `${{ matrix.os }} build`n    runs-on: ubuntu-latest`n    timeout-minutes: 5`n    steps:`n      - run: x`n"
-        (Only (Invoke-Rules @{ 'ci.yml' = $n } $script:Req) 'R4')[0].Message | Should -Match 'empieza por una expresion'
+        (Only (Invoke-Rules @{ 'ci.yml' = $n } $script:Req) 'R4')[0].Message | Should -Match 'starts with an expression'
     }
 
     It 'a match that rests only on the literal prefix of an expression name is MEDIUM and says so; an exact match stays HIGH' {
@@ -464,7 +464,7 @@ Describe 'R4 and the deadlock trap - path filters against required checks' {
         $f = Only (Invoke-Rules @{ 'ci.yml' = $y } $req) 'TRAP'
         $f.Count | Should -Be 1
         $f[0].Severity | Should -Be 'medium'
-        $f[0].Message | Should -Match 'prefijo'
+        $f[0].Message | Should -Match 'prefix'
         $j = [pscustomobject]@{ Id = 'a'; Name = 'Test ${{ matrix.os }}'; Uses = $null }
         Get-CheckMatchKind 'Test ubuntu-latest' $j | Should -Be 'prefix'
         Get-CheckMatchKind 'a' $j | Should -Be 'exact'
@@ -588,7 +588,7 @@ Describe 'Fan-out - setup repeated across the jobs one event starts' {
         $r = Invoke-Rules @{ 'a.yml' = $a; 'b.yml' = $b }
         $f = Only $r 'FAN'
         $f.Count | Should -Be 1
-        $f[0].Message | Should -Match "'npm ci' se repite en 2 jobs"
+        $f[0].Message | Should -Match "'npm ci' repeats in 2 jobs"
         ($f[0].Evidence -join ' ') | Should -Match 'a\.yml:8'
         ($f[0].Evidence -join ' ') | Should -Match 'b\.yml:8'
         $r.PerEvent[0].Runners | Should -Be 2
@@ -619,7 +619,7 @@ Describe 'Fan-out on push, and folded scalars' {
         $y = "on:`n  push:`n    branches: [main]`njobs:`n  a:`n    runs-on: ubuntu-latest`n    timeout-minutes: 5`n    steps:`n      - run: npm ci`n  b:`n    runs-on: ubuntu-latest`n    timeout-minutes: 5`n    steps:`n      - run: npm ci`n"
         $f = Only (Invoke-Rules @{ 'ci.yml' = $y }) 'FAN'
         $f.Count | Should -Be 1
-        $f[0].Message | Should -Match 'dispara push'
+        $f[0].Message | Should -Match 'started by push'
     }
 
     It 'a workflow on BOTH pull_request and push is counted once (R1 owns that overlap)' {
@@ -833,8 +833,8 @@ jobs:
         $r.RequiredChecks.Complete | Should -BeTrue
         $r.RequiredChecks.Contexts | Should -Be @('Pester')
         $r4 = @($r.Findings | Where-Object { $_.Rule -eq 'R4' })
-        ($r4 | Where-Object { $_.File -eq 'ci.yml' }).Message | Should -Match 'REQUERIDO'
-        ($r4 | Where-Object { $_.File -eq 'lint.yml' }).Message | Should -Match 'no puede dejar una PR en deadlock'
+        ($r4 | Where-Object { $_.File -eq 'ci.yml' }).Message | Should -Match 'REQUIRED'
+        ($r4 | Where-Object { $_.File -eq 'lint.yml' }).Message | Should -Match 'cannot leave a PR deadlocked'
     }
 
     It 'the runners a PR starts are counted from the files, and the repeated install is named' {
@@ -855,7 +855,7 @@ jobs:
         $r = Get-ActionsCostAudit -Repo 'me/app' -Month '2026-09'
         $r.Cost.Measured | Should -BeFalse
         @($r.Unmeasured | Where-Object { $_.Rule -eq 'COST' }).Count | Should -Be 1
-        (@($r.Findings | Where-Object { $_.Rule -eq 'R8' })[0]).Message | Should -Match 'no se pudo medir'
+        (@($r.Findings | Where-Object { $_.Rule -eq 'R8' })[0]).Message | Should -Match 'could not be measured'
         @($r.Findings | Where-Object { $_.Rule -eq 'R3' }).Count | Should -BeGreaterThan 0
     }
 
@@ -868,7 +868,7 @@ jobs:
         $r = Get-ActionsCostAudit -Repo 'me/app' -Month '2026-09'
         $r.RequiredChecks.Complete | Should -BeFalse
         @($r.Unmeasured | Where-Object { $_.Rule -eq 'TRAP' }).Count | Should -BeGreaterThan 0
-        (@($r.Findings | Where-Object { $_.Rule -eq 'R4' -and $_.File -eq 'lint.yml' })[0]).Message | Should -Not -Match 'no puede dejar una PR en deadlock'
+        (@($r.Findings | Where-Object { $_.Rule -eq 'R4' -and $_.File -eq 'lint.yml' })[0]).Message | Should -Not -Match 'cannot leave a PR deadlocked'
     }
 
     It 'a failure reading ONLY classic branch protection (not a plain 404) also makes the required checks incomplete' {
@@ -914,7 +914,7 @@ jobs:
 
     It 'an unreadable repo is an error, not an empty report' {
         Mock Invoke-GhRaw { [pscustomobject]@{ Output = ''; ExitCode = 1; StdErr = 'gh: Not Found (HTTP 404)' } }
-        { Get-ActionsCostAudit -Repo 'me/nope' -Month '2026-09' } | Should -Throw '*No pude leer el repo*'
+        { Get-ActionsCostAudit -Repo 'me/nope' -Month '2026-09' } | Should -Throw '*read the repo me/nope*'
     }
 
     It 'rejects a malformed -Month before touching gh' {
@@ -948,8 +948,8 @@ jobs:
         Mock Invoke-GhRaw $script:EngineRoute
         $r = Get-ActionsCostAudit -Repo 'me/app' -Month '2026-09'
         $out = & { Write-ActionsCostReport $r } 6>&1 | Out-String
-        $out | Should -Match 'COSTE MEDIDO'
-        $out | Should -Match 'LIBRO DE REGLAS'
+        $out | Should -Match 'MEASURED COST'
+        $out | Should -Match 'RULE BOOK'
         $out | Should -Match 'ci\.yml:8'
         $out | Should -Not -Match '\.ps1'
     }

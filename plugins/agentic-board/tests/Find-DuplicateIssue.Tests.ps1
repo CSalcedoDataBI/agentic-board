@@ -278,7 +278,7 @@ Describe 'Find-DuplicateIssue.ps1 - the CLI contract the skill acts on' {
         $script:Src | Should -Match '(?s)catch \{.*?exit 2'
     }
     It 'says a failed search is NOT "no duplicates"' {
-        $script:Src | Should -Match "NO significa 'sin duplicados'"
+        $script:Src | Should -Match "does NOT mean 'no duplicates'"
     }
     It 'takes its identity from the resolver' {
         $script:Src | Should -Match 'Get-GhTokenForContext'

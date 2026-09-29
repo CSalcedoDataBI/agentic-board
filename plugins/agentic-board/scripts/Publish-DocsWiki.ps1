@@ -224,30 +224,30 @@ $ownerVarMap = @{}
 foreach ($o in (Get-KnownOwners)) { $ownerVarMap[$o] = (Get-OwnerTokenVar -Owner $o) }
 if (-not $TokenVar) {
     if ($ownerVarMap.ContainsKey($owner)) { $TokenVar = $ownerVarMap[$owner] }
-    else { $TokenVar = 'GITHUB_TOKEN_PERSONAL'; Write-Host "AVISO: owner '$owner' sin mapear — uso la personal (-TokenVar para forzar)." -ForegroundColor Yellow }
+    else { $TokenVar = 'GITHUB_TOKEN_PERSONAL'; Write-Host "WARNING: owner '$owner' is not mapped — using the personal account (-TokenVar to override)." -ForegroundColor Yellow }
 }
 $token = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
-if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar no está en el entorno USER de Windows." }
+if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar is not in the Windows USER environment." }
 $env:GH_TOKEN = $token
 
 # Confirm identity + that the wiki is enabled on the repo.
 $login = "$(gh api user --jq .login 2>$null)".Trim()
-if ($LASTEXITCODE -ne 0 -or -not $login) { throw "El token de $TokenVar no autentica contra la API." }
+if ($LASTEXITCODE -ne 0 -or -not $login) { throw "The $TokenVar token does not authenticate against the API." }
 $repoInfo = gh api "repos/$Repo" 2>$null | ConvertFrom-Json
-if (-not $repoInfo) { throw "'$login' no ve el repo $Repo (no existe o sin acceso). Cuenta equivocada?" }
-if (-not $repoInfo.permissions.push) { throw "'$login' NO tiene permiso de push en $Repo." }
-if (-not $repoInfo.has_wiki) { throw "El Wiki está deshabilitado en $Repo. Actívalo en Settings → Features → Wikis y reintenta." }
+if (-not $repoInfo) { throw "'$login' cannot see repo $Repo (it does not exist or there is no access). Wrong account?" }
+if (-not $repoInfo.permissions.push) { throw "'$login' has NO push permission on $Repo." }
+if (-not $repoInfo.has_wiki) { throw "The Wiki is disabled on $Repo. Enable it in Settings → Features → Wikis and retry." }
 
 $wikiUrl = "https://github.com/$Repo.wiki.git"
 Write-Host "=== docs-wiki  $Repo ===" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Identidad : $login  (via $TokenVar)"
-Write-Host "  Páginas   : $($pages.Count) ($($pages.Keys -join ', '))"
+Write-Host "  Identity  : $login  (via $TokenVar)"
+Write-Host "  Pages     : $($pages.Count) ($($pages.Keys -join ', '))"
 Write-Host "  Wiki      : $wikiUrl"
 Write-Host ""
 
 if ($DryRun) {
-    Write-Host "DRY-RUN: no se clona ni se empuja nada." -ForegroundColor Yellow
+    Write-Host "DRY-RUN: nothing is cloned or pushed." -ForegroundColor Yellow
     if ($Json) {
         [pscustomobject]@{ repo=$Repo; pages=@($pages.Keys); wikiUrl=$wikiUrl; dryRun=$true } |
             ConvertTo-Json -Depth 6
@@ -265,16 +265,16 @@ try {
     git -c credential.helper= -c $helper clone --quiet $wikiUrl $tmp 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw @"
-ERROR: El repositorio wiki de $Repo aún no está inicializado.
+ERROR: The wiki repository of $Repo is not initialized yet.
 
-GitHub crea el wiki git repo de forma lazy: no existe hasta que se guarda
-la primera página desde la interfaz web. No hay endpoint REST para crearlo.
+GitHub creates the wiki git repo lazily: it does not exist until the first
+page is saved from the web UI. There is no REST endpoint to create it.
 
-Para inicializarlo:
-  1. Abre https://github.com/$Repo/wiki en el navegador
-  2. Haz clic en "Create the first page"
-  3. Escribe cualquier contenido y pulsa "Save Page"
-  4. Vuelve a ejecutar este comando
+To initialize it:
+  1. Open https://github.com/$Repo/wiki in the browser
+  2. Click "Create the first page"
+  3. Type any content and press "Save Page"
+  4. Run this command again
 
 "@
     }
@@ -284,14 +284,14 @@ Para inicializarlo:
     git -C $tmp add -A
     $status = git -C $tmp status --porcelain
     if (-not $status) {
-        Write-Host "OK  Wiki ya estaba al día (sin cambios)." -ForegroundColor Green
+        Write-Host "OK  Wiki was already up to date (no changes)." -ForegroundColor Green
     } else {
         git -C $tmp -c user.name='agentic-board' -c user.email='noreply@agentic-board' `
-            commit --quiet -m "docs: publish wiki ($($pages.Count) páginas, $Date)"
-        if ($LASTEXITCODE -ne 0) { throw "git commit falló (exit $LASTEXITCODE)." }
+            commit --quiet -m "docs: publish wiki ($($pages.Count) pages, $Date)"
+        if ($LASTEXITCODE -ne 0) { throw "git commit failed (exit $LASTEXITCODE)." }
         git -c credential.helper= -c $helper -C $tmp push --quiet origin HEAD:master
-        if ($LASTEXITCODE -ne 0) { throw "git push al wiki falló (exit $LASTEXITCODE)." }
-        Write-Host "OK  Wiki publicado ($($pages.Count) páginas)." -ForegroundColor Green
+        if ($LASTEXITCODE -ne 0) { throw "git push to the wiki failed (exit $LASTEXITCODE)." }
+        Write-Host "OK  Wiki published ($($pages.Count) pages)." -ForegroundColor Green
     }
 } finally {
     Remove-Item Env:ABIOS_WIKI_TOKEN -ErrorAction SilentlyContinue
@@ -299,7 +299,7 @@ Para inicializarlo:
 }
 
 $viewUrl = "https://github.com/$Repo/wiki"
-Write-Host "  Ver: $viewUrl"
+Write-Host "  View: $viewUrl"
 if ($Json) {
     [pscustomobject]@{ repo=$Repo; pages=@($pages.Keys); wikiUrl=$wikiUrl; viewUrl=$viewUrl } |
         ConvertTo-Json -Depth 6

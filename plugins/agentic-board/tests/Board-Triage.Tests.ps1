@@ -36,7 +36,7 @@ Describe 'Test-PriorityRequest (proposal must carry a rationale)' {
         Test-PriorityRequest -Priority '' -Rationale '' | Should -BeNullOrEmpty
     }
     It 'refuses a Priority with no rationale (a silent P-value is exactly what #306 forbids)' {
-        Test-PriorityRequest -Priority 'P1' -Rationale '' | Should -Match 'razonamiento'
+        Test-PriorityRequest -Priority 'P1' -Rationale '' | Should -Match 'reasoning'
     }
     It 'accepts a Priority that carries a rationale' {
         Test-PriorityRequest -Priority 'P1' -Rationale 'blocks the release' | Should -BeNullOrEmpty

@@ -166,9 +166,9 @@ Describe 'Regression: no caller may state an absence off a possibly-short read' 
         $t | Should -Match 'Sin pendientes'          # the all-clear still exists...
         $t | Should -Match 'if \(\$truncWarn\)'      # ...and so does the guard on it
     }
-    It 'Board-Triage consults it before its "(no hay items pendientes)"' {
+    It 'Board-Triage consults it before its "(no pending items)"' {
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Triage.ps1') -Raw
-        $t | Should -Match 'no hay items pendientes'
+        $t | Should -Match 'no pending items'
         $t | Should -Match 'if \(\$itemTrunc\)'
     }
     It 'Assert-BoardComplete refuses to PASS on a truncated read' {

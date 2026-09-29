@@ -106,7 +106,7 @@ if ($env:ABIOS_CLEARSTATE_DOTSOURCE) { return }
 . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
 $state = Get-AbiosStateDir -NoCreate
 if (-not $state -or -not (Test-Path -LiteralPath $state)) {
-    Write-Host "No hay directorio de estado .agentic-board - nada que limpiar." -ForegroundColor DarkGray
+    Write-Host "No .agentic-board state directory - nothing to clean." -ForegroundColor DarkGray
     return
 }
 
@@ -133,14 +133,14 @@ $files = @(Get-ChildItem -LiteralPath $state -Recurse -File | ForEach-Object {
 $plan = Get-StateReapPlan -Files $files -LiveIssues $liveIssues -MaxAgeDays $MaxAgeDays
 
 Write-Host "=== Clear-AbiosState  ($state) ===" -ForegroundColor Cyan
-Write-Host ("  Archivos: {0}   a limpiar: {1}   se conservan: {2}   (umbral {3} dias)" -f `
+Write-Host ("  Files: {0}   to clean: {1}   kept: {2}   (threshold {3} days)" -f `
     $files.Count, @($plan.Reap).Count, @($plan.Keep).Count, $MaxAgeDays)
 foreach ($r in @($plan.Reap)) { Write-Host ("  REAP  {0}  ({1})" -f $r.File, $r.Reason) -ForegroundColor Yellow }
-if (@($plan.Reap).Count -eq 0) { Write-Host "  Nada que limpiar." -ForegroundColor Green; return }
+if (@($plan.Reap).Count -eq 0) { Write-Host "  Nothing to clean." -ForegroundColor Green; return }
 
 if (-not $Force) {
     Write-Host ""
-    Write-Host "  Plan solamente - re-ejecuta con -Force para borrar lo listado." -ForegroundColor DarkYellow
+    Write-Host "  Plan only - run again with -Force to delete what is listed." -ForegroundColor DarkYellow
     return
 }
 $byPath = @{}
@@ -148,7 +148,7 @@ foreach ($f in $files) { $byPath[$f.RelativePath] = $f.FullName }
 $removed = 0
 foreach ($r in @($plan.Reap)) {
     try { Remove-Item -LiteralPath $byPath[$r.File] -Force; $removed++ } catch {
-        Write-Host ("  WARN no pude borrar {0}: {1}" -f $r.File, $_) -ForegroundColor DarkYellow
+        Write-Host ("  WARN could not delete {0}: {1}" -f $r.File, $_) -ForegroundColor DarkYellow
     }
 }
-Write-Host ("  OK  {0} archivo(s) limpiados." -f $removed) -ForegroundColor Green
+Write-Host ("  OK  {0} file(s) cleaned." -f $removed) -ForegroundColor Green
