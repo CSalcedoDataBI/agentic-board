@@ -3879,8 +3879,8 @@ query($o:String!, $r:String!) {
         }
         $rows += [PSCustomObject]@{
             Num       = $b.number
-            Titulo    = $b.title
-            Pendientes = $pending
+            Title     = $b.title
+            Pending    = $pending
             Items     = $total
             Trunc     = $trunc
             Url       = "https://github.com/users/$($b.ownerLogin)/projects/$($b.number)"
@@ -3888,15 +3888,15 @@ query($o:String!, $r:String!) {
     }
 
     # Boards with pending work first, most pending on top
-    $rows = $rows | Sort-Object -Property @{Expression={ if ($_.Pendientes -is [int]) { -$_.Pendientes } else { 1 } }}
+    $rows = $rows | Sort-Object -Property @{Expression={ if ($_.Pending -is [int]) { -$_.Pending } else { 1 } }}
 
     foreach ($r in $rows) {
-        $color = if ($r.Pendientes -is [int] -and $r.Pendientes -gt 0) { "Yellow" } else { "DarkGray" }
+        $color = if ($r.Pending -is [int] -and $r.Pending -gt 0) { "Yellow" } else { "DarkGray" }
         # A capped read makes both numbers a FLOOR, not a count - so they are rendered as "N+".
         # Printing a bare "pendientes: 0" off a short read is the whole bug (#484).
         $sfx   = if ($r.Trunc) { "+" } else { "" }
         Write-Host ("  #{0,-3} {1,-45} pending: {2,-4} items: {3}" -f `
-                    $r.Num, $r.Titulo, "$($r.Pendientes)$sfx", "$($r.Items)$sfx") -ForegroundColor $color
+                    $r.Num, $r.Title, "$($r.Pending)$sfx", "$($r.Items)$sfx") -ForegroundColor $color
         Write-Host ("        {0}" -f $r.Url) -ForegroundColor DarkCyan
     }
     if (@($rows | Where-Object { $_.Trunc }).Count -gt 0) {
