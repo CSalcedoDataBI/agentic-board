@@ -254,8 +254,8 @@ if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (
 
 $doctor = Join-Path $PSScriptRoot 'Board-Doctor.ps1'
 if ($Owner.Count -eq 0) {
-    $me = (gh api user --jq .login 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $me) { throw "Could not read the token's login to know which repos are yours. Pass -Owner <account>." }
+    $me = "$(Invoke-Gh -GhArgs @('api', 'user', '--jq', '.login') -What 'leer la cuenta del token (para saber que repos son tuyos; o pasa -Owner)')".Trim()
+    if (-not $me) { throw "Could not read the token's login to know which repos are yours. Pass -Owner <account>." }
     $Owner = @($me)
 }
 $now = (Get-Date).ToUniversalTime()
@@ -370,17 +370,18 @@ if ($Force) {
                     if ($it.Action -in @('park', 'wip-park')) {
                         git push -q -u origin $it.Branch 2>&1 | Out-Null
                         if ($LASTEXITCODE -ne 0) { Set-Failed $it 'git push'; continue }
-                        $openPr = @(gh pr list --repo $repo --head $it.Branch --state open --json number 2>$null | ConvertFrom-Json)
+                        # Invoke-Gh throws on any gh failure, so an unreadable PR list is a failed
+                        # step (caught below), never "no PR yet" followed by a duplicate PR.
+                        $openPr = @(Invoke-Gh -GhArgs @('pr', 'list', '--repo', $repo, '--head', $it.Branch, '--state', 'open', '--json', 'number') -Json -What "listar los PRs abiertos de $($it.Branch)")
                         if ($openPr.Count -eq 0) {
                             if (-not $labelled[$repo]) {
-                                gh label create parked --repo $repo --color BFD4F2 --description 'Work parked by close-cycle --all: pushed, draft PR, not merged' --force 2>&1 | Out-Null
+                                $null = Invoke-Gh -GhArgs @('label', 'create', 'parked', '--repo', $repo, '--color', 'BFD4F2', '--description', 'Work parked by close-cycle --all: pushed, draft PR, not merged', '--force') -What "crear la etiqueta parked en $repo"
                                 $labelled[$repo] = $true
                             }
                             $hs = Find-HostSession $it.WorktreePath
                             $body = New-ParkedPrBody -Branch $it.Branch -Reason $it.Reason -SessionTitle "$($hs.title)" -SessionLink "$($hs.link)"
-                            $url = gh pr create --repo $repo --draft --base $it.DefaultBranch --head $it.Branch --title "WIP (parked): $($it.Branch)" --body $body --label parked 2>&1
-                            if ($LASTEXITCODE -ne 0) { Set-Failed $it "draft PR: $url"; continue }
-                            $it.Pr = "$url"
+                            $url = Invoke-Gh -GhArgs @('pr', 'create', '--repo', $repo, '--draft', '--base', $it.DefaultBranch, '--head', $it.Branch, '--title', "WIP (parked): $($it.Branch)", '--body', $body, '--label', 'parked') -What "abrir el PR en borrador de $($it.Branch)"
+                            $it.Pr = "$(@($url) | Select-Object -Last 1)".Trim()
                         }
                         $it.Outcome = 'done'
                     } elseif ($it.Action -eq 'delete-empty') {
