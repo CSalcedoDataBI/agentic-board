@@ -54,13 +54,38 @@ function Get-BoardInFlightFindings {
         -Text ("El board tiene {0} item(s) en progreso o en review: {1}." -f $nums.Count, (Format-StateNumberList $nums)))
 }
 
+# Is this PR parked work? `/board close-cycle --all` parks unmerged work as a draft PR with this
+# label (#734). Label names are case-insensitive on GitHub, so the match is too.
+function Test-ParkedPr {
+    param($Pr)
+    return [bool](@($Pr.labels | Where-Object { "$($_.name)" -ieq 'parked' }).Count -gt 0)
+}
+
+# Parked work, the ledger's read side (#735). Pure over `gh pr list` rows (with labels). Parked work
+# is listed FIRST in the state of play, oldest first, with the issue it belongs to and the one
+# command that resumes it - otherwise it is just one more draft PR nobody remembers.
+function Get-ParkedWorkFindings {
+    param([object[]]$Prs = @())
+    $parked = @($Prs | Where-Object { $_ -and (Test-ParkedPr $_) } | Sort-Object { [int]$_.number })
+    if ($parked.Count -eq 0) { return @() }
+    $desc = @($parked | Select-Object -First 10 | ForEach-Object {
+        $issue = if ("$($_.headRefName)" -match '^issue-(\d+)') { ", issue #$($Matches[1])" } else { '' }
+        "PR #$($_.number) (rama $($_.headRefName)$issue; retomar: git switch $($_.headRefName))"
+    }) -join '; '
+    if ($parked.Count -gt 10) { $desc += "; y $($parked.Count - 10) mas" }
+    @(New-StateFinding -Source 'parked' -Group 'parked' `
+        -Text ("{0} trabajo(s) aparcado(s) como PR en borrador, sin mergear: {1}." -f $parked.Count, $desc) `
+        -Offer 'retomar uno (te cambio a su rama y sigues donde quedo)')
+}
+
 # Open PRs of the repo. Pure over `gh pr list` rows. A capped read is flagged: "N PRs" off a list
-# that hit its cap is a floor, not a count.
+# that hit its cap is a floor, not a count. Parked PRs are left out: the parked group lists them.
 function Get-OpenPrFindings {
     param([object[]]$Prs = @(), [int]$Cap = 100)
-    $rows = @($Prs | Where-Object { $_ })
+    $plusFromCap = (@($Prs | Where-Object { $_ }).Count -ge $Cap)
+    $rows = @($Prs | Where-Object { $_ -and -not (Test-ParkedPr $_) })
     if ($rows.Count -eq 0) { return @() }
-    $plus = if ($rows.Count -ge $Cap) { '+' } else { '' }
+    $plus = if ($plusFromCap) { '+' } else { '' }
     $desc = @($rows | Sort-Object { [int]$_.number } | Select-Object -First 8 | ForEach-Object {
         $draft = if ($_.isDraft) { ' [borrador]' } else { '' }
         "PR #$($_.number)$draft (rama $($_.headRefName))"
@@ -246,6 +271,9 @@ function Get-UnreleasedFinding {
 # ---------------------------------------------------------------------------- presentation
 
 $script:StateGroupOrder = @(
+    # First on purpose (#735): parked work is what you set aside to come back to - the answer to
+    # "what did I leave pending?" - so it leads, before what is merely in flight.
+    [pscustomobject]@{ Group = 'parked';   Label = 'Trabajo aparcado (para retomar)';         Color = 'Magenta'    }
     [pscustomobject]@{ Group = 'inflight'; Label = 'En curso';                                Color = 'Cyan'       }
     [pscustomobject]@{ Group = 'stale';    Label = 'Colgado o listo para cerrar';             Color = 'Yellow'     }
     [pscustomobject]@{ Group = 'offboard'; Label = 'Fuera del board';                         Color = 'Yellow'     }
@@ -335,7 +363,7 @@ function Read-StateOpenPrs {
     param([Parameter(Mandatory)][string]$Repo, [int]$Cap = 100)
     try {
         $prs = @((Invoke-Gh -GhArgs @('pr', 'list', '--repo', $Repo, '--state', 'open', '--limit', "$Cap",
-                                      '--json', 'number,title,headRefName,isDraft') `
+                                      '--json', 'number,title,headRefName,isDraft,labels') `
                             -What "listar los PRs abiertos de $Repo" -Json) | Where-Object { $null -ne $_ })
         [pscustomobject]@{ Ok = $true; Prs = $prs; Error = '' }
     } catch {
@@ -451,7 +479,7 @@ function Get-StateOfPlay {
     $f += @(Get-OffBoardFindings -OpenIssues $open.Issues -Items $Items -Repo $Repo -OpenVerified $open.Ok -BoardTruncated $BoardTruncated)
 
     $prs = Read-StateOpenPrs -Repo $Repo
-    if ($prs.Ok) { $f += @(Get-OpenPrFindings -Prs $prs.Prs) }
+    if ($prs.Ok) { $f += @(Get-ParkedWorkFindings -Prs $prs.Prs); $f += @(Get-OpenPrFindings -Prs $prs.Prs) }
     else         { $f += New-StateFinding -Source 'pr' -Group 'unknown' -Text "No pude listar los PRs abiertos de $Repo ($($prs.Error))." }
 
     $local = [bool]($HereRepo -and ($HereRepo -ieq $Repo))
