@@ -32,6 +32,7 @@ just the number):
 16. handoff         → guardar/retomar contexto entre sesiones (save/resume) para continuar días después
 17. doctor          → auditar ramas y worktrees locales (mergeadas, estancadas, fantasma) y limpiarlos
 18. close-cycle     → clasificar la RAMA ACTUAL y enrutarla (commitear/PR/gate/merge/limpiar) — cierra la sesión individual
+                      (close-cycle --all = cerrar TODAS las sesiones: aparcar lo pendiente como PR borrador y archivar lo resuelto)
 19. telemetry       → medir cómo se comportó la herramienta en tus sesiones reales (barrido incremental)
 20. triage          → llenar Type/Area/Estimate por evidencia + PROPONER Priority (con confirmación) en los pendientes
 21. complete        → verificar que el board quedó full (0 pendientes) — PASS/FAIL, útil para CI o cierre
@@ -95,7 +96,9 @@ improvise the recipe from this summary:
 - **close-cycle** — classify the CURRENT branch and route it (commit/PR/gate/merge/teardown);
   performs exactly ONE action. Full contract: `references/verbs-close-cycle.md`. The old Spanish
   name `cerrar-ciclo` is a deprecated alias (#733): accept it, run `close-cycle`, and tell the user
-  the new name in one line. It will be removed in a later release.
+  the new name in one line. It will be removed in a later release. **`close-cycle --all`** sweeps
+  every session instead: plan first, one confirmation, then park unmerged work as draft PRs and
+  archive the sessions whose work is resolved (same reference file, section `--all`).
 - **telemetry** — the incremental field sweep over real session transcripts (watermarks, four
   mechanical signals, read-only). Full contract: `references/verbs-telemetry.md`.
 - **triage** — fill Type/Area/Estimate from evidence and PROPOSE Priority (never write it
