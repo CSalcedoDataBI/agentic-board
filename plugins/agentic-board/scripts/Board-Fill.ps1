@@ -17,7 +17,7 @@
       Priority  : if empty -> P2 Medium
       Size      : if empty -> M
       Type      : if empty -> detect from labels (bug->Bug, docs->Docs,
-                  refactor->Refactor, chore->Chore), else Feature
+                  refactor->Refactor, chore->Chore, spike->Spike), else Feature
 
     Linked PRs and Sub-issues progress are system-derived — not writable via API.
 
@@ -479,6 +479,7 @@ foreach ($item in $items) {
         elseif ($labels -contains "docs")     { $detectedType = "Docs" }
         elseif ($labels -contains "refactor") { $detectedType = "Refactor" }
         elseif ($labels -contains "chore")    { $detectedType = "Chore" }
+        elseif ($labels -contains "spike")    { $detectedType = "Spike" }
         $typeOpt = Find-FieldOption -Options $typeNode.options -Key 'Type' -Value $detectedType   # 'Feature', or a Spanish board's 'Funcionalidad'
         $typeOptId = $typeOpt.id
         if ($typeOptId) {
