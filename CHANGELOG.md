@@ -1,6 +1,44 @@
 ﻿# Changelog
 
 
+## [0.43.0] - 2026-09-29
+Machine housekeeping gets its own command, `/cleanup`, so `/board` is only about GitHub. It also
+fixes where the disk actually went.
+### Added
+- **`/cleanup` (new command) with the internal `cleanup-ops` skill.** Every verb plans first and acts
+  only on one confirmation. The menu is written in English, and the agent relays it in the user's
+  language.
+  - `/cleanup sessions`: the sweep that was `/board close-cycle --all` (#734). It is scoped to the
+    current repo by default, with `-Scope orphans` for the sessions whose folder is gone.
+  - **`/cleanup transcripts` (#736)**: compresses old session transcripts into
+    `~/.claude/transcript-archive/<project>/<session>.zip`, indexed by title, folder, branch, issue
+    and dates. `find` searches the index and `restore` puts a transcript back byte for byte (the
+    SHA-256 is verified). It never compresses the transcript of a session the desktop app still
+    shows (it reads the app's own `cliSessionId` / `isArchived` metadata, read-only) or of a running
+    session. The original is deleted only after the zip reads back identical.
+  - **`/cleanup disk` (#737)**: one report of what fills `~/.claude`. `--force` cleans only what is
+    provably safe:
+    - compaction copies whose original transcript still holds them;
+    - old plugin builds, through the same path as `plugins clean`;
+    - the current repo's stale `.agentic-board` state.
+
+    Transcripts are reported only, because they have their own verb. Big folders the tool does not
+    own are listed and never touched.
+  - `/cleanup plugins`: moved from `/board plugins`.
+- `/board work` lists **parked work first**: open draft PRs labelled `parked`, with their issue and
+  the command that resumes them (#735).
+- A console-output ratchet test. New scripts must print English, and the 371 Spanish messages still
+  in 32 older scripts are frozen per file, so they can only go down.
+### Changed
+- **The PreCompact hook no longer copies the whole transcript into `<repo>/.agentic-board/`
+  (#737).** That copy was a verbatim duplicate of the transcript Claude Code keeps (1.7 GB on one
+  machine), and it carried the global CLAUDE.md into a repo folder. The hook now appends a one-line
+  marker (when, trigger, repo, session, transcript path and size) to
+  `<ClaudeHome>/agentic-board/compact-markers.jsonl`. `/cleanup disk` removes the old copies.
+- `/board` drops `plugins` from its menu. `/board plugins` and `/board close-cycle --all` still work
+  for this release as aliases routed to `/cleanup`.
+- The sweep script is renamed `Cleanup-Sessions.ps1` (it was `Board-CloseCycleSweep.ps1`).
+
 ## [0.42.0] - 2026-09-29
 Close every session of a repo and leave nothing dangling, and an English-only command surface.
 ### Added
