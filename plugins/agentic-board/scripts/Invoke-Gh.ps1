@@ -99,7 +99,7 @@ function Test-GhTransientError {
 function Invoke-Gh {
     param(
         [Parameter(Mandatory)][string[]]$GhArgs,
-        [string]$What = 'la operacion gh',
+        [string]$What = 'run the gh command',
         [switch]$Json,
         [switch]$RawJson,
         [switch]$Graphql,
@@ -138,7 +138,7 @@ function Invoke-Gh {
             continue
         }
         $detail = if ($r.StdErr) { ": $($r.StdErr)" } else { '' }
-        throw "No pude $What (gh exit $($r.ExitCode))$detail"
+        throw "Could not $What (gh exit $($r.ExitCode))$detail"
     }
 
     if (-not $Json) { return $r.Output }
@@ -146,14 +146,14 @@ function Invoke-Gh {
     # gh --json ALWAYS emits at least [] or {}. Nothing means something went wrong in a way
     # the exit code did not report - never hand that back as an empty result.
     $body = ($r.Output -join "`n").Trim()
-    if (-not $body) { throw "No pude $What - gh salio 0 pero sin salida (se esperaba JSON)" }
+    if (-not $body) { throw "Could not $What - gh exited 0 with no output (JSON was expected)" }
 
     try   { $parsed = $body | ConvertFrom-Json }
-    catch { throw "No pude $What - la respuesta de gh no es JSON valido: $($_.Exception.Message)" }
+    catch { throw "Could not $What - gh's answer is not valid JSON: $($_.Exception.Message)" }
 
     # graphql's own failure mode: HTTP 200 + exit 0, with the failure inside the body.
     if ($Graphql -and $parsed.PSObject.Properties.Name -contains 'errors' -and @($parsed.errors).Count -gt 0) {
-        throw "No pude $What - graphql devolvio errores: $(@($parsed.errors)[0].message)"
+        throw "Could not $What - graphql returned errors: $(@($parsed.errors)[0].message)"
     }
     if ($RawJson) { return $body }
     return $parsed
@@ -180,7 +180,7 @@ function Clear-GhCache {
 function Invoke-GhCached {
     param(
         [Parameter(Mandatory)][string[]]$GhArgs,
-        [string]$What = 'la operacion gh',
+        [string]$What = 'run the gh command',
         [int]$TtlSec = 120,
         [switch]$Json,
         [switch]$Graphql,
