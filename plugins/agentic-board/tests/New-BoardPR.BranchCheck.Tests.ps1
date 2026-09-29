@@ -54,7 +54,7 @@ Describe 'Get-RegisteredBranchMismatch (pure)' {
         $rows[0]              | Should -BeOfType [pscustomobject]
         Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'issue-5-new' | Should -Be ''
         Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'issue-5-old' | Should -Be ''
-        Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'stranger'    | Should -Match 'se registro en la rama'
+        Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'stranger'    | Should -Match 'was registered on branch'
     }
     It 'checks every issue of a batch PR' {
         Get-RegisteredBranchMismatch -Entries @(New-Entry 7 'issue-7-x' 'C:\r\wt') -Repo 'o/r' -Issues @(5, 7) -WorkPath 'C:/r/wt' -Branch 'other' | Should -Match 'issue-7-x'
@@ -76,15 +76,15 @@ Describe 'ConvertTo-ComparablePath keeps a filesystem root and folds case only w
     }
     It 'a working copy that IS a root is still checked, not silently skipped' {
         $m = Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' 'C:/') -Repo 'o/r' -Issues @(5) -WorkPath 'C:\' -Branch 'other'
-        $m | Should -Match 'se registro en la rama'
+        $m | Should -Match 'was registered on branch'
     }
     It 'still trims an ordinary trailing separator' {
         ConvertTo-ComparablePath 'C:\Repo\WT\' | Should -Be (ConvertTo-ComparablePath 'C:/repo/wt')
     }
     It 'folds case by default (Windows/macOS) and NOT under -CaseSensitive (Linux)' {
-        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' '/r/Foo') -Repo 'o/r' -Issues @(5) -WorkPath '/r/foo' -Branch 'other' | Should -Match 'se registro en la rama'
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' '/r/Foo') -Repo 'o/r' -Issues @(5) -WorkPath '/r/foo' -Branch 'other' | Should -Match 'was registered on branch'
         Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' '/r/Foo') -Repo 'o/r' -Issues @(5) -WorkPath '/r/foo' -Branch 'other' -CaseSensitive | Should -Be ''
-        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' '/r/Foo') -Repo 'o/r' -Issues @(5) -WorkPath '/r/Foo' -Branch 'other' -CaseSensitive | Should -Match 'se registro en la rama'
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' '/r/Foo') -Repo 'o/r' -Issues @(5) -WorkPath '/r/Foo' -Branch 'other' -CaseSensitive | Should -Match 'was registered on branch'
     }
 }
 
@@ -120,7 +120,7 @@ Describe 'a malformed registry row is skipped, never fatal' {
         )
         $ErrorActionPreference = 'Stop'
         try { $m = Get-RegisteredBranchMismatch -Entries $rows -Repo 'o/r' -Issues @(5) -WorkPath 'C:/r/wt' -Branch 'other' } finally { $ErrorActionPreference = $script:EAP }
-        $m | Should -Match 'se registro en la rama ''issue-5-x'''
+        $m | Should -Match 'was registered on branch ''issue-5-x'''
     }
 }
 
@@ -152,8 +152,8 @@ Describe 'the working-copy comparison survives 8.3 short-name spellings (Windows
     }
     It 'must NOT miss a mismatch: registered long, running from the short spelling (and the reverse)' {
         if (-not $script:Has83) { Set-ItResult -Skipped -Because 'no 8.3 names on this volume'; return }
-        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $script:LongDir)  -Repo 'o/r' -Issues @(5) -WorkPath $script:ShortDir -Branch 'other' | Should -Match 'se registro en la rama'
-        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $script:ShortDir) -Repo 'o/r' -Issues @(5) -WorkPath $script:LongDir  -Branch 'other' | Should -Match 'se registro en la rama'
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $script:LongDir)  -Repo 'o/r' -Issues @(5) -WorkPath $script:ShortDir -Branch 'other' | Should -Match 'was registered on branch'
+        Get-RegisteredBranchMismatch -Entries @(New-Entry 5 'issue-5-x' $script:ShortDir) -Repo 'o/r' -Issues @(5) -WorkPath $script:LongDir  -Branch 'other' | Should -Match 'was registered on branch'
     }
     It 'must NOT refuse a legitimate push: same branch, different spellings' {
         if (-not $script:Has83) { Set-ItResult -Skipped -Because 'no 8.3 names on this volume'; return }
@@ -183,7 +183,7 @@ Describe 'the working-copy comparison survives 8.3 short-name spellings (Windows
         try {
             $out = & pwsh -NoProfile -File $script:Script -Issue 5 -Repo 'o/r' -TokenVar 'ABIOS_TEST_NO_SUCH_VAR' 2>&1 | Out-String
         } finally { Pop-Location }
-        $out | Should -Match 'se registro en la rama ''issue-5-x'''
+        $out | Should -Match 'was registered on branch ''issue-5-x'''
         $out | Should -Not -Match 'no esta en el entorno USER'
     }
 }
@@ -242,7 +242,7 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         Set-Head 'issue-5-x'
         Set-Registry @(New-Entry 5 'issue-5-x' $script:Repo)
         $r = Invoke-Pr
-        $r.Out | Should -Not -Match 'se registro en la rama'
+        $r.Out | Should -Not -Match 'was registered on branch'
         $r.Out | Should -Match 'no esta en el entorno USER'     # it reached the identity step
     }
     It 'REFUSES when another session switched the folder to a different branch' {
@@ -250,7 +250,7 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         Set-Registry @(New-Entry 5 'issue-5-x' $script:Repo)
         $r = Invoke-Pr
         $r.Code | Should -Be 1
-        $r.Out  | Should -Match 'se registro en la rama ''issue-5-x'''
+        $r.Out  | Should -Match 'was registered on branch ''issue-5-x'''
         $r.Out  | Should -Match 'other-branch'
         $r.Out  | Should -Not -Match 'no esta en el entorno USER'   # stopped BEFORE the identity work
     }
@@ -258,14 +258,14 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         Set-Head 'other-branch'
         Set-Registry @(New-Entry 5 'issue-5-x' $script:Repo)
         $r = Invoke-Pr @('-AllowBranchMismatch')
-        $r.Out | Should -Match 'AVISO'
+        $r.Out | Should -Match 'WARNING'
         $r.Out | Should -Match 'no esta en el entorno USER'
     }
     It 'an explicit -Branch equal to the registered one is fine even with HEAD elsewhere' {
         Set-Head 'other-branch'
         Set-Registry @(New-Entry 5 'issue-5-x' $script:Repo)
         $r = Invoke-Pr @('-Branch', 'issue-5-x')
-        $r.Out | Should -Not -Match 'se registro en la rama'
+        $r.Out | Should -Not -Match 'was registered on branch'
         $r.Out | Should -Match 'no esta en el entorno USER'
     }
     It 'an explicit -Branch that is NOT the registered one is refused too' {
@@ -273,7 +273,7 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         Set-Registry @(New-Entry 5 'issue-5-x' $script:Repo)
         $r = Invoke-Pr @('-Branch', 'other-branch')
         $r.Code | Should -Be 1
-        $r.Out  | Should -Match 'se registro en la rama'
+        $r.Out  | Should -Match 'was registered on branch'
     }
     It 'a DEAD session''s stale entry never blocks' {
         Set-Head 'other-branch'
@@ -281,7 +281,7 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         $stale.sessionPid = $script:DeadPid
         Set-Registry @($stale)
         $r = Invoke-Pr
-        $r.Out | Should -Not -Match 'se registro en la rama'
+        $r.Out | Should -Not -Match 'was registered on branch'
         $r.Out | Should -Match 'no esta en el entorno USER'
     }
     It 'a row with a garbage sessionPid next to a real one does not take the run down: the real row still refuses' {
@@ -290,7 +290,7 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         Set-Registry @($bad, (New-Entry 5 'issue-5-x' $script:Repo))
         $r = Invoke-Pr
         $r.Code | Should -Be 1
-        $r.Out  | Should -Match 'se registro en la rama ''issue-5-x'''
+        $r.Out  | Should -Match 'was registered on branch ''issue-5-x'''
         $r.Out  | Should -Not -Match 'Cannot convert'
     }
     It 'no registry at all changes nothing' {

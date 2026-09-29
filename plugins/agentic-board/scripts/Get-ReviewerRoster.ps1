@@ -3,7 +3,7 @@
     Which external reviewers can actually run RIGHT NOW (#537).
 
 .DESCRIPTION
-    Board-ReviewGate exits 2 ("GATE SIN REVISAR") when CI is green and nobody read the diff. The
+    Board-ReviewGate exits 2 ("GATE UNREVIEWED") when CI is green and nobody read the diff. The
     way out it printed named the external reviewer (second-opinion) unconditionally - without
     checking that one could run. Measured on a normal run, both could not: Gemini CLI fails at
     auth (`IneligibleTierError` / `UNSUPPORTED_CLIENT`) and STILL EXITS 0, and with Copilot
@@ -208,7 +208,7 @@ function Get-ReviewerStatusText {
     }
 }
 
-# The lines the gate prints for way #1 of "GATE SIN REVISAR", built ONLY from what answered.
+# The lines the gate prints for way #1 of "GATE UNREVIEWED", built ONLY from what answered.
 # Returns an array of @{ Text; Color } (the gate owns Write-Host). Pure.
 #
 # $Liveness is the output of Invoke-ReviewerProbes, or $null when the probe itself could not run -

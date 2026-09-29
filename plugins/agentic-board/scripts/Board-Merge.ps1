@@ -95,7 +95,7 @@ if (-not $DryRun) {
         $env:ABIOS_BRAKEGUARD_DOTSOURCE = $prevB
         $brakeMarker = Read-BrakeMarker -StartDir (Get-Location).Path
         if ($brakeMarker -and (@($brakeMarker.irreversible) -contains 'merge')) {
-            $forWhat = if ($brakeMarker.issue -gt 0) { " para el issue #$($brakeMarker.issue)" } else { "" }
+            $forWhat = if ($brakeMarker.issue -gt 0) { " for issue #$($brakeMarker.issue)" } else { "" }
 
             # THE ARMED RUN DOES NOT MERGE, ordered or not (#541).
             #
@@ -115,16 +115,16 @@ if (-not $DryRun) {
             # A HUMAN who wants this merge deletes the marker first, deliberately. That is the
             # documented path and the message below says so.
             Write-Host ""
-            Write-Host "FRENO ACTIVO: este worktree pertenece a un run autonomo con freno armado$forWhat." -ForegroundColor Red
+            Write-Host "BRAKE ACTIVE: this worktree belongs to an autonomous run with the brake armed$forWhat." -ForegroundColor Red
             if ($brakeMarker.endToEnd) {
-                Write-Host "PUNTA A PUNTA: la orden esta REGISTRADA pero todavia no se ejecuta." -ForegroundColor Yellow
-                Write-Host "  El mecanismo que la honraba tenia dos agujeros que no podia defender (#541)," -ForegroundColor Yellow
-                Write-Host "  asi que ninguna ruta de merge esta abierta para ningun run." -ForegroundColor Yellow
+                Write-Host "END TO END: the order is RECORDED but not executed yet." -ForegroundColor Yellow
+                Write-Host "  The mechanism that honoured it had two holes it could not defend (#541)," -ForegroundColor Yellow
+                Write-Host "  so no merge path is open for any run." -ForegroundColor Yellow
             } else {
-                Write-Host "Deja el PR listo y con el gate en verde; el cierre lo hace una persona." -ForegroundColor Yellow
+                Write-Host "Leave the PR ready with the gate green; a person does the closing." -ForegroundColor Yellow
             }
-            Write-Host "  Marcador: $($brakeMarker.path)" -ForegroundColor DarkGray
-            Write-Host "  (Si de verdad quieres mergear a mano, borra ese archivo primero - a conciencia.)" -ForegroundColor DarkGray
+            Write-Host "  Marker: $($brakeMarker.path)" -ForegroundColor DarkGray
+            Write-Host "  (If you really want to merge by hand, delete that file first - deliberately.)" -ForegroundColor DarkGray
             Write-Host ""
             exit 1
         }
@@ -146,14 +146,14 @@ function Show-LocalBranchCleanupHint {
     if (-not $Branch) { return }
     git rev-parse --verify --quiet "refs/heads/$Branch" 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host ("  NOTA: la rama local '{0}' sigue aqui - --delete-branch no la borra si esta checkouteada." -f $Branch) -ForegroundColor DarkYellow
-        Write-Host  "        Cierrala con:  /board close-cycle" -ForegroundColor DarkGray
+        Write-Host ("  NOTE: the local branch '{0}' is still here - --delete-branch does not delete it while it is checked out." -f $Branch) -ForegroundColor DarkYellow
+        Write-Host  "        Close it with:  /board close-cycle" -ForegroundColor DarkGray
     }
 }
 
 # -- 1. Repo: -Repo or origin (strip any embedded credential - never reuse it) --
 if (-not $Repo) { $Repo = Get-RepoFromOrigin }
-if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi '$Repo')." }
+if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo must be owner/name (got '$Repo')." }
 $owner = ($Repo -split '/')[0]
 
 # -- 2. Account FROM THE OWNER (same mapping as New-BoardPR.ps1) ----------------
@@ -164,7 +164,7 @@ $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
 $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
 if (-not $TokenVar) { $TokenVar = Get-OwnerTokenVar -Owner $owner }
 $token = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
-if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar no esta en el entorno USER de Windows." }
+if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar is not set in the Windows USER environment." }
 # On purpose: identity must match the repo owner, not whatever ran last.
 $env:GH_TOKEN = $token
 
@@ -175,33 +175,33 @@ Invoke-BrakeMergeCheck
 
 # -- 3. Identity + admin (bypass candidate) ------------------------------------
 $login = "$(gh api user --jq .login 2>$null)".Trim()
-if ($LASTEXITCODE -ne 0 -or -not $login) { throw "El token de $TokenVar no autentica contra la API." }
+if ($LASTEXITCODE -ne 0 -or -not $login) { throw "The $TokenVar token does not authenticate against the API." }
 $repoInfo = gh api "repos/$Repo" 2>$null | ConvertFrom-Json
-if (-not $repoInfo) { throw "'$login' no ve el repo $Repo (no existe o sin acceso)." }
+if (-not $repoInfo) { throw "'$login' cannot see repo $Repo (does not exist or no access)." }
 $isAdmin = [bool]$repoInfo.permissions.admin
 
 # -- 4. PR state ---------------------------------------------------------------
 $prInfo = gh pr view $PR --repo $Repo --json state,title,mergedAt,headRefName 2>$null | ConvertFrom-Json
-if (-not $prInfo) { throw "PR #$PR no existe en $Repo." }
+if (-not $prInfo) { throw "PR #$PR does not exist in $Repo." }
 $headBranch = [string]$prInfo.headRefName
 if ($prInfo.state -eq 'MERGED' -or $prInfo.mergedAt) {
-    Write-Host "PR #$PR ya esta MERGED - nada que hacer." -ForegroundColor Green
+    Write-Host "PR #$PR is already MERGED - nothing to do." -ForegroundColor Green
     exit 0
 }
-if ($prInfo.state -ne 'OPEN') { throw "PR #$PR esta '$($prInfo.state)' (no OPEN) - no se puede mergear." }
+if ($prInfo.state -ne 'OPEN') { throw "PR #$PR is '$($prInfo.state)' (not OPEN) - cannot merge." }
 
 $mergeArgs = @('pr','merge',"$PR",'--repo',$Repo,"--$Method")
 if (-not $NoDeleteBranch) { $mergeArgs += '--delete-branch' }
 
 Write-Host "=== Board-Merge  $Repo  PR #$PR ===" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Identidad : $login  (via $TokenVar)$(if ($isAdmin) { ' [admin: bypass disponible]' })"
+Write-Host "  Identity  : $login  (via $TokenVar)$(if ($isAdmin) { ' [admin: bypass available]' })"
 Write-Host "  Merge     : --$Method$(if (-not $NoDeleteBranch) { ' --delete-branch' })  '$($prInfo.title)'"
 Write-Host ""
 
 if ($DryRun) {
     Write-Host "DRY-RUN: gh $($mergeArgs -join ' ')" -ForegroundColor Yellow
-    Write-Host "         (si el ruleset lo bloquea y eres admin, reintentaria con --admin)" -ForegroundColor DarkGray
+    Write-Host "         (if the ruleset blocks it and you are admin, it would retry with --admin)" -ForegroundColor DarkGray
     exit 0
 }
 
@@ -209,7 +209,7 @@ if ($DryRun) {
 $out  = (& gh @mergeArgs 2>&1 | Out-String)
 $code = $LASTEXITCODE
 if ($code -eq 0) {
-    Write-Host "OK  PR #$PR mergeado (--$Method)." -ForegroundColor Green
+    Write-Host "OK  PR #$PR merged (--$Method)." -ForegroundColor Green
     if (-not $NoDeleteBranch) { Show-LocalBranchCleanupHint $headBranch }
     exit 0
 }
@@ -217,28 +217,28 @@ if ($code -eq 0) {
 # -- 6. Blocked by branch policy? Retry with the admin bypass the ruleset grants.
 $blocked = $out -match '(?i)not mergeable|base branch policy|protected|prohibits|required'
 if (-not $blocked) {
-    Write-Host "FAIL merge de #${PR}:" -ForegroundColor Red
+    Write-Host "FAIL merging #${PR}:" -ForegroundColor Red
     Write-Host ($out.Trim()) -ForegroundColor Red
     exit 1
 }
 
 if (-not $isAdmin) {
-    Write-Host "BLOQUEADO: el branch policy de $Repo impide el merge y '$login' NO es admin (sin bypass)." -ForegroundColor Red
-    Write-Host "Pide a un admin que lo mergee, o ajusta el ruleset. Detalle:" -ForegroundColor Yellow
+    Write-Host "BLOCKED: the branch policy of $Repo prevents the merge and '$login' is NOT admin (no bypass)." -ForegroundColor Red
+    Write-Host "Ask an admin to merge it, or adjust the ruleset. Details:" -ForegroundColor Yellow
     Write-Host ($out.Trim()) -ForegroundColor DarkGray
     exit 1
 }
 
-Write-Host "AVISO: el ruleset marca el PR como blocked; uso el bypass de admin (--admin) que el propio" -ForegroundColor Yellow
-Write-Host "       ruleset otorga a los admins. El gate (CI + review) ya paso; esto solo salta el estado" -ForegroundColor Yellow
-Write-Host "       'blocked' que gh exige confirmar." -ForegroundColor Yellow
+Write-Host "WARNING: the ruleset marks the PR as blocked; using the admin bypass (--admin) that the ruleset" -ForegroundColor Yellow
+Write-Host "         itself grants to admins. The gate (CI + review) already passed; this only skips the" -ForegroundColor Yellow
+Write-Host "         'blocked' state that gh requires confirming." -ForegroundColor Yellow
 $out2  = (& gh @($mergeArgs + '--admin') 2>&1 | Out-String)
 $code2 = $LASTEXITCODE
 if ($code2 -eq 0) {
-    Write-Host "OK  PR #$PR mergeado con bypass de admin (--$Method --admin)." -ForegroundColor Green
+    Write-Host "OK  PR #$PR merged with the admin bypass (--$Method --admin)." -ForegroundColor Green
     if (-not $NoDeleteBranch) { Show-LocalBranchCleanupHint $headBranch }
     exit 0
 }
-Write-Host "FAIL ni con --admin se pudo mergear #${PR}:" -ForegroundColor Red
+Write-Host "FAIL could not merge #${PR} even with --admin:" -ForegroundColor Red
 Write-Host ($out2.Trim()) -ForegroundColor Red
 exit 1

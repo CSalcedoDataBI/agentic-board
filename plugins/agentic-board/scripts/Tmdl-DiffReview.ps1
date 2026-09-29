@@ -320,7 +320,7 @@ function Get-ChangedTmdlFiles-PR {
     # plain: --jq emits filtered text. A PR with no .tmdl legitimately returns empty at exit 0; a
     # READ FAILURE must throw instead of an empty list read as "nothing changed" (#316).
     $files = Invoke-Gh -GhArgs @('api',"repos/$Repo/pulls/$PR/files",'--paginate','--jq','.[] | select(.filename | endswith(".tmdl")) | .filename') `
-                       -What "leer los archivos del PR #$PR"
+                       -What "read the files of PR #$PR"
     return @($files | Where-Object { $_ })
 }
 
@@ -333,7 +333,7 @@ function Get-Content-AtRef-API {
     # any other failure -> throw (#316).
     try {
         $b64 = Invoke-Gh -GhArgs @('api',"repos/$Repo/contents/$escaped`?ref=$Ref",'--jq','.content') `
-                         -What "leer $Path @ $Ref"
+                         -What "read $Path @ $Ref"
     } catch {
         if ($_.Exception.Message -match '404|Not Found') { return "" }
         throw
@@ -359,7 +359,7 @@ $mode = ""
 if ($PR -gt 0) { $mode = "pr" }
 elseif ($Base) { $mode = "local" }
 else {
-    Write-Error "Usa modo PR (-Repo owner/name -PR <n>) o modo local (-Base <ref> [-Head <ref>])."
+    Write-Error "Use PR mode (-Repo owner/name -PR <n>) or local mode (-Base <ref> [-Head <ref>])."
     exit 2
 }
 
@@ -371,7 +371,7 @@ if ($mode -eq "pr") {
         $originUrl = git remote get-url origin 2>$null
         $Repo = Get-RepoFromOriginUrl $originUrl
     }
-    if (-not $Repo) { Write-Error "No pude derivar el repo del origin - pasa -Repo owner/name."; exit 2 }
+    if (-not $Repo) { Write-Error "Could not derive the repo from origin - pass -Repo owner/name."; exit 2 }
 }
 
 # Gather (path, baseContent, headContent) per changed .tmdl file.
@@ -379,8 +379,8 @@ $pairs = @()
 if ($mode -eq "pr") {
     # plain: an empty base/head sha would make every file read as fully added/deleted - a false
     # review over an unread diff. A read failure must throw (#316).
-    $baseSha = Invoke-Gh -GhArgs @('api',"repos/$Repo/pulls/$PR",'--jq','.base.sha') -What "leer base.sha del PR #$PR"
-    $headSha = Invoke-Gh -GhArgs @('api',"repos/$Repo/pulls/$PR",'--jq','.head.sha') -What "leer head.sha del PR #$PR"
+    $baseSha = Invoke-Gh -GhArgs @('api',"repos/$Repo/pulls/$PR",'--jq','.base.sha') -What "read base.sha of PR #$PR"
+    $headSha = Invoke-Gh -GhArgs @('api',"repos/$Repo/pulls/$PR",'--jq','.head.sha') -What "read head.sha of PR #$PR"
     $changed = Get-ChangedTmdlFiles-PR -Repo $Repo -PR $PR
     foreach ($p in $changed) {
         $pairs += [pscustomobject]@{
@@ -438,15 +438,15 @@ else { Write-Host "  local  $Base..$Head" -ForegroundColor DarkGray }
 Write-Host ""
 
 if ($pairs.Count -eq 0) {
-    Write-Host "  No cambiaron archivos .tmdl - nada que revisar." -ForegroundColor DarkGray
+    Write-Host "  No .tmdl files changed - nothing to review." -ForegroundColor DarkGray
     exit 0
 }
 
-Write-Host ("  Archivos .tmdl cambiados: {0}" -f $pairs.Count) -ForegroundColor DarkGray
+Write-Host ("  Changed .tmdl files: {0}" -f $pairs.Count) -ForegroundColor DarkGray
 Write-Host ""
 
 if ($allFindings.Count -eq 0) {
-    Write-Host "  Sin cambios de esquema detectados." -ForegroundColor Green
+    Write-Host "  No schema changes detected." -ForegroundColor Green
 } else {
     foreach ($f in $allFindings) {
         $color = switch ($f.Severity) { 'BREAKING' { 'Red' } 'WARNING' { 'DarkYellow' } default { 'DarkGray' } }
@@ -457,17 +457,17 @@ if ($allFindings.Count -eq 0) {
 }
 
 Write-Host ""
-Write-Host ("----- RESUMEN: {0} breaking, {1} warning, {2} info -----" -f $nBreaking, $nWarning, $nInfo) -ForegroundColor Cyan
+Write-Host ("----- SUMMARY: {0} breaking, {1} warning, {2} info -----" -f $nBreaking, $nWarning, $nInfo) -ForegroundColor Cyan
 
 if ($nBreaking -gt 0) {
     Write-Host ""
-    Write-Host "  Hay $nBreaking cambio(s) BREAKING de esquema." -ForegroundColor Red
+    Write-Host "  There are $nBreaking BREAKING schema change(s)." -ForegroundColor Red
     if ($FailOnBreaking) {
-        Write-Host "  -FailOnBreaking activo -> GATE BLOCKED." -ForegroundColor Red
+        Write-Host "  -FailOnBreaking active -> GATE BLOCKED." -ForegroundColor Red
         exit 1
     } else {
-        Write-Host "  Advertencia (warn-only): reconoce estos cambios antes de mergear." -ForegroundColor DarkYellow
-        Write-Host "  Un breaking change puede ser intencional (quitar una columna deprecada)." -ForegroundColor DarkGray
+        Write-Host "  Warning (warn-only): acknowledge these changes before merging." -ForegroundColor DarkYellow
+        Write-Host "  A breaking change can be intentional (removing a deprecated column)." -ForegroundColor DarkGray
     }
 }
 exit 0

@@ -271,7 +271,7 @@ are the method.
    Then act on what you decided: an in-scope problem → fix it in the loop and continue;
    an out-of-scope finding → file a sanitized 'discovered' issue on the board and keep going.
 6. **Loop until done or budget**: never loop on a CI that did not run - if the review gate exits **3**
-   (``CI NO SE EVALUO``) no code change can turn that CI green: stop re-pushing, record the ``ci`` gate
+   (``CI NOT EVALUATED``) no code change can turn that CI green: stop re-pushing, record the ``ci`` gate
    as ``NOT-EVALUATED``, finish the rest and report it plainly (exit 1, a real failure, is what the loop
    is for). Otherwise keep iterating until the DoD is green — then leave the PR ready
    and STOP before merge — or the budget is spent -> ``/board handoff -Save``. $budgetSentence

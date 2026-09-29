@@ -1,7 +1,7 @@
 ﻿#Requires -Modules Pester
 <#  Tests for the reviewer liveness probe behind the review gate's way out (#537).
 
-    The gate exits 2 ("GATE SIN REVISAR") and used to recommend the external reviewer
+    The gate exits 2 ("GATE UNREVIEWED") and used to recommend the external reviewer
     unconditionally. Both external CLIs can be dead at once - Gemini fails at auth and still
     exits 0 - and then the only exit left is -AllowUnreviewed, the escape hatch the gate exists to
     discourage. These tests pin: a dead reviewer is never recommended, exit 0 is not a verdict, and
@@ -254,9 +254,9 @@ Describe 'Board-ReviewGate is wired to the probe, and the verdict is untouched (
     It 'no longer recommends the external reviewer unconditionally' {
         $script:Gate | Should -Not -Match 'el revisor externo \(second-opinion\) sirve'
     }
-    It 'probes ONLY inside the GATE SIN REVISAR branch, before its exit 2 - never on a normal pass' {
+    It 'probes ONLY inside the GATE UNREVIEWED branch, before its exit 2 - never on a normal pass' {
         $probe = $script:Gate.IndexOf('Invoke-ReviewerProbes')
-        $sin   = $script:Gate.IndexOf('GATE SIN REVISAR')
+        $sin   = $script:Gate.IndexOf('GATE UNREVIEWED')
         $exit2 = $script:Gate.IndexOf('exit 2', $sin)
         $probe | Should -BeGreaterThan $sin
         $probe | Should -BeLessThan $exit2
@@ -264,7 +264,7 @@ Describe 'Board-ReviewGate is wired to the probe, and the verdict is untouched (
         ([regex]::Matches($script:Gate, 'Invoke-ReviewerProbes')).Count | Should -Be 1
     }
     It 'still exits 2 on that path, and still offers -AllowUnreviewed as the last resort' {
-        $sin = $script:Gate.IndexOf('GATE SIN REVISAR')
+        $sin = $script:Gate.IndexOf('GATE UNREVIEWED')
         $tail = $script:Gate.Substring($sin, [Math]::Min(6000, $script:Gate.Length - $sin))
         $tail | Should -Match 'exit 2'
         $tail | Should -Match '-AllowUnreviewed'

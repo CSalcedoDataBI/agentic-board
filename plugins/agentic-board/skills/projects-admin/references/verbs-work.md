@@ -168,12 +168,12 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         and prints decision + feedback + unresolved threads. **Exit 0 = passed; 1 = blocked;
         2 = nobody reviewed; 3 = CI never ran (#481).** Address printed feedback with new commits,
         push, and RE-RUN the gate until it passes.
-        **Exit 3 — "CI NO SE EVALUO" (#481)** means the only blocker is that CI never executed a
+        **Exit 3 — "CI NOT EVALUATED" (#481)** means the only blocker is that CI never executed a
         step (`startup_failure`, or a job GitHub refused to start — exhausted Actions minutes, a
         spending limit, no runner). It is still a block, never a pass, but no code change can clear
         it: **do not re-push**. Tell the user the CI could not run (quota / billing / workflow) and
         let them decide; a real failing check keeps exit 1.
-        **Exit 2 — "GATE SIN REVISAR" (#510)** means the checks are green but no one read the code:
+        **Exit 2 — "GATE UNREVIEWED" (#510)** means the checks are green but no one read the code:
         a `claude-review` check can report a PASS having left zero reviews, and that used to print
         the same `GATE PASSED` as a genuinely clean review. **Never merge on exit 2.** Clear it by
         reviewing for real — the `second-opinion` skill is the reviewer that actually shows up here;
@@ -298,7 +298,7 @@ Notes:
   one (`-StartGroup` would drop it anyway), and it never proposes a group on evidence it cannot
   name: if it cannot say WHY two issues belong together, it does not suggest them.
 - After step 4, the agent continues working the issue in-session — the printed context is the briefing.
-- **Gate exit 2 — "GATE SIN REVISAR" (#510).** Checks are green but *nobody looked at the code*: no
+- **Gate exit 2 — "GATE UNREVIEWED" (#510).** Checks are green but *nobody looked at the code*: no
   GitHub review, no registered external review. This used to print `GATE PASSED` with a reminder
   underneath, so a green `claude-review` check that had left **zero** reviews read as approved —
   in the exact window where it was the only reviewer (Copilot quota-blocked). Do **not** merge on

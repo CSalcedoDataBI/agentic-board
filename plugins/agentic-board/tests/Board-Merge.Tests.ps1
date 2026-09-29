@@ -102,6 +102,6 @@ Describe 'The armed run does not merge, ordered or not (#541)' {
         $script:Ast.Extent.Text | Should -Not -Match 'E2eHeadSha'
     }
     It 'still tells the human how to proceed deliberately' {
-        $script:BrakeFn.Extent.Text | Should -Match 'borra ese archivo primero'
+        $script:BrakeFn.Extent.Text | Should -Match 'delete that file first'
     }
 }
