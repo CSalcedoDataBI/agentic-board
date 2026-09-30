@@ -91,7 +91,7 @@ Describe 'Get-BoardItems — the cap it actually sends to gh' {
 
 Describe 'Get-BoardItems — a failed read still throws (Invoke-Gh contract preserved)' {
     It 'does not swallow a gh failure into an empty, complete-looking read' {
-        Mock Invoke-Gh { throw 'No pude listar los items (gh exit 1): HTTP 401' }
+        Mock Invoke-Gh { throw 'Could not list the items (gh exit 1): HTTP 401' }
         { Get-BoardItems -Number 13 -Owner x } | Should -Throw
     }
 }
@@ -103,12 +103,12 @@ Describe 'Get-BoardTruncationWarning' {
     }
     It 'names how many items it actually read, so the number is auditable' {
         $w = Get-BoardTruncationWarning ([pscustomobject]@{ Truncated = $true; Read = 200; Limit = 200 })
-        $w | Should -Match 'TRUNCADO'
+        $w | Should -Match 'TRUNCATED'
         $w | Should -Match '200'
     }
     It 'refuses to assert an absence — the whole point of the flag' {
         $w = Get-BoardTruncationWarning ([pscustomobject]@{ Truncated = $true; Read = 200; Limit = 200 })
-        $w | Should -Match 'NO puedo afirmar'
+        $w | Should -MatchExactly 'I CANNOT claim'
     }
 }
 

@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 $itemLimit = Get-BoardItemReadLimit
 $resp  = Invoke-Gh -GhArgs @('project', 'item-list', "$Number", '--owner', $Owner, '--format', 'json', '--limit', "$itemLimit") `
-                   -What "leer los items del board #$Number de $Owner" -Json -Retries 2
+                   -What "read the items of board #$Number of $Owner" -Json -Retries 2
 
 # -Json covers a non-zero exit, an empty body and an unparseable body - but NOT "parsed
 # fine, wrong shape" (an error object like {"message":"Not Found"}, or a gh schema change).
@@ -28,7 +28,7 @@ $resp  = Invoke-Gh -GhArgs @('project', 'item-list', "$Number", '--owner', $Owne
 # Kept as its own check: Get-BoardItems cannot tell a wrong SHAPE from an empty board, so
 # reading through it here would trade this guard for the truncation one instead of adding it.
 if (-not $resp.PSObject.Properties['items']) {
-    throw "No pude leer los items del board #$Number - gh devolvio JSON sin 'items'."
+    throw "Could not read the items of board #$Number - gh returned JSON without 'items'."
 }
 $items = @($resp.items | Where-Object { $null -ne $_ })
 
@@ -36,7 +36,7 @@ $items = @($resp.items | Where-Object { $null -ne $_ })
 # "N of M tracked items done", so a short read publishes a finished-looking board that never
 # existed - the same false document a 401 used to produce, from a call that SUCCEEDED (#484).
 if ($items.Count -ge $itemLimit) {
-    throw "No publico el snapshot del board #$Number - la lectura se corto en $($items.Count) items (el tope de lectura), asi que el 'N de M' del documento seria falso."
+    throw "Not publishing the snapshot of board #$Number - the read stopped at $($items.Count) items (the read cap), so the document's 'N of M' would be false."
 }
 
 $rank  = @{ 'Backlog' = 0; 'In Progress' = 1; 'In Review' = 2; 'Done' = 3 }

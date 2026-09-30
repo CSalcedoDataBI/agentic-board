@@ -63,7 +63,7 @@ Describe 'Read-BoardConfig' {
         '' | Set-Content -LiteralPath $p
         $r = Read-BoardConfig -Path $p
         $r.ok    | Should -BeFalse
-        $r.error | Should -Match 'vacio'
+        $r.error | Should -Match 'empty'
     }
 
     It 'reports a JSON scalar (not an object) as unreadable' {

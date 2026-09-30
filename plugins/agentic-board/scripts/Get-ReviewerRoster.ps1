@@ -140,7 +140,7 @@ function Invoke-ReviewerProbes {
         $cmd = Get-Command $r.Command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $cmd) {
             $results[$r.Name] = [pscustomobject]@{ Name = $r.Name; Command = $r.Command
-                Status = 'not-installed'; Detail = "$($r.Command) no esta en el PATH" }
+                Status = 'not-installed'; Detail = "$($r.Command) is not on the PATH" }
             continue
         }
         try {
@@ -158,7 +158,7 @@ function Invoke-ReviewerProbes {
             $procs[$r.Name] = @{ P = $p; Out = $p.StandardOutput.ReadToEndAsync(); Err = $p.StandardError.ReadToEndAsync() }
         } catch {
             $results[$r.Name] = [pscustomobject]@{ Name = $r.Name; Command = $r.Command
-                Status = 'error'; Detail = "no pude lanzarlo: $($_.Exception.Message)" }
+                Status = 'error'; Detail = "could not launch it: $($_.Exception.Message)" }
         }
     }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
@@ -185,7 +185,7 @@ function Invoke-ReviewerProbes {
         } else {
             Stop-ReviewerProcess -Process $e.P
             $results[$r.Name] = [pscustomobject]@{ Name = $r.Name; Command = $r.Command
-                Status = 'timeout'; Detail = "no respondio en ${TimeoutSec}s" }
+                Status = 'timeout'; Detail = "did not answer within ${TimeoutSec}s" }
         }
         $e.P.Dispose()
     }
@@ -196,15 +196,15 @@ function Invoke-ReviewerProbes {
 function Get-ReviewerStatusText {
     param([string]$Status)
     switch ($Status) {
-        'not-installed' { 'no esta instalado' }
-        'auth'          { 'no esta autenticado' }
-        'unsupported'   { 'el proveedor retiro este cliente (ya no puede autenticarse)' }
-        'untrusted'     { 'se niega a correr fuera de un directorio de confianza' }
-        'no-quota'      { 'sin cupo (rate limit / quota)' }
-        'no-output'     { 'salio 0 pero no produjo ninguna salida - eso no es un revisor vivo' }
-        'timeout'       { 'no respondio a tiempo' }
-        'error'         { 'fallo al ejecutarse' }
-        default         { "estado '$Status'" }
+        'not-installed' { 'is not installed' }
+        'auth'          { 'is not authenticated' }
+        'unsupported'   { 'the provider retired this client (it can no longer authenticate)' }
+        'untrusted'     { 'refuses to run outside a trusted directory' }
+        'no-quota'      { 'out of quota (rate limit / quota)' }
+        'no-output'     { 'exited 0 but produced no output at all - that is not a live reviewer' }
+        'timeout'       { 'did not answer in time' }
+        'error'         { 'failed to run' }
+        default         { "status '$Status'" }
     }
 }
 
@@ -220,9 +220,9 @@ function Get-UnreviewedWayOut {
     $add = { param($t, $c) $lines.Add([pscustomobject]@{ Text = $t; Color = $c }) }
 
     if ($null -eq $Liveness) {
-        & $add '   1. Que alguien revise de verdad - el revisor externo (second-opinion) sirve en principio,' 'Cyan'
-        & $add '      pero no pude comprobar si alguno responde ahora: verificalo antes de contar con el.' 'Cyan'
-        & $add '      Se registra con -RecordReview -Reviewer <quien> -Summary <que encontro>.' 'DarkGray'
+        & $add '   1. Get a real review - the external reviewer (second-opinion) works in principle,' 'Cyan'
+        & $add '      but I could not check whether any of them answers right now: verify it before counting on it.' 'Cyan'
+        & $add '      Record it with -RecordReview -Reviewer <who> -Summary <what they found>.' 'DarkGray'
         return $lines.ToArray()
     }
     $alive = @($Liveness | Where-Object { $_.Status -eq 'ok' })
@@ -230,15 +230,15 @@ function Get-UnreviewedWayOut {
 
     if ($alive.Count -gt 0) {
         $names = ($alive | ForEach-Object { "$($_.Name) ($($_.Command))" }) -join ', '
-        & $add "   1. Que alguien revise de verdad - hay revisor(es) externo(s) que responden ahora: $names." 'Cyan'
-        & $add '      Usa la skill second-opinion con uno de ellos y registralo con' 'DarkGray'
-        & $add '      -RecordReview -Reviewer <quien> -Summary <que encontro>.' 'DarkGray'
-        foreach ($d in $dead) { & $add ("      (no responde: {0} - {1})" -f $d.Name, (Get-ReviewerStatusText -Status $d.Status)) 'DarkGray' }
+        & $add "   1. Get a real review - external reviewer(s) answering right now: $names." 'Cyan'
+        & $add '      Use the second-opinion skill with one of them and record it with' 'DarkGray'
+        & $add '      -RecordReview -Reviewer <who> -Summary <what they found>.' 'DarkGray'
+        foreach ($d in $dead) { & $add ("      (not answering: {0} - {1})" -f $d.Name, (Get-ReviewerStatusText -Status $d.Status)) 'DarkGray' }
     } else {
-        & $add '   1. Que alguien revise de verdad - pero NINGUN revisor externo responde ahora, asi que' 'Cyan'
-        & $add '      second-opinion no puede correr y no lo recomiendo:' 'Cyan'
+        & $add '   1. Get a real review - but NO external reviewer answers right now, so' 'Cyan'
+        & $add '      second-opinion cannot run and I do not recommend it:' 'Cyan'
         foreach ($d in $dead) { & $add ("        - {0} ({1}): {2}" -f $d.Name, $d.Command, (Get-ReviewerStatusText -Status $d.Status)) 'DarkGray' }
-        & $add '      Lee el diff tu mismo y registralo: -RecordReview -Reviewer <tu nombre> -Summary <que encontraste>.' 'DarkGray'
+        & $add '      Read the diff yourself and record it: -RecordReview -Reviewer <your name> -Summary <what you found>.' 'DarkGray'
     }
     return $lines.ToArray()
 }

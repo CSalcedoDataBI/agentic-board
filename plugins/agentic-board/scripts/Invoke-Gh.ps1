@@ -38,9 +38,9 @@
 
     Usage:
       $board  = Invoke-Gh -GhArgs @('project','view','13','--owner','x','--format','json') `
-                          -What 'leer el board #13' -Json
-      $resp   = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$q") -What 'mover el item' -Graphql
-      $null   = Invoke-Gh -GhArgs @('project','item-edit',...) -What 'escribir el campo' -Retries 3
+                          -What 'read board #13' -Json
+      $resp   = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$q") -What 'move the item' -Graphql
+      $null   = Invoke-Gh -GhArgs @('project','item-edit',...) -What 'write the field' -Retries 3
 
     A body on stdin (`gh api graphql --input -`) travels as -StdIn, NOT as a pipe into this
     function - see Invoke-GhRaw for why a pipe would hang instead of failing:

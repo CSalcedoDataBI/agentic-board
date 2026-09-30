@@ -79,22 +79,22 @@ function Read-BoardConfig {
     try {
         $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
     } catch {
-        return [pscustomobject]@{ ok = $false; config = $cfg; error = "no se pudo leer: $($_.Exception.Message)"; path = $Path; exists = $true }
+        return [pscustomobject]@{ ok = $false; config = $cfg; error = "could not be read: $($_.Exception.Message)"; path = $Path; exists = $true }
     }
 
     # An empty file is a half-written file, not an empty decision - treat it as unreadable.
     if ([string]::IsNullOrWhiteSpace($raw)) {
-        return [pscustomobject]@{ ok = $false; config = $cfg; error = 'el archivo esta vacio'; path = $Path; exists = $true }
+        return [pscustomobject]@{ ok = $false; config = $cfg; error = 'the file is empty'; path = $Path; exists = $true }
     }
 
     try {
         $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
     } catch {
-        return [pscustomobject]@{ ok = $false; config = $cfg; error = 'no es JSON valido'; path = $Path; exists = $true }
+        return [pscustomobject]@{ ok = $false; config = $cfg; error = 'not valid JSON'; path = $Path; exists = $true }
     }
 
     if (-not (Test-IsJsonObject $parsed)) {
-        return [pscustomobject]@{ ok = $false; config = $cfg; error = 'el contenido no es un objeto JSON'; path = $Path; exists = $true }
+        return [pscustomobject]@{ ok = $false; config = $cfg; error = 'the content is not a JSON object'; path = $Path; exists = $true }
     }
 
     foreach ($key in @($cfg.Keys)) {

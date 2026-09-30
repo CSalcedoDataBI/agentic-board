@@ -440,7 +440,7 @@ exit 1
     It '#499: with no GH_TOKEN and -TokenVar named, the identity comes from THAT variable and a missing one is an error, not a fallback' {
         $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner someone-new -TokenVar MISSING_XYZ_VAR -Repo acme/widgets' -NoToken
         $r.Calls.Count | Should -Be 0
-        $r.Out | Should -Match 'MISSING_XYZ_VAR no esta en el entorno'
+        $r.Out | Should -Match 'MISSING_XYZ_VAR is not in the Windows USER environment'
     }
 
     It '#499: inside a brake-armed worktree the owner''s token variable is refused before any token is read' {
@@ -449,7 +449,7 @@ exit 1
         Set-Content -LiteralPath (Join-Path $armed '.agentic-board/brake-armed.json') -Value '{}'
         $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner PesanteAnalytics -Repo acme/widgets' $armed -NoToken
         $r.Calls.Count | Should -Be 0
-        $r.Out | Should -Match 'Run FRENADO'
+        $r.Out | Should -Match 'BRAKED run'
         $r.Out | Should -Match 'GITHUB_TOKEN_AGENT'
     }
 
@@ -457,7 +457,7 @@ exit 1
         $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -TokenVar MISSING_XYZ_VAR -Repo acme/widgets' -NoToken
         $r.Calls.Count | Should -Be 1
         $r.Calls[0].TokenVar | Should -Be 'MISSING_XYZ_VAR'
-        $r.Out | Should -Not -Match 'no esta en el entorno'
+        $r.Out | Should -Not -Match 'is not in the Windows USER environment'
     }
 
     It '#499: real-looking account and repo names (dots, underscores, hyphens, single characters) are NOT refused' {

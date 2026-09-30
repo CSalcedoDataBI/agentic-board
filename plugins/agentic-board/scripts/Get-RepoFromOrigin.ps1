@@ -65,8 +65,8 @@ function Get-IssueNumberFromUrl {
 function Get-RepoFromOrigin {
     param([string]$Path = '')
     $url = if ($Path) { git -C $Path remote get-url origin 2>$null } else { git remote get-url origin 2>$null }
-    if (-not $url) { throw "No hay remote 'origin' aqui - usa -Repo owner/name." }
+    if (-not $url) { throw "No 'origin' remote here - use -Repo owner/name." }
     $repo = Get-RepoFromOriginUrl $url
-    if (-not $repo) { throw "No pude derivar owner/name desde '$url' - usa -Repo owner/name." }
+    if (-not $repo) { throw "Could not derive owner/name from '$url' - use -Repo owner/name." }
     return $repo
 }

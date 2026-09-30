@@ -28,8 +28,8 @@ Describe 'Invoke-Gh (a non-zero exit is a failure, not an empty result)' {
 
     It 'names the operation and the exit code in the message' {
         Mock Invoke-GhRaw { [pscustomobject]@{ Output = ''; ExitCode = 4; StdErr = 'HTTP 401: Bad credentials' } }
-        { Invoke-Gh -GhArgs @('project', 'view') -What 'leer el board #13' } |
-            Should -Throw -ExpectedMessage '*leer el board #13*'
+        { Invoke-Gh -GhArgs @('project', 'view') -What 'read board #13' } |
+            Should -Throw -ExpectedMessage '*read board #13*'
     }
 
     It 'surfaces gh stderr in the message (2>$null used to bury it)' {
@@ -141,7 +141,7 @@ Describe 'Invoke-Gh -Graphql (exit 0 WITH an errors[] body)' {
         Mock Invoke-GhRaw {
             [pscustomobject]@{ Output = '{"data":null,"errors":[{"message":"Could not resolve to a node"}]}'; ExitCode = 0; StdErr = '' }
         }
-        { Invoke-Gh -GhArgs @('api', 'graphql') -What 'mover el item' -Graphql } |
+        { Invoke-Gh -GhArgs @('api', 'graphql') -What 'move the item' -Graphql } |
             Should -Throw -ExpectedMessage '*Could not resolve to a node*'
     }
 
@@ -239,7 +239,7 @@ Describe 'Invoke-GhRaw against the REAL gh (the seam every other test mocks away
     }
 
     It 'end-to-end: a real succeeding gh call returns its output' -Skip:(-not $hasGh) {
-        (Invoke-Gh -GhArgs @('--version') -What 'leer la version') -join ' ' | Should -Match 'gh version'
+        (Invoke-Gh -GhArgs @('--version') -What 'read the version') -join ' ' | Should -Match 'gh version'
     }
 }
 

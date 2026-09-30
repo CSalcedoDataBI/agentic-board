@@ -714,7 +714,7 @@ function Get-StatusOptionNames([int]$num) {
         # Invoke-Gh.ps1's header (a 401 read as "the board has no fields"), still live here.
         # Board field schemas change rarely; 5 minutes of staleness is free speed.
         $fields = (Invoke-GhCached -GhArgs @('project','field-list',"$num",'--owner',$Owner,'--format','json','--limit','50') `
-                       -What "leer los campos del board #$num" -Json -TtlSec 300).fields
+                       -What "read the fields of board #$num" -Json -TtlSec 300).fields
         @(($fields | Where-Object { $_.name -eq 'Status' } | Select-Object -First 1).options | ForEach-Object { $_.name })
     } catch { @() }
 }
@@ -1168,7 +1168,7 @@ query($owner:String!, $num:Int!) {
   }
 }'
     $projData = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$statusQuery",'-F',"owner=$owner",'-F',"num=$projectNum") `
-                          -What "resolver el board #$projectNum de $owner" -Graphql
+                          -What "resolve board #$projectNum of $owner" -Graphql
 
     $projectId  = $projData.data.user.projectV2.id
     if (-not $projectId) { throw "Board #$projectNum not found for $owner." }
@@ -1243,7 +1243,7 @@ query(`$proj:ID!, `$cursor:String) {
             # instead of silently truncating pagination -> a target issue falsely "not on board" (#314).
             $ghArgs = @('api','graphql','-f',"query=$q",'-F',"proj=$projectId")
             if ($cursor) { $ghArgs += @('-f',"cursor=$cursor") }
-            $resp  = Invoke-Gh -GhArgs $ghArgs -What "leer los items del board" -Graphql -Retries 2
+            $resp  = Invoke-Gh -GhArgs $ghArgs -What "read the board items" -Graphql -Retries 2
             $items = $resp.data.node.items
             return @{ nodes = $items.nodes; hasNext = $items.pageInfo.hasNextPage; endCursor = $items.pageInfo.endCursor }
         }
@@ -1271,7 +1271,7 @@ function Get-IssueBlockers([string]$repo, [int]$issueNum) {
     # the try/catch keeps the degrade, but now only a REAL absence degrades silently.
     try {
         $deps = Invoke-Gh -GhArgs @('api',"repos/$repo/issues/$issueNum/dependencies/blocked_by") `
-                          -What "leer los bloqueadores de #$issueNum" -Json
+                          -What "read the blockers of #$issueNum" -Json
         foreach ($d in @($deps | Where-Object { $_.state -eq "open" })) {
             $blockers += "blocked by #$($d.number) '$($d.title)' (open)"
         }
@@ -1285,7 +1285,7 @@ function Get-IssueBlockers([string]$repo, [int]$issueNum) {
 function Get-LastClaim([string]$repo, [int]$issueNum) {
     try {
         return (Invoke-Gh -GhArgs @('api',"repos/$repo/issues/$issueNum/comments",'--jq','[.[] | select(.body | startswith("[abios-claim]"))] | last | .body') `
-                          -What "leer los claims de #$issueNum")
+                          -What "read the claims of #$issueNum")
     } catch { return '' }
 }
 
@@ -1436,7 +1436,7 @@ query($o:String!,$r:String!,$n:Int!){
       }
     }
   }
-}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$IssueNum") -What "leer los PRs de #$IssueNum" -Graphql
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$IssueNum") -What "read the PRs of #$IssueNum" -Graphql
         $prs = @($data.data.repository.issue.closedByPullRequestsReferences.nodes)
     } catch { }
     # GitHub commit search indexes the DEFAULT branch. The search matches the number
@@ -1445,7 +1445,7 @@ query($o:String!,$r:String!,$n:Int!){
     # Select-IssueCitingCommits for why the body and reverts do not count.
     try {
         $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit',"$commitSearchLimit") `
-                          -What "buscar commits de #$IssueNum" -Json
+                          -What "find the commits of #$IssueNum" -Json
         $sel = Select-IssueCitingCommits -Hits @($hits) -IssueNum $IssueNum -Truncated:(@($hits).Count -ge $commitSearchLimit)
         $commits    = @($sel.commits)
         $revertedAt = $sel.revertedAt
@@ -1773,7 +1773,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
   }) { projectV2Item { id } }
 }'
     $null = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$startStatusMutation",'-f',"proj=$($Ctx.projectId)",'-f',"item=$($item.id)",'-f',"field=$($Ctx.statusNode.id)",'-f',"opt=$($Ctx.inProgId)") `
-                      -What "mover #$IssueNum a In Progress" -Graphql
+                      -What "move #$IssueNum to In Progress" -Graphql
     Write-Host "  OK  Status -> In Progress" -ForegroundColor Green
 
     # -- Execute: assign owner --------------------------------------------------
@@ -1793,7 +1793,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
     $fingerprint = Format-ClaimFingerprint -Note $claimNote -Computer $env:COMPUTERNAME -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm') -Branch $branchName
     try {
         $null = Invoke-Gh -GhArgs @('issue','comment',"$IssueNum",'--repo',$repo,'--body',$fingerprint) `
-                          -What "registrar el claim en #$IssueNum"
+                          -What "record the claim on #$IssueNum"
         Write-Host "  OK  Claim recorded ($claimNote)" -ForegroundColor Green
     } catch {
         Write-Host "  WARN could not record the claim: $_" -ForegroundColor DarkYellow
@@ -3534,7 +3534,7 @@ if ($CloseCrossRepo -gt 0) {
     if (-not $plan.Verdict.CanClose) { exit 1 }
     try {
         $now = Invoke-Gh -GhArgs @('issue', 'view', "$CloseCrossRepo", '--repo', $plan.Repo, '--json', 'state') `
-                         -What "leer el estado del issue $($plan.Repo)#$CloseCrossRepo" -Json
+                         -What "read the state of issue $($plan.Repo)#$CloseCrossRepo" -Json
     } catch { Write-Host "  NOT closing: could not read the issue state ($($_.Exception.Message))." -ForegroundColor Red; exit 1 }
     if ("$($now.state)" -ne 'OPEN') { Write-Host "  The issue is already '$($now.state)': nothing to do." -ForegroundColor DarkGray; exit 0 }
     if ($DryRun -or -not $Force) {
@@ -3543,7 +3543,7 @@ if ($CloseCrossRepo -gt 0) {
     }
     $body = "All $($plan.Verdict.Total) recorded pull request(s) are merged: " + ((@($plan.Prs) | ForEach-Object { "$($_.repo)#$($_.number)" }) -join ', ') + '.'
     $null = Invoke-Gh -GhArgs @('issue', 'close', "$CloseCrossRepo", '--repo', $plan.Repo, '--reason', 'completed', '--comment', $body) `
-                      -What "cerrar el issue $($plan.Repo)#$CloseCrossRepo"
+                      -What "close issue $($plan.Repo)#$CloseCrossRepo"
     Write-Host "  OK  issue $($plan.Repo)#$CloseCrossRepo closed (all its PRs were merged)." -ForegroundColor Green
     exit 0
 }
@@ -3595,7 +3595,7 @@ if ($Lock -gt 0 -or $Unlock -gt 0) {
     # post, -Start would not see the lock. Fail closed (throw) so a lock that did not happen is
     # never reported as posted (#314).
     $null = Invoke-Gh -GhArgs @('issue','comment',"$n",'--repo',$repo,'--body',$fingerprint) `
-                      -What "postear el comentario [abios-claim] en #$n"
+                      -What "post the [abios-claim] comment on #$n"
     if ($targetOpt) {
         # -Graphql throws on exit OR errors[]: the multi-session LOCK the user believes protects
         # their work must not be reported "OK" when the status move silently no-op'd (#314).
@@ -3607,7 +3607,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
   }) { projectV2Item { id } }
 }'
         $null = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$lockStatusMutation",'-f',"proj=$($ctx.projectId)",'-f',"item=$($item.id)",'-f',"field=$($ctx.statusNode.id)",'-f',"opt=$targetOpt") `
-                          -What "mover #$n a $targetName" -Graphql
+                          -What "move #$n to $targetName" -Graphql
         Write-Host ("OK  #{0} Status -> {1}" -f $n, $targetName) -ForegroundColor Green
     } else {
         Write-Host ("WARN the board has no '{0}' option in Status - only the {1} comment was posted." -f $targetName, $note) -ForegroundColor DarkYellow
@@ -3767,7 +3767,7 @@ if ($CloseLoop) {
             $ans = Read-Host ("PR #{0} was closed without merging. Reopen it and keep going, or discard branch '{1}' for good? [reopen/discard]" -f $pr.number, $curBranch)
             if ($ans -match '^(reabrir|reopen|r)$') {
                 try {
-                    $null = Invoke-Gh -GhArgs @('pr','reopen',"$($pr.number)",'--repo',$repo) -What "reabrir el PR #$($pr.number)"
+                    $null = Invoke-Gh -GhArgs @('pr','reopen',"$($pr.number)",'--repo',$repo) -What "reopen PR #$($pr.number)"
                     Write-Host ("  OK  PR #{0} reopened - keep working on this branch." -f $pr.number) -ForegroundColor Green
                 } catch {
                     Write-Host "  WARN could not reopen the PR - check it by hand." -ForegroundColor DarkYellow
@@ -3843,7 +3843,7 @@ query($o:String!, $r:String!) {
   }
 }'
         $linked = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$linkedQuery",'-f',"o=$($rp[0])",'-f',"r=$($rp[1])") `
-                            -What "leer los boards vinculados a $Repo" -Graphql
+                            -What "read the boards linked to $Repo" -Graphql
         $boards = @($linked.data.repository.projectsV2.nodes |
                     Where-Object { -not $_.closed -and $_.title -notmatch '(?i)backup' } |
                     ForEach-Object { [PSCustomObject]@{ number = $_.number; title = $_.title; ownerLogin = $_.owner.login } })
@@ -3856,7 +3856,7 @@ query($o:String!, $r:String!) {
         Write-Host "=== Boards of $Owner (counting pending, may take a few seconds) ===" -ForegroundColor Cyan
         Write-Host ""
         $projects = (Invoke-Gh -GhArgs @('project','list','--owner',$Owner,'--format','json','--limit','30') `
-                               -What "listar los boards de $Owner" -Json).projects
+                               -What "list the boards of $Owner" -Json).projects
         $boards   = @($projects | Where-Object { $_.title -notmatch '(?i)backup' } |
                       ForEach-Object { [PSCustomObject]@{ number = $_.number; title = $_.title; ownerLogin = $Owner } })
         if ($boards.Count -eq 0) { Write-Host "No boards for $Owner."; exit 0 }
@@ -3870,7 +3870,7 @@ query($o:String!, $r:String!) {
             # It ALSO reports a capped read, which the old --limit 200 swallowed: this picker
             # under-counted every board past the cap and so looked emptier than it was (#484).
             $read    = Get-BoardItems -Number $b.number -Owner $b.ownerLogin `
-                                      -What "listar los items del board #$($b.number)"
+                                      -What "list the items of board #$($b.number)"
             $pending = @($read.Items | Where-Object { Test-Pending $_ }).Count
             $total   = $read.Read
             $trunc   = $read.Truncated
@@ -3937,7 +3937,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     # work and the Backlog falls off the end. At --limit 200 against a 291-item board this printed a
     # confident "Sin pendientes" over 37 open Backlog items (#484).
     $read    = Get-BoardItems -Number $ProjectNum -Owner $Owner `
-                              -What "listar los items del board #$ProjectNum"
+                              -What "list the items of board #$ProjectNum"
     $items   = $read.Items
     $truncWarn = Get-BoardTruncationWarning $read
     $pending = @($items | Where-Object { Test-Pending $_ })
@@ -4093,7 +4093,7 @@ query($owner:String!, $num:Int!) {
   }
 }'
     $projData = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$toReviewQuery",'-F',"owner=$Owner",'-F',"num=$ProjectNum") `
-                          -What "resolver el board #$ProjectNum de $Owner" -Graphql
+                          -What "resolve board #$ProjectNum of $Owner" -Graphql
 
     $projectId  = $projData.data.user.projectV2.id
     if (-not $projectId) { throw "Board #$ProjectNum not found for $Owner." }
@@ -4126,7 +4126,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
   }) { projectV2Item { id } }
 }'
     $null = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$toReviewMutation",'-f',"proj=$projectId",'-f',"item=$($item.id)",'-f',"field=$($statusNode.id)",'-f',"opt=$reviewId") `
-                      -What "mover #$ToReview a In Review" -Graphql
+                      -What "move #$ToReview to In Review" -Graphql
     Write-Host "OK  #$ToReview '$($item.content.title)' -> Status In Review (in review/testing)." -ForegroundColor Green
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0

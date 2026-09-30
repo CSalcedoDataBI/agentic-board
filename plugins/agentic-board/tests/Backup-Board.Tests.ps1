@@ -179,7 +179,7 @@ Describe 'Export-BoardSnapshot: a failed read must not become a "0 of 0 done" re
                                  -Env @{ FAKE_GH_OUT = '{"message":"Not Found"}' }
         Test-Path $script:OutFile | Should -BeFalse
         $out | Should -Not -Match 'Snapshot written'
-        $out | Should -Match "sin 'items'"
+        $out | Should -Match "without 'items'"
     }
 
     It 'renders an EMPTY board as empty - a board with no items is not an error' {

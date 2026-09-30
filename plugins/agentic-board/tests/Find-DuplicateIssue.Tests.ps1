@@ -213,7 +213,7 @@ Describe 'Get-IssueCandidates - the live read fails LOUDLY and honours the close
             }
             [pscustomobject]@{ Output = @('[]'); ExitCode = 0; StdErr = '' }
         }
-        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*abiertos*limite*'
+        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*open issues*limit*'
     }
     It 'THROWS when the closed list fills its page' {
         Mock Invoke-GhRaw {
@@ -224,25 +224,25 @@ Describe 'Get-IssueCandidates - the live read fails LOUDLY and honours the close
             }
             [pscustomobject]@{ Output = @('[]'); ExitCode = 0; StdErr = '' }
         }
-        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*cerrados*limite*'
+        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*closed in the last*limit*'
     }
     It 'THROWS when ONLY the open-issues read fails - the closed read succeeding must not cover for it' {
         Mock Invoke-GhRaw {
             if ($GhArgs -contains 'open') { return [pscustomobject]@{ Output = @(); ExitCode = 1; StdErr = 'gh: HTTP 502' } }
             [pscustomobject]@{ Output = @('[]'); ExitCode = 0; StdErr = '' }
         }
-        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*abiertos*'
+        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*open issues*'
     }
     It 'THROWS when ONLY the closed-issues read fails' {
         Mock Invoke-GhRaw {
             if ($GhArgs -contains 'closed') { return [pscustomobject]@{ Output = @(); ExitCode = 1; StdErr = 'gh: HTTP 502' } }
             [pscustomobject]@{ Output = @('[]'); ExitCode = 0; StdErr = '' }
         }
-        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*cerrados*'
+        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*closed issues*'
     }
     It 'THROWS when gh fails - a failed search must never read as "no duplicates"' {
         Mock Invoke-GhRaw { [pscustomobject]@{ Output = @(); ExitCode = 1; StdErr = 'gh: HTTP 401' } }
-        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*listar los issues*'
+        { Get-IssueCandidates -Repo 'o/r' } | Should -Throw -ExpectedMessage '*list the open issues*'
     }
     It 'asks for the state reason, so a not-planned twin can be reported as such' {
         $script:seen = @()

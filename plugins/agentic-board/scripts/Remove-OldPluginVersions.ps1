@@ -39,35 +39,35 @@ function Format-CleanupReport {
     $acc = [System.Collections.Generic.List[object]]::new()
     $add = { param($t, $c) $acc.Add([pscustomobject]@{ Text = $t; Color = $c }) }
     if (-not $Plan.Ok) {
-        & $add "No borro nada: $($Plan.Reason)." 'Red'
+        & $add "Deleting nothing: $($Plan.Reason)." 'Red'
         return @($acc)
     }
     $rm = @($Plan.Items | Where-Object { $_.Action -eq 'remove' })
     $kept = @($Plan.Items | Where-Object { $_.Action -ne 'remove' })
     $executed = ($null -ne $Removed)
     if ($rm.Count -eq 0) {
-        & $add 'No hay versiones viejas sin uso que borrar.' 'Green'
+        & $add 'No unused old versions to delete.' 'Green'
     } elseif (-not $executed) {
         $total = [long](($rm | Measure-Object SizeBytes -Sum).Sum)
-        & $add ("Versiones viejas que nadie usa: {0} (unos {1}). NO se ha borrado nada; para borrarlas usa /cleanup plugins clean -Execute." -f $rm.Count, (Format-CleanupMegabytes $total)) 'Cyan'
+        & $add ("Old versions nobody uses: {0} (about {1}). NOTHING has been deleted; to delete them use /cleanup plugins clean -Execute." -f $rm.Count, (Format-CleanupMegabytes $total)) 'Cyan'
         foreach ($i in $rm) { & $add ("  {0}@{1}  version {2}  ({3})" -f $i.Plugin, $i.Marketplace, $i.Version, (Format-CleanupMegabytes $i.SizeBytes)) 'Gray' }
     } else {
         $freed = [long](($Removed | Measure-Object SizeBytes -Sum).Sum)
-        & $add ("Borradas: {0} (unos {1} liberados)." -f @($Removed).Count, (Format-CleanupMegabytes $freed)) 'Green'
+        & $add ("Deleted: {0} (about {1} freed)." -f @($Removed).Count, (Format-CleanupMegabytes $freed)) 'Green'
         foreach ($i in $Removed) { & $add ("  {0}@{1}  version {2}" -f $i.Plugin, $i.Marketplace, $i.Version) 'Gray' }
         if (@($Failed).Count -gt 0) {
-            & $add ("No se pudieron borrar: {0}" -f @($Failed).Count) 'Red'
+            & $add ("Could not delete: {0}" -f @($Failed).Count) 'Red'
             foreach ($i in $Failed) { & $add ("  {0}@{1}  version {2}: {3}" -f $i.Plugin, $i.Marketplace, $i.Version, $i.FailReason) 'Red' }
         }
     }
     if ($kept.Count -gt 0) {
         $names = @{
-            'installed' = 'instaladas'; 'in-use' = 'en uso por una sesion abierta'
-            'unknown-holder' = 'sin poder confirmar quien las usa'; 'link' = 'enlaces o con enlaces dentro'
-            'outside' = 'fuera de la carpeta de versiones'; 'recent' = 'tocadas hace muy poco'
+            'installed' = 'installed'; 'in-use' = 'in use by an open session'
+            'unknown-holder' = 'with no way to confirm who uses them'; 'link' = 'links or with links inside'
+            'outside' = 'outside the versions folder'; 'recent' = 'touched very recently'
         }
         $parts = @($kept | Group-Object Category | Sort-Object Name | ForEach-Object { "{0} {1}" -f $_.Count, $(if ($names.ContainsKey($_.Name)) { $names[$_.Name] } else { $_.Name }) })
-        & $add ("Se conservan {0}: {1}." -f $kept.Count, ($parts -join '; ')) 'Gray'
+        & $add ("Kept {0}: {1}." -f $kept.Count, ($parts -join '; ')) 'Gray'
         if ($ShowKept) { foreach ($i in $kept) { & $add ("  {0}@{1}  version {2}: {3}" -f $i.Plugin, $i.Marketplace, $i.Version, $i.Reason) 'DarkGray' } }
     }
     return @($acc)

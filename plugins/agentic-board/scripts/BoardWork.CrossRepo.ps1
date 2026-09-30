@@ -175,7 +175,7 @@ function Get-SessionPrStates {
     foreach ($p in @($Prs | Where-Object { $_ -and $_.repo -and $_.number })) {
         try {
             $one = Invoke-Gh -GhArgs @('pr', 'view', "$($p.number)", '--repo', "$($p.repo)", '--json', 'state') `
-                             -What "leer el PR $($p.repo)#$($p.number)" -Json
+                             -What "read PR $($p.repo)#$($p.number)" -Json
             if ($one -and $one.state) { $states["$($p.repo)#$($p.number)"] = [string]$one.state }
         } catch { }
     }

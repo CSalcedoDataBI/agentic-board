@@ -212,7 +212,7 @@ query(`$o:String!, `$n:Int!, `$cursor:String) {
 "@
         $ghArgs = @('api','graphql','-f',"query=$q",'-F',"o=$Owner",'-F',"n=$ProjectNum")
         if ($cursor) { $ghArgs += @('-f',"cursor=$cursor") }
-        $resp  = Invoke-Gh -GhArgs $ghArgs -What "leer los items del board #$ProjectNum" -Graphql
+        $resp  = Invoke-Gh -GhArgs $ghArgs -What "read the items of board #$ProjectNum" -Graphql
         $items = $resp.data.user.projectV2.items
         return @{ nodes = $items.nodes; hasNext = $items.pageInfo.hasNextPage; endCursor = $items.pageInfo.endCursor }
     }

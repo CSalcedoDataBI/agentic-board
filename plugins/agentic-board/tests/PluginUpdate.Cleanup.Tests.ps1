@@ -163,7 +163,7 @@ Describe 'Invoke-PluginCleanup re-checks right before deleting (the plan is a mo
         Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '0.9') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '1.0') | Should -BeFalse
         @($out.Removed).Count | Should -Be 1
-        (@($out.Failed)[0].FailReason) | Should -Match 'justo antes de borrarla'
+        (@($out.Failed)[0].FailReason) | Should -Match 'right before deleting it'
     }
     It 'a build that is still removable at the re-check is deleted' {
         $fx = New-CleanFx
@@ -290,7 +290,7 @@ Describe 'the script: default is a listing, only -Execute deletes' {
         $fx = New-CleanFx
         $out = pwsh -NoProfile -File $script:Script -ClaudeHome $fx.Root 2>&1 | Out-String
         $LASTEXITCODE | Should -Be 0
-        $out | Should -Match 'NO se ha borrado nada'
+        $out | Should -Match 'NOTHING has been deleted'
         Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '1.0') | Should -BeTrue
     }
     It 'with -Execute it deletes the unused build and keeps the installed one' {
@@ -303,6 +303,6 @@ Describe 'the script: default is a listing, only -Execute deletes' {
         Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '1.0') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' '2.0') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'm' 'p' 'held') | Should -BeTrue
-        $out | Should -Match 'Borradas: 1'
+        $out | Should -Match 'Deleted: 1'
     }
 }

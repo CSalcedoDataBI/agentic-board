@@ -138,18 +138,18 @@ function Get-IssueCandidates {
     $since = (Get-Date).ToUniversalTime().AddDays(-1 * $ClosedDays)
 
     $open = @(Invoke-Gh -GhArgs @('issue', 'list', '--repo', $Repo, '--state', 'open', '--limit', "$openLimit", '--json', $fields) `
-                        -What "listar los issues abiertos de $Repo" -Json -Retries 1)
+                        -What "list the open issues of $Repo" -Json -Retries 1)
     # The closed list is filtered SERVER-SIDE by closing date. Without it `gh issue list` returns the
     # newest 300 CREATED issues, and this repo has more closed issues than that: a defect closed last
     # week but created long ago would fall off the list and read as "not filed" (found by counting -
     # the unfiltered closed list hits its limit here).
     $closed = @(Invoke-Gh -GhArgs @('issue', 'list', '--repo', $Repo, '--state', 'closed', '--search', ("closed:>={0:yyyy-MM-dd}" -f $since), '--limit', "$closedLimit", '--json', $fields) `
-                          -What "listar los issues cerrados de $Repo" -Json -Retries 1)
+                          -What "list the closed issues of $Repo" -Json -Retries 1)
 
     # A list that FILLS its page may be missing entries. "No duplicate found" on a truncated list is a
     # claim nobody checked, so it fails instead.
-    if ($open.Count -ge $openLimit)     { throw "la lista de issues abiertos de $Repo llego al limite ($openLimit): no puedo garantizar que este completa." }
-    if ($closed.Count -ge $closedLimit) { throw "la lista de issues cerrados de $Repo en los ultimos $ClosedDays dias llego al limite ($closedLimit): no puedo garantizar que este completa. Reduce -ClosedDays." }
+    if ($open.Count -ge $openLimit)     { throw "the list of open issues of $Repo hit its limit ($openLimit): I cannot guarantee it is complete." }
+    if ($closed.Count -ge $closedLimit) { throw "the list of issues of $Repo closed in the last $ClosedDays days hit its limit ($closedLimit): I cannot guarantee it is complete. Lower -ClosedDays." }
 
     $recent = @($closed | Where-Object {
         if (-not $_.closedAt) { return $false }

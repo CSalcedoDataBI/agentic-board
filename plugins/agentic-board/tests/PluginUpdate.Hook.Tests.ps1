@@ -58,15 +58,15 @@ Describe 'Invoke-StaleNotice - the decision' {
     It 'tells the session, in plain words, that a plugin it loaded was updated and to type /reload-plugins' {
         $sc = New-StaleScenario
         $note = Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir (New-StateDir)
-        $note | Should -Match 'Se actualizo el plugin "p" a la version 2\.0'
-        $note | Should -Match 'sigue con la 1\.0'
+        $note | Should -Match 'Plugin "p" was updated to version 2\.0'
+        $note | Should -Match 'still on 1\.0'
         $note | Should -Match '/reload-plugins'
-        $note | Should -Not -Match 'sesion nueva'
+        $note | Should -Not -Match 'new session'
     }
     It 'a plugin that ships an MCP server says "open a new session", not /reload-plugins' {
         $sc = New-StaleScenario -Mcp
         $note = Invoke-StaleNotice -StdinText $sc.Payload -ClaudeHome $sc.Fx.Root -StateDir (New-StateDir)
-        $note | Should -Match 'abre una sesion nueva'
+        $note | Should -Match 'open a new session'
         $note | Should -Not -Match '/reload-plugins'
     }
     It 'says it ONCE per (session, plugin, new build): the second prompt is silent' {
@@ -262,7 +262,7 @@ Describe 'the real hook script over real stdin' {
         New-Item -ItemType Directory -Force -Path $home_ | Out-Null
         $r = Invoke-HookProcess -Stdin $payload -ClaudeHome $sc.Fx.Root -HomeDir $home_
         $r.ExitCode | Should -Be 0
-        ($r.Stdout | ConvertFrom-Json).systemMessage | Should -Match 'Se actualizo el plugin'
+        ($r.Stdout | ConvertFrom-Json).systemMessage | Should -Match 'Plugin "p" was updated'
     }
     It 'garbage, empty and missing stdin all exit 0 with no output and no error text' {
         $sc = New-StaleScenario

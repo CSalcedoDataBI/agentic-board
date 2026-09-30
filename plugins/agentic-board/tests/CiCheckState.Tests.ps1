@@ -204,7 +204,7 @@ Describe 'Get-FailedCheckJobFacts - reads job facts for failed checks only, fail
         function script:Invoke-Gh {
             param([string[]]$GhArgs, [string]$What, [switch]$Json, [int]$Retries, [switch]$Graphql, [switch]$StdIn)
             $script:Calls.Add(($GhArgs -join ' '))
-            if ($env:FAKE_JOB_MODE -eq 'throw') { throw "No pude $What (gh exit 1)" }
+            if ($env:FAKE_JOB_MODE -eq 'throw') { throw "Could not $What (gh exit 1)" }
             if ($GhArgs -join ' ' -match '/jobs/89284023176$') { return $script:JobNeverRan }
             return $script:JobBroken
         }

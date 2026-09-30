@@ -93,7 +93,7 @@ Describe 'Board-Work graphql reads fail closed (#314, part of #303)' {
             # A null-id guard already throws here, so a bare Should -Throw would pass even
             # un-hardened (for the wrong reason). Assert the MESSAGE so only -Graphql satisfies it.
             Mock Invoke-GhRaw { [pscustomobject]@{ Output = '{"data":null,"errors":[{"message":"boom"}]}'; ExitCode = 0; StdErr = '' } }
-            { Resolve-BoardStatus 'owner' 13 } | Should -Throw -ExpectedMessage '*resolver el board*'
+            { Resolve-BoardStatus 'owner' 13 } | Should -Throw -ExpectedMessage '*resolve board*'
         }
         It 'returns the context (id + In Progress option) on a successful read - empty is not failure' {
             Mock Invoke-GhRaw { [pscustomobject]@{ Output = '{"data":{"user":{"projectV2":{"id":"PID","fields":{"nodes":[{"id":"F","name":"Status","options":[{"id":"O","name":"In Progress"}]}]}}}}}'; ExitCode = 0; StdErr = '' } }
@@ -109,7 +109,7 @@ Describe 'Invoke-BatchIssueStart (a fail-closed throw must not abort the -Parall
     # abort the whole foreach and skip the summary - so the batch wraps each start and converts a
     # throw into a recorded skip. Mocking Invoke-IssueStart keeps this off git and the network.
     It 'converts a throw into a skip result so the batch keeps going' {
-        Mock Invoke-IssueStart { throw "No pude mover #7 a In Progress (gh exit 1)" }
+        Mock Invoke-IssueStart { throw "Could not move #7 to In Progress (gh exit 1)" }
         $r = Invoke-BatchIssueStart -IssueNum 7 -Ctx $script:Ctx -Owner 'me'
         $r.started | Should -BeFalse
         $r.issue   | Should -Be 7

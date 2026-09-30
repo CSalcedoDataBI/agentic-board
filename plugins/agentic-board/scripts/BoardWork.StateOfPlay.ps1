@@ -345,7 +345,7 @@ function Read-StateOpenIssues {
         do {
             $ghArgs = @('api', 'graphql', '-f', "query=$query", '-f', "o=$($parts[0])", '-f', "r=$($parts[1])")
             if ($cursor) { $ghArgs += @('-f', "cursor=$cursor") }
-            $resp = Invoke-Gh -GhArgs $ghArgs -What "leer los issues abiertos de $Repo" -Graphql
+            $resp = Invoke-Gh -GhArgs $ghArgs -What "read the open issues of $Repo" -Graphql
             $page = $resp.data.repository.issues
             if (-not $page -or -not $page.pageInfo) { throw "response without the issue list of $Repo" }
             $all += @($page.nodes | Where-Object { $null -ne $_ })
@@ -364,7 +364,7 @@ function Read-StateOpenPrs {
     try {
         $prs = @((Invoke-Gh -GhArgs @('pr', 'list', '--repo', $Repo, '--state', 'open', '--limit', "$Cap",
                                       '--json', 'number,title,headRefName,isDraft,labels') `
-                            -What "listar los PRs abiertos de $Repo" -Json) | Where-Object { $null -ne $_ })
+                            -What "list the open PRs of $Repo" -Json) | Where-Object { $null -ne $_ })
         [pscustomobject]@{ Ok = $true; Prs = $prs; Error = '' }
     } catch {
         [pscustomobject]@{ Ok = $false; Prs = @(); Error = $_.Exception.Message }
@@ -410,7 +410,7 @@ function Read-StateWorktreeVerdicts {
         try {
             $prs = @((Invoke-Gh -GhArgs @('pr', 'list', '--repo', $Repo, '--head', $w.Branch, '--state', 'all',
                                           '--json', 'number,state,headRefOid', '--limit', '20') `
-                                -What "leer el PR de la rama $($w.Branch)" -Json) | Where-Object { $null -ne $_ })
+                                -What "read the PR of branch $($w.Branch)" -Json) | Where-Object { $null -ne $_ })
             $mine = @($prs | Where-Object { $w.Head -and $_.headRefOid -eq $w.Head }) | Select-Object -First 1
             $merged = $false; $pr = 0
             if ($mine) {

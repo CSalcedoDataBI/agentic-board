@@ -653,7 +653,7 @@ if (-not $env:GH_TOKEN -and $Owner) {
     # Routed through Invoke-Gh for the raw-gh ratchet (#571); an unauthenticated login makes
     # it THROW, which this guard tolerates on purpose - the catch text simply carries no
     # 'project' scope, so the check falls through to the registry PAT exactly as before.
-    $ghStatus         = try { (Invoke-Gh -GhArgs @('auth', 'status') -What 'leer los scopes del login gh ambiente') | Out-String } catch { "$_" }
+    $ghStatus         = try { (Invoke-Gh -GhArgs @('auth', 'status') -What 'read the scopes of the ambient gh login') | Out-String } catch { "$_" }
     $ambientOk        = Test-GhScope -Scope 'project' -StatusText $ghStatus
     $registryToken    = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
     if ($ambientOk) {
@@ -763,7 +763,7 @@ query($o:String!,$r:String!,$n:Int!,$c:String){
 }','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$Epic")
         if ($cursor) { $ghArgs += @('-f',"c=$cursor") }
         # -Graphql throws on exit code OR errors[] - a partial list must never classify a wave.
-        $pageData = Invoke-Gh -GhArgs $ghArgs -What "leer los sub-issues del epic #$Epic" -Graphql
+        $pageData = Invoke-Gh -GhArgs $ghArgs -What "read the sub-issues of epic #$Epic" -Graphql
         $page = $pageData.data.repository.issue.subIssues
         if ($null -eq $page -or $null -eq $page.pageInfo) { throw "Expert-Auto: the response for epic #$Epic has no subIssues - not dispatching from a partial list." }
         $subs += @($page.nodes | Where-Object { $_ })
@@ -805,7 +805,7 @@ query($o:String!,$r:String!,$n:Int!){
       pageInfo { hasNextPage }
       nodes { number state } } }
   }
-}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$($s.number)") -What "leer los PRs del sub-issue #$($s.number)" -Graphql
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$($s.number)") -What "read the PRs of sub-issue #$($s.number)" -Graphql
             $issueNode = $lw.data.repository.issue
             if ($null -eq $issueNode) { throw "no issue node" }
             # Another page = facts we did not see (round 3): an OPEN PR could hide there, so the
@@ -1000,7 +1000,7 @@ if ($ProjectNum -gt 0) {
     $boardOwner = if ($Owner) { $Owner } elseif ($repo) { ($repo -split '/')[0] } else { 'CSalcedoDataBI' }
     $resolvedUrl = ''
     try {
-        $pv = Invoke-Gh -GhArgs @('project', 'view', "$ProjectNum", '--owner', $boardOwner, '--format', 'json') -What "leer el board #$ProjectNum de $boardOwner" -Json
+        $pv = Invoke-Gh -GhArgs @('project', 'view', "$ProjectNum", '--owner', $boardOwner, '--format', 'json') -What "read board #$ProjectNum of $boardOwner" -Json
         $resolvedUrl = "$($pv.url)"
     } catch { }
     Write-Host ""

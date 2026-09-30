@@ -17,7 +17,7 @@ $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
 # The alias -> login map lives in Resolve-GhTokenVar now too (#665): this was a second copy of it,
 # documented as "kept in one place", and it is the copy a rename left stale.
 $user  = Get-AccountForAlias -Alias $Account
-if (-not $user) { Write-Error "Alias de cuenta desconocido '$Account'. Validos: $((Get-KnownAccountAliases) -join ', ')."; exit 1 }
+if (-not $user) { Write-Error "Unknown account alias '$Account'. Valid: $((Get-KnownAccountAliases) -join ', ')."; exit 1 }
 $sel   = @{ User = $user; Var = (Get-OwnerTokenVar -Owner $user) }
 $token = [System.Environment]::GetEnvironmentVariable($sel.Var, 'User')
 if ([string]::IsNullOrWhiteSpace($token)) {
