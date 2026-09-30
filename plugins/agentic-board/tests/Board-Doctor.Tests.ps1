@@ -87,8 +87,8 @@ Describe 'Board-Doctor parameter binding survives the dot-source' {
         # of PR #280 - each of these failed OPEN before.
         $src = Get-Content $script:Script -Raw
         $src | Should -Match 'if \(\$LASTEXITCODE -ne 0 -or \$null -eq \$prJson\)'   # gh pr list
-        $src | Should -Match "'git for-each-ref' fallo"                              # branch inventory
-        $src | Should -Match "'git worktree list' fallo"                             # worktree inventory
+        $src | Should -Match "'git for-each-ref' failed"                            # branch inventory
+        $src | Should -Match "'git worktree list' failed"                           # worktree inventory
         $src | Should -Match 'if \(-not \$registryTrusted\)'                         # registry veto
     }
 }
@@ -306,7 +306,7 @@ Describe 'Get-BranchClass (branches with no PR)' {
     It 'fails closed: an unreadable worktree is never treated as clean' {
         $r = Invoke-Classify @{ Dirty = 'unknown' }
         $r.Class | Should -Be 'dirty'
-        $r.Reason | Should -Match 'no pude comprobar'
+        $r.Reason | Should -Match 'could not check'
     }
 }
 
@@ -385,7 +385,7 @@ Describe 'the -Fix terminal guard and -Auto (#285)' {
         }, $true))
         $calls.Count | Should -Be 1
         # ...and it is the merged walk, identifiable by its prompt.
-        $calls[0].Extent.Text | Should -Match 'mergeado'
+        $calls[0].Extent.Text | Should -Match 'merged\)\?'
     }
     It 'only lets -Auto skip a prompt when that call site opted in' {
         (Get-Content $script:Script -Raw) | Should -Match 'if \(\$Auto -and \$AutoOk\) \{ return \$true \}'
@@ -404,7 +404,7 @@ Describe 'the -Fix terminal guard and -Auto (#285)' {
     }
     It 'skips the unmerged walk entirely under -Auto rather than prompting into the void' {
         $src = Get-Content $script:Script -Raw
-        $src | Should -Match '-Auto NO las toca'
+        $src | Should -Match '-Auto does NOT touch them'
     }
 }
 

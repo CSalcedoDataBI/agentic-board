@@ -136,7 +136,7 @@ Describe 'Select-PluginVersionFile — deterministic plugin.json, never a recurs
     }
     It 'THROWS on genuine ambiguity rather than guessing (the stale-worktree bug)' {
         { Select-PluginVersionFile -Candidates @('C:\a\plugin.json', 'C:\b\plugin.json') } |
-            Should -Throw '*ambigua*'
+            Should -Throw '*Ambiguous version*'
     }
     It 'ignores blank/null entries' {
         Select-PluginVersionFile -Candidates @('', 'C:\a\plugin.json', $null) |

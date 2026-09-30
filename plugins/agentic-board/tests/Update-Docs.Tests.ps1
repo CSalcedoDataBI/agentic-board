@@ -196,19 +196,22 @@ Describe 'Set-MarkedRegion' {
 Describe 'Format-ClosingSummaryPrompt (#493)' {
     BeforeAll {
         $script:SampleBlocks = @(
-            [pscustomobject]@{ Key = 'Found'; Label = 'Que encontre'; Empty = 'Nada fuera de lo esperado.' }
-            [pscustomobject]@{ Key = 'Did';   Label = 'Que hice';     Empty = 'Nada - no se cambio nada.' }
+            [pscustomobject]@{ Key = 'Found'; Label = 'What I found'; Empty = 'Nothing unexpected.' }
+            [pscustomobject]@{ Key = 'Did';   Label = 'What I did';   Empty = 'Nothing - nothing was changed.' }
         )
     }
     It 'renders one numbered row per block, in the order given' {
         $out = Format-ClosingSummaryPrompt -Blocks $script:SampleBlocks
-        $out | Should -Match '(?m)^\| 1 \| \*\*Que encontre\*\* \|'
-        $out | Should -Match '(?m)^\| 2 \| \*\*Que hice\*\* \|'
+        $out | Should -Match '(?m)^\| 1 \| \*\*What I found\*\* \|'
+        $out | Should -Match '(?m)^\| 2 \| \*\*What I did\*\* \|'
         ([regex]::Matches($out, '(?m)^\| \d+ \|')).Count | Should -Be 2
     }
     It 'carries each block''s when-empty sentence, so the prompt and the renderer agree' {
         $out = Format-ClosingSummaryPrompt -Blocks $script:SampleBlocks
         foreach ($b in $script:SampleBlocks) { $out | Should -BeLike "*$($b.Empty)*" }
+    }
+    It 'tells the agent to write the headings in the user''s language (#751)' {
+        Format-ClosingSummaryPrompt -Blocks $script:SampleBlocks | Should -Match '(?s)language the user is speaking.*translate the headings'
     }
     It 'tells the reader never to drop a block' {
         Format-ClosingSummaryPrompt -Blocks $script:SampleBlocks | Should -Match '(?i)never drop'

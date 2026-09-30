@@ -52,7 +52,7 @@ Describe 'Board-Work.ps1 -PreferGroupedPRs outside a git repo' {
             $out = & $script:Script -PreferGroupedPRs on -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 6>&1 2>&1 | Out-String
             Pop-Location
         } finally { $env:GH_TOKEN = $saved }
-        $out | Should -Match 'no hay donde guardar la preferencia'
+        $out | Should -Match 'nowhere to save the preference'
     }
 }
 
@@ -61,7 +61,7 @@ Describe 'Board-Work.ps1 -PreferGroupedPRs' {
         $repo = New-ThrowawayRepo 'pref-no-token'
         $r = Invoke-PreferenceWithoutToken -Repo $repo -Value 'on'
         $r.output | Should -Not -Match 'not set in Windows USER environment'
-        $r.output | Should -Match 'Preferencia del repo guardada'
+        $r.output | Should -Match 'Repo preference saved'
 
         $cfg = Join-Path $repo '.agentic-board' 'config.json'
         Test-Path $cfg | Should -BeTrue
@@ -86,7 +86,7 @@ Describe 'Board-Work.ps1 -PreferGroupedPRs' {
     It 'says what it recorded in the words of the decision, not in tool jargon' {
         $repo = New-ThrowawayRepo 'pref-words'
         $r = Invoke-PreferenceWithoutToken -Repo $repo -Value 'on'
-        $r.output | Should -Match 'De ahora en adelante'
+        $r.output | Should -Match 'From now on'
         # #494: no internal script names in user-facing output.
         $r.output | Should -Not -Match '\.ps1'
     }

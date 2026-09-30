@@ -146,7 +146,7 @@ function Update-ChangelogText {
         $newText = $Original.Substring(0, $unrel.Index) + $merged + "`n`n" + $tail
         $n = 0; foreach ($k in $Sections.Keys) { $n += @($Sections[$k]).Count }
         return [pscustomobject]@{ Changed = $true; Text = $newText
-            Message = ("[Unreleased] renombrado a [{0}] - {1}; {2} entrada(s) del board fusionada(s)." -f $Version, $Date, $n) }
+            Message = ("[Unreleased] renamed to [{0}] - {1}; {2} board entry(ies) merged." -f $Version, $Date, $n) }
     }
     if ($Block -match '(?m)^###') {
         if ($Original -match '(?s)^(#\s+Changelog\s*\r?\n)(\r?\n)?(.*)$') {
@@ -155,10 +155,10 @@ function Update-ChangelogText {
             $newText = $Block + "`n`n" + $Original
         }
         return [pscustomobject]@{ Changed = $true; Text = $newText
-            Message = ("bloque [{0}] insertado bajo el encabezado." -f $Version) }
+            Message = ("block [{0}] inserted under the heading." -f $Version) }
     }
     return [pscustomobject]@{ Changed = $false; Text = $Original
-        Message = "nada que escribir (sin [Unreleased] y sin issues nuevos)." }
+        Message = "nothing to write (no [Unreleased] and no new issues)." }
 }
 
 # Pick THE plugin.json to read the version from, deterministically (#319). The old code did a
@@ -174,7 +174,7 @@ function Select-PluginVersionFile {
     $u = @($Candidates | Where-Object { $_ } | Sort-Object -Unique)
     if ($u.Count -eq 0) { return $null }
     if ($u.Count -gt 1) {
-        throw "Version ambigua: varios plugin.json candidatos (resuelve con -Version):`n  $($u -join "`n  ")"
+        throw "Ambiguous version: several candidate plugin.json files (resolve with -Version):`n  $($u -join "`n  ")"
     }
     return $u[0]
 }
@@ -332,7 +332,7 @@ if (-not $Repo) {
     $originUrl = git remote get-url origin 2>$null
     $Repo = Get-RepoFromOriginUrl $originUrl
 }
-if (-not $Repo) { throw "No pude derivar el repo del origin - pasa -Repo owner/name." }
+if (-not $Repo) { throw "Could not work out the repo from origin - pass -Repo owner/name." }
 
 # ── Existing CHANGELOG: cited issue numbers + last entry date ─────────────────
 $alreadyCited = @{}
@@ -422,10 +422,10 @@ query(`$owner:String!, `$num:Int!, `$cursor:String) {
 "@
     $ghArgs = @('api','graphql','-f',"query=$q",'-F',"owner=$Owner",'-F',"num=$ProjectNum")
     if ($cursor) { $ghArgs += @('-f',"cursor=$cursor") }
-    $data = Invoke-Gh -GhArgs $ghArgs -What "leer los items del board #$ProjectNum de $Owner" -Graphql
+    $data = Invoke-Gh -GhArgs $ghArgs -What "read the items of board #$ProjectNum of $Owner" -Graphql
     $pv = $data.data.user.projectV2
     if (-not $pv.id) {
-        throw "No pude resolver el board #$ProjectNum de $Owner (revisa cuenta / scope 'project')."
+        throw "Could not resolve board #$ProjectNum of $Owner (check the account / 'project' scope)."
     }
     $nodes += @($pv.items.nodes)
     $cursor = $pv.items.pageInfo.endCursor
@@ -455,18 +455,18 @@ foreach ($secName in $sections.Keys) {
 $block = $sb.ToString().TrimEnd()
 
 Write-Host "=== Board-Changelog  $Repo  board #$ProjectNum ===" -ForegroundColor Cyan
-Write-Host ("  Since: {0}  |  incluidos: {1}  |  omitidos: {2} otro-repo, {3} ya-citados (incl. rangos), {4} anteriores, {5} no-planeados" -f `
-    ($(if ($Since) { $Since } else { "(todo)" })), $included, $skippedRepo, $skippedCited, $skippedOld, (Get-SkipCount 'not-planned')) -ForegroundColor DarkGray
+Write-Host ("  Since: {0}  |  included: {1}  |  skipped: {2} other-repo, {3} already-cited (incl. ranges), {4} older, {5} not-planned" -f `
+    ($(if ($Since) { $Since } else { "(all)" })), $included, $skippedRepo, $skippedCited, $skippedOld, (Get-SkipCount 'not-planned')) -ForegroundColor DarkGray
 # Nothing is dropped silently: what a human may want to place by hand is named, with the reason.
 $review = @($sel.Skipped | Where-Object { $_.reason -in @('no-merged-pr', 'pr-before-release', 'unknown-prs', 'unclassified') })
 if ($review.Count -gt 0) {
-    Write-Host "  Cerrados pero NO incluidos (revisa a mano si corresponden a este release):" -ForegroundColor Yellow
+    Write-Host "  Closed but NOT included (check by hand whether they belong to this release):" -ForegroundColor Yellow
     foreach ($r in $review) {
         $why = switch ($r.reason) {
-            'no-merged-pr'      { 'no lo cerro ningun PR mergeado' }
-            'pr-before-release' { 'su PR se mergeo antes de este release' }
-            'unknown-prs'       { 'tiene mas PRs de los que se leyeron: no se pudo establecer cual lo cerro' }
-            'unclassified'      { 'sin Type ni label: no se en que seccion va' }
+            'no-merged-pr'      { 'no merged PR closed it' }
+            'pr-before-release' { 'its PR was merged before this release' }
+            'unknown-prs'       { 'it has more PRs than were read: could not tell which one closed it' }
+            'unclassified'      { 'no Type and no label: unknown which section it goes in' }
         }
         Write-Host ("    #{0}  {1}  - {2}" -f $r.number, $r.title, $why) -ForegroundColor DarkYellow
     }
@@ -480,18 +480,18 @@ if ($any) {
     # No new board entries. In print-only mode there is nothing to do; but under -Write a
     # hand-written [Unreleased] must still be RENAMED to this version (a release can ship with
     # only curated prose and no newly-Done issues), so do NOT exit before the write below.
-    Write-Host "  Sin issues Done nuevos para changelog (nada desde $Since que no este ya citado)." -ForegroundColor Green
+    Write-Host "  No new Done issues for the changelog (nothing since $Since that is not already cited)." -ForegroundColor Green
     if (-not $Write) { exit 0 }
 }
 
 # ── Optionally write into the CHANGELOG ───────────────────────────────────────
 if ($Write) {
-    if (-not (Test-Path $ChangelogPath)) { throw "No existe $ChangelogPath - no puedo insertar." }
+    if (-not (Test-Path $ChangelogPath)) { throw "$ChangelogPath does not exist - cannot insert." }
     $orig   = Get-Content $ChangelogPath -Raw
     $result = Update-ChangelogText -Original $orig -Block $block -Sections $sections -Version $Version -Date $Date
     if ($result.Changed) {
         Set-Content -Path $ChangelogPath -Value $result.Text -NoNewline
-        Write-Host "OK  $($result.Message) (revisa y commitea)." -ForegroundColor Green
+        Write-Host "OK  $($result.Message) (review and commit)." -ForegroundColor Green
     } else {
         Write-Host "  $($result.Message)" -ForegroundColor DarkGray
     }

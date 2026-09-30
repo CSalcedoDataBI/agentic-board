@@ -43,13 +43,13 @@ whose visibility could not be read is named and excluded, not guessed.
 
 ## 2. Rules over `.github/workflows/*.yml`
 
-Every finding names `file:line` and quotes that line. Severity: `ALTA` / `MEDIA` / `BAJA` are
-violations; `CONSEJO` is advice; `OBSERVACION` is information only.
+Every finding names `file:line` and quotes that line. Severity: `HIGH` / `MEDIUM` / `LOW` are
+violations; `ADVICE` is advice; `OBSERVATION` is information only.
 
 | Rule | What it flags | Notes |
 |---|---|---|
-| R1 | the same job on `pull_request` **and** `push` | two overlaps, told apart because `pull_request.branches` filters the PR **base** and `push.branches` the **pushed** branch: a push to the default branch re-runs the verdict the PR paid for (MEDIA), and a push to a branch a PR can be opened from (a wildcard like `feature/**`: MEDIA; a literal name like `develop`: BAJA) runs next to the PR run. A push that covers every branch (no branch list, only `branches-ignore`, or `**`) double-runs every PR-branch commit (ALTA). A job whose `if:` tests `github.event_name` / `github.ref` is treated as separating the events. Tag-only pushes are not a second run. |
-| R2 | no `concurrency` + `cancel-in-progress: true` | judged per unit: the workflow's own `concurrency`, or — when it has none — each job's own, so a job that cancels never hides one that does not (jobs with none are named). Release/deploy workflows (name or file matches release/deploy/publish) are the exception: there it must be `false` — `true` is ALTA, no concurrency is BAJA. The classification is by name and is shown so you can overrule it. |
+| R1 | the same job on `pull_request` **and** `push` | two overlaps, told apart because `pull_request.branches` filters the PR **base** and `push.branches` the **pushed** branch: a push to the default branch re-runs the verdict the PR paid for (MEDIUM), and a push to a branch a PR can be opened from (a wildcard like `feature/**`: MEDIUM; a literal name like `develop`: LOW) runs next to the PR run. A push that covers every branch (no branch list, only `branches-ignore`, or `**`) double-runs every PR-branch commit (HIGH). A job whose `if:` tests `github.event_name` / `github.ref` is treated as separating the events. Tag-only pushes are not a second run. |
+| R2 | no `concurrency` + `cancel-in-progress: true` | judged per unit: the workflow's own `concurrency`, or — when it has none — each job's own, so a job that cancels never hides one that does not (jobs with none are named). Release/deploy workflows (name or file matches release/deploy/publish) are the exception: there it must be `false` — `true` is HIGH, no concurrency is LOW. The classification is by name and is shown so you can overrule it. |
 | R3 | a job without `timeout-minutes` | counts the jobs **in the file**, not the ones a request mentions; a reusable-workflow call is skipped (it takes none); an explicit 360 is flagged (it limits nothing). |
 | R4 | `pull_request` workflow with no `paths` / `paths-ignore` | advice only — whether a workflow can be affected by a path is a human call. Carries the deadlock verdict below and the content-site caution (when the `.md` **is** the product it must not be ignored). |
 | R5 | `windows-*` (×2) / `macos-*` (×10) on a branch push | `runs-on: ${{ matrix.os }}` is resolved from the matrix (a matrix with `exclude` is reported as not measured, not guessed); tag-only pushes, PR-only workflows and `self-hosted` runners (no GitHub-hosted minutes) are not flagged. |
@@ -66,7 +66,7 @@ paths never triggers the workflow, the check never reports, and GitHub parks the
 waiting for status" forever (the only way out is the admin bypass in the ruleset). So wherever the
 audit sees a path filter, or suggests one (R4), it reads the branch's required checks — rulesets
 via `rules/branches/<branch>` **and** classic branch protection — matches them to job names
-(`name:` or the job id; a matrix appends ` (values)`; a name like `Test ${{ matrix.os }}` is matched by its literal prefix; a job that calls a reusable workflow reports `caller / called`), and says whether the workflow is required. `pull_request_target` counts like `pull_request`. A job whose name has an expression is matched by its literal prefix, which can collide with an unrelated check, so that finding is MEDIA and says so; a name that STARTS with an expression cannot be matched at all, and is reported as not measured.
+(`name:` or the job id; a matrix appends ` (values)`; a name like `Test ${{ matrix.os }}` is matched by its literal prefix; a job that calls a reusable workflow reports `caller / called`), and says whether the workflow is required. `pull_request_target` counts like `pull_request`. A job whose name has an expression is matched by its literal prefix, which can collide with an unrelated check, so that finding is MEDIUM and says so; a name that STARTS with an expression cannot be matched at all, and is reported as not measured.
 When the required checks cannot be read completely it says **that** instead of claiming a filter
 is safe.
 

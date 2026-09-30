@@ -148,7 +148,7 @@ Describe 'Get-TriageEntries (#605)' {
             @(Get-TriageEntries -BatchFile $script:bf).Count | Should -Be 1
         }
         It 'refuses a file that does not exist' {
-            { Get-TriageEntries -BatchFile (Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-batch.json') } | Should -Throw '*no existe*'
+            { Get-TriageEntries -BatchFile (Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-batch.json') } | Should -Throw '*does not exist*'
         }
         It 'refuses invalid JSON rather than dropping the batch silently' {
             'not json' | Set-Content $script:bf -Encoding UTF8
@@ -156,7 +156,7 @@ Describe 'Get-TriageEntries (#605)' {
         }
         It 'refuses an entry with no "issue" key' {
             '[{"type":"Bug"}]' | Set-Content $script:bf -Encoding UTF8
-            { Get-TriageEntries -BatchFile $script:bf } | Should -Throw "*falta la clave 'issue'*"
+            { Get-TriageEntries -BatchFile $script:bf } | Should -Throw "*missing the 'issue' key*"
         }
     }
 }
@@ -167,11 +167,11 @@ Describe 'Test-TriageEntry (#605)' {
             [pscustomobject]@{ Issue = $Issue; Repo = $Repo; Type = ''; Area = ''; Estimate = $Estimate; Priority = $Priority; Rationale = $Rationale } }
     }
     It 'accepts a plain entry' { Test-TriageEntry (New-Entry) | Should -BeNullOrEmpty }
-    It 'refuses a non-numeric Estimate, naming the issue' { Test-TriageEntry (New-Entry -Issue '7' -Estimate 'big') | Should -Match '^7: .*numerico' }
-    It 'refuses a Priority outside P0-P3' { Test-TriageEntry (New-Entry -Priority 'P9' -Rationale 'x') | Should -Match 'P0, P1, P2 o P3' }
-    It 'refuses a Priority with no rationale (#306 applies per entry)' { Test-TriageEntry (New-Entry -Priority 'P1') | Should -Match 'razonamiento' }
+    It 'refuses a non-numeric Estimate, naming the issue' { Test-TriageEntry (New-Entry -Issue '7' -Estimate 'big') | Should -Match '^7: .*numeric' }
+    It 'refuses a Priority outside P0-P3' { Test-TriageEntry (New-Entry -Priority 'P9' -Rationale 'x') | Should -Match 'P0, P1, P2 or P3' }
+    It 'refuses a Priority with no rationale (#306 applies per entry)' { Test-TriageEntry (New-Entry -Priority 'P1') | Should -Match 'reasoning' }
     It 'refuses a repo qualifier that is not owner/name (review of #686)' {
-        Test-TriageEntry (New-Entry -Issue '42' -Repo 'not-a-repo') | Should -Match "repo debe ser owner/name.*not-a-repo"
+        Test-TriageEntry (New-Entry -Issue '42' -Repo 'not-a-repo') | Should -Match "repo must be owner/name.*not-a-repo"
         Test-TriageEntry (New-Entry -Issue '42' -Repo 'a/b/c')      | Should -Match 'owner/name'
         Test-TriageEntry (New-Entry -Issue '42' -Repo 'owner/repo') | Should -BeNullOrEmpty
     }
@@ -184,7 +184,7 @@ Describe '#605 - a batch reads the board ONCE (end to end, counted)' -Skip:$scri
         $r.Code   | Should -Be 0
         $r.Reads  | Should -Be 1
         $r.Writes | Should -Be 6          # Type + Area on each of 3 issues
-        $r.Out    | Should -Match '3 de 3 issue'
+        $r.Out    | Should -Match '3 of 3 issue'
     }
     It 'reads the board once for a -BatchFile with per-issue values' {
         $bf = Join-Path $script:FakeDir 'batch.json'
@@ -203,7 +203,7 @@ Describe '#605 - a batch reads the board ONCE (end to end, counted)' -Skip:$scri
         '[{"issue":1,"type":"Bug"},{"issue":2,"estimate":"huge"}]' | Set-Content $bf -Encoding UTF8
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-BatchFile', $bf)
         $r.Code  | Should -Be 1
-        $r.Out   | Should -Match 'no escribi nada'
+        $r.Out   | Should -Match 'nothing was written'
         $r.Calls.Count | Should -Be 0      # not even the read: nothing was half-done
     }
     It 'reports an unresolvable issue at the end and still triages the rest' {
@@ -211,13 +211,13 @@ Describe '#605 - a batch reads the board ONCE (end to end, counted)' -Skip:$scri
         $r.Code   | Should -Be 1
         $r.Reads  | Should -Be 1
         $r.Writes | Should -Be 2          # 1 and 3 written; 99 skipped, not fatal
-        $r.Out    | Should -Match 'Pendientes para reintentar'
+        $r.Out    | Should -Match 'Left to retry'
         $r.Out    | Should -Match '#99'
     }
     It 'proposes Priority for a batch without writing it unless -ConfirmPriority' {
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '1,2', '-Priority', 'P1', '-Rationale', 'blocks')
         $r.Writes | Should -Be 0
-        $r.Out    | Should -Match '\(no escrita\)'
+        $r.Out    | Should -Match '\(not written\)'
         $r2 = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '1,2', '-Priority', 'P1', '-Rationale', 'blocks', '-ConfirmPriority')
         $r2.Writes | Should -Be 2
     }
@@ -230,7 +230,7 @@ Describe 'review of #686 - batch edge cases' -Skip:$script:notWindows {
         # No -Number: the board would be resolved from origin (gh api graphql) if validation ran later.
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Owner', 'o', '-BatchFile', $bf)
         $r.Code | Should -Be 1
-        $r.Out  | Should -Match 'no escribi nada'
+        $r.Out  | Should -Match 'nothing was written'
         $r.Calls.Count | Should -Be 0
     }
     It 'a row with a malformed "repo" is refused before any gh call (review of #686)' {
@@ -238,7 +238,7 @@ Describe 'review of #686 - batch edge cases' -Skip:$script:notWindows {
         '[{"issue":1,"type":"Bug"},{"issue":42,"repo":"not-a-repo","type":"Bug"}]' | Set-Content $bf -Encoding UTF8
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-BatchFile', $bf)
         $r.Code | Should -Be 1
-        $r.Out  | Should -Match 'repo debe ser owner/name'
+        $r.Out  | Should -Match 'repo must be owner/name'
         $r.Calls.Count | Should -Be 0
     }
     It 'a ONE-row -BatchFile is still a batch: an unresolvable target is listed for retry, not thrown' {
@@ -246,31 +246,31 @@ Describe 'review of #686 - batch edge cases' -Skip:$script:notWindows {
         '[{"issue":99,"type":"Bug"}]' | Set-Content $bf -Encoding UTF8
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-BatchFile', $bf)
         $r.Code | Should -Be 1
-        $r.Out  | Should -Match 'Pendientes para reintentar'
+        $r.Out  | Should -Match 'Left to retry'
         $r.Out  | Should -Match '#99'
     }
     It 'a ONE-item -Issues is still a batch' {
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '99', '-Type', 'Bug')
         $r.Code | Should -Be 1
-        $r.Out  | Should -Match 'Pendientes para reintentar'
+        $r.Out  | Should -Match 'Left to retry'
     }
     It 'a single -Issue that cannot be resolved still throws exactly as before (no retry list)' {
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issue', '99', '-Type', 'Bug')
         $r.Code | Should -Be 1
-        $r.Out  | Should -Match 'ERROR: El issue #99 no esta en el board'
-        $r.Out  | Should -Not -Match 'Pendientes para reintentar'
+        $r.Out  | Should -Match 'ERROR: Issue #99 is not on board'
+        $r.Out  | Should -Not -Match 'Left to retry'
     }
     It 'a failed WRITE stops the batch (no more writes are issued) and lists everything not yet done' {
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '1,2,3', '-Type', 'Bug') -ExtraEnv @{ FAKE_GH_EDIT_FAIL = '1' }
         $r.Code   | Should -Be 1
         $r.Writes | Should -Be 1          # the first write failed; issues 2 and 3 were never attempted
-        $r.Out    | Should -Match 'detengo el lote'
-        $r.Out    | Should -Match 'Pendientes para reintentar'
-        @($r.Out -split "`n" | Where-Object { $_ -match 'no procesado' }).Count | Should -Be 2
+        $r.Out    | Should -Match 'stopping the batch'
+        $r.Out    | Should -Match 'Left to retry'
+        @($r.Out -split "`n" | Where-Object { $_ -match 'not processed' }).Count | Should -Be 2
     }
     It 'an unresolvable target does NOT stop the batch (only a failed write does)' {
         $r = Invoke-TriageWithFakeGh -ScriptArgs @('-Number', '13', '-Owner', 'o', '-Issues', '99,2,3', '-Type', 'Bug')
         $r.Writes | Should -Be 2
-        $r.Out    | Should -Not -Match 'detengo el lote'
+        $r.Out    | Should -Not -Match 'stopping the batch'
     }
 }

@@ -147,7 +147,7 @@ function Invoke-FleetDispatch {
             # after MaxStalls consecutive zero-wave waits, give up and report the remainder.
             $stalls++
             if ($stalls -ge $MaxStalls) {
-                Write-Host ("  WARN governor: {0} issue(s) sin lanzar - no se liberaron slots tras {1} esperas." -f ($items.Count - $idx), $stalls) -ForegroundColor DarkYellow
+                Write-Host ("  WARN governor: {0} issue(s) not launched - no slots freed up after {1} waits." -f ($items.Count - $idx), $stalls) -ForegroundColor DarkYellow
                 break
             }
             & $WaitForSlot | Out-Null

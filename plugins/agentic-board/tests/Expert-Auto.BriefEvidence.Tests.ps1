@@ -35,8 +35,8 @@ Describe 'the brief tells the agent how to record a gate honestly' {
 }
 
 Describe 'the brief tells the agent to stop re-pushing when the review gate exits 3' {
-    It 'names exit 3 and CI NO SE EVALUO' {
-        $script:Brief | Should -Match '(?s)exits \*\*3\*\*.{0,40}CI NO SE EVALUO'
+    It 'names exit 3 and CI NOT EVALUATED' {
+        $script:Brief | Should -Match '(?s)exits \*\*3\*\*.{0,40}CI NOT EVALUATED'
     }
     It 'says to stop re-pushing and record the ci gate as NOT-EVALUATED' {
         $script:Brief | Should -Match '(?s)stop re-pushing.{0,80}NOT-EVALUATED'

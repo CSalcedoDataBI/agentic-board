@@ -116,19 +116,19 @@ function Resolve-GhTokenVar {
     )
     if (-not $IsArmed) {
         $res = Resolve-OwnerTokenVar -Owner $Owner -IdLookup $IdLookup
-        $why = if ($res.mapped) { "no es un run frenado - identidad normal ($($res.var))" }
+        $why = if ($res.mapped) { "not a braked run - normal identity ($($res.var))" }
                else             { $res.reason }
         return @{ var = $res.var; fail = $false; mapped = $res.mapped; reason = $why }
     }
     if (-not $AgentTokenPresent) {
         return @{ var = ''; fail = $true; mapped = $true
-                  reason = "run FRENADO y $script:AgentTokenVar no esta en el entorno. No se " +
-                           "continua con el token del dueno: es admin y la regla de main lo " +
-                           "exceptua, asi que seguir seria devolverle justo lo que el freno le quita." }
+                  reason = "BRAKED run and $script:AgentTokenVar is not in the environment. Not " +
+                           "continuing with the owner's token: it is admin and the main rule " +
+                           "exempts it, so continuing would hand back exactly what the brake takes away." }
     }
     return @{ var = $script:AgentTokenVar; fail = $false; mapped = $true
-              reason = "run frenado - identidad de agente ($script:AgentTokenVar): sin admin, " +
-                       "GitHub le rechaza el push a main" }
+              reason = "braked run - agent identity ($script:AgentTokenVar): no admin, " +
+                       "GitHub rejects its push to main" }
 }
 
 <#
@@ -174,7 +174,7 @@ function Get-OwnerAccountId {
     }
     try {
         $out = Invoke-Gh -GhArgs @('api', "users/$Owner", '--jq', '.id') `
-                         -What "resolver el ID de la cuenta '$Owner'"
+                         -What "resolve the account ID of '$Owner'"
     } catch { return '' }
     $id = ((@($out) | ForEach-Object { "$_" }) -join '').Trim()
     if ($id -match '^\d+$') { return $id }
@@ -206,7 +206,7 @@ function Resolve-OwnerTokenVar {
     if ($Owner -and $script:OwnerTokenVar.ContainsKey($Owner)) {
         $v = $script:OwnerTokenVar[$Owner]
         return @{ var = $v; mapped = $true; how = 'login'
-                  reason = "owner '$Owner' esta en el mapa ($v)" }
+                  reason = "owner '$Owner' is in the map ($v)" }
     }
     $known = (@($script:OwnerTokenVar.Keys) | Sort-Object) -join ', '
     $note  = ''
@@ -216,18 +216,18 @@ function Resolve-OwnerTokenVar {
         if ($id -and $script:AccountIdTokenVar.ContainsKey($id)) {
             $v = $script:AccountIdTokenVar[$id]
             return @{ var = $v; mapped = $true; how = 'account-id'
-                      reason = "owner '$Owner' no esta en el mapa por login, pero su ID de cuenta " +
-                               "($id) es la de una cuenta conocida ($v): se renombro. Agrega el " +
-                               "login nuevo a `$OwnerTokenVar en Resolve-GhTokenVar.ps1." }
+                      reason = "owner '$Owner' is not in the map by login, but its account ID " +
+                               "($id) belongs to a known account ($v): it was renamed. Add the " +
+                               "new login to `$OwnerTokenVar in Resolve-GhTokenVar.ps1." }
         }
-        $note = if ($id) { " Su ID de cuenta ($id) tampoco es de ninguna cuenta conocida." }
-                else     { ' No se pudo consultar su ID de cuenta en GitHub.' }
+        $note = if ($id) { " Its account ID ($id) does not belong to any known account either." }
+                else     { ' Could not look up its account ID on GitHub.' }
     }
     return @{ var = 'GITHUB_TOKEN_PERSONAL'; mapped = $false; how = 'unmapped'
-              reason = "owner '$Owner' no esta mapeado a ninguna cuenta conocida ($known).$note " +
-                       "Se usa GITHUB_TOKEN_PERSONAL por defecto. Es un problema del MAPA " +
-                       "owner->token, no de permisos: si esa cuenta se renombro, agrega su login " +
-                       "en Resolve-GhTokenVar.ps1 o pasa -TokenVar." }
+              reason = "owner '$Owner' is not mapped to any known account ($known).$note " +
+                       "GITHUB_TOKEN_PERSONAL is used by default. This is a problem of the " +
+                       "owner->token MAP, not of permissions: if that account was renamed, add its login " +
+                       "in Resolve-GhTokenVar.ps1 or pass -TokenVar." }
 }
 
 function Get-OwnerTokenVar {
@@ -293,15 +293,15 @@ function Get-GhTokenForContext {
     )
     $armed = Test-InBrakedRun -StartDir $StartDir
     if (-not (Test-ExplicitVarAllowed -IsArmed $armed -ExplicitVar $ExplicitVar)) {
-        throw ("Run FRENADO: -TokenVar '$ExplicitVar' no esta permitido aqui. Dentro de un run " +
-               "con freno armado la unica identidad valida es $script:AgentTokenVar; el token del " +
-               "dueno es admin y la regla de main lo exceptua, asi que aceptarlo devolveria justo " +
-               "la capacidad que el freno quita.")
+        throw ("BRAKED run: -TokenVar '$ExplicitVar' is not allowed here. Inside a run " +
+               "with the brake armed the only valid identity is $script:AgentTokenVar; the owner's " +
+               "token is admin and the main rule exempts it, so accepting it would hand back exactly " +
+               "the capability the brake removes.")
     }
     if ($ExplicitVar) {
         $v = Get-GhTokenValue -VarName $ExplicitVar
-        if (-not $v) { throw "$ExplicitVar no esta en el entorno USER de Windows." }
-        return @{ token = $v; var = $ExplicitVar; armed = $armed; reason = "override explicito ($ExplicitVar)" }
+        if (-not $v) { throw "$ExplicitVar is not in the Windows USER environment." }
+        return @{ token = $v; var = $ExplicitVar; armed = $armed; reason = "explicit override ($ExplicitVar)" }
     }
     $agentPresent = [bool](Get-GhTokenValue -VarName $script:AgentTokenVar)
     $d = Resolve-GhTokenVar -IsArmed $armed -AgentTokenPresent $agentPresent -Owner $Owner -IdLookup $IdLookup
@@ -310,7 +310,7 @@ function Get-GhTokenForContext {
     # is told so before it reaches a push error that would read as "no permission" (#665).
     if (-not $d.mapped) { Write-Warning $d.reason }
     $val = Get-GhTokenValue -VarName $d.var
-    if (-not $val) { throw "$($d.var) no esta en el entorno USER de Windows." }
+    if (-not $val) { throw "$($d.var) is not in the Windows USER environment." }
     return @{ token = $val; var = $d.var; armed = $armed; mapped = $d.mapped; reason = $d.reason }
 }
 

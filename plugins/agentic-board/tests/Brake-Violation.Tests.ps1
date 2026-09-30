@@ -93,7 +93,7 @@ Describe 'Fleet supervisor detects a brake-armed run whose PR merged (#517)' {
     }
     It 'names the issue, the PR, who merged and how to judge it' {
         $text = (Format-BrakeViolations @(Get-BrakeViolations @((New-FleetSess -Issue 9 -MergedBy 'alice')))) -join "`n"
-        $text | Should -Match '#9 #109 MERGEADO por alice'
+        $text | Should -Match '#9 #109 MERGED by alice'
         $text | Should -Match 'denials\.jsonl'
     }
     It 'a violation without who/when (GitHub omitted them, or a legacy row) is still flagged, and the report does not invent an actor' {
@@ -102,8 +102,8 @@ Describe 'Fleet supervisor detects a brake-armed run whose PR merged (#517)' {
         $v.Count | Should -Be 1
         $v[0].mergedBy | Should -BeNullOrEmpty
         $text = (Format-BrakeViolations $v) -join "`n"
-        $text | Should -Match '#4 #104 MERGEADO - la corrida'
-        $text | Should -Not -Match ' por '
+        $text | Should -Match '#4 #104 MERGED - the run'
+        $text | Should -Not -Match ' by '
     }
     It 'Get-SessionBrakeInfo reads the REAL marker of the session''s worktree' {
         $armed = Get-SessionBrakeInfo -WorkPath (New-ArmedDir @('merge'))
@@ -210,7 +210,7 @@ Describe 'auto-clean refuses to tear down a brake-armed session whose PR merged 
     It 'REFUSES: worktree, marker, branch and registry entry all survive, and the reason is named' {
         Arm
         $acts = @(Invoke-SessionCleanup -Session (New-Sess) -PrMerged)
-        ($acts -join ' ') | Should -Match 'FRENO armado'
+        ($acts -join ' ') | Should -Match 'BRAKE armed'
         ($acts -join ' ') | Should -Match '-ForceRemoveWorktree'
         ($acts -join ' ') | Should -Not -Match 'worktree remove'
         Test-Path $script:Wt | Should -BeTrue
@@ -222,13 +222,13 @@ Describe 'auto-clean refuses to tear down a brake-armed session whose PR merged 
         Arm
         $acts = @(Invoke-SessionCleanup -Session (New-Sess) -PrMerged -DryRun)
         $acts.Count | Should -Be 1
-        ($acts -join ' ') | Should -Match 'FRENO armado'
+        ($acts -join ' ') | Should -Match 'BRAKE armed'
     }
     It 'an UNREADABLE marker is treated as armed: refuses' {
         Arm
         Set-Content -LiteralPath (Get-BrakeMarkerPath -WorkPath $script:Wt) -Value '{ not json'
         $acts = @(Invoke-SessionCleanup -Session (New-Sess) -PrMerged)
-        ($acts -join ' ') | Should -Match 'FRENO armado'
+        ($acts -join ' ') | Should -Match 'BRAKE armed'
         Test-Path $script:Wt | Should -BeTrue
     }
     It '-ForceRemoveWorktree is the human''s deliberate way past it' {
@@ -240,21 +240,21 @@ Describe 'auto-clean refuses to tear down a brake-armed session whose PR merged 
     }
     It 'CONTROL: a run that was never armed is torn down as before' {
         $acts = @(Invoke-SessionCleanup -Session (New-Sess) -PrMerged)
-        ($acts -join ' ') | Should -Not -Match 'FRENO'
+        ($acts -join ' ') | Should -Not -Match 'BRAKE'
         Test-Path $script:Wt | Should -BeFalse
         (Get-Content $script:Reg -Raw) | Should -Not -Match '"issue": 30'
     }
     It 'CONTROL: armed but NOT braking on merge (deploy only) is torn down as before' {
         Arm @('deploy')
         $acts = @(Invoke-SessionCleanup -Session (New-Sess) -PrMerged)
-        ($acts -join ' ') | Should -Not -Match 'FRENO'
+        ($acts -join ' ') | Should -Not -Match 'BRAKE'
         Test-Path $script:Wt | Should -BeFalse
     }
     It 'CONTROL: armed, but the session did NOT end with a merged PR - the refusal is about merges only' {
         Arm
         $acts = @(Invoke-SessionCleanup -Session (New-Sess) -DryRun)     # no -PrMerged
-        ($acts -join ' ') | Should -Not -Match 'FRENO'
+        ($acts -join ' ') | Should -Not -Match 'BRAKE'
         # The ordinary path runs (here the marker file itself makes the worktree dirty, so the #276 guard speaks).
-        ($acts -join ' ') | Should -Match 'sin commitear'
+        ($acts -join ' ') | Should -Match 'uncommitted'
     }
 }

@@ -212,7 +212,7 @@ query(`$o:String!, `$n:Int!, `$cursor:String) {
 "@
         $ghArgs = @('api','graphql','-f',"query=$q",'-F',"o=$Owner",'-F',"n=$ProjectNum")
         if ($cursor) { $ghArgs += @('-f',"cursor=$cursor") }
-        $resp  = Invoke-Gh -GhArgs $ghArgs -What "leer los items del board #$ProjectNum" -Graphql
+        $resp  = Invoke-Gh -GhArgs $ghArgs -What "read the items of board #$ProjectNum" -Graphql
         $items = $resp.data.user.projectV2.items
         return @{ nodes = $items.nodes; hasNext = $items.pageInfo.hasNextPage; endCursor = $items.pageInfo.endCursor }
     }
@@ -262,7 +262,7 @@ function Write-PlanLedger {
 function Show-Plan {
     param([object[]]$Plan)
     if (-not $Plan -or @($Plan).Count -eq 0) {
-        Write-Host "  (no hay issues pendientes que planificar)" -ForegroundColor DarkGray
+        Write-Host "  (no pending issues to plan)" -ForegroundColor DarkGray
         return
     }
     $waves = @($Plan | ForEach-Object { $_.wave } | Sort-Object -Unique)
@@ -280,31 +280,31 @@ if ($env:ABIOS_FLEETPLAN_DOTSOURCE) { return }
 
 # ------------------------------------------------------------------------ main entry
 if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
-if (-not $env:GH_TOKEN) { throw "$TokenVar no esta en el entorno de usuario (y GH_TOKEN vacio)." }
-if ($ProjectNum -le 0) { throw "Especifica -ProjectNum <n> del board." }
+if (-not $env:GH_TOKEN) { throw "$TokenVar is not set in the user environment (and GH_TOKEN is empty)." }
+if ($ProjectNum -le 0) { throw "Pass the board's -ProjectNum <n>." }
 
 $issues = @(Get-PendingBoardIssues $Owner $ProjectNum)
 $plan   = @(New-AssignmentPlan $issues $Clis)
 
 if ($Json) { if ($plan.Count -eq 0) { '[]' } else { $plan | ConvertTo-Json -Depth 6 -AsArray }; return }
 
-Write-Host "=== Plan de asignacion del fleet (board #$ProjectNum) ===" -ForegroundColor Cyan
+Write-Host "=== Fleet assignment plan (board #$ProjectNum) ===" -ForegroundColor Cyan
 $fleetClis = @(Split-CsvArg $Clis); if ($fleetClis.Count -eq 0) { $fleetClis = @('claude') }
-Write-Host ("CLIs disponibles: {0}" -f ($fleetClis -join ', ')) -ForegroundColor DarkGray
+Write-Host ("Available CLIs: {0}" -f ($fleetClis -join ', ')) -ForegroundColor DarkGray
 Write-Host ""
 Show-Plan $plan
 
 $ledger = Get-FleetPlanPath
 Write-PlanLedger -Path $ledger -Plan $plan
-if ($ledger) { Write-Host "" ; Write-Host ("Plan guardado en: {0}" -f $ledger) -ForegroundColor DarkGray }
+if ($ledger) { Write-Host "" ; Write-Host ("Plan saved to: {0}" -f $ledger) -ForegroundColor DarkGray }
 
 # Advisory: the -Parallel command per wave (dependent waves run after the prior merges).
 if ($plan.Count -gt 0) {
     Write-Host ""
-    Write-Host "Sugerencia (advisory - no se lanza nada):" -ForegroundColor Cyan
+    Write-Host "Suggestion (advisory - nothing is launched):" -ForegroundColor Cyan
     foreach ($w in (@($plan | ForEach-Object { $_.wave } | Sort-Object -Unique))) {
         $nums = @($plan | Where-Object { $_.wave -eq $w } | ForEach-Object { $_.issue })
         Write-Host ("  Wave {0}:  /board work -Parallel {1} -Fleet" -f $w, ($nums -join ',')) -ForegroundColor Gray
     }
-    Write-Host "  (corre cada wave cuando la anterior haya mergeado sus PRs)" -ForegroundColor DarkGray
+    Write-Host "  (run each wave once the previous one has merged its PRs)" -ForegroundColor DarkGray
 }

@@ -84,16 +84,16 @@ $pending = @(Select-SessionsToScan -Disk $disk -Ledger $ledger)
 $pending = @($pending | Sort-Object -Property events -Descending)
 if ($Limit -gt 0 -and $pending.Count -gt $Limit) { $pending = @($pending[0..($Limit-1)]) }
 
-Write-Host "  sesiones en disco : $($disk.Count)"
-Write-Host "  ya escaneadas     : $($ledger.Count)"
-Write-Host "  pendientes        : $($pending.Count)" -ForegroundColor Yellow
+Write-Host "  sessions on disk  : $($disk.Count)"
+Write-Host "  already scanned   : $($ledger.Count)"
+Write-Host "  pending           : $($pending.Count)" -ForegroundColor Yellow
 
 if (-not $pending.Count) {
-    Write-Host "`nNada nuevo que leer." -ForegroundColor Green
+    Write-Host "`nNothing new to read." -ForegroundColor Green
     return
 }
 if ($WhatIfPreference) {
-    Write-Host "`n-WhatIf: no se leyó ni escribió nada." -ForegroundColor DarkGray
+    Write-Host "`n-WhatIf: nothing was read or written." -ForegroundColor DarkGray
     return
 }
 
@@ -116,7 +116,7 @@ foreach ($p in $pending) {
     $src = $byPath[$key]
     if (-not $src) { continue }
 
-    Write-Progress -Activity "Escaneando sesiones" -Status "$n / $($pending.Count)  $($p.project)" -PercentComplete ([int](100 * $n / $pending.Count))
+    Write-Progress -Activity "Scanning sessions" -Status "$n / $($pending.Count)  $($p.project)" -PercentComplete ([int](100 * $n / $pending.Count))
 
     $events = [System.Collections.Generic.List[object]]::new()
     $i = 0
@@ -143,7 +143,7 @@ foreach ($p in $pending) {
             }
         } finally { $reader.Dispose() }
     } catch {
-        Write-Warning "no se pudo leer $key : $($_.Exception.Message)"
+        Write-Warning "could not read $key : $($_.Exception.Message)"
         continue   # watermark NOT advanced: a session we failed to read must stay pending
     }
 
@@ -192,7 +192,7 @@ foreach ($p in $pending) {
                     -DurationMin $(if ($null -eq $sessionDurationMin) { 0 } else { $sessionDurationMin }) -FirstTs $firstTs `
                     -ScannedAt ((Get-Date).ToUniversalTime().ToString('o')))
 }
-Write-Progress -Activity "Escaneando sesiones" -Completed
+Write-Progress -Activity "Scanning sessions" -Completed
 
 Write-FieldLedger -Path $ledgerPath -Ledger $ledger | Out-Null
 
@@ -205,7 +205,7 @@ if ($MatchFiled) {
     . (Join-Path $PSScriptRoot 'IssueSearch.ps1')
     try {
         if ($CandidatesFile) {
-            if (-not (Test-Path -LiteralPath $CandidatesFile)) { throw "no existe -CandidatesFile '$CandidatesFile'" }
+            if (-not (Test-Path -LiteralPath $CandidatesFile)) { throw "-CandidatesFile '$CandidatesFile' does not exist" }
             $cands = @(Get-Content -LiteralPath $CandidatesFile -Raw | ConvertFrom-Json)
         } else {
             # Same identity rule as everything else that talks to GitHub: the owner's account, or the
@@ -222,7 +222,7 @@ if ($MatchFiled) {
             [pscustomobject]@{ tool = $_; invocations = [int]$toolTally[$_]; incidents = [int]$incidentTally[$_]; failures = [int]$failTally[$_] } })
         $recurrence = @(Get-ToolRecurrence -Stats $stats -Candidates $cands)
     } catch {
-        $recurrenceNote = "no se pudo cotejar con los issues archivados: $($_.Exception.Message)"
+        $recurrenceNote = "could not match against the filed issues: $($_.Exception.Message)"
         Write-Warning $recurrenceNote
     }
 }
@@ -243,18 +243,18 @@ $summary = [pscustomobject]@{
 
 if ($Json) { $summary | ConvertTo-Json -Depth 5; return }
 
-Write-Host "`n=== resultado ===" -ForegroundColor Cyan
-Write-Host "  sesiones escaneadas    : $n"
-Write-Host "  usaron la herramienta  : $withTool"
-Write-Host "  episodios              : $totalEpisodes"
+Write-Host "`n=== result ===" -ForegroundColor Cyan
+Write-Host "  sessions scanned       : $n"
+Write-Host "  used the tool          : $withTool"
+Write-Host "  episodes               : $totalEpisodes"
 if ($signalTally.Count) {
-    Write-Host "`n  señales:" -ForegroundColor Yellow
+    Write-Host "`n  signals:" -ForegroundColor Yellow
     foreach ($k in ($signalTally.GetEnumerator() | Sort-Object Value -Descending)) {
         Write-Host ("    {0,-12} {1}" -f $k.Key, $k.Value)
     }
 }
 if ($toolTally.Count) {
-    Write-Host "`n  más invocadas:" -ForegroundColor Yellow
+    Write-Host "`n  most invoked:" -ForegroundColor Yellow
     foreach ($k in ($toolTally.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 8)) {
         Write-Host ("    {0,-28} {1}" -f $k.Key, $k.Value)
     }
@@ -262,19 +262,19 @@ if ($toolTally.Count) {
 if ($MatchFiled -and -not $recurrenceNote) {
     $rec = @($recurrence | Where-Object status -eq 'recurrence')
     $new = @($recurrence | Where-Object status -eq 'new-candidate')
-    Write-Host "`n  reincidencia (ya archivado):" -ForegroundColor Yellow
-    if (-not $rec.Count) { Write-Host '    ninguna' -ForegroundColor DarkGray }
+    Write-Host "`n  recurrence (already filed):" -ForegroundColor Yellow
+    if (-not $rec.Count) { Write-Host '    none' -ForegroundColor DarkGray }
     foreach ($r in $rec) {
-        Write-Host ("    {0,-28} {1} incidente(s), {2} fallo(s)" -f $r.tool, $r.incidents, $r.failures)
+        Write-Host ("    {0,-28} {1} incident(s), {2} failure(s)" -f $r.tool, $r.incidents, $r.failures)
         foreach ($f in $r.filed) {
-            $st = if ($f.state -eq 'OPEN') { 'abierto' } else { "cerrado $($f.stateReason)".Trim() }
+            $st = if ($f.state -eq 'OPEN') { 'open' } else { "closed $($f.stateReason)".Trim() }
             Write-Host ("      #{0} [{1}] {2}" -f $f.number, $st, $f.title) -ForegroundColor DarkGray
         }
     }
-    Write-Host "`n  candidatos NUEVOS (ningun issue archivado nombra el script):" -ForegroundColor Yellow
-    if (-not $new.Count) { Write-Host '    ninguno' -ForegroundColor DarkGray }
-    foreach ($r in $new) { Write-Host ("    {0,-28} {1} incidente(s), {2} fallo(s)" -f $r.tool, $r.incidents, $r.failures) }
+    Write-Host "`n  NEW candidates (no filed issue names the script):" -ForegroundColor Yellow
+    if (-not $new.Count) { Write-Host '    none' -ForegroundColor DarkGray }
+    foreach ($r in $new) { Write-Host ("    {0,-28} {1} incident(s), {2} failure(s)" -f $r.tool, $r.incidents, $r.failures) }
 }
 Write-Host "`n  ledger  : $ledgerPath"
-Write-Host "  registro: $recordDir"
-Write-Host "`nNada se archivó en GitHub: esto son candidatos para que un humano juzgue." -ForegroundColor DarkGray
+Write-Host "  records : $recordDir"
+Write-Host "`nNothing was filed on GitHub: these are candidates for a human to judge." -ForegroundColor DarkGray

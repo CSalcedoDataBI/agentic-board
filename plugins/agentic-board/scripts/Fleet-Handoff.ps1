@@ -100,19 +100,19 @@ if ($env:ABIOS_FLEETHANDOFF_DOTSOURCE) { return }
 
 # ------------------------------------------------------------------------ main entry
 if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
-if ($Issue -le 0) { throw "Especifica -Issue <n>." }
+if ($Issue -le 0) { throw "Pass -Issue <n>." }
 if (-not $Repo) {
     $originUrl = git remote get-url origin 2>$null
     $Repo = Get-RepoFromOriginUrl $originUrl
 }
-if (-not $Repo) { throw "No pude resolver el repo (usa -Repo owner/name)." }
+if (-not $Repo) { throw "Could not resolve the repo (use -Repo owner/name)." }
 
 $blockedBy = @(Get-IssueBlockedBy $Repo $Issue)
 
 if ($Context) {
     $ctx = Get-HandoffContext $blockedBy (Read-BlackboardFindings)
     if ($ctx) { Write-Output $ctx }
-    else { Write-Host "  (sin contexto upstream - los bloqueadores no dejaron findings en la pizarra)" -ForegroundColor DarkGray }
+    else { Write-Host "  (no upstream context - the blockers left no findings on the blackboard)" -ForegroundColor DarkGray }
     return
 }
 
@@ -124,8 +124,8 @@ foreach ($b in $blockedBy) {
 }
 $pending = @(Get-PendingBlockers $blockedBy $merged)
 if ($pending.Count -eq 0) {
-    Write-Host ("  OK  #{0} listo para arrancar - sus bloqueadores estan cerrados." -f $Issue) -ForegroundColor Green
+    Write-Host ("  OK  #{0} is ready to start - its blockers are closed." -f $Issue) -ForegroundColor Green
     exit 0
 }
-Write-Host ("  WAIT #{0} espera a que cierren: {1}" -f $Issue, ($pending -join ', ')) -ForegroundColor Yellow
+Write-Host ("  WAIT #{0} is waiting for these to close: {1}" -f $Issue, ($pending -join ', ')) -ForegroundColor Yellow
 exit 1

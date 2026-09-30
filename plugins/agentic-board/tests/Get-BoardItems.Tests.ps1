@@ -91,7 +91,7 @@ Describe 'Get-BoardItems — the cap it actually sends to gh' {
 
 Describe 'Get-BoardItems — a failed read still throws (Invoke-Gh contract preserved)' {
     It 'does not swallow a gh failure into an empty, complete-looking read' {
-        Mock Invoke-Gh { throw 'No pude listar los items (gh exit 1): HTTP 401' }
+        Mock Invoke-Gh { throw 'Could not list the items (gh exit 1): HTTP 401' }
         { Get-BoardItems -Number 13 -Owner x } | Should -Throw
     }
 }
@@ -103,12 +103,12 @@ Describe 'Get-BoardTruncationWarning' {
     }
     It 'names how many items it actually read, so the number is auditable' {
         $w = Get-BoardTruncationWarning ([pscustomobject]@{ Truncated = $true; Read = 200; Limit = 200 })
-        $w | Should -Match 'TRUNCADO'
+        $w | Should -Match 'TRUNCATED'
         $w | Should -Match '200'
     }
     It 'refuses to assert an absence — the whole point of the flag' {
         $w = Get-BoardTruncationWarning ([pscustomobject]@{ Truncated = $true; Read = 200; Limit = 200 })
-        $w | Should -Match 'NO puedo afirmar'
+        $w | Should -MatchExactly 'I CANNOT claim'
     }
 }
 
@@ -161,14 +161,14 @@ Describe 'Regression: no caller may state an absence off a possibly-short read' 
         placement is covered by the helper's own behavioural tests above plus the live check on the
         291-item board; what these add is "nobody deleted the guard". #>
 
-    It 'Board-Work consults the truncation flag before its "Sin pendientes"' {
+    It 'Board-Work consults the truncation flag before its "Nothing pending"' {
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1') -Raw
-        $t | Should -Match 'Sin pendientes'          # the all-clear still exists...
+        $t | Should -Match 'Nothing pending'          # the all-clear still exists...
         $t | Should -Match 'if \(\$truncWarn\)'      # ...and so does the guard on it
     }
-    It 'Board-Triage consults it before its "(no hay items pendientes)"' {
+    It 'Board-Triage consults it before its "(no pending items)"' {
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Triage.ps1') -Raw
-        $t | Should -Match 'no hay items pendientes'
+        $t | Should -Match 'no pending items'
         $t | Should -Match 'if \(\$itemTrunc\)'
     }
     It 'Assert-BoardComplete refuses to PASS on a truncated read' {
@@ -181,7 +181,7 @@ Describe 'Regression: no caller may state an absence off a possibly-short read' 
     }
     It 'Backup-Board refuses to write a partial snapshot' {
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Backup-Board.ps1') -Raw
-        $t | Should -Match 'un backup parcial no es un backup'
+        $t | Should -Match 'a partial backup is not a backup'
     }
     It 'Export-BoardSnapshot refuses to publish a truncated "N of M"' {
         $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Export-BoardSnapshot.ps1') -Raw

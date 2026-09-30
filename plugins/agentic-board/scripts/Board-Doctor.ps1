@@ -208,39 +208,39 @@ function Get-BranchClass {
         # `merged` predicate, not its session-completion opinion.
         $verdict = Get-SessionCompletion -PrState $pr.state -PrHeadOid ([string]$pr.headRefOid) -BranchTip $Tip
         if ($verdict.merged) {
-            return & $mk 'merged' "PR #$prNum mergeado (tip coincide)" $true
+            return & $mk 'merged' "PR #$prNum merged (tip matches)" $true
         }
         if ($pr.state -eq 'MERGED') {
             # Merged PR, but its head is NOT our tip: either commits landed on top after the
             # merge, or the name was reused by a later session. Either way the merge proves
             # nothing about THESE commits - surface it, never delete it.
-            return & $mk 'merged-advanced' "PR #$prNum mergeado pero la rama tiene commits encima (el merge no prueba este tip)" $false
+            return & $mk 'merged-advanced' "PR #$prNum merged but the branch has commits on top (the merge does not prove this tip)" $false
         }
-        if ($pr.state -eq 'OPEN')   { return & $mk 'in-review' "PR #$prNum abierto" $false }
-        if ($pr.state -eq 'CLOSED') { return & $mk 'closed-unmerged' "PR #$prNum cerrado sin mergear" $false }
+        if ($pr.state -eq 'OPEN')   { return & $mk 'in-review' "PR #$prNum open" $false }
+        if ($pr.state -eq 'CLOSED') { return & $mk 'closed-unmerged' "PR #$prNum closed without merging" $false }
     }
 
-    if ($HasLiveSession) { return & $mk 'active' 'sesion viva trabajando esta rama' $false }
-    if ($Dirty -eq 'dirty')   { return & $mk 'dirty' 'worktree con cambios sin commitear (conservado a proposito, #276)' $false }
-    if ($Dirty -eq 'unknown') { return & $mk 'dirty' 'no pude comprobar si el worktree tiene cambios [git status fallo] - revisalo a mano' $false }
+    if ($HasLiveSession) { return & $mk 'active' 'a live session is working on this branch' $false }
+    if ($Dirty -eq 'dirty')   { return & $mk 'dirty' 'worktree with uncommitted changes (kept on purpose, #276)' $false }
+    if ($Dirty -eq 'unknown') { return & $mk 'dirty' 'could not check whether the worktree has changes [git status failed] - check it by hand' $false }
     if ($ageDays -ge 0 -and $ageDays -gt $StaleDays) {
-        return & $mk 'stale' "sin PR y sin actividad hace $ageDays dias" $false
+        return & $mk 'stale' "no PR and no activity for $ageDays days" $false
     }
-    return & $mk 'working' 'sin PR todavia, reciente' $false
+    return & $mk 'working' 'no PR yet, recent' $false
 }
 
 # Presentation order + labels. `merged` first (the bulk of the noise and the only safely
 # deletable class), then the ones needing a human decision, then the informational ones.
 function Get-DoctorClassOrder {
     return @(
-        [pscustomobject]@{ Class='merged';          Label='Mergeadas (PR MERGED + tip coincide) - borrables'; Color='Green'      }
-        [pscustomobject]@{ Class='closed-unmerged'; Label='PR cerrado sin mergear - decide';                  Color='Yellow'     }
-        [pscustomobject]@{ Class='stale';           Label='Sin PR y estancadas';                              Color='Yellow'     }
-        [pscustomobject]@{ Class='merged-advanced'; Label='PR mergeado pero con commits encima';              Color='DarkYellow' }
-        [pscustomobject]@{ Class='dirty';           Label='Worktree con cambios sin commitear (esperado)';    Color='DarkYellow' }
-        [pscustomobject]@{ Class='in-review';       Label='En review (PR abierto)';                           Color='Cyan'       }
-        [pscustomobject]@{ Class='active';          Label='Sesion viva';                                      Color='Cyan'       }
-        [pscustomobject]@{ Class='working';         Label='Trabajo reciente sin PR';                          Color='DarkGray'   }
+        [pscustomobject]@{ Class='merged';          Label='Merged (PR MERGED + tip matches) - deletable';    Color='Green'      }
+        [pscustomobject]@{ Class='closed-unmerged'; Label='PR closed without merging - decide';               Color='Yellow'     }
+        [pscustomobject]@{ Class='stale';           Label='No PR and stale';                                  Color='Yellow'     }
+        [pscustomobject]@{ Class='merged-advanced'; Label='PR merged but with commits on top';                Color='DarkYellow' }
+        [pscustomobject]@{ Class='dirty';           Label='Worktree with uncommitted changes (expected)';     Color='DarkYellow' }
+        [pscustomobject]@{ Class='in-review';       Label='In review (PR open)';                              Color='Cyan'       }
+        [pscustomobject]@{ Class='active';          Label='Live session';                                     Color='Cyan'       }
+        [pscustomobject]@{ Class='working';         Label='Recent work without a PR';                         Color='DarkGray'   }
     )
 }
 
@@ -310,7 +310,7 @@ function Get-HalfRemovedWorktrees {
 function Get-HalfRemovedHint {
     param([Parameter(Mandatory)][string]$Path)
     if ($null -eq $IsWindows -or $IsWindows) {
-        return "robocopy `"$env:TEMP\abios-empty`" `"$Path`" /MIR ; rmdir `"$Path`" ; git worktree prune   (crea antes la carpeta vacia: mkdir `"$env:TEMP\abios-empty`")"
+        return "robocopy `"$env:TEMP\abios-empty`" `"$Path`" /MIR ; rmdir `"$Path`" ; git worktree prune   (first create the empty folder: mkdir `"$env:TEMP\abios-empty`")"
     }
     return "rm -rf `"$Path`" ; git worktree prune"
 }
@@ -327,14 +327,14 @@ function Get-DoctorFixSummary {
     $lines = @()
     $skipped = @($Skipped | Where-Object { $_ })
     $half = @($HalfRemoved | Where-Object { $_ })
-    $verb = if ($DryRun) { 'se borrarian' } else { 'borradas' }
-    $lines += "Resumen: $Deleted rama(s) $verb, $($skipped.Count) omitida(s)."
+    $verb = if ($DryRun) { 'would be deleted' } else { 'deleted' }
+    $lines += "Summary: $Deleted branch(es) $verb, $($skipped.Count) skipped."
     if ($skipped.Count -gt 0) {
-        $lines += "  Omitidas (siguen ahi; el resto del barrido SI se hizo):"
+        $lines += "  Skipped (still there; the rest of the sweep DID run):"
         foreach ($s in $skipped) { $lines += ("    {0,-48} {1}" -f $s.Branch, $s.Reason) }
     }
     if ($half.Count -gt 0) {
-        $lines += "  Worktrees a medio borrar (git ya los solto, la carpeta sigue con contenido) - reintentar 'git worktree remove' no los arregla:"
+        $lines += "  Half-removed worktrees (git already released them, the folder still has content) - retrying 'git worktree remove' will not fix them:"
         foreach ($h in $half) {
             $lines += "    $($h.Path)"
             $lines += "      -> $(Get-HalfRemovedHint -Path $h.Path)"
@@ -355,15 +355,15 @@ function Remove-BranchAndWorktree {
         # it matters most exactly here: a yes-to-all over 57 merged branches must not be able to
         # take a dirty one with it. Unreadable ('unknown') counts as dirty - never as clean.
         if ($Row.Dirty -eq 'dirty' -or $Row.Dirty -eq 'unknown') {
-            $why = if ($Row.Dirty -eq 'dirty') { "tiene cambios sin commitear" } else { "no pude comprobar si tiene cambios [git status fallo]" }
-            Write-Host "     SKIP conservo $($Row.Branch): su worktree $why. Revisalo a mano." -ForegroundColor DarkYellow
-            Add-DoctorSkip -Branch $Row.Branch -Reason "su worktree $why"
+            $why = if ($Row.Dirty -eq 'dirty') { "has uncommitted changes" } else { "could not be checked for changes [git status failed]" }
+            Write-Host "     SKIP keeping $($Row.Branch): its worktree $why. Check it by hand." -ForegroundColor DarkYellow
+            Add-DoctorSkip -Branch $Row.Branch -Reason "its worktree $why"
             return $did
         }
         if ($Row.WorktreePath) {
             if ($here -and ((Resolve-Path $Row.WorktreePath -ErrorAction SilentlyContinue).Path -eq $here)) {
-                Write-Host "     SKIP es el worktree actual - no me borro a mi mismo." -ForegroundColor DarkYellow
-                Add-DoctorSkip -Branch $Row.Branch -Reason "es el worktree actual"
+                Write-Host "     SKIP this is the current worktree - not deleting myself." -ForegroundColor DarkYellow
+                Add-DoctorSkip -Branch $Row.Branch -Reason "it is the current worktree"
                 return $did
             }
             # Half-removed by an EARLIER run (#548): retrying the same removal cannot converge, so
@@ -373,8 +373,8 @@ function Remove-BranchAndWorktree {
                 $half = @(Get-HalfRemovedWorktrees -Records (Get-WorktreeRecords -Porcelain ($pre.Lines -join "`n")) |
                           Where-Object { $_.Branch -eq $Row.Branch -or ($_.Path -replace '\\', '/').TrimEnd('/') -eq ($Row.WorktreePath -replace '\\', '/').TrimEnd('/') })
                 if ($half.Count -gt 0) {
-                    Write-Host "     SKIP $($Row.Branch): su worktree quedo a medio borrar (git lo solto, la carpeta sigue). Vea el resumen final." -ForegroundColor DarkYellow
-                    Add-DoctorSkip -Branch $Row.Branch -Reason "worktree a medio borrar: $(Get-HalfRemovedHint -Path $Row.WorktreePath)"
+                    Write-Host "     SKIP $($Row.Branch): its worktree is half-removed (git released it, the folder remains). See the final summary." -ForegroundColor DarkYellow
+                    Add-DoctorSkip -Branch $Row.Branch -Reason "half-removed worktree: $(Get-HalfRemovedHint -Path $Row.WorktreePath)"
                     return $did
                 }
             }
@@ -392,8 +392,8 @@ function Remove-BranchAndWorktree {
                 $list = Invoke-GitQuiet -GitArgs @('worktree', 'list', '--porcelain')
                 if ($list.ExitCode -ne 0) {
                     # FAIL CLOSED: "I could not ask git" is not "it is gone" (the #277 rule).
-                    Write-Host "     FAIL no pude releer 'git worktree list' tras el remove - conservo la rama $($Row.Branch) por si acaso." -ForegroundColor Red
-                    Add-DoctorSkip -Branch $Row.Branch -Reason "no pude releer 'git worktree list' tras el remove"
+                    Write-Host "     FAIL could not re-read 'git worktree list' after the remove - keeping branch $($Row.Branch) to be safe." -ForegroundColor Red
+                    Add-DoctorSkip -Branch $Row.Branch -Reason "could not re-read 'git worktree list' after the remove"
                     return $did
                 }
                 $after = ($list.Lines -join "`n")
@@ -401,17 +401,17 @@ function Remove-BranchAndWorktree {
                     $nowHalf = @(Get-HalfRemovedWorktrees -Records (Get-WorktreeRecords -Porcelain $after) |
                                  Where-Object { $_.Branch -eq $Row.Branch })
                     if ($nowHalf.Count -gt 0) {
-                        Write-Host "     FAIL el worktree de $($Row.Branch) quedo a medio borrar - conservo la rama. Vea el resumen final." -ForegroundColor Red
-                        Add-DoctorSkip -Branch $Row.Branch -Reason "worktree a medio borrar: $(Get-HalfRemovedHint -Path $Row.WorktreePath)"
+                        Write-Host "     FAIL the worktree of $($Row.Branch) is half-removed - keeping the branch. See the final summary." -ForegroundColor Red
+                        Add-DoctorSkip -Branch $Row.Branch -Reason "half-removed worktree: $(Get-HalfRemovedHint -Path $Row.WorktreePath)"
                     } else {
-                        Write-Host "     FAIL git sigue registrando el worktree de $($Row.Branch) (handle abierto? locked?) - conservo la rama." -ForegroundColor Red
-                        Add-DoctorSkip -Branch $Row.Branch -Reason "git sigue registrando su worktree (handle abierto? locked?)"
+                        Write-Host "     FAIL git still registers the worktree of $($Row.Branch) (open handle? locked?) - keeping the branch." -ForegroundColor Red
+                        Add-DoctorSkip -Branch $Row.Branch -Reason "git still registers its worktree (open handle? locked?)"
                     }
                     return $did
                 }
                 if (Test-Path $Row.WorktreePath) {
                     # Litter, not a blocker: git let it go, so the branch is safe to delete.
-                    Write-Host "     NOTA git solto el worktree pero la carpeta sigue en disco (handle abierto?) - borro la rama igual; borra la carpeta a mano: $($Row.WorktreePath)" -ForegroundColor DarkYellow
+                    Write-Host "     NOTE git released the worktree but the folder is still on disk (open handle?) - deleting the branch anyway; delete the folder by hand: $($Row.WorktreePath)" -ForegroundColor DarkYellow
                 }
             }
         }
@@ -419,8 +419,8 @@ function Remove-BranchAndWorktree {
         if (-not $DryRun) {
             $del = Invoke-GitQuiet -GitArgs @('branch', $BranchFlag, $Row.Branch)
             if ($del.ExitCode -ne 0) {
-                Write-Host "     WARN conservo la rama $($Row.Branch): git no la borro [$($del.Output)]" -ForegroundColor DarkYellow
-                Add-DoctorSkip -Branch $Row.Branch -Reason "git no la borro [$($del.Output)]"
+                Write-Host "     WARN keeping branch $($Row.Branch): git did not delete it [$($del.Output)]" -ForegroundColor DarkYellow
+                Add-DoctorSkip -Branch $Row.Branch -Reason "git did not delete it [$($del.Output)]"
             } else {
                 $script:DoctorDeleted++
             }
@@ -428,8 +428,8 @@ function Remove-BranchAndWorktree {
     } catch {
         # Whatever else goes wrong for THIS branch must not take the rest of the sweep with it.
         $msg = "$($_.Exception.Message)".Split("`n")[0].Trim()
-        Write-Host "     FAIL $($Row.Branch): $msg - sigo con las demas." -ForegroundColor Red
-        Add-DoctorSkip -Branch $Row.Branch -Reason "error inesperado: $msg"
+        Write-Host "     FAIL $($Row.Branch): $msg - continuing with the rest." -ForegroundColor Red
+        Add-DoctorSkip -Branch $Row.Branch -Reason "unexpected error: $msg"
     }
     return $did
 }
@@ -584,11 +584,11 @@ function Get-PluginDrift {
         PublishedVersion = ''; ChannelVersion = ''; Modified = @(); Extra = @(); Missing = @()
     }
     $rec = Get-InstalledPluginRecord -InstalledJson $InstalledJson -PluginName $PluginName
-    if (-not $rec) { $res.Status = 'not-installed'; $res.Reason = "no hay '$PluginName' en $InstalledJson"; return [pscustomobject]$res }
+    if (-not $rec) { $res.Status = 'not-installed'; $res.Reason = "no '$PluginName' in $InstalledJson"; return [pscustomobject]$res }
     $res.InstalledVersion = $rec.Version; $res.InstalledSha = $rec.Sha; $res.InstalledPath = $rec.InstallPath
-    if (-not $rec.Sha) { $res.Reason = "la instalacion no registra gitCommitSha - no hay build publicado contra el que comparar"; return [pscustomobject]$res }
+    if (-not $rec.Sha) { $res.Reason = "the install records no gitCommitSha - there is no published build to compare against"; return [pscustomobject]$res }
     if (-not $rec.InstallPath -or -not (Test-Path -LiteralPath $rec.InstallPath -PathType Container)) {
-        $res.Reason = "la carpeta instalada no existe: $($rec.InstallPath)"; return [pscustomobject]$res
+        $res.Reason = "the installed folder does not exist: $($rec.InstallPath)"; return [pscustomobject]$res
     }
     # The marketplace clone first (that is where the published build lives), then any other clone.
     $repos = @($CandidateRepos | Where-Object { $_ })
@@ -599,7 +599,7 @@ function Get-PluginDrift {
         if ($m) { $published = $m; $usedRepo = $r; break }
     }
     if (-not $published) {
-        $res.Reason = "el commit $($rec.Sha.Substring(0, [Math]::Min(7, $rec.Sha.Length))) no esta en ningun clon local ($($repos.Count) buscados). Actualiza el clon del marketplace (git -C <clon> fetch) y reintenta"
+        $res.Reason = "commit $($rec.Sha.Substring(0, [Math]::Min(7, $rec.Sha.Length))) is not in any local clone ($($repos.Count) searched). Update the marketplace clone (git -C <clone> fetch) and retry"
         return [pscustomobject]$res
     }
     $res.PublishedVersion = Get-PublishedVersion -RepoPath $usedRepo -Sha $rec.Sha -Subdir $Subdir
@@ -611,7 +611,7 @@ function Get-PluginDrift {
         $res.Status = 'clean'
     } else {
         $res.Status = 'drifted'
-        $res.Reason = "$($diff.Modified.Count) archivo(s) modificado(s), $($diff.Extra.Count) de mas, $($diff.Missing.Count) ausente(s) respecto al build publicado"
+        $res.Reason = "$($diff.Modified.Count) file(s) modified, $($diff.Extra.Count) extra, $($diff.Missing.Count) missing versus the published build"
     }
     return [pscustomobject]$res
 }
@@ -620,21 +620,21 @@ function Get-PluginDrift {
 function Format-PluginDrift {
     param([Parameter(Mandatory)]$Drift)
     $short = { param($s) if ($s) { $s.Substring(0, [Math]::Min(7, $s.Length)) } else { '?' } }
-    $ver = "instalado $($Drift.InstalledVersion) @ $(& $short $Drift.InstalledSha)"
-    if ($Drift.PublishedVersion) { $ver += " | publicado en ese commit: $($Drift.PublishedVersion)" }
-    if ($Drift.ChannelVersion)   { $ver += " | canal release: $($Drift.ChannelVersion)" }
+    $ver = "installed $($Drift.InstalledVersion) @ $(& $short $Drift.InstalledSha)"
+    if ($Drift.PublishedVersion) { $ver += " | published at that commit: $($Drift.PublishedVersion)" }
+    if ($Drift.ChannelVersion)   { $ver += " | release channel: $($Drift.ChannelVersion)" }
     $lines = @()
     switch ($Drift.Status) {
-        'clean'         { $lines += "OK  el plugin instalado coincide byte a byte con el build publicado ($ver)" }
+        'clean'         { $lines += "OK  the installed plugin matches the published build byte for byte ($ver)" }
         'not-installed' { $lines += "--  $($Drift.Reason)" }
-        'unverifiable'  { $lines += "??  no pude verificar el plugin instalado ($ver): $($Drift.Reason)" }
+        'unverifiable'  { $lines += "??  could not verify the installed plugin ($ver): $($Drift.Reason)" }
         'drifted' {
-            $lines += "!!  el plugin instalado NO coincide con su build publicado ($ver): $($Drift.Reason)"
-            $lines += "    Se compara el CONTENIDO, no la version: la misma cadena de version puede esconder un parche local."
-            foreach ($f in $Drift.Modified) { $lines += "      modificado  $f" }
-            foreach ($f in $Drift.Extra)    { $lines += "      de mas      $f" }
-            foreach ($f in $Drift.Missing)  { $lines += "      ausente     $f" }
-            $lines += "    Solo informa: 'claude plugin update' sobrescribiria un parche local deliberado (podria quitar lo que solo vive en tu copia)."
+            $lines += "!!  the installed plugin does NOT match its published build ($ver): $($Drift.Reason)"
+            $lines += "    The CONTENT is compared, not the version: the same version string can hide a local patch."
+            foreach ($f in $Drift.Modified) { $lines += "      modified    $f" }
+            foreach ($f in $Drift.Extra)    { $lines += "      extra       $f" }
+            foreach ($f in $Drift.Missing)  { $lines += "      missing     $f" }
+            $lines += "    Report only: 'claude plugin update' would overwrite a deliberate local patch (it could remove what lives only in your copy)."
         }
     }
     return @($lines)
@@ -657,9 +657,9 @@ if (-not (git rev-parse --git-dir 2>$null)) { throw "Not inside a git repository
 if (-not $Repo) { $Repo = Get-RepoFromOrigin }
 
 Write-Host ""
-Write-Host "=== /board doctor - inventario de ramas y worktrees ($Repo) ===" -ForegroundColor Cyan
-Write-Host "    Fuente: git refs + PRs de GitHub. sessions.json NO decide nada aqui" -ForegroundColor DarkGray
-Write-Host "    (solo marca sesiones vivas para protegerlas)." -ForegroundColor DarkGray
+Write-Host "=== /board doctor - branch and worktree inventory ($Repo) ===" -ForegroundColor Cyan
+Write-Host "    Source: git refs + GitHub PRs. sessions.json decides NOTHING here" -ForegroundColor DarkGray
+Write-Host "    (it only marks live sessions to protect them)." -ForegroundColor DarkGray
 Write-Host ""
 
 # The remote's real default branch - never audit it, whatever it is called.
@@ -677,7 +677,7 @@ $protected = @($protected | Where-Object { $_ } | Select-Object -Unique)
 # nothing, which is indistinguishable from "this repo has no branches" and would print a
 # reassuring empty audit. An empty answer we cannot vouch for is not an answer.
 $refLines = @(git for-each-ref --format='%(refname:short)|%(objectname)|%(committerdate:iso8601)' refs/heads 2>$null)
-if ($LASTEXITCODE -ne 0) { throw "'git for-each-ref' fallo - no puedo inventariar las ramas locales, y un inventario vacio se leeria como 'no hay nada que limpiar'." }
+if ($LASTEXITCODE -ne 0) { throw "'git for-each-ref' failed - cannot inventory the local branches, and an empty inventory would read as 'nothing to clean up'." }
 $branches = @()
 foreach ($l in $refLines) {
     $parts = $l -split '\|', 3
@@ -695,7 +695,7 @@ foreach ($l in $refLines) {
 # dirty-files guard and the "never delete my own worktree" guard - the two things standing
 # between -Fix and someone's uncommitted work.
 $wtPorcelain = (git worktree list --porcelain 2>$null) -join "`n"
-if ($LASTEXITCODE -ne 0) { throw "'git worktree list' fallo - sin el inventario de worktrees no puedo saber cuales tienen cambios sin commitear, asi que no es seguro seguir." }
+if ($LASTEXITCODE -ne 0) { throw "'git worktree list' failed - without the worktree inventory I cannot tell which have uncommitted changes, so it is not safe to continue." }
 $wtRecords = Get-WorktreeRecords -Porcelain $wtPorcelain
 $wtByBranch = @{}
 foreach ($w in $wtRecords) { if ($w.Branch) { $wtByBranch[$w.Branch] = $w } }
@@ -741,17 +741,17 @@ $prsByBranch = @{}
 $prJson = $null
 try { $prJson = gh pr list --repo $Repo --state all --limit $PrLimit --json number,state,headRefName,headRefOid 2>$null } catch { }
 if ($LASTEXITCODE -ne 0 -or $null -eq $prJson) {
-    throw "No pude listar los PRs de $Repo (gh fallo). Sin ellos el veredicto de merge no es fiable: este repo squash-mergea, asi que la ancestria de git no puede sustituirlos. Revisa el token y el acceso al repo, y reintenta."
+    throw "Could not list the PRs of $Repo (gh failed). Without them the merge verdict is not reliable: this repo squash-merges, so git ancestry cannot stand in for them. Check the token and repo access, and retry."
 }
 $allPrs = @()
 try { $allPrs = @($prJson | ConvertFrom-Json) } catch {
-    throw "La respuesta de 'gh pr list' para $Repo no es JSON valido - no puedo verificar que ramas estan mergeadas. $_"
+    throw "The 'gh pr list' response for $Repo is not valid JSON - cannot verify which branches are merged. $_"
 }
 # NO SILENT CAPS. Hitting -PrLimit means the listing is truncated, and a merged PR that fell off
 # the end reads as "this branch has no PR" -> stale -> offered for deletion. A truncated answer
 # is an unknown answer, so refuse it the same way a gh failure is refused (#246).
 if ($allPrs.Count -ge $PrLimit) {
-    throw "'gh pr list' devolvio $($allPrs.Count) PRs y toco el limite de ${PrLimit}: la lista podria estar truncada, y un PR mergeado que se caiga del corte haria que su rama parezca 'sin PR' (y -Fix ofreceria borrarla). Sube -PrLimit por encima del total de PRs del repo y reintenta."
+    throw "'gh pr list' returned $($allPrs.Count) PRs and hit the limit of ${PrLimit}: the list may be truncated, and a merged PR that falls off the end would make its branch look like 'no PR' (and -Fix would offer to delete it). Raise -PrLimit above the repo's total PR count and retry."
 }
 foreach ($p in $allPrs) {
     if (-not $p.headRefName) { continue }
@@ -830,7 +830,7 @@ if ($Json) {
 }
 
 # --- report -------------------------------------------------------------------
-Write-Host "  $($branches.Count) ramas locales auditadas | $($prsByBranch.Keys.Count) ramas con PR | $($wtRecords.Count) worktrees" -ForegroundColor DarkGray
+Write-Host "  $($branches.Count) local branches audited | $($prsByBranch.Keys.Count) branches with a PR | $($wtRecords.Count) worktrees" -ForegroundColor DarkGray
 Write-Host ""
 
 foreach ($c in Get-DoctorClassOrder) {
@@ -841,8 +841,8 @@ foreach ($c in Get-DoctorClassOrder) {
         # Flag the dirty worktree even on a class that is otherwise deletable: -Fix will
         # refuse it, so the reader must see WHY it survives the cleanup.
         $wtNote = switch ($r.Dirty) {
-            'dirty'   { "  [worktree: cambios sin commitear -> -Fix lo conserva]" }
-            'unknown' { "  [worktree: no pude leer su estado -> -Fix lo conserva]" }
+            'dirty'   { "  [worktree: uncommitted changes -> -Fix keeps it]" }
+            'unknown' { "  [worktree: could not read its state -> -Fix keeps it]" }
             default   { if ($r.WorktreePath) { "  [worktree]" } else { "" } }
         }
         Write-Host ("   {0,-52} {1}{2}" -f $r.Branch, $r.Reason, $wtNote)
@@ -851,16 +851,16 @@ foreach ($c in Get-DoctorClassOrder) {
 }
 
 if ($ghosts.Count -gt 0) {
-    Write-Host "--- Worktrees fantasma (carpeta ausente) ($($ghosts.Count)) ---" -ForegroundColor Yellow
+    Write-Host "--- Ghost worktrees (folder missing) ($($ghosts.Count)) ---" -ForegroundColor Yellow
     foreach ($g in $ghosts) { Write-Host ("   {0,-52} {1}" -f $g.Path, $g.Prunable) }
-    Write-Host "    Se limpian solos al correr con -Fix (no hay trabajo que perder, git ya sabe que desaparecieron)." -ForegroundColor DarkGray
+    Write-Host "    -Fix cleans them up on its own (no work to lose, git already knows they are gone)." -ForegroundColor DarkGray
     Write-Host ""
 }
 
 if ($halfRemoved.Count -gt 0) {
-    Write-Host "--- Worktrees a medio borrar (git los solto, la carpeta sigue con contenido) ($($halfRemoved.Count)) ---" -ForegroundColor Red
+    Write-Host "--- Half-removed worktrees (git released them, the folder still has content) ($($halfRemoved.Count)) ---" -ForegroundColor Red
     foreach ($h in $halfRemoved) { Write-Host ("   {0,-52} {1}" -f $h.Branch, $h.Path) }
-    Write-Host "    Reintentar 'git worktree remove' no converge. Lo que si los limpia (long paths / node_modules):" -ForegroundColor DarkGray
+    Write-Host "    Retrying 'git worktree remove' does not converge. What does clean them (long paths / node_modules):" -ForegroundColor DarkGray
     foreach ($h in $halfRemoved) { Write-Host "      $(Get-HalfRemovedHint -Path $h.Path)" -ForegroundColor DarkGray }
     Write-Host ""
 }
@@ -868,7 +868,7 @@ if ($halfRemoved.Count -gt 0) {
 # The plugin that is actually installed vs the build it says it is (#482).
 if ($pluginDrift -and $pluginDrift.Status -ne 'not-installed') {
     $driftColor = switch ($pluginDrift.Status) { 'clean' { 'Green' } 'drifted' { 'Red' } default { 'Yellow' } }
-    Write-Host "--- Plugin instalado vs build publicado ---" -ForegroundColor $driftColor
+    Write-Host "--- Installed plugin vs published build ---" -ForegroundColor $driftColor
     foreach ($l in (Format-PluginDrift -Drift $pluginDrift)) { Write-Host "   $l" -ForegroundColor $driftColor }
     Write-Host ""
 }
@@ -879,24 +879,24 @@ $orphanContent = @($orphans | Where-Object { $_.Class -eq 'orphan-content' })
 $orphanEmpty   = @($orphans | Where-Object { $_.Class -eq 'orphan-empty' })
 
 if ($orphanContent.Count -gt 0) {
-    Write-Host "--- Worktrees huerfanos CON CONTENIDO (carpeta presente, git no los conoce) ($($orphanContent.Count)) ---" -ForegroundColor Red
+    Write-Host "--- Orphan worktrees WITH CONTENT (folder present, git does not know them) ($($orphanContent.Count)) ---" -ForegroundColor Red
     foreach ($o in $orphanContent) { Write-Host ("   {0,-52} {1}" -f $o.Name, $o.Path) }
-    Write-Host "    Git ya podo su metadata, asi que 'git worktree prune' no los ve." -ForegroundColor DarkGray
-    Write-Host "    Tienen archivos: revisalos a mano antes de borrar nada." -ForegroundColor DarkGray
+    Write-Host "    Git already pruned their metadata, so 'git worktree prune' does not see them." -ForegroundColor DarkGray
+    Write-Host "    They have files: check them by hand before deleting anything." -ForegroundColor DarkGray
     Write-Host ""
 }
 
 if ($orphanEmpty.Count -gt 0) {
-    Write-Host "--- Worktrees huerfanos vacios ($($orphanEmpty.Count)) ---" -ForegroundColor Yellow
+    Write-Host "--- Empty orphan worktrees ($($orphanEmpty.Count)) ---" -ForegroundColor Yellow
     foreach ($o in $orphanEmpty) { Write-Host ("   {0,-52} {1}" -f $o.Name, $o.Path) }
-    Write-Host "    El hook de SessionStart los barre solo en el proximo arranque." -ForegroundColor DarkGray
+    Write-Host "    The SessionStart hook sweeps them on its own at the next start." -ForegroundColor DarkGray
     Write-Host ""
 }
 
 if ($staleRegistry.Count -gt 0) {
-    Write-Host "--- Entradas muertas en el registro global ($($staleRegistry.Count)) ---" -ForegroundColor Yellow
-    Write-Host "    Su ruta ya no existe. Alimentan el ciclo de reintentos desde CUALQUIER repo," -ForegroundColor DarkGray
-    Write-Host "    no solo este, por eso aparecen aunque no sean de aqui." -ForegroundColor DarkGray
+    Write-Host "--- Dead entries in the global registry ($($staleRegistry.Count)) ---" -ForegroundColor Yellow
+    Write-Host "    Their path no longer exists. They feed the retry loop from ANY repo," -ForegroundColor DarkGray
+    Write-Host "    not just this one, which is why they show up even if they are not from here." -ForegroundColor DarkGray
     foreach ($s in $staleRegistry) { Write-Host ("   {0,-36} {1}" -f $s.Name, $s.Path) }
     Write-Host ""
 }
@@ -905,18 +905,18 @@ $deletable = @($rows | Where-Object { $_.Deletable })
 $decide    = @($rows | Where-Object { $_.Class -in @('closed-unmerged','stale') -and -not $_.HasLiveSession })
 
 if (-not $Fix) {
-    Write-Host "Read-only: no se cambio nada." -ForegroundColor DarkGray
+    Write-Host "Read-only: nothing was changed." -ForegroundColor DarkGray
     if ($deletable.Count -gt 0 -or $ghosts.Count -gt 0 -or $halfRemoved.Count -gt 0 -or $decide.Count -gt 0 -or $orphans.Count -gt 0 -or $staleRegistry.Count -gt 0) {
-        Write-Host "  $($deletable.Count) rama(s) mergeadas borrables, $($decide.Count) por decidir, $($ghosts.Count) worktree(s) fantasma." -ForegroundColor DarkGray
+        Write-Host "  $($deletable.Count) deletable merged branch(es), $($decide.Count) to decide, $($ghosts.Count) ghost worktree(s)." -ForegroundColor DarkGray
         if ($orphans.Count -gt 0 -or $staleRegistry.Count -gt 0) {
-            Write-Host "  $($orphanContent.Count) huerfano(s) con contenido, $($orphanEmpty.Count) vacio(s), $($staleRegistry.Count) entrada(s) muerta(s) en el registro global." -ForegroundColor DarkGray
+            Write-Host "  $($orphanContent.Count) orphan(s) with content, $($orphanEmpty.Count) empty, $($staleRegistry.Count) dead entry(ies) in the global registry." -ForegroundColor DarkGray
         }
-        Write-Host "  Ejecuta con -Fix para limpiarlas (confirma rama por rama; -Fix -DryRun para ver el plan)." -ForegroundColor DarkGray
+        Write-Host "  Run with -Fix to clean them up (confirms branch by branch; -Fix -DryRun to see the plan)." -ForegroundColor DarkGray
         if ($orphanContent.Count -gt 0) {
-            Write-Host "  -Fix NO toca los huerfanos con contenido: revisalos tu." -ForegroundColor DarkGray
+            Write-Host "  -Fix does NOT touch the orphans with content: check them yourself." -ForegroundColor DarkGray
         }
     } else {
-        Write-Host "  Nada que limpiar." -ForegroundColor Green
+        Write-Host "  Nothing to clean up." -ForegroundColor Green
     }
     Write-Host ""
     exit 0
@@ -925,7 +925,7 @@ if (-not $Fix) {
 # --- -Fix ---------------------------------------------------------------------
 # One message, two guards (up-front IsInputRedirected + the Read-Host catch) - they must say
 # the same thing wherever the missing terminal is discovered (#285).
-$script:NeedTty = "-Fix necesita una terminal interactiva: confirma rama por rama y aqui no hay donde preguntar. Opciones: -Fix -DryRun para ver el plan, -Fix -Auto para borrar solo las mergeadas (probadas seguras) sin preguntar, o corre esto en una terminal normal."
+$script:NeedTty = "-Fix needs an interactive terminal: it confirms branch by branch and there is nowhere to ask here. Options: -Fix -DryRun to see the plan, -Fix -Auto to delete only the merged branches (proven safe) without asking, or run this in a normal terminal."
 # Every branch is confirmed individually. `a` (todas) only ever applies within the class
 # being walked, so a yes-to-all on the proven-merged pile can never spill into the unmerged
 # ones - those are a separate walk with its own prompts, defaulting to No.
@@ -953,7 +953,7 @@ function Confirm-Branch {
     if ($AllRef.Value) { return $true }
     while ($true) {
         try {
-            $ans = (Read-Host "$Prompt [s=si / n=no / t=todas / q=salir] ($Default)").Trim().ToLower()
+            $ans = (Read-Host "$Prompt [y=yes / n=no / a=all / q=quit] ($Default)").Trim().ToLower()
         } catch {
             # `pwsh -NonInteractive` has no API to detect up front, so this is the real guard:
             # turn the raw "PowerShell is in NonInteractive mode" into the actionable message
@@ -962,10 +962,11 @@ function Confirm-Branch {
         }
         if (-not $ans) { $ans = $Default }
         switch ($ans) {
-            's' { return $true }
-            'n' { return $false }
-            't' { $AllRef.Value = $true; return $true }
-            'q' { $script:Quit = $true; return $false }
+            # English letters are printed; the Spanish ones (s/si/t/todas/salir) are still accepted.
+            { $_ -in @('y', 'yes', 's', 'si', 'sí') }       { return $true }
+            { $_ -in @('n', 'no') }                          { return $false }
+            { $_ -in @('a', 'all', 't', 'todas') }           { $AllRef.Value = $true; return $true }
+            { $_ -in @('q', 'quit', 'salir') }               { $script:Quit = $true; return $false }
         }
     }
 }
@@ -973,7 +974,7 @@ function Confirm-Branch {
 # The read-only report is still honest with a broken registry (it just cannot say "active"), but
 # -Fix leans on it to veto deleting a live session's branch. Without it, refuse to delete.
 if (-not $registryTrusted) {
-    throw "No pude leer .agentic-board/sessions.json (corrupto o bloqueado). Es lo unico que marca las ramas de sesiones vivas, y sin el una rama mergeada que otra sesion sigue trabajando entraria en la lista de borrado. Arregla o borra ese archivo y reintenta; el inventario read-only (sin -Fix) sigue funcionando."
+    throw "Could not read .agentic-board/sessions.json (corrupt or locked). It is the only thing that marks the branches of live sessions, and without it a merged branch that another session is still working on would land on the delete list. Fix or delete that file and retry; the read-only inventory (without -Fix) still works."
 }
 
 # A real -Fix cannot run where Read-Host is unavailable (`pwsh -NonInteractive`, CI, a piped
@@ -990,9 +991,9 @@ if (-not $DryRun -and -not $Auto -and [System.Console]::IsInputRedirected) {
     throw $script:NeedTty
 }
 
-$mode = if ($DryRun) { "DRY-RUN - nada se ejecuta" }
-        elseif ($Auto) { "-Fix -Auto - borra las mergeadas SIN preguntar (las sin mergear no se tocan)" }
-        else { "-Fix - esto borra ramas y worktrees" }
+$mode = if ($DryRun) { "DRY-RUN - nothing is executed" }
+        elseif ($Auto) { "-Fix -Auto - deletes the merged branches WITHOUT asking (unmerged ones are not touched)" }
+        else { "-Fix - this deletes branches and worktrees" }
 Write-Host "=== $mode ===" -ForegroundColor Yellow
 Write-Host ""
 
@@ -1001,12 +1002,12 @@ Write-Host ""
 #    we have already PROVEN merged via the PR (#273/PR #275). The proof is the PR, not git.
 $allMerged = $false
 if ($deletable.Count -gt 0) {
-    Write-Host "-- $($deletable.Count) rama(s) mergeadas (PR MERGED + tip coincide)" -ForegroundColor Green
+    Write-Host "-- $($deletable.Count) merged branch(es) (PR MERGED + tip matches)" -ForegroundColor Green
     foreach ($r in ($deletable | Sort-Object Branch)) {
         if ($script:Quit) { break }
         # -AutoOk is passed HERE and nowhere else: this is the only class whose safety is proven
         # rather than judged, so it is the only one -Auto may skip the prompt for (#285).
-        if (Confirm-Branch "   Borrar $($r.Branch) (PR #$($r.Pr) mergeado)?" ([ref]$allMerged) 's' -AutoOk) {
+        if (Confirm-Branch "   Delete $($r.Branch) (PR #$($r.Pr) merged)?" ([ref]$allMerged) 'y' -AutoOk) {
             foreach ($a in (Remove-BranchAndWorktree -Row $r -BranchFlag '-D')) { Write-Host "     $a" -ForegroundColor DarkGray }
         }
     }
@@ -1018,17 +1019,17 @@ if ($deletable.Count -gt 0) {
 if ($decide.Count -gt 0 -and -not $script:Quit -and $Auto) {
     # -Auto must never reach a prompt it cannot answer, and "cannot ask" must resolve to KEEP.
     # Listing them is the useful half; deleting unmerged work unattended is not on the table.
-    Write-Host "-- $($decide.Count) rama(s) SIN MERGEAR: -Auto NO las toca (su trabajo no esta en ningun lado)" -ForegroundColor Yellow
+    Write-Host "-- $($decide.Count) UNMERGED branch(es): -Auto does NOT touch them (their work exists nowhere else)" -ForegroundColor Yellow
     foreach ($r in ($decide | Sort-Object Branch)) { Write-Host "   $($r.Branch) - $($r.Reason)" -ForegroundColor DarkGray }
-    Write-Host "   Revisalas con -Fix en una terminal interactiva." -ForegroundColor DarkGray
+    Write-Host "   Review them with -Fix in an interactive terminal." -ForegroundColor DarkGray
     Write-Host ""
 } elseif ($decide.Count -gt 0 -and -not $script:Quit) {
-    Write-Host "-- $($decide.Count) rama(s) SIN MERGEAR - el trabajo se pierde si las borras" -ForegroundColor Yellow
+    Write-Host "-- $($decide.Count) UNMERGED branch(es) - the work is lost if you delete them" -ForegroundColor Yellow
     $never = $false
     foreach ($r in ($decide | Sort-Object Branch)) {
         if ($script:Quit) { break }
         Write-Host "   $($r.Branch) - $($r.Reason)" -ForegroundColor Yellow
-        if (Confirm-Branch "     Descartarla (irreversible)?" ([ref]$never) 'n') {
+        if (Confirm-Branch "     Discard it (irreversible)?" ([ref]$never) 'n') {
             foreach ($a in (Remove-BranchAndWorktree -Row $r -BranchFlag '-D')) { Write-Host "     $a" -ForegroundColor DarkGray }
         }
         $never = $false   # yes-to-all is deliberately not honored for unmerged work
@@ -1038,9 +1039,9 @@ if ($decide.Count -gt 0 -and -not $script:Quit -and $Auto) {
 
 # 3) Ghost worktrees: pure bookkeeping, no work can be lost - git already knows they are gone.
 if ($ghosts.Count -gt 0 -and -not $script:Quit) {
-    Write-Host "-- $($ghosts.Count) worktree(s) fantasma" -ForegroundColor Yellow
+    Write-Host "-- $($ghosts.Count) ghost worktree(s)" -ForegroundColor Yellow
     Write-Host "   git worktree prune" -ForegroundColor DarkGray
-    if (-not $DryRun) { git worktree prune 2>&1 | Out-Null; Write-Host "   OK  podados" -ForegroundColor Green }
+    if (-not $DryRun) { git worktree prune 2>&1 | Out-Null; Write-Host "   OK  pruned" -ForegroundColor Green }
 }
 
 Write-Host ""
@@ -1052,8 +1053,8 @@ if (-not $DryRun) {
     foreach ($l in $sum.Lines) { Write-Host $l -ForegroundColor $sumColor }
     Write-Host ""
 }
-if ($script:Quit) { Write-Host "Cancelado - el resto queda intacto." -ForegroundColor DarkGray }
-elseif ($DryRun)  { Write-Host "DRY-RUN: nada se cambio. Quita -DryRun para ejecutarlo." -ForegroundColor Yellow }
-elseif (@($script:DoctorSkipped).Count -gt 0 -or $halfRemoved.Count -gt 0) { Write-Host "Listo, con elementos omitidos (ver el resumen de arriba). Vuelve a correr sin -Fix para ver el inventario." -ForegroundColor Yellow }
-else              { Write-Host "Listo. Vuelve a correr sin -Fix para ver el inventario limpio." -ForegroundColor Green }
+if ($script:Quit) { Write-Host "Cancelled - the rest is left untouched." -ForegroundColor DarkGray }
+elseif ($DryRun)  { Write-Host "DRY-RUN: nothing was changed. Drop -DryRun to run it." -ForegroundColor Yellow }
+elseif (@($script:DoctorSkipped).Count -gt 0 -or $halfRemoved.Count -gt 0) { Write-Host "Done, with skipped items (see the summary above). Run again without -Fix to see the inventory." -ForegroundColor Yellow }
+else              { Write-Host "Done. Run again without -Fix to see the clean inventory." -ForegroundColor Green }
 Write-Host ""

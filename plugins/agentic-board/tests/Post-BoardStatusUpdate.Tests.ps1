@@ -36,7 +36,7 @@ Describe 'Post-BoardStatusUpdate fails closed (#315)' {
         Mock gh -ParameterFilter { ($args -join ' ') -match 'projectV2\(number' } { $global:LASTEXITCODE = 0; '{"data":{"user":{"projectV2":{"id":"PID_1","title":"B"}}}}' }
         Mock gh -ParameterFilter { $args -contains 'item-list' } { $global:LASTEXITCODE = 1 }
         # No -Body, so the body is auto-generated from the item read.
-        { & $script:Script -ProjectNum 13 } | Should -Throw -ExpectedMessage '*listar los items*'
+        { & $script:Script -ProjectNum 13 } | Should -Throw -ExpectedMessage '*list the items*'
         # And the public post must never run off a board it could not read.
         Should -Invoke gh -ParameterFilter { ($args -join ' ') -match 'createProjectV2StatusUpdate' } -Times 0 -Exactly
     }
@@ -45,6 +45,6 @@ Describe 'Post-BoardStatusUpdate fails closed (#315)' {
         Mock gh -ParameterFilter { ($args -join ' ') -match 'projectV2\(number' } { $global:LASTEXITCODE = 0; '{"data":null,"errors":[{"message":"Could not resolve"}]}' }
         # -Body given so the item read is skipped; the project-id read is what must throw.
         { & $script:Script -ProjectNum 13 -Body 'manual body' } |
-            Should -Throw -ExpectedMessage '*leer el board*'
+            Should -Throw -ExpectedMessage '*read board*'
     }
 }

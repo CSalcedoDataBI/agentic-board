@@ -43,7 +43,7 @@ Describe 'Resolve-GhTokenVar — a braked run gets the agent identity' {
     }
     It 'says WHY, in terms of what GitHub does' {
         (Resolve-GhTokenVar -IsArmed $true -AgentTokenPresent $true).reason |
-            Should -Match 'rechaza el push a main'
+            Should -Match 'rejects its push to main'
     }
     It 'never hands a braked run the BUSINESS identity' {
         # The widest of the three: 20 repos, admin on 17, client work included. Reaching for it to

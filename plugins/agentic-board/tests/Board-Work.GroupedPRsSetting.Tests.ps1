@@ -54,13 +54,13 @@ Describe 'Get-GroupingSetting: the value a user types, and where it came from' {
         $a = Get-GroupingSetting @{ preferGroupedPRs = 'auto' }
         $a.value | Should -Be 'auto'; $a.source | Should -Be 'config'
     }
-    It 'an UNRECOGNISED stored value is the default, never "config del repo" (intent must not be reported as fact)' {
+    It 'an UNRECOGNISED stored value is the default, never "repo config" (intent must not be reported as fact)' {
         foreach ($garbage in @('quizas', 42, 0, 1, @{ a = 1 }, @(1, 2), '', ' ')) {
             $s = Get-GroupingSetting @{ preferGroupedPRs = $garbage }
             $s.value   | Should -Be 'auto'    -Because "'$garbage' is not a decision, so the value in force is auto"
             $s.posture | Should -Be 'auto'
             $s.source  | Should -Be 'default' -Because "'$garbage' was never a decision the repo made"
-            Format-GroupingSettingLabel $s | Should -Be 'auto (por defecto)'
+            Format-GroupingSettingLabel $s | Should -Be 'auto (default)'
         }
     }
     It 'a recognised string is still a recorded decision, whatever its case or padding' {
@@ -77,8 +77,8 @@ Describe 'Get-GroupingSetting: the value a user types, and where it came from' {
 
 Describe 'Format-GroupingSettingLabel' {
     It 'reads as value + source in the tool''s language' {
-        Format-GroupingSettingLabel ([pscustomobject]@{ value = 'on';   source = 'config'  }) | Should -Be 'on (config del repo)'
-        Format-GroupingSettingLabel ([pscustomobject]@{ value = 'auto'; source = 'default' }) | Should -Be 'auto (por defecto)'
+        Format-GroupingSettingLabel ([pscustomobject]@{ value = 'on';   source = 'config'  }) | Should -Be 'on (repo config)'
+        Format-GroupingSettingLabel ([pscustomobject]@{ value = 'auto'; source = 'default' }) | Should -Be 'auto (default)'
     }
 }
 
@@ -90,17 +90,17 @@ Describe 'Show-GroupingOffer states which setting produced each proposed group (
         )
     }
     It 'prints the setting and its source under EVERY group, and how to change it' {
-        $t = Show-GroupingOffer -Suggestions $script:Groups -Posture 'auto' -SettingLabel 'auto (por defecto)' 6>&1 | Out-String
-        ([regex]::Matches($t, "propuesta de PR agrupado - ajuste 'PRs agrupados': auto \(por defecto\)")).Count | Should -Be 2
-        $t | Should -Match 'Cambiarlo: /board work -PreferGroupedPRs on\|off\|auto'
+        $t = Show-GroupingOffer -Suggestions $script:Groups -Posture 'auto' -SettingLabel 'auto (default)' 6>&1 | Out-String
+        ([regex]::Matches($t, "grouped PR proposal - 'Grouped PRs' setting: auto \(default\)")).Count | Should -Be 2
+        $t | Should -Match 'Change it: /board work -PreferGroupedPRs on\|off\|auto'
     }
     It 'names a repo-recorded value as such' {
-        $t = Show-GroupingOffer -Suggestions $script:Groups -Posture 'always' -SettingLabel 'on (config del repo)' 6>&1 | Out-String
-        $t | Should -Match "ajuste 'PRs agrupados': on \(config del repo\)"
+        $t = Show-GroupingOffer -Suggestions $script:Groups -Posture 'always' -SettingLabel 'on (repo config)' 6>&1 | Out-String
+        $t | Should -Match "'Grouped PRs' setting: on \(repo config\)"
     }
     It 'says nothing about the setting when no label is given (older callers keep their output)' {
         $t = Show-GroupingOffer -Suggestions $script:Groups -Posture 'auto' 6>&1 | Out-String
-        $t | Should -Not -Match 'PRs agrupados'
+        $t | Should -Not -Match 'Grouped PRs'
     }
     It 'the pending list passes the label from the repo config (script-level wiring)' {
         $src = Get-Content -LiteralPath $script:Script -Raw
@@ -113,18 +113,18 @@ Describe 'Board-Work.ps1 -PreferGroupedPRs show (read-only, no token)' {
         $repo = New-ThrowawayRepo 'show-default'
         $r = Invoke-Setting $repo 'show'
         $r.code | Should -Be 0
-        $r.out  | Should -Match 'PRs agrupados: auto \(por defecto\)'
-        $r.out  | Should -Match 'Cambiarlo: /board work -PreferGroupedPRs on\|off\|auto'
+        $r.out  | Should -Match 'Grouped PRs: auto \(default\)'
+        $r.out  | Should -Match 'Change it: /board work -PreferGroupedPRs on\|off\|auto'
         (Test-Path (Join-Path $repo '.agentic-board' 'config.json')) | Should -BeFalse -Because 'show must never create the config'
     }
     It 'reads back what was recorded: on, off, and back to auto' {
         $repo = New-ThrowawayRepo 'show-recorded'
         Invoke-Setting $repo 'on'  | Out-Null
-        (Invoke-Setting $repo 'show').out | Should -Match 'PRs agrupados: on \(config del repo\)'
+        (Invoke-Setting $repo 'show').out | Should -Match 'Grouped PRs: on \(repo config\)'
         Invoke-Setting $repo 'off' | Out-Null
-        (Invoke-Setting $repo 'show').out | Should -Match 'PRs agrupados: off \(config del repo\)'
+        (Invoke-Setting $repo 'show').out | Should -Match 'Grouped PRs: off \(repo config\)'
         Invoke-Setting $repo 'auto' | Out-Null
-        (Invoke-Setting $repo 'show').out | Should -Match 'PRs agrupados: auto \(por defecto\)'
+        (Invoke-Setting $repo 'show').out | Should -Match 'Grouped PRs: auto \(default\)'
     }
     It 'does not change the file it reads' {
         $repo = New-ThrowawayRepo 'show-readonly'
@@ -139,38 +139,41 @@ Describe 'Board-Work.ps1 -PreferGroupedPRs show (read-only, no token)' {
         New-Item -ItemType Directory -Path $plain -Force | Out-Null
         $r = Invoke-Setting $plain 'show'
         $r.code | Should -Be 0
-        $r.out  | Should -Match 'PRs agrupados: auto \(por defecto\)'
+        $r.out  | Should -Match 'Grouped PRs: auto \(default\)'
     }
     It 'a garbage stored value shows as the default end to end, not as a repo decision' {
         $repo = New-ThrowawayRepo 'show-garbage'
         New-Item -ItemType Directory -Path (Join-Path $repo '.agentic-board') -Force | Out-Null
         '{"preferGroupedPRs": 42}' | Set-Content (Join-Path $repo '.agentic-board' 'config.json')
         $r = Invoke-Setting $repo 'show'
-        $r.out | Should -Match 'PRs agrupados: auto \(por defecto\)'
-        $r.out | Should -Not -Match 'config del repo'
+        $r.out | Should -Match 'Grouped PRs: auto \(default\)'
+        $r.out | Should -Not -Match 'repo config'
     }
     It 'a corrupt config still yields a first line with the value in force, and says it could not read it' {
         $repo = New-ThrowawayRepo 'show-corrupt'
         New-Item -ItemType Directory -Path (Join-Path $repo '.agentic-board') -Force | Out-Null
         '{not json' | Set-Content (Join-Path $repo '.agentic-board' 'config.json')
         $r = Invoke-Setting $repo 'show'
-        ($r.out -split "`n")[0] | Should -Match 'PRs agrupados: auto \(por defecto\)'
-        $r.out | Should -Match 'No pude leer la preferencia'
+        ($r.out -split "`n")[0] | Should -Match 'Grouped PRs: auto \(default\)'
+        $r.out | Should -Match 'Could not read the repo preference'
     }
 }
 
 Describe 'the /board menu shows the setting (#681)' {
     BeforeAll {
         $script:Board = Get-Content -LiteralPath (Join-Path $script:Plugin 'commands' 'board.md') -Raw
-        $script:Menu  = [regex]::Match($script:Board, '(?s)```\r?\n¿Qué quieres hacer con el board\?.*?```').Value
+        $script:Menu  = [regex]::Match($script:Board, '(?s)```\r?\nWhat do you want to do with the board\?.*?```').Value
     }
     It 'has a sub-line under work naming the setting, its current value slot and how to change it' {
-        $script:Menu | Should -Match '(?m)^1\. work .*\r?\n\s+PRs agrupados en este repo: <valor del repo>'
+        $script:Menu | Should -Match '(?m)^1\. work .*\r?\n\s+Grouped PRs in this repo: <repo value>'
         $script:Menu | Should -Match 'work -PreferGroupedPRs on\|off\|auto'
     }
     It 'tells the model to read the value first with the read-only command, and what to print on failure' {
         $script:Board | Should -Match 'scripts/Board-Work\.ps1 -PreferGroupedPRs show'
-        $script:Board | Should -Match 'print\s+`auto \(por defecto\)`'
+        $script:Board | Should -Match 'print\s+`auto \(default\)`'
+    }
+    It 'tells the model to show the menu translated into the user''s language' {
+        $script:Board | Should -Match "Show this menu translated into the user's language"
     }
     # 23 since `plugins` moved to /cleanup (machine housekeeping is not board work). The point of the
     # count is unchanged: an indented sub-line (like the PreferGroupedPRs one) is never an extra option.
@@ -180,7 +183,7 @@ Describe 'the /board menu shows the setting (#681)' {
     It 'the work reference documents show and the three values in one place' {
         $ref = Get-Content -LiteralPath (Join-Path $script:Plugin 'skills' 'projects-admin' 'references' 'verbs-work.md') -Raw
         $ref | Should -Match 'PreferGroupedPRs show'
-        $ref | Should -Match 'por\s+defecto'
+        $ref | Should -Match 'auto\s+\(default\)'
         ($ref -match '`on` = group whatever overlaps') | Should -BeTrue
     }
 }

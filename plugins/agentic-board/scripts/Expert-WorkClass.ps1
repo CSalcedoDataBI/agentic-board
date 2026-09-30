@@ -137,7 +137,7 @@ function Get-WorkClass {
     $paths = @(@($ChangedPaths) | Where-Object { "$_".Trim() })
     if ($paths.Count -eq 0) {
         return @{ class = 'unknown'; visualPaths = @(); visualGroups = @()
-                  reason = 'no pude determinar que archivos cambiaron' }
+                  reason = 'could not tell which files changed' }
     }
     $visual = @($paths | Where-Object {
         (Test-IsVisualPath -Path $_ -VisualPatterns $Policy.visualPatterns) -and
@@ -149,16 +149,16 @@ function Get-WorkClass {
         # the decision he can actually make.
         $groups = @($visual | ForEach-Object {
             $segs = (("$_" -replace '\\', '/') -split '/')
-            if ($segs.Count -gt 1) { $segs[0] } else { '(raiz)' }
+            if ($segs.Count -gt 1) { $segs[0] } else { '(root)' }
         } | Sort-Object -Unique)
         return @{
             class        = 'visual'
             visualPaths  = $visual
             visualGroups = $groups
-            reason       = "el cambio toca $($visual.Count) archivo(s) que se juzgan mirandolos, en $($groups.Count) seccion(es): $($groups -join ', ')"
+            reason       = "the change touches $($visual.Count) file(s) that are judged by looking at them, in $($groups.Count) section(s): $($groups -join ', ')"
         }
     }
-    return @{ class = 'code'; visualPaths = @(); visualGroups = @(); reason = 'el cambio es codigo: se juzga leyendolo' }
+    return @{ class = 'code'; visualPaths = @(); visualGroups = @(); reason = 'the change is code: it is judged by reading it' }
 }
 
 <#
@@ -261,19 +261,19 @@ $changed = @(git diff --name-only "$baseRef...HEAD" 2>$null | Where-Object { "$_
 $policy  = Get-EffectiveWorkClassPolicy -Contract (Read-ExpertContract)
 $verdict = Get-WorkClass -ChangedPaths $changed -Policy $policy
 
-Write-Host "=== Clase de trabajo  (vs $baseRef) ===" -ForegroundColor Cyan
-Write-Host ("  Archivos cambiados : {0}" -f $changed.Count)
-Write-Host ("  Clase              : {0}" -f $verdict.class) -ForegroundColor $(if ($verdict.class -eq 'code') { 'Green' } else { 'Yellow' })
-Write-Host ("  Motivo             : {0}" -f $verdict.reason) -ForegroundColor DarkGray
+Write-Host "=== Work class  (vs $baseRef) ===" -ForegroundColor Cyan
+Write-Host ("  Files changed : {0}" -f $changed.Count)
+Write-Host ("  Class         : {0}" -f $verdict.class) -ForegroundColor $(if ($verdict.class -eq 'code') { 'Green' } else { 'Yellow' })
+Write-Host ("  Reason        : {0}" -f $verdict.reason) -ForegroundColor DarkGray
 if ($verdict.visualPaths.Count -gt 0) {
-    Write-Host ("  Secciones a mirar (aprueba por LOTE, no archivo por archivo): {0}" -f ($verdict.visualGroups -join ', ')) -ForegroundColor Yellow
-    Write-Host "  Lo que se juzga mirando:" -ForegroundColor Yellow
+    Write-Host ("  Sections to look at (approve by BATCH, not file by file): {0}" -f ($verdict.visualGroups -join ', ')) -ForegroundColor Yellow
+    Write-Host "  What is judged by looking:" -ForegroundColor Yellow
     $verdict.visualPaths | Select-Object -First 20 | ForEach-Object { Write-Host "    $_" }
 }
 if (Test-HumanMustApprove -Class $verdict.class -Policy $policy) {
-    Write-Host "  -> Lo aprueba una persona: hay algo que se juzga viendolo." -ForegroundColor Yellow
+    Write-Host "  -> A person approves it: something here is judged by looking at it." -ForegroundColor Yellow
 } else {
-    Write-Host "  -> El agente puede cerrarlo solo, si cumple los estandares." -ForegroundColor Green
+    Write-Host "  -> The agent can close it alone, if it meets the standards." -ForegroundColor Green
 }
 
 # Which DoD gates THIS diff owes (#569): derived from the same changed paths, so a docs fix does
@@ -288,12 +288,12 @@ $owed = @(Get-ApplicableDodGates -Dod $dodTable -ChangedPaths $changed)
 $enabledAll = @(Get-ApplicableDodGates -Dod $dodTable -ChangedPaths @())
 $skipped = @($enabledAll | Where-Object { $owed -notcontains $_ })
 Write-Host ""
-Write-Host ("  DoD que APLICA a este diff : {0}" -f $(if ($owed.Count) { ($owed | Sort-Object) -join ', ' } else { '(ninguna)' })) -ForegroundColor Cyan
+Write-Host ("  DoD that APPLIES to this diff : {0}" -f $(if ($owed.Count) { ($owed | Sort-Object) -join ', ' } else { '(none)' })) -ForegroundColor Cyan
 if ($skipped.Count) {
-    Write-Host ("  DoD que NO aplica (nada que la dispare en el diff): {0}" -f (($skipped | Sort-Object) -join ', ')) -ForegroundColor DarkGray
+    Write-Host ("  DoD that does NOT apply (nothing in the diff triggers it): {0}" -f (($skipped | Sort-Object) -join ', ')) -ForegroundColor DarkGray
     # #475: not owed is not the same as passed. Say so in the record, once per gate, so a reader
     # later can tell "bpa passed" from "bpa never applied" (Expert-Evidence.Get-NotApplicableGateRows).
-    Write-Host "  -> Registra cada una en la evidencia con resultado N/A (nunca PASS): no corrio porque no aplica." -ForegroundColor DarkGray
+    Write-Host "  -> Record each one in the evidence as N/A (never PASS): it did not run because it does not apply." -ForegroundColor DarkGray
 }
 
 

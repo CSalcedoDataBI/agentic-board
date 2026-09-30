@@ -240,7 +240,7 @@ Describe 'Get-LiveSessionMap + Format-SessionMap' {
         $text = (Format-SessionMap -Map $map | ForEach-Object Text) -join "`n"
         $text | Should -Match 'Sales model'
         $text | Should -Match 'D:\\proj\\sales'
-        $text | Should -Match 'p@m: cargo 1\.0 -> instalado 2\.0'
+        $text | Should -Match 'p@m: loaded 1\.0 -> installed 2\.0'
         $text | Should -Match '/reload-plugins'
     }
     It 'NEVER prints the name, folder or id of a session that is not live' {
@@ -267,19 +267,19 @@ Describe 'Get-LiveSessionMap + Format-SessionMap' {
         $map.UnknownLiveness | Should -Be 1
         ((Format-SessionMap -Map $map | ForEach-Object Text) -join "`n") | Should -Not -Match 'No start time'
     }
-    It 'an open session with no markers is listed as SIN DATOS, and is not counted as up to date' {
+    It 'an open session with no markers is listed as NO DATA, and is not counted as up to date' {
         [void](Add-FakeSession $fx -ProcId 333 -StartFt $ftLive -Name 'Blind session')
         $map = Get-LiveSessionMap -ClaudeHome $fx.Root -GetProcess $table
         $map.Sessions[0].State | Should -Be 'unknown'
         $lines = @(Format-SessionMap -Map $map)
-        # the per-session line itself (the summary line also says "sin datos", in lower case)
-        ($lines | ForEach-Object Text) -join "`n" | Should -MatchExactly 'Blind session".*SIN DATOS: no encuentro'
-        ($lines | ForEach-Object Text) -join "`n" | Should -Match '0 al dia'
+        # the per-session line itself (the summary line also says "no data", in lower case)
+        ($lines | ForEach-Object Text) -join "`n" | Should -MatchExactly 'Blind session".*NO DATA: I cannot find'
+        ($lines | ForEach-Object Text) -join "`n" | Should -Match '0 up to date'
     }
     It 'an unreadable installed list is a failure, not "all current"' {
         [System.IO.File]::WriteAllText((Join-Path $fx.Root 'plugins' 'installed_plugins.json'), '{ nope')
         $map = Get-LiveSessionMap -ClaudeHome $fx.Root -GetProcess $table
         $map.Ok | Should -BeFalse
-        ((Format-SessionMap -Map $map | ForEach-Object Text) -join "`n") | Should -Match 'No pude comprobar'
+        ((Format-SessionMap -Map $map | ForEach-Object Text) -join "`n") | Should -Match 'Could not check'
     }
 }

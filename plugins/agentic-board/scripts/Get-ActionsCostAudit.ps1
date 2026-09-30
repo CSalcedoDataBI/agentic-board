@@ -724,14 +724,14 @@ function Expand-CronField {
 function Get-CronFrequency {
     param([string]$Expr)
     $f = @("$Expr".Trim() -split '\s+')
-    if ($f.Count -ne 5) { return [pscustomobject]@{ Parsed = $false; Reason = "se esperaban 5 campos, hay $($f.Count)"; PerWeek = 0; PerDay = 0 } }
+    if ($f.Count -ne 5) { return [pscustomobject]@{ Parsed = $false; Reason = "expected 5 fields, got $($f.Count)"; PerWeek = 0; PerDay = 0 } }
     $mi  = Expand-CronField $f[0] 0 59 $null
     $hr  = Expand-CronField $f[1] 0 23 $null
     $dom = Expand-CronField $f[2] 1 31 $null
     $mon = Expand-CronField $f[3] 1 12 $script:CronMon
     $dow = Expand-CronField $f[4] 0 7  $script:CronDow
     foreach ($x in @($mi, $hr, $dom, $mon, $dow)) {
-        if ($null -eq $x) { return [pscustomobject]@{ Parsed = $false; Reason = "no es una expresion cron que esta auditoria sepa leer: '$Expr'"; PerWeek = 0; PerDay = 0 } }
+        if ($null -eq $x) { return [pscustomobject]@{ Parsed = $false; Reason = "not a cron expression this audit can read: '$Expr'"; PerWeek = 0; PerDay = 0 } }
     }
     $dowSet = @($dow | ForEach-Object { $_ % 7 } | Sort-Object -Unique)
     $domFrac = $dom.Count / 31.0
@@ -752,18 +752,18 @@ function Get-CronFrequency {
 # ============================================================================================
 
 $script:RuleTitles = [ordered]@{
-    'R1'   = 'el mismo job en pull_request y en push'
-    'R2'   = 'concurrency con cancel-in-progress'
-    'R3'   = 'timeout-minutes en cada job'
-    'R4'   = 'filtro de rutas (paths / paths-ignore) en pull_request'
-    'R5'   = 'runners windows / macos en push de rama'
-    'R6'   = 'retention-days en artefactos y cache en setup-*'
-    'R7'   = 'crons que corren mas de una vez por semana'
-    'R8'   = 'repo privado (observacion)'
-    'FAN'  = 'setup repetido entre los jobs que dispara un mismo evento'
-    'TRAP' = 'check requerido + filtro de rutas (trampa del deadlock)'
-    'PARSE' = 'workflows que esta auditoria sabe leer'
-    'COST' = 'coste medido (endpoint de uso de la cuenta)'
+    'R1'   = 'the same job on pull_request and on push'
+    'R2'   = 'concurrency with cancel-in-progress'
+    'R3'   = 'timeout-minutes on every job'
+    'R4'   = 'path filter (paths / paths-ignore) on pull_request'
+    'R5'   = 'windows / macos runners on a branch push'
+    'R6'   = 'retention-days on artifacts and cache on setup-*'
+    'R7'   = 'crons that run more than once a week'
+    'R8'   = 'private repo (observation)'
+    'FAN'  = 'setup repeated across the jobs one event starts'
+    'TRAP' = 'required check + path filter (the deadlock trap)'
+    'PARSE' = 'workflows this audit can read'
+    'COST' = 'measured cost (account usage endpoint)'
 }
 
 $script:QuotaMultiplier = @{ 'Actions Linux' = 1; 'Actions Windows' = 2; 'Actions macOS' = 10 }
@@ -886,7 +886,7 @@ function Test-WorkflowRules {
         $pushDef = Test-BranchFilter $push.Branches $push.BranchesIgnore $DefaultBranch
         $prDef   = Test-BranchFilter $pr.Branches $pr.BranchesIgnore $DefaultBranch
         if ($null -eq $pushDef -or $null -eq $prDef) {
-            Add-Unmeasured $Ctx 'R1' $f $push.Line 'un filtro de ramas usa un patron que esta auditoria no evalua (negacion, clase, ? o +)'
+            Add-Unmeasured $Ctx 'R1' $f $push.Line 'a branch filter uses a pattern this audit does not evaluate (negation, class, ? or +)'
         } else {
             $incl = @($push.Branches)
             # every branch (bar the ignored ones): no positive list, or a catch-all pattern
@@ -900,15 +900,15 @@ function Test-WorkflowRules {
                     if ($j.If -and $j.If -match 'github\.(event_name|ref)') { continue }    # the job tells the two events apart
                     $parts = @()
                     if ($allBranches) {
-                        $ign = $(if (@($push.BranchesIgnore).Count -gt 0) { " (salvo $(@($push.BranchesIgnore) -join ', '))" } else { '' })
-                        $parts += "cada push a cualquier rama${ign}: un commit empujado a la rama de una PR se juzga dos veces, y otra tras el merge"
+                        $ign = $(if (@($push.BranchesIgnore).Count -gt 0) { " (except $(@($push.BranchesIgnore) -join ', '))" } else { '' })
+                        $parts += "every push to any branch${ign}: a commit pushed to a PR's branch is judged twice, and once more after the merge"
                         $sev = 'high'
                     } else {
-                        if ($rerun) { $parts += "push a ${DefaultBranch}: el merge repite el veredicto que la PR ya pago" }
-                        if ($others.Count -gt 0) { $parts += "push a ramas que coinciden con [$($others -join ', ')]: una PR abierta desde una de esas ramas, o un merge a ellas, repite el veredicto" }
+                        if ($rerun) { $parts += "push to ${DefaultBranch}: the merge repeats the verdict the PR already paid for" }
+                        if ($others.Count -gt 0) { $parts += "push to branches matching [$($others -join ', ')]: a PR opened from one of those branches, or a merge into them, repeats the verdict" }
                         $sev = $(if ($rerun -or $wild.Count -gt 0) { 'medium' } else { 'low' })
                     }
-                    Add-Finding $Ctx 'R1' $sev $f $j.Line ("job '$($j.Id)' corre en $($pr.Event) (linea $($pr.Line)) Y en push (linea $($push.Line)): " + ($parts -join '; ')) @() $Model
+                    Add-Finding $Ctx 'R1' $sev $f $j.Line ("job '$($j.Id)' runs on $($pr.Event) (line $($pr.Line)) AND on push (line $($push.Line)): " + ($parts -join '; ')) @() $Model
                 }
             }
         }
@@ -923,34 +923,34 @@ function Test-WorkflowRules {
         # The concurrency that applies: the workflow's own, or - when it has none - each job's own.
         # Judged unit by unit, so one job that cancels never hides another that does not.
         $units = @(); $uncovered = @()
-        if ($wf.Present) { $units += [pscustomobject]@{ Label = 'el workflow'; C = $wf } }
+        if ($wf.Present) { $units += [pscustomobject]@{ Label = 'the workflow'; C = $wf } }
         else {
             foreach ($j in $jobs) {
-                if ($j.Concurrency.Present) { $units += [pscustomobject]@{ Label = "el job '$($j.Id)'"; C = $j.Concurrency } }
+                if ($j.Concurrency.Present) { $units += [pscustomobject]@{ Label = "job '$($j.Id)'"; C = $j.Concurrency } }
                 else { $uncovered += $j }
             }
         }
         if ($units.Count -eq 0) {
             if ($release) {
-                Add-Finding $Ctx 'R2' 'low' $f $trigLine 'workflow de release/deploy sin concurrency: dos releases pueden solaparse (debe llevar concurrency con cancel-in-progress: false)' @() $Model
+                Add-Finding $Ctx 'R2' 'low' $f $trigLine 'release/deploy workflow without concurrency: two releases can overlap (it should have concurrency with cancel-in-progress: false)' @() $Model
             } else {
-                Add-Finding $Ctx 'R2' 'medium' $f $trigLine 'sin concurrency: cada push nuevo a una PR deja correr (y cobrar) la ejecucion anterior, ya obsoleta' @() $Model
+                Add-Finding $Ctx 'R2' 'medium' $f $trigLine 'no concurrency: each new push to a PR lets the previous, now stale, run keep running (and billing)' @() $Model
             }
         } else {
             foreach ($u in $units) {
                 $cancelLine = $(if ($u.C.CancelLine -gt 0) { $u.C.CancelLine } else { $u.C.Line })
                 if ($u.C.Cancel -eq 'expression') {
-                    Add-Unmeasured $Ctx 'R2' $f $cancelLine "$($u.Label): cancel-in-progress es una expresion que esta auditoria no evalua"
+                    Add-Unmeasured $Ctx 'R2' $f $cancelLine "$($u.Label): cancel-in-progress is an expression this audit does not evaluate"
                 } elseif ($release) {
                     if ($u.C.Cancel -eq 'true') {
-                        Add-Finding $Ctx 'R2' 'high' $f $cancelLine "$($u.Label) de release/deploy con cancel-in-progress: true: un release cancelado a medias deja tags y PRs inconsistentes (debe ser false)" @() $Model
+                        Add-Finding $Ctx 'R2' 'high' $f $cancelLine "$($u.Label) (release/deploy) has cancel-in-progress: true: a release cancelled halfway leaves inconsistent tags and PRs (it should be false)" @() $Model
                     }
                 } elseif ($u.C.Cancel -ne 'true') {
-                    Add-Finding $Ctx 'R2' 'medium' $f $u.C.Line "$($u.Label) tiene concurrency sin cancel-in-progress: true: las ejecuciones obsoletas siguen corriendo y cobrando" @() $Model
+                    Add-Finding $Ctx 'R2' 'medium' $f $u.C.Line "$($u.Label) has concurrency without cancel-in-progress: true: stale runs keep running and billing" @() $Model
                 }
             }
             if (-not $release -and $uncovered.Count -gt 0) {
-                Add-Finding $Ctx 'R2' 'medium' $f $trigLine ("jobs sin concurrency: $(@($uncovered | ForEach-Object { $_.Id }) -join ', ') (los demas si la tienen): sus ejecuciones obsoletas siguen corriendo y cobrando") @() $Model
+                Add-Finding $Ctx 'R2' 'medium' $f $trigLine ("jobs without concurrency: $(@($uncovered | ForEach-Object { $_.Id }) -join ', ') (the others have it): their stale runs keep running and billing") @() $Model
             }
         }
     }
@@ -960,13 +960,13 @@ function Test-WorkflowRules {
         if ($j.Uses) { continue }       # a reusable-workflow call takes no timeout-minutes of its own
         Add-Eval $Ctx 'R3' 1
         if ($null -eq $j.TimeoutRaw) {
-            Add-Finding $Ctx 'R3' 'high' $f $j.Line "job '$($j.Id)' sin timeout-minutes: GitHub aplica 360 min por defecto; un job colgado se come el 12% de una cuota de 3000" @() $Model
+            Add-Finding $Ctx 'R3' 'high' $f $j.Line "job '$($j.Id)' has no timeout-minutes: GitHub applies 360 min by default; a hung job eats 12% of a 3000-minute quota" @() $Model
         } elseif ($j.TimeoutRaw -match '^\d+$') {
             if ([int]$j.TimeoutRaw -ge 360) {
-                Add-Finding $Ctx 'R3' 'high' $f $j.TimeoutLine "job '$($j.Id)' fija timeout-minutes: $($j.TimeoutRaw), que es el valor por defecto: no limita nada" @() $Model
+                Add-Finding $Ctx 'R3' 'high' $f $j.TimeoutLine "job '$($j.Id)' sets timeout-minutes: $($j.TimeoutRaw), which is the default: it limits nothing" @() $Model
             }
         } else {
-            Add-Unmeasured $Ctx 'R3' $f $j.TimeoutLine "el timeout-minutes del job '$($j.Id)' es una expresion: no se evalua"
+            Add-Unmeasured $Ctx 'R3' $f $j.TimeoutLine "the timeout-minutes of job '$($j.Id)' is an expression: not evaluated"
         }
     }
 
@@ -981,14 +981,14 @@ function Test-WorkflowRules {
             # a self-hosted runner does not spend GitHub-hosted minutes, whatever its os label says
             if (@(@($j.RunsOn.Labels) | Where-Object { $_ -ieq 'self-hosted' }).Count -gt 0) { continue }
             if ($j.RunsOn.Unresolved) {
-                Add-Unmeasured $Ctx 'R5' $f $j.RunsOn.Line "el runs-on del job '$($j.Id)' no se puede resolver (una expresion, o una matriz con exclude)"
+                Add-Unmeasured $Ctx 'R5' $f $j.RunsOn.Line "the runs-on of job '$($j.Id)' cannot be resolved (an expression, or a matrix with exclude)"
             }
             foreach ($lab in @($j.RunsOn.Labels)) {
                 $mult = 0; $os = ''
                 if ($lab -match '^(?i)windows') { $mult = 2; $os = 'windows' }
                 elseif ($lab -match '^(?i)macos') { $mult = 10; $os = 'macos' }
                 if ($mult -gt 0) {
-                    Add-Finding $Ctx 'R5' 'high' $f $j.RunsOn.Line "job '$($j.Id)' corre en $lab en un push de rama (linea $($push.Line)): $os cuenta x$mult contra la cuota. Windows/macOS solo en push de tags" @() $Model
+                    Add-Finding $Ctx 'R5' 'high' $f $j.RunsOn.Line "job '$($j.Id)' runs on $lab on a branch push (line $($push.Line)): $os counts x$mult against the quota. Windows/macOS only on tag pushes" @() $Model
                 }
             }
         }
@@ -1002,7 +1002,7 @@ function Test-WorkflowRules {
             if ($name -like 'actions/upload-artifact*') {
                 Add-Eval $Ctx 'R6' 1
                 if (-not $s.With.ContainsKey('retention-days')) {
-                    Add-Finding $Ctx 'R6' 'medium' $f $s.UsesLine "job '$($j.Id)' sube un artefacto sin retention-days: se usa la retencion por defecto del repo/organizacion (90 dias salvo que la hayan cambiado)" @() $Model
+                    Add-Finding $Ctx 'R6' 'medium' $f $s.UsesLine "job '$($j.Id)' uploads an artifact without retention-days: the repo/organization default retention applies (90 days unless it was changed)" @() $Model
                 }
                 continue
             }
@@ -1010,7 +1010,7 @@ function Test-WorkflowRules {
             if ($null -ne $rule) {
                 Add-Eval $Ctx 'R6' 1
                 if (-not $s.With.ContainsKey($rule.Input) -and -not $hasCacheStep) {
-                    Add-Finding $Ctx 'R6' 'medium' $f $s.UsesLine "job '$($j.Id)' usa $name sin '$($rule.Input):' ni un paso actions/cache: reinstala las dependencias en cada ejecucion" @() $Model
+                    Add-Finding $Ctx 'R6' 'medium' $f $s.UsesLine "job '$($j.Id)' uses $name without '$($rule.Input):' or an actions/cache step: it reinstalls the dependencies on every run" @() $Model
                 }
             } elseif ($name -eq 'actions/setup-go') {
                 Add-Eval $Ctx 'R6' 1
@@ -1018,11 +1018,11 @@ function Test-WorkflowRules {
                 if ($s.Uses -match '@v(\d+)') { $ver = [int]$Matches[1] }
                 $cacheOff = ($s.With.ContainsKey('cache') -and "$($s.With['cache'])" -ieq 'false')
                 if ($cacheOff -and -not $hasCacheStep) {
-                    Add-Finding $Ctx 'R6' 'medium' $f $s.UsesLine "job '$($j.Id)' desactiva la cache de setup-go (cache: false) y no hay un paso actions/cache" @() $Model
+                    Add-Finding $Ctx 'R6' 'medium' $f $s.UsesLine "job '$($j.Id)' turns off the setup-go cache (cache: false) and there is no actions/cache step" @() $Model
                 } elseif ($null -ne $ver -and $ver -lt 4 -and -not $s.With.ContainsKey('cache') -and -not $hasCacheStep) {
-                    Add-Finding $Ctx 'R6' 'medium' $f $s.UsesLine "job '$($j.Id)' usa $($s.Uses): antes de v4 setup-go no cachea por defecto" @() $Model
+                    Add-Finding $Ctx 'R6' 'medium' $f $s.UsesLine "job '$($j.Id)' uses $($s.Uses): before v4, setup-go does not cache by default" @() $Model
                 } elseif ($null -eq $ver) {
-                    Add-Unmeasured $Ctx 'R6' $f $s.UsesLine "setup-go fijado por algo distinto de una etiqueta de version mayor: no se puede leer si cachea por defecto"
+                    Add-Unmeasured $Ctx 'R6' $f $s.UsesLine "setup-go is pinned by something other than a major version tag: cannot tell whether it caches by default"
                 }
             }
         }
@@ -1037,7 +1037,7 @@ function Test-WorkflowRules {
                 Add-Unmeasured $Ctx 'R7' $f $c.Line $freq.Reason
             } elseif ($freq.PerWeek -gt 1) {
                 $sev = $(if ($freq.PerWeek -ge 14) { 'high' } else { 'medium' })
-                Add-Finding $Ctx 'R7' $sev $f $c.Line ("cron '$($c.Expr)' corre unas $($freq.PerWeek) veces por semana: es gasto que corre aunque no trabajes. Semanal cuesta 1 vez") @() $Model
+                Add-Finding $Ctx 'R7' $sev $f $c.Line ("cron '$($c.Expr)' runs about $($freq.PerWeek) times a week: it spends even when you are not working. Weekly costs 1 run") @() $Model
             }
         }
     }
@@ -1110,30 +1110,30 @@ function Test-PathFilterAndRequiredChecks {
                 $names = ($reqJobs | ForEach-Object { $_.Job.Id }) -join ', '
                 $exact = @($reqJobs | Where-Object { $_.Kind -eq 'exact' }).Count -gt 0
                 $sev   = $(if ($exact) { 'high' } else { 'medium' })
-                $hedge = $(if ($exact) { '' } else { " OJO: el job coincide con el check solo por el prefijo de su nombre (lleva una expresion), que puede chocar con otro check: verificalo." })
-                Add-Finding $Ctx 'TRAP' $sev $m.File $pr.Line ("el workflow filtra por rutas y su job '$names' es un check REQUERIDO: una PR que solo toque rutas filtradas nunca dispara el check, y GitHub la deja en 'Expected - waiting for status' para siempre (la unica salida es el bypass de admin).$hedge") @() $m
+                $hedge = $(if ($exact) { '' } else { " NOTE: the job matches the check only by the prefix of its name (it contains an expression), which can collide with another check: verify it." })
+                Add-Finding $Ctx 'TRAP' $sev $m.File $pr.Line ("the workflow filters by path and its job '$names' is a REQUIRED check: a PR that only touches filtered paths never triggers the check, and GitHub leaves it at 'Expected - waiting for status' forever (the only way out is the admin bypass).$hedge") @() $m
             } elseif (-not $Required.Complete) {
-                Add-Unmeasured $Ctx 'TRAP' $m.File $pr.Line "el workflow filtra por rutas y los checks requeridos no se pudieron leer completos ($($Required.Reason)): no se midio si el filtro puede dejar una PR en deadlock"
+                Add-Unmeasured $Ctx 'TRAP' $m.File $pr.Line "the workflow filters by path and the required checks could not be read in full ($($Required.Reason)): not measured whether the filter can leave a PR deadlocked"
             } elseif ($Required.Contexts.Count -gt 0 -and @(Get-OpaqueJobs $m).Count -gt 0) {
-                Add-Unmeasured $Ctx 'TRAP' $m.File $pr.Line "el workflow filtra por rutas y un job tiene un nombre que empieza por una expresion: no se pudo comprobar si es un check requerido"
+                Add-Unmeasured $Ctx 'TRAP' $m.File $pr.Line "the workflow filters by path and a job has a name that starts with an expression: could not check whether it is a required check"
             }
             continue
         }
 
         # No filter: R4 advice, with the deadlock verdict attached.
-        $caution = "Si el contenido (los .md, los datos) ES el producto, no se ignora. Un filtro solo sirve si de verdad ninguna ruta filtrada puede afectar a este workflow."
+        $caution = "If the content (the .md files, the data) IS the product, do not ignore it. A filter only helps if no filtered path can really affect this workflow."
         if ($reqJobs.Count -gt 0) {
             $names = ($reqJobs | ForEach-Object { $_.Job.Id }) -join ', '
-            $may = $(if (@($reqJobs | Where-Object { $_.Kind -eq 'exact' }).Count -gt 0) { 'es' } else { 'PODRIA ser (coincide solo por el prefijo de su nombre, que lleva una expresion)' })
-            $verdict = "OJO: su job '$names' $may un check REQUERIDO en el ruleset; anadir un filtro de rutas aqui dejaria PRs paradas en 'Expected - waiting for status'. No lo anadas (o quita el requisito antes)."
+            $may = $(if (@($reqJobs | Where-Object { $_.Kind -eq 'exact' }).Count -gt 0) { 'is' } else { 'MIGHT be (it matches only by the prefix of its name, which contains an expression)' })
+            $verdict = "NOTE: its job '$names' $may a REQUIRED check in the ruleset; adding a path filter here would leave PRs stuck at 'Expected - waiting for status'. Do not add one (or remove the requirement first)."
         } elseif ($Required.Contexts.Count -gt 0 -and @(Get-OpaqueJobs $m).Count -gt 0) {
-            $verdict = "Un job tiene un nombre que empieza por una expresion: no se pudo comprobar si es un check requerido. Comprueba que no lo es ANTES de anadir un filtro de rutas."
+            $verdict = "A job has a name that starts with an expression: could not check whether it is a required check. Check that it is not one BEFORE adding a path filter."
         } elseif ($Required.Complete) {
-            $verdict = "No es un check requerido en el ruleset (leido), asi que un filtro de rutas no puede dejar una PR en deadlock."
+            $verdict = "It is not a required check in the ruleset (read), so a path filter cannot leave a PR deadlocked."
         } else {
-            $verdict = "No se pudieron leer los checks requeridos ($($Required.Reason)): comprueba que este workflow no lo es ANTES de anadir un filtro de rutas."
+            $verdict = "The required checks could not be read ($($Required.Reason)): check that this workflow is not one BEFORE adding a path filter."
         }
-        Add-Finding $Ctx 'R4' 'advice' $m.File $pr.Line ("$($pr.Event) sin paths / paths-ignore: cualquier PR lo dispara, tambien las que solo tocan documentacion. $verdict $caution") @() $m
+        Add-Finding $Ctx 'R4' 'advice' $m.File $pr.Line ("$($pr.Event) without paths / paths-ignore: any PR triggers it, including those that only touch documentation. $verdict $caution") @() $m
     }
 }
 
@@ -1184,10 +1184,10 @@ function Get-EventFanOut {
     # runners
     $runners = 0; $reasons = @()
     foreach ($r in $rows) {
-        if ($r.Reusable) { $runners += 1; $reasons += "el job '$($r.JobId)' ($($r.File)) llama a un workflow reutilizable: arranca un numero de runners que no se conoce"; continue }
-        if ($null -eq $r.MatrixSize) { $runners += 1; $reasons += "el job '$($r.JobId)' ($($r.File)) tiene una matriz que no se puede contar exacta (se cuenta como 1)" }
+        if ($r.Reusable) { $runners += 1; $reasons += "job '$($r.JobId)' ($($r.File)) calls a reusable workflow: it starts an unknown number of runners"; continue }
+        if ($null -eq $r.MatrixSize) { $runners += 1; $reasons += "job '$($r.JobId)' ($($r.File)) has a matrix that cannot be counted exactly (counted as 1)" }
         else { $runners += $r.MatrixSize }
-        if ($r.Guarded) { $reasons += "el job '$($r.JobId)' ($($r.File)) tiene un if: puede no arrancar" }
+        if ($r.Guarded) { $reasons += "job '$($r.JobId)' ($($r.File)) has an if: it may not start" }
     }
     $summary = [pscustomobject]@{
         Event = $EventName; Workflows = @($rows | ForEach-Object { $_.File } | Select-Object -Unique).Count
@@ -1213,7 +1213,7 @@ function Get-EventFanOut {
         if ($where.Count -lt 2) { continue }
         $ev = @($where | ForEach-Object { "$($_.File):$($_.Line) (job '$($_.JobId)')" })
         $first = $where[0]
-        Add-Finding $Ctx 'FAN' 'medium' $first.File $first.Line ("'$cmd' se repite en $($where.Count) jobs que dispara $EventName, y cada uno es su propio runner con su propio checkout: el setup se paga $($where.Count) veces para juzgar un commit. Un workflow con jobs, o un job con pasos, lo pagaria una vez") $ev $first.Model
+        Add-Finding $Ctx 'FAN' 'medium' $first.File $first.Line ("'$cmd' repeats in $($where.Count) jobs started by $EventName, and each one is its own runner with its own checkout: the setup is paid $($where.Count) times to judge one commit. One workflow with jobs, or one job with steps, would pay it once") $ev $first.Model
     }
     return $summary
 }
@@ -1223,7 +1223,7 @@ function Invoke-WorkflowRules {
     param($Ctx, $Models, [string]$DefaultBranch, $Required)
     $good = @($Models | Where-Object { $_.Parsed })
     foreach ($m in @($Models | Where-Object { -not $_.Parsed })) {
-        Add-Unmeasured $Ctx 'PARSE' $m.File 0 "esta auditoria no pudo leer el archivo ($($m.Error)): no se evaluo ninguna de sus reglas"
+        Add-Unmeasured $Ctx 'PARSE' $m.File 0 "this audit could not read the file ($($m.Error)): none of its rules were evaluated"
     }
     foreach ($m in $good) { Test-WorkflowRules $Ctx $m $DefaultBranch }
     Test-PathFilterAndRequiredChecks $Ctx $good $Required
@@ -1239,7 +1239,7 @@ function Invoke-WorkflowRules {
 
 function Get-RepoFacts {
     param([string]$Repo)
-    $r = Invoke-Gh -GhArgs @('api', "repos/$Repo") -What "leer el repo $Repo" -Json -Retries 2
+    $r = Invoke-Gh -GhArgs @('api', "repos/$Repo") -What "read the repo $Repo" -Json -Retries 2
     [pscustomobject]@{
         Repo = $Repo; Name = $r.name; Owner = $r.owner.login; OwnerType = $r.owner.type
         Private = [bool]$r.private; DefaultBranch = $r.default_branch; Archived = [bool]$r.archived
@@ -1250,7 +1250,7 @@ function Get-RemoteWorkflowFiles {
     param([string]$Repo, [string]$Branch, $Ctx)
     $files = @()
     try {
-        $list = Invoke-Gh -GhArgs @('api', "repos/$Repo/contents/.github/workflows?ref=$Branch") -What "listar los workflows de $Repo" -Json -Retries 2
+        $list = Invoke-Gh -GhArgs @('api', "repos/$Repo/contents/.github/workflows?ref=$Branch") -What "list the workflows of $Repo" -Json -Retries 2
     } catch {
         if ("$($_.Exception.Message)" -match 'HTTP 404|Not Found') { return @() }     # no workflows directory: measured, empty
         throw
@@ -1258,10 +1258,10 @@ function Get-RemoteWorkflowFiles {
     foreach ($e in @($list)) {
         if ($e.type -ne 'file' -or $e.name -notmatch '\.ya?ml$') { continue }
         try {
-            $out = Invoke-Gh -GhArgs @('api', '-H', 'Accept: application/vnd.github.raw', "repos/$Repo/contents/$($e.path)?ref=$Branch") -What "leer $($e.path)" -Retries 2
+            $out = Invoke-Gh -GhArgs @('api', '-H', 'Accept: application/vnd.github.raw', "repos/$Repo/contents/$($e.path)?ref=$Branch") -What "read $($e.path)" -Retries 2
             $files += [pscustomobject]@{ File = $e.name; Text = (@($out) -join "`n") }
         } catch {
-            Add-Unmeasured $Ctx 'PARSE' $e.name 0 "no se pudo descargar el archivo: $($_.Exception.Message)"
+            Add-Unmeasured $Ctx 'PARSE' $e.name 0 "could not download the file: $($_.Exception.Message)"
         }
     }
     return $files
@@ -1283,7 +1283,7 @@ function Get-RequiredChecks {
     param([string]$Repo, [string]$Branch)
     $contexts = @(); $problems = @(); $complete = $true
     try {
-        $rules = Invoke-Gh -GhArgs @('api', "repos/$Repo/rules/branches/$Branch") -What "leer las reglas de $Branch" -Json -Retries 2
+        $rules = Invoke-Gh -GhArgs @('api', "repos/$Repo/rules/branches/$Branch") -What "read the rules of $Branch" -Json -Retries 2
         foreach ($r in @($rules)) {
             if ($r.type -eq 'required_status_checks') {
                 foreach ($c in @($r.parameters.required_status_checks)) { if ($c.context) { $contexts += [string]$c.context } }
@@ -1291,7 +1291,7 @@ function Get-RequiredChecks {
         }
     } catch { $complete = $false; $problems += "rulesets: $($_.Exception.Message)" }
     try {
-        $prot = Invoke-Gh -GhArgs @('api', "repos/$Repo/branches/$Branch/protection/required_status_checks") -What "leer la proteccion de $Branch" -Json -Retries 2
+        $prot = Invoke-Gh -GhArgs @('api', "repos/$Repo/branches/$Branch/protection/required_status_checks") -What "read the protection of $Branch" -Json -Retries 2
         foreach ($c in @($prot.contexts)) { if ($c) { $contexts += [string]$c } }
         foreach ($c in @($prot.checks)) { if ($c.context) { $contexts += [string]$c.context } }
     } catch {
@@ -1323,7 +1323,7 @@ function Get-UsageMeasure {
     $seg = $(if ($Facts.OwnerType -eq 'Organization') { "organizations/$($Facts.Owner)" } else { "users/$($Facts.Owner)" })
     try {
         $body = Invoke-Gh -GhArgs @('api', "/$seg/settings/billing/usage?year=$([int]$parts[0])&month=$([int]$parts[1])") `
-                          -What "leer el uso de Actions de $($Facts.Owner) ($Month)" -Json -Retries 2
+                          -What "read the Actions usage of $($Facts.Owner) ($Month)" -Json -Retries 2
     } catch {
         return [pscustomobject]@{ Measured = $false; Reason = $_.Exception.Message; Month = $Month }
     }
@@ -1360,7 +1360,7 @@ function Get-UsageMeasure {
     foreach ($r in $repoRows) {
         if ($r.Repo -ieq $Facts.Name) { $r.Visibility = $(if ($Facts.Private) { 'private' } else { 'public' }); continue }
         try {
-            $rv = Invoke-Gh -GhArgs @('api', "repos/$($Facts.Owner)/$($r.Repo)", '--jq', '.private') -What "leer la visibilidad de $($r.Repo)"
+            $rv = Invoke-Gh -GhArgs @('api', "repos/$($Facts.Owner)/$($r.Repo)", '--jq', '.private') -What "read the visibility of $($r.Repo)"
             $t = ((@($rv) | ForEach-Object { "$_" }) -join '').Trim()
             if ($t -eq 'true') { $r.Visibility = 'private' } elseif ($t -eq 'false') { $r.Visibility = 'public' }
         } catch { }
@@ -1396,7 +1396,7 @@ function Get-ActionsCostAudit {
         [int]$Top = 5
     )
     if (-not $Month) { $Month = (Get-Date).ToUniversalTime().ToString('yyyy-MM') }
-    if ($Month -notmatch '^\d{4}-(0[1-9]|1[0-2])$') { throw "-Month debe ser yyyy-MM (recibi '$Month')." }
+    if ($Month -notmatch '^\d{4}-(0[1-9]|1[0-2])$') { throw "-Month must be yyyy-MM (got '$Month')." }
 
     $ctx   = New-AuditContext
     $facts = Get-RepoFacts $Repo
@@ -1417,7 +1417,7 @@ function Get-ActionsCostAudit {
     if (@($models | Where-Object { $_.Parsed -and (Get-Trigger $_ @('pull_request', 'pull_request_target')) }).Count -gt 0) {
         $required = Get-RequiredChecks $Repo $Branch
         if (-not $required.Complete) {
-            Add-Unmeasured $ctx 'TRAP' '' 0 "los checks requeridos no se pudieron leer completos: $($required.Reason)"
+            Add-Unmeasured $ctx 'TRAP' '' 0 "the required checks could not be read in full: $($required.Reason)"
         }
     }
 
@@ -1428,14 +1428,14 @@ function Get-ActionsCostAudit {
     Add-Eval $ctx 'COST' 1
     $usage = Get-UsageMeasure $facts $Month $Top
     if (-not $usage.Measured) {
-        Add-Unmeasured $ctx 'COST' '' 0 "el endpoint de uso no se pudo leer, asi que NO se reporta ningun coste (un cero seria una afirmacion): $($usage.Reason)"
+        Add-Unmeasured $ctx 'COST' '' 0 "the usage endpoint could not be read, so NO cost is reported (a zero would be a claim): $($usage.Reason)"
     }
 
     # -- R8: an observation, never an action
     Add-Eval $ctx 'R8' 1
     if ($facts.Private) {
-        $mins = $(if ($usage.Measured) { "$($usage.RepoMinutes) min medidos en $Month" } else { 'el uso no se pudo medir' })
-        Add-Finding $ctx 'R8' 'observation' '' 0 ("el repo es PRIVADO ($mins). Los repos publicos no consumen cuota de Actions; los privados si. Es una observacion: la visibilidad es decision del dueno y esta auditoria no propone cambiarla. Si el contenido tiene o no motivo para ser privado, no lo puede medir.") @() $null
+        $mins = $(if ($usage.Measured) { "$($usage.RepoMinutes) min measured in $Month" } else { 'usage could not be measured' })
+        Add-Finding $ctx 'R8' 'observation' '' 0 ("the repo is PRIVATE ($mins). Public repos use no Actions quota; private ones do. This is an observation: visibility is the owner's decision and this audit does not propose changing it. Whether the content has a reason to be private is something it cannot measure.") @() $null
     }
 
     # -- ledger + per-file summary
@@ -1459,9 +1459,9 @@ function Get-ActionsCostAudit {
         Workflows = $wfRows; Cost = $usage; RunnersPerPr = $runnersPerPr
         RequiredChecks = $required; Findings = $sorted; Unmeasured = @($ctx.Unmeasured); Rules = $ledger
         Method = @(
-            'Coste = numeros del endpoint de uso de la cuenta. No se usa el endpoint de timing de los runs (devuelve 0) ni el reloj de pared de un run (incluye la cola).'
-            'Minutos ponderados = minutos medidos x multiplicador documentado (Linux 1, Windows 2, macOS 10). Los SKU de runners grandes se listan, no se ponderan.'
-            'Las reglas leen los workflows de la fuente elegida; un archivo que esta auditoria no sabe leer se reporta, no se omite.'
+            'Cost = numbers from the account usage endpoint. Not used: the runs timing endpoint (it returns 0) or a run''s wall clock (it includes the queue).'
+            'Weighted minutes = measured minutes x documented multiplier (Linux 1, Windows 2, macOS 10). Large-runner SKUs are listed, not weighted.'
+            'The rules read the workflows from the chosen source; a file this audit cannot read is reported, not skipped.'
         )
     }
 }
@@ -1475,55 +1475,55 @@ function Format-Num { param($N) return ([double]$N).ToString('0.##', [System.Glo
 function Write-ActionsCostReport {
     param($R)
     $sevColor = @{ 'high' = 'Red'; 'medium' = 'DarkYellow'; 'low' = 'Yellow'; 'advice' = 'Cyan'; 'observation' = 'Gray' }
-    $sevLabel = @{ 'high' = 'ALTA'; 'medium' = 'MEDIA'; 'low' = 'BAJA'; 'advice' = 'CONSEJO'; 'observation' = 'OBSERVACION' }
+    $sevLabel = @{ 'high' = 'HIGH'; 'medium' = 'MEDIUM'; 'low' = 'LOW'; 'advice' = 'ADVICE'; 'observation' = 'OBSERVATION' }
 
     Write-Host ''
-    Write-Host "=== /board actions-cost - costo de Actions de $($R.Repo) ===" -ForegroundColor Cyan
-    Write-Host "    Solo lectura: no cambia nada en ningun repo. Workflows leidos de: $($R.Source)" -ForegroundColor DarkGray
+    Write-Host "=== /board actions-cost - Actions cost of $($R.Repo) ===" -ForegroundColor Cyan
+    Write-Host "    Read-only: changes nothing in any repo. Workflows read from: $($R.Source)" -ForegroundColor DarkGray
     Write-Host ''
 
-    Write-Host "-- 1. COSTE MEDIDO ($($R.Month), endpoint de uso de la cuenta) --" -ForegroundColor Cyan
+    Write-Host "-- 1. MEASURED COST ($($R.Month), account usage endpoint) --" -ForegroundColor Cyan
     $c = $R.Cost
     if (-not $c.Measured) {
-        Write-Host "  NO MEDIDO: $($c.Reason)" -ForegroundColor Red
-        Write-Host "  (no se imprime un 0: un 0 seria una afirmacion que esta auditoria no puede respaldar)" -ForegroundColor DarkGray
+        Write-Host "  NOT MEASURED: $($c.Reason)" -ForegroundColor Red
+        Write-Host "  (no 0 is printed: a 0 would be a claim this audit cannot back up)" -ForegroundColor DarkGray
     } else {
-        Write-Host ("  {0}: {1} min medidos este mes ({2})" -f $R.Repo, (Format-Num $c.RepoMinutes), $(if ($R.Private) { 'repo privado: cuenta contra la cuota' } else { 'repo publico: no consume cuota' }))
+        Write-Host ("  {0}: {1} min measured this month ({2})" -f $R.Repo, (Format-Num $c.RepoMinutes), $(if ($R.Private) { 'private repo: counts against the quota' } else { 'public repo: uses no quota' }))
         foreach ($k in $c.BySku.Keys) {
-            $note = $(if ($script:QuotaMultiplier.ContainsKey($k)) { " (x$($script:QuotaMultiplier[$k]) contra la cuota)" } else { ' (SKU sin multiplicador conocido: no ponderado)' })
+            $note = $(if ($script:QuotaMultiplier.ContainsKey($k)) { " (x$($script:QuotaMultiplier[$k]) against the quota)" } else { ' (SKU with no known multiplier: not weighted)' })
             Write-Host ("    {0,-22} {1,8} min{2}" -f $k, (Format-Num $c.BySku[$k]), $note)
         }
         if ($R.Private -and $c.BySku.Count -gt 0) {
-            Write-Host ("  Ponderado (minutos x multiplicador documentado, DERIVADO): {0} min de cuota" -f (Format-Num $c.QuotaWeightedMinutes))
+            Write-Host ("  Weighted (minutes x documented multiplier, DERIVED): {0} quota min" -f (Format-Num $c.QuotaWeightedMinutes))
         }
-        Write-Host ("  Almacenamiento: {0} GB-hora   Importe bruto: `$ {1}   Importe cobrado: `$ {2}" -f (Format-Num $c.StorageGbHours), (Format-Num $c.GrossUsd), (Format-Num $c.NetUsd))
+        Write-Host ("  Storage: {0} GB-hours   Gross amount: `$ {1}   Billed amount: `$ {2}" -f (Format-Num $c.StorageGbHours), (Format-Num $c.GrossUsd), (Format-Num $c.NetUsd))
         if ($c.ByDay.Count -gt 0) {
-            Write-Host '  Por dia:'
+            Write-Host '  Per day:'
             foreach ($d in $c.ByDay) {
                 $skus = ($d.Skus.Keys | ForEach-Object { "$_ $(Format-Num $d.Skus[$_])" }) -join ', '
                 Write-Host ("    {0}  {1,8} min   ({2})" -f $d.Date, (Format-Num $d.Minutes), $skus) -ForegroundColor DarkGray
             }
         }
-        Write-Host ("  Cuenta {0}: {1} min en total; {2} min ponderados en repos privados" -f $R.Repo.Split('/')[0], (Format-Num $c.AccountMinutes), (Format-Num $c.AccountQuotaBearingWeighted))
+        Write-Host ("  Account {0}: {1} min in total; {2} weighted min in private repos" -f $R.Repo.Split('/')[0], (Format-Num $c.AccountMinutes), (Format-Num $c.AccountQuotaBearingWeighted))
         foreach ($t in $c.TopRepos) {
             Write-Host ("    {0,-40} {1,8} min   {2}" -f $t.Repo, (Format-Num $t.Minutes), $t.Visibility) -ForegroundColor DarkGray
         }
         if ($c.AccountUnknownVisibility.Count -gt 0) {
-            Write-Host "  Visibilidad no leida para: $($c.AccountUnknownVisibility -join ', ') (no entran en el ponderado de cuota)" -ForegroundColor DarkYellow
+            Write-Host "  Visibility not read for: $($c.AccountUnknownVisibility -join ', ') (left out of the quota weighting)" -ForegroundColor DarkYellow
         }
     }
     Write-Host ''
 
-    Write-Host '-- 2. RUNNERS POR PR (leido de los workflows, no medido) --' -ForegroundColor Cyan
+    Write-Host '-- 2. RUNNERS PER PR (read from the workflows, not measured) --' -ForegroundColor Cyan
     $rp = $R.RunnersPerPr
     if ($rp) {
-        Write-Host ("  Una PR arranca {0} runner(s): {1} job(s) en {2} workflow(s). Exacto: {3}" -f $rp.Runners, $rp.Jobs, $rp.Workflows, $(if ($rp.Exact) { 'si' } else { 'no' }))
+        Write-Host ("  A PR starts {0} runner(s): {1} job(s) in {2} workflow(s). Exact: {3}" -f $rp.Runners, $rp.Jobs, $rp.Workflows, $(if ($rp.Exact) { 'yes' } else { 'no' }))
         foreach ($why in $rp.Reasons) { Write-Host "    - $why" -ForegroundColor DarkGray }
-    } else { Write-Host '  Ningun workflow se dispara con pull_request.' }
+    } else { Write-Host '  No workflow is triggered by pull_request.' }
     Write-Host ''
 
-    Write-Host '-- 3. HALLAZGOS (cada uno con archivo:linea y la linea citada) --' -ForegroundColor Cyan
-    if ($R.Findings.Count -eq 0) { Write-Host '  Ninguno. Mira la seccion 5: dice cuantas cosas se evaluaron.' }
+    Write-Host '-- 3. FINDINGS (each with file:line and the quoted line) --' -ForegroundColor Cyan
+    if ($R.Findings.Count -eq 0) { Write-Host '  None. See section 5: it says how many things were evaluated.' }
     foreach ($f in $R.Findings) {
         $where = $(if ($f.File) { "$($f.File):$($f.Line)" } else { '(repo)' })
         Write-Host ("  [{0}] {1,-4} {2}  {3}" -f $sevLabel[$f.Severity], $f.Rule, $where, $f.Message) -ForegroundColor $sevColor[$f.Severity]
@@ -1532,20 +1532,20 @@ function Write-ActionsCostReport {
     }
     Write-Host ''
 
-    Write-Host '-- 4. NO SE PUDO MEDIR --' -ForegroundColor Cyan
-    if ($R.Unmeasured.Count -eq 0) { Write-Host '  Nada quedo sin medir.' }
+    Write-Host '-- 4. COULD NOT BE MEASURED --' -ForegroundColor Cyan
+    if ($R.Unmeasured.Count -eq 0) { Write-Host '  Nothing was left unmeasured.' }
     foreach ($u in $R.Unmeasured) {
         $where = $(if ($u.File) { "$($u.File):$($u.Line)" } else { '(general)' })
         Write-Host ("  {0,-5} {1}  {2}" -f $u.Rule, $where, $u.Reason) -ForegroundColor DarkYellow
     }
     Write-Host ''
 
-    Write-Host '-- 5. LIBRO DE REGLAS (evaluado / hallazgos / sin medir) --' -ForegroundColor Cyan
+    Write-Host '-- 5. RULE BOOK (evaluated / findings / not measured) --' -ForegroundColor Cyan
     foreach ($l in $R.Rules) {
         Write-Host ("  {0,-5} {1,-58} {2,3} / {3,2} / {4,2}" -f $l.Rule, $l.Title, $l.Evaluated, $l.Findings, $l.NotMeasured)
     }
     Write-Host ''
-    Write-Host '  Como se midio:' -ForegroundColor DarkGray
+    Write-Host '  How it was measured:' -ForegroundColor DarkGray
     foreach ($m in $R.Method) { Write-Host "    $m" -ForegroundColor DarkGray }
     Write-Host ''
 }
@@ -1557,7 +1557,7 @@ if ($env:ABIOS_ACTIONSCOST_DOTSOURCE) { return }
 # ------------------------------------------------------------------------------- main
 try {
     if (-not $Repo) { $Repo = $(if ($Local) { Get-RepoFromOrigin -Path $Path } else { Get-RepoFromOrigin }) }
-    if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi '$Repo')." }
+    if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo must be owner/name (got '$Repo')." }
     $owner = ($Repo -split '/')[0]
 
     # Identity: the owner's account, or the AGENT's inside a braked run - the one resolver.
@@ -1572,7 +1572,7 @@ try {
     if ($Json) { $report | ConvertTo-Json -Depth 10 } else { Write-ActionsCostReport $report }
     exit 0
 } catch {
-    Write-Host "No pude auditar el costo de Actions: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Esto NO significa 'sin problemas': la auditoria no se completo." -ForegroundColor Red
+    Write-Host "Could not audit the Actions cost: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "This does NOT mean 'no problems': the audit did not complete." -ForegroundColor Red
     exit 1
 }

@@ -71,13 +71,13 @@ if (-not $Repo) {
     $originUrl = git remote get-url origin 2>$null
     $Repo = Get-RepoFromOriginUrl $originUrl
 }
-if (-not $Repo) { throw "No pude derivar el repo del origin - pasa -Repo owner/name." }
+if (-not $Repo) { throw "Could not work out the repo from origin - pass -Repo owner/name." }
 
 # Parent must exist and be open. A failed read here would leave $parentId empty and every
 # addSubIssue below would orphan its child - so fail closed on the read (#303).
 $parentData = Invoke-Gh -GhArgs @('issue','view',"$Parent",'--repo',$Repo,'--json','id,title,state') `
-                        -What "leer el issue padre #$Parent" -Json
-if ($parentData.state -eq "CLOSED") { throw "El issue padre #$Parent esta CERRADO - reabrelo antes de desglosarlo." }
+                        -What "read parent issue #$Parent" -Json
+if ($parentData.state -eq "CLOSED") { throw "Parent issue #$Parent is CLOSED - reopen it before breaking it down." }
 $parentId    = $parentData.id
 $parentTitle = $parentData.title
 
@@ -97,12 +97,12 @@ foreach ($t in $Tasks) {
         # (#281). Check $LASTEXITCODE after each gh call, and treat a non-positive issue number
         # as the failure it is - #0 was always the tell.
         $url = gh issue create --repo $Repo --title $t --body $body --label $Label
-        if ($LASTEXITCODE -ne 0) { throw "gh issue create fallo (exit $LASTEXITCODE)" }
+        if ($LASTEXITCODE -ne 0) { throw "gh issue create failed (exit $LASTEXITCODE)" }
         $num = Get-IssueNumberFromUrl $url
-        if ($num -le 0) { throw "no pude leer el numero del issue creado (gh devolvio '$url')" }
+        if ($num -le 0) { throw "could not read the number of the created issue (gh returned '$url')" }
 
         $childId = gh issue view $num --repo $Repo --json id -q .id
-        if ($LASTEXITCODE -ne 0 -or -not $childId) { throw "gh issue view #$num fallo (exit $LASTEXITCODE)" }
+        if ($LASTEXITCODE -ne 0 -or -not $childId) { throw "gh issue view #$num failed (exit $LASTEXITCODE)" }
 
         # addSubIssue can 200 with an errors[] body (already-linked, permissions) - -Graphql throws
         # on that as well as on a non-zero exit, so a loose child is never listed as linked.
@@ -112,10 +112,10 @@ mutation($p:ID!, $c:ID!) {
 }'
         try {
             $null = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$linkQuery",'-f',"p=$parentId",'-f',"c=$childId") `
-                              -What "enlazar #$num como sub-issue de #$Parent" -Graphql
+                              -What "link #$num as a sub-issue of #$Parent" -Graphql
         } catch {
             # The issue exists but is not linked - say so instead of silently listing it as a child.
-            throw "#$num se creo pero addSubIssue fallo ($($_.Exception.Message)) - queda suelto, enlazalo a mano"
+            throw "#$num was created but addSubIssue failed ($($_.Exception.Message)) - it is left unlinked, link it by hand"
         }
 
         Write-Host "  OK  #$num  $t" -ForegroundColor Green
@@ -127,6 +127,6 @@ mutation($p:ID!, $c:ID!) {
 }
 
 Write-Host ""
-Write-Host "Sub-issues creados: $($created.Count)  fallos: $fail" -ForegroundColor Cyan
-Write-Host "La columna 'Sub-issues progress' del board se llena sola al cerrarlos." -ForegroundColor DarkGray
-Write-Host "Empieza uno con: /board work" -ForegroundColor Cyan
+Write-Host "Sub-issues created: $($created.Count)  failed: $fail" -ForegroundColor Cyan
+Write-Host "The board's 'Sub-issues progress' column fills itself as they are closed." -ForegroundColor DarkGray
+Write-Host "Start one with: /board work" -ForegroundColor Cyan

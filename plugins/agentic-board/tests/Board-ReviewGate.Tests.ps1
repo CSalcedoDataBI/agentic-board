@@ -485,12 +485,12 @@ Describe 'Get-RefusalNotice - the count is answers, not reviewers (#651, review 
     # a re-request is two of them - and the PR that carried this fix collected three. Saying "the 3
     # reviewers answered" invents two reviewers that never existed.
     It 'names a single refusal as the only reviewer' {
-        Get-RefusalNotice -Count 1 | Should -BeLike '*unico revisor*'
+        Get-RefusalNotice -Count 1 | Should -BeLike '*only reviewer*'
     }
     It 'speaks of ANSWERS, never of reviewers, once there is more than one' {
         $m = Get-RefusalNotice -Count 3
-        $m | Should -BeLike '*3 respuestas*'
-        $m | Should -Not -BeLike '*revisores*'
+        $m | Should -BeLike "*3 'could not review' answers*"
+        $m | Should -Not -BeLike '*reviewers*'
     }
     It 'does not claim a plural for a count of zero or one' {
         Get-RefusalNotice -Count 0 | Should -Be (Get-RefusalNotice -Count 1)
@@ -570,7 +570,7 @@ Describe 'Get-CodexRescueMarker - parses a codex-rescue marker out of a comment 
     It 'ignores rollout=/thread= tokens that appear in the free-text SUMMARY, outside the marker comment' {
         $body = @"
 <!-- [abios-review] cristobal sha=abc -->
-## Revision externa - cristobal
+## External review - cristobal
 
 Reviewed the rollout="canary" plan; thread=3 on the forum has more context.
 "@

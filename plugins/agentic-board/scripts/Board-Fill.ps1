@@ -104,7 +104,7 @@ function Get-OwnerType {
     # so it still comes back as $null - only a real failure throws now (#303/#315).
     $ownerQuery = 'query($o:String!) { repositoryOwner(login:$o) { __typename } }'
     $resp = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$ownerQuery",'-F',"o=$Owner") `
-                      -What "resolver el tipo de owner '$Owner'" -Graphql
+                      -What "resolve the owner type of '$Owner'" -Graphql
     return $resp.data.repositoryOwner.__typename
 }
 
@@ -136,7 +136,7 @@ query($owner:String!, $num:Int!) {
 }
 '@ -replace 'ROOT', $root
     $resp = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$query",'-F',"owner=$Owner",'-F',"num=$Num") `
-                      -What "resolver el board #$Num de $Owner" -Graphql
+                      -What "resolve board #$Num of $Owner" -Graphql
     return $resp.data.$root.projectV2
 }
 
@@ -242,7 +242,7 @@ query(`$proj:ID!, `$cursor:String) {
 "@
         $ghArgs = @('api','graphql','-f',"query=$q",'-F',"proj=$projId")
         if ($cursor) { $ghArgs += @('-f',"cursor=$cursor") }
-        $resp  = Invoke-Gh -GhArgs $ghArgs -What "leer los items del board" -Graphql
+        $resp  = Invoke-Gh -GhArgs $ghArgs -What "read the board items" -Graphql
         $items = $resp.data.node.items
         return @{ nodes = $items.nodes; hasNext = $items.pageInfo.hasNextPage; endCursor = $items.pageInfo.endCursor }
     }
@@ -262,7 +262,7 @@ mutation($itemId:ID!, $repoId:ID!) {
   }
 }'
     $result = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$convQuery",'-F',"itemId=$draftId",'-F',"repoId=$repoId") `
-                        -What "convertir el draft '$title' a issue" -Graphql
+                        -What "convert draft '$title' to an issue" -Graphql
     return $result.data.convertProjectV2DraftIssueItemToIssue.item.content.number
 }
 
@@ -279,7 +279,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
   }) { projectV2Item { id } }
 }'
     $null = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$updItemQuery",'-f',"proj=$projId",'-f',"item=$itemId",'-f',"field=$fieldId",'-f',"opt=$optId") `
-                      -What "escribir el valor del campo en el item" -Graphql
+                      -What "write the field value on the item" -Graphql
 }
 
 # Dot-source guard: tests set this to load the functions above without running
@@ -333,7 +333,7 @@ $projNode = Resolve-ProjectV2Node -Owner $Owner -Num $ProjectNum -OwnerType $own
 # scope) resolves projectV2 to null, and an unknown owner resolves $ownerType to
 # null. Abort loudly instead of sailing on to report a healthy, empty board.
 if (-not $projNode -or -not $projNode.id) {
-    throw "No pude resolver el board: '$Owner' projectV2 #$ProjectNum no existe (owner tipo '$ownerType'), o el token ($TokenVar) no tiene acceso (revisa cuenta y scope 'project'). Aborto en vez de reportar un board sano."
+    throw "Could not resolve the board: '$Owner' projectV2 #$ProjectNum does not exist (owner type '$ownerType'), or the token ($TokenVar) has no access (check the account and the 'project' scope). Aborting instead of reporting a healthy board."
 }
 $projectId = $projNode.id
 $allFields = $projNode.fields.nodes | Where-Object { $_.name }
@@ -345,9 +345,9 @@ $fillCoverage = Get-BoardFieldCoverage -Keys @('Status', 'Priority', 'Size', 'Ty
 if ($fillCoverage.NoneFound) {
     # The false all-clear #509 reported: a board whose fields carry other names made this run print
     # only the assignee gap and read like "almost complete".
-    Write-Host ("ATENCION: el board #{0} no tiene NINGUNO de los campos que lleno (Status/Estado, Priority/Prioridad, Size/Tamano, Type/Task Type/Tipo). NO puedo llenar ni verificar Status, Priority, Size ni Type: corre /board field apply -Number {0} -Owner {1}." -f $ProjectNum, $Owner) -ForegroundColor Red
+    Write-Host ("ATTENTION: board #{0} has NONE of the fields this fills (Status/Estado, Priority/Prioridad, Size/Tamano, Type/Task Type/Tipo). Cannot fill or verify Status, Priority, Size or Type: run /board field apply -Number {0} -Owner {1}." -f $ProjectNum, $Owner) -ForegroundColor Red
 } elseif ($fillCoverage.Missing.Count) {
-    Write-Host ("WARN el board no tiene: {0}. Esos campos no se llenan ni se verifican." -f ($fillCoverage.Missing -join ', ')) -ForegroundColor DarkYellow
+    Write-Host ("WARN the board does not have: {0}. Those fields are neither filled nor verified." -f ($fillCoverage.Missing -join ', ')) -ForegroundColor DarkYellow
 }
 
 $statusNode = $fillFields.Status
@@ -382,10 +382,10 @@ query($owner:String!, $name:String!) {
   repository(owner:$owner, name:$name) { id }
 }'
 $repoData = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$repoIdQuery",'-F',"owner=$repoOwner",'-F',"name=$repoName") `
-                      -What "resolver el repo '$Repo'" -Graphql
+                      -What "resolve repo '$Repo'" -Graphql
 $repoId = $repoData.data.repository.id
 if (-not $repoId) {
-    throw "No pude resolver el repo '$Repo' (no existe o el token ($TokenVar) no tiene acceso). Aborto."
+    throw "Could not resolve repo '$Repo' (it does not exist or the token ($TokenVar) has no access). Aborting."
 }
 
 # ── 3. Convert any drafts to real issues ──────────────────────────────────────
@@ -393,10 +393,10 @@ $items  = Get-BoardItems $projectId
 $drafts = @($items | Where-Object { $_.content.__typename -eq "DraftIssue" })
 
 if ($drafts.Count -gt 0) {
-    Write-Host "$($drafts.Count) draft(s) encontrado(s) — convirtiendo a issues reales en $Repo..." -ForegroundColor Cyan
+    Write-Host "$($drafts.Count) draft(s) found - converting to real issues in $Repo..." -ForegroundColor Cyan
 
     if ($DryRun) {
-        Write-Host "(DRY-RUN: conversion omitida)" -ForegroundColor Gray
+        Write-Host "(DRY-RUN: conversion skipped)" -ForegroundColor Gray
         $drafts | ForEach-Object { Write-Host "  [draft] $($_.content.title)" }
         Write-Host ""
     } else {
@@ -413,7 +413,7 @@ if ($drafts.Count -gt 0) {
                 $convFail++
             }
         }
-        Write-Host "Conversion: $convOk OK  $convFail fallos" -ForegroundColor Cyan
+        Write-Host "Conversion: $convOk OK  $convFail failed" -ForegroundColor Cyan
         Write-Host ""
 
         # Re-load items so the converted issues appear with their numbers
@@ -447,30 +447,30 @@ foreach ($item in $items) {
     $changes = @()
 
     if ($assigneeCount -eq 0) {
-        $changes += [PSCustomObject]@{ Type="assignee"; Display="Assignee vacio -> $Owner" }
+        $changes += [PSCustomObject]@{ Type="assignee"; Display="Assignee empty -> $Owner" }
     }
 
     $targetStatus = $null; $targetStatusN = $null
-    if     ($c.state -eq "CLOSED"  -and $currentStatus -ne $doneId)  { $targetStatus=$doneId;   $targetStatusN="Done (issue cerrado)" }
-    elseif ($mergedPRs.Count -gt 0 -and $currentStatus -ne $doneId)  { $targetStatus=$doneId;   $targetStatusN="Done (PR mergeado)" }
+    if     ($c.state -eq "CLOSED"  -and $currentStatus -ne $doneId)  { $targetStatus=$doneId;   $targetStatusN="Done (issue closed)" }
+    elseif ($mergedPRs.Count -gt 0 -and $currentStatus -ne $doneId)  { $targetStatus=$doneId;   $targetStatusN="Done (PR merged)" }
     elseif ($openPRs.Count -gt 0) {
         # An open PR means the change is in review/testing -> In Review (the
         # review-gate stage). Fall back to In Progress on boards without it.
         $prTarget  = if ($reviewId) { $reviewId } else { $inProgId }
-        $prTargetN = if ($reviewId) { "In Review (PR abierto)" } else { "In Progress (PR abierto)" }
+        $prTargetN = if ($reviewId) { "In Review (PR open)" } else { "In Progress (PR open)" }
         if ($currentStatus -ne $prTarget -and $currentStatus -ne $doneId) { $targetStatus=$prTarget; $targetStatusN=$prTargetN }
     }
-    elseif (-not $currentStatus -and $backlogId)                       { $targetStatus=$backlogId; $targetStatusN="$($backlogOpt.name) (sin PR)" }
+    elseif (-not $currentStatus -and $backlogId)                       { $targetStatus=$backlogId; $targetStatusN="$($backlogOpt.name) (no PR)" }
     if ($targetStatus) {
         $changes += [PSCustomObject]@{ Type="single"; FieldId=$statusId; TargetId=$targetStatus; Display="$($statusNode.name) [$currentStatusN] -> $targetStatusN" }
     }
 
     if (-not $currentPrio -and $prioMedId) {
-        $changes += [PSCustomObject]@{ Type="single"; FieldId=$prioId; TargetId=$prioMedId; Display="$($prioNode.name) vacio -> $($prioMedOpt.name)" }
+        $changes += [PSCustomObject]@{ Type="single"; FieldId=$prioId; TargetId=$prioMedId; Display="$($prioNode.name) empty -> $($prioMedOpt.name)" }
     }
 
     if (-not $currentSize -and $sizeMId) {
-        $changes += [PSCustomObject]@{ Type="single"; FieldId=$sizeId; TargetId=$sizeMId; Display="$($sizeNode.name) vacio -> $($sizeMOpt.name)" }
+        $changes += [PSCustomObject]@{ Type="single"; FieldId=$sizeId; TargetId=$sizeMId; Display="$($sizeNode.name) empty -> $($sizeMOpt.name)" }
     }
 
     if (-not $currentType -and $typeId) {
@@ -483,7 +483,7 @@ foreach ($item in $items) {
         $typeOpt = Find-FieldOption -Options $typeNode.options -Key 'Type' -Value $detectedType   # 'Feature', or a Spanish board's 'Funcionalidad'
         $typeOptId = $typeOpt.id
         if ($typeOptId) {
-            $changes += [PSCustomObject]@{ Type="single"; FieldId=$typeId; TargetId=$typeOptId; Display="$($typeNode.name) vacio -> $($typeOpt.name)" }
+            $changes += [PSCustomObject]@{ Type="single"; FieldId=$typeId; TargetId=$typeOptId; Display="$($typeNode.name) empty -> $($typeOpt.name)" }
         }
     }
 
@@ -503,29 +503,29 @@ foreach ($item in $items) {
 if ($plan.Count -eq 0) {
     if ($fillCoverage.Missing.Count) {
         # Not "complete": the fields the board does not have were never checked (#509).
-        Write-Host ("Sin gaps en los campos que pude leer, pero NO verifique: {0} (el board no los tiene)." -f ($fillCoverage.Missing -join ', ')) -ForegroundColor Yellow
+        Write-Host ("No gaps in the fields I could read, but I did NOT verify: {0} (the board does not have them)." -f ($fillCoverage.Missing -join ', ')) -ForegroundColor Yellow
     } else {
-        Write-Host "Board completo. Sin gaps detectados." -ForegroundColor Green
+        Write-Host "Board complete. No gaps detected." -ForegroundColor Green
     }
-    Write-Host "NOTA: Linked PRs y Sub-issues progress son columnas del sistema, no escribibles via API."
+    Write-Host "NOTE: Linked PRs and Sub-issues progress are system columns, not writable via the API."
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
 }
 
-Write-Host "Plan de cambios:" -ForegroundColor Yellow
+Write-Host "Change plan:" -ForegroundColor Yellow
 foreach ($entry in $plan) {
     Write-Host ""
     Write-Host "  #$($entry.IssueNum) $($entry.Title) [$($entry.State)]" -ForegroundColor Yellow
     foreach ($ch in $entry.Changes) { Write-Host "    -> $($ch.Display)" }
 }
 Write-Host ""
-Write-Host "Total: $($plan.Count) item(s) con gaps." -ForegroundColor Yellow
+Write-Host "Total: $($plan.Count) item(s) with gaps." -ForegroundColor Yellow
 
 if ($DryRun) {
     Write-Host ""
-    Write-Host "Modo DRY-RUN — ningun cambio ejecutado." -ForegroundColor Gray
-    Write-Host "NOTA: Linked PRs y Sub-issues progress son columnas del sistema, no escribibles via API."
+    Write-Host "DRY-RUN mode - no change executed." -ForegroundColor Gray
+    Write-Host "NOTE: Linked PRs and Sub-issues progress are system columns, not writable via the API."
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
@@ -534,8 +534,8 @@ if ($DryRun) {
 # ── 6. Confirm (interactive) ──────────────────────────────────────────────────
 if (-not $Auto) {
     Write-Host ""
-    $confirm = Read-Host "Aplicar estos cambios? (s/n)"
-    if ($confirm -notmatch '^[sySY]') { Write-Host "Cancelado." -ForegroundColor Gray; exit 0 }
+    $confirm = Read-Host "Apply these changes? [y/n]"
+    if ($confirm -notmatch '^[sySY]') { Write-Host "Cancelled." -ForegroundColor Gray; exit 0 }
 }
 
 # ── 7. Execute ────────────────────────────────────────────────────────────────
@@ -552,7 +552,7 @@ foreach ($entry in $plan) {
                 # the intended one stayed empty - reported as OK either way (#659).
                 $assignUrl = "repos/$($entry.Repo)/issues/$($entry.IssueNum)/assignees"
                 $null = Invoke-Gh -GhArgs @('api',$assignUrl,'-X','POST','-F',"assignees[]=$Owner") `
-                                  -What "asignar #$($entry.IssueNum) a $Owner en $($entry.Repo)"
+                                  -What "assign #$($entry.IssueNum) to $Owner in $($entry.Repo)"
 
                 # Read it back. A 200 is not proof: GitHub SILENTLY DROPS an assignee who cannot
                 # be assigned on that repo (not a collaborator) and still answers 200 with the
@@ -560,9 +560,9 @@ foreach ($entry in $plan) {
                 # so a false OK here is worse than a loud failure - the board looks governed and
                 # is not.
                 $after = Invoke-Gh -GhArgs @('api',"repos/$($entry.Repo)/issues/$($entry.IssueNum)",'--jq','[.assignees[].login]') `
-                                   -What "verificar la asignacion de #$($entry.IssueNum)" -Json
+                                   -What "verify the assignment of #$($entry.IssueNum)" -Json
                 if (@($after) -notcontains $Owner) {
-                    throw "la API acepto la asignacion pero #$($entry.IssueNum) sigue sin $Owner en $($entry.Repo) (GitHub descarta en silencio a quien no puede asignar en ese repo)"
+                    throw "the API accepted the assignment but #$($entry.IssueNum) still lacks $Owner in $($entry.Repo) (GitHub silently drops anyone it cannot assign on that repo)"
                 }
 
                 Write-Host "  OK  #$($entry.IssueNum) assignee -> $Owner  ($($entry.Repo))" -ForegroundColor Green
@@ -581,7 +581,7 @@ foreach ($entry in $plan) {
 }
 
 Write-Host ""
-Write-Host "=== Completado: $ok OK  $fail fallos ===" -ForegroundColor Cyan
-Write-Host "NOTA: Linked PRs y Sub-issues progress son columnas del sistema, no escribibles via API."
+Write-Host "=== Completed: $ok OK  $fail failed ===" -ForegroundColor Cyan
+Write-Host "NOTE: Linked PRs and Sub-issues progress are system columns, not writable via the API."
 Write-Host ""
 Write-Host "Board: $boardUrl" -ForegroundColor Cyan

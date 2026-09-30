@@ -23,36 +23,36 @@ BeforeAll {
 Describe 'Test-EndToEndAllowed — all four conditions met' {
     It 'allows the close' { (script:Allowed).allowed | Should -BeTrue }
     It 'has nothing missing' { (script:Allowed).missing.Count | Should -Be 0 }
-    It 'says why it was allowed' { (script:Allowed).reason | Should -Match 'revisado y probado' }
+    It 'says why it was allowed' { (script:Allowed).reason | Should -Match 'reviewed and tested' }
 }
 
 Describe 'Test-EndToEndAllowed — any single missing condition refuses' {
     It 'refuses without the explicit order — a stored setting is not an instruction' {
         $v = script:Allowed @{ Ordered = $false }
         $v.allowed | Should -BeFalse
-        $v.reason  | Should -Match 'orden explicita'
+        $v.reason  | Should -Match 'explicit order'
     }
     It 'refuses a VISUAL change even when ordered, reviewed and tested' {
         # The owner said this one plainly: what he judges by looking at it stays his, whatever else
         # is green and whatever he told the run to do.
         $v = script:Allowed @{ WorkClass = 'visual' }
         $v.allowed | Should -BeFalse
-        $v.reason  | Should -Match 'se juzga mirandolo'
+        $v.reason  | Should -Match 'judged by looking at it'
     }
     It 'refuses an UNKNOWN class — not knowing what changed is not permission' {
         $v = script:Allowed @{ WorkClass = 'unknown' }
         $v.allowed | Should -BeFalse
-        $v.reason  | Should -Match 'no se pudo determinar'
+        $v.reason  | Should -Match 'could not determine'
     }
     It 'refuses without a real review of THIS commit' {
         $v = script:Allowed @{ ReviewedHead = $false }
         $v.allowed | Should -BeFalse
-        $v.reason  | Should -Match 'revision real de ESTE commit'
+        $v.reason  | Should -Match 'real review of THIS commit'
     }
     It 'refuses when testable work went untested' {
         $v = script:Allowed @{ TestsRecorded = $false }
         $v.allowed | Should -BeFalse
-        $v.reason  | Should -Match 'pruebas automaticas'
+        $v.reason  | Should -Match 'automated tests'
     }
 }
 
@@ -66,8 +66,8 @@ Describe 'Test-EndToEndAllowed — every unmet condition is named, not just the 
     It 'lists exactly the two that are missing' {
         $v = script:Allowed @{ ReviewedHead = $false; TestsRecorded = $false }
         $v.missing.Count | Should -Be 2
-        ($v.missing -join ' ') | Should -Match 'revision real'
-        ($v.missing -join ' ') | Should -Match 'pruebas automaticas'
+        ($v.missing -join ' ') | Should -Match 'real review'
+        ($v.missing -join ' ') | Should -Match 'automated tests'
     }
 }
 
@@ -109,7 +109,7 @@ Describe 'Test-EndToEndAllowed — a project can widen what stays with the human
 
 Describe 'Format-EndToEndVerdict' {
     It 'states the permission plainly when allowed' {
-        Format-EndToEndVerdict -Verdict (script:Allowed) | Should -Match 'permitido'
+        Format-EndToEndVerdict -Verdict (script:Allowed) | Should -Match 'allowed'
     }
     It 'lists each missing condition on its own line' {
         $t = Format-EndToEndVerdict -Verdict (script:Allowed @{ ReviewedHead = $false; TestsRecorded = $false })
@@ -117,7 +117,7 @@ Describe 'Format-EndToEndVerdict' {
     }
     It 'says what to do instead of just refusing' {
         Format-EndToEndVerdict -Verdict (script:Allowed @{ Ordered = $false }) |
-            Should -Match 'el cierre lo hace una persona'
+            Should -Match 'a person does the closing'
     }
 }
 

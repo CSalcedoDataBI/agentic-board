@@ -220,10 +220,10 @@ function Get-RegisteredBranchMismatch {
     # branch being pushed only has to be one the folder legitimately registered.
     if (@($mine | Where-Object { "$($_.branch)" -eq $Branch }).Count -gt 0) { return '' }
     $e = $mine[0]
-    return "el issue #$($e.issue) se registro en la rama '$($e.branch)' de esta copia de trabajo, pero se va a empujar '$Branch'. " +
-           "Otra sesion pudo cambiar la rama de esta carpeta, y lo commiteado desde entonces puede estar en la rama equivocada. " +
-           "Revisa con 'git log' y vuelve a '$($e.branch)' (git checkout $($e.branch), o pasa -Branch $($e.branch)); " +
-           "-AllowBranchMismatch lo omite a proposito."
+    return "issue #$($e.issue) was registered on branch '$($e.branch)' of this working copy, but '$Branch' is about to be pushed. " +
+           "Another session may have switched this folder's branch, and what was committed since then may be on the wrong branch. " +
+           "Check with 'git log' and go back to '$($e.branch)' (git checkout $($e.branch), or pass -Branch $($e.branch)); " +
+           "-AllowBranchMismatch skips this check on purpose."
 }
 
 # Dot-source guard: tests set $env:ABIOS_NEWBOARDPR_DOTSOURCE to load the pure helper only.
@@ -247,7 +247,7 @@ trap {
 
 # -- 1. Repo: -Repo or origin (strip any embedded credential - never reuse it) --
 if (-not $Repo) { $Repo = Get-RepoFromOrigin }
-if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi '$Repo')." }
+if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo must be owner/name (got '$Repo')." }
 $owner = ($Repo -split '/')[0]
 
 # -- 1b. Is the branch about to be pushed the one this working copy's session registered? (#547)
@@ -265,7 +265,7 @@ if ($stateDir -and $pushBranch -and $pushBranch -ne 'HEAD') {
         -CaseSensitive:([bool]$IsLinux) `
         -Branch   $pushBranch
     if ($mismatch -and -not $AllowBranchMismatch) { throw $mismatch }
-    if ($mismatch) { Write-Host "AVISO: $mismatch" -ForegroundColor Yellow }
+    if ($mismatch) { Write-Host "WARNING: $mismatch" -ForegroundColor Yellow }
 }
 
 # -- 2. Identity: the OWNER's account, or the AGENT's inside a braked run (#550) ----
@@ -286,37 +286,37 @@ $ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $owner -Explic
 $token    = $ctx.token
 $TokenVar = $ctx.var
 if ($ctx.armed) {
-    Write-Host "  Identidad de agente: $TokenVar (run frenado - sin admin, GitHub le niega main)." -ForegroundColor Cyan
+    Write-Host "  Agent identity: $TokenVar (braked run - no admin, GitHub denies it main)." -ForegroundColor Cyan
 }
 # On purpose: override any session GH_TOKEN - identity must match the context resolved above.
 $env:GH_TOKEN = $token
 
 # -- 3. Identity + push permission ---------------------------------------------
 $login = "$(gh api user --jq .login 2>$null)".Trim()
-if ($LASTEXITCODE -ne 0 -or -not $login) { throw "El token de $TokenVar no autentica contra la API." }
+if ($LASTEXITCODE -ne 0 -or -not $login) { throw "The $TokenVar token does not authenticate against the API." }
 $repoInfo = gh api "repos/$Repo" 2>$null | ConvertFrom-Json
-if (-not $repoInfo) { throw "'$login' no ve el repo $Repo (no existe o sin acceso). Cuenta equivocada?" }
+if (-not $repoInfo) { throw "'$login' cannot see repo $Repo (does not exist or no access). Wrong account?" }
 if (-not $repoInfo.permissions.push) {
-    throw "'$login' NO tiene permiso de push en $Repo. Usa la cuenta correcta (-TokenVar) o pide acceso - el flujo por fork queda fuera de este script."
+    throw "'$login' does NOT have push permission on $Repo. Use the right account (-TokenVar) or ask for access - the fork flow is out of scope for this script."
 }
 if (-not $Base) { $Base = $repoInfo.default_branch }
 
 # -- 4. Branch ------------------------------------------------------------------
 if (-not $Branch) { $Branch = (git rev-parse --abbrev-ref HEAD 2>$null).Trim() }
-if (-not $Branch -or $Branch -eq 'HEAD') { throw "No pude resolver la rama actual - usa -Branch." }
-if ($Branch -eq $Base) { throw "Estas en '$Base' (la base). Trabaja el issue en su rama issue-<num>-<slug> - nunca PR desde la base a si misma." }
+if (-not $Branch -or $Branch -eq 'HEAD') { throw "Could not resolve the current branch - use -Branch." }
+if ($Branch -eq $Base) { throw "You are on '$Base' (the base). Work the issue on its issue-<num>-<slug> branch - never a PR from the base into itself." }
 
 # -- 5. Issue(s) -> title / body -------------------------------------------------
 $issueNums = @(Get-IssueNumbers $Issue)
-if ($issueNums.Count -eq 0) { throw "-Issue no trajo ningun numero de issue valido (recibi '$($Issue -join ',')')." }
+if ($issueNums.Count -eq 0) { throw "-Issue carried no valid issue number (got '$($Issue -join ',')')." }
 
-if ($IssueRepo -and $IssueRepo -notmatch '^[^/]+/[^/]+$') { throw "-IssueRepo debe ser owner/name (recibi '$IssueRepo')." }
+if ($IssueRepo -and $IssueRepo -notmatch '^[^/]+/[^/]+$') { throw "-IssueRepo must be owner/name (got '$IssueRepo')." }
 $issueHome = Get-IssueHomeRepo -Repo $Repo -IssueRepo $IssueRepo
 $issues = @()
 foreach ($n in $issueNums) {
     $one = gh api "repos/$issueHome/issues/$n" 2>$null | ConvertFrom-Json
-    if (-not $one) { throw "Issue #$n no existe en $issueHome." }
-    if ($one.state -ne 'open') { Write-Host "AVISO: issue #$n esta '$($one.state)' - el PR igual lo referencia." -ForegroundColor Yellow }
+    if (-not $one) { throw "Issue #$n does not exist in $issueHome." }
+    if ($one.state -ne 'open') { Write-Host "WARNING: issue #$n is '$($one.state)' - the PR references it anyway." -ForegroundColor Yellow }
     $issues += $one
 }
 if (-not $Title) { $Title = $issues[0].title }
@@ -326,23 +326,23 @@ $prBody = Format-ClosesBody -Issues $issueNums -Extra $Body -IssueRepo $(if ($Is
 # Fail closed (Invoke-Gh -Json) then require a positive-integer number: a phantom/null-number row is
 # NOT an existing PR, so the create path runs instead of silently skipping (#336).
 $existing   = @(Invoke-Gh -GhArgs @('pr','list','--repo',$Repo,'--head',$Branch,'--state','open','--json','number,url') `
-                          -What "buscar un PR abierto para la rama $Branch" -Json)
+                          -What "look up an open PR for branch $Branch" -Json)
 $existingPr = Get-ExistingPr $existing
 
 Write-Host "=== Cross-account PR  $Repo ===" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Identidad : $login  (via $TokenVar)"
-Write-Host "  Rama      : $Branch -> $Base"
+Write-Host "  Identity  : $login  (via $TokenVar)"
+Write-Host "  Branch    : $Branch -> $Base"
 foreach ($one in $issues) { Write-Host ("  Issue     : #{0} {1}" -f $one.number, $one.title) }
 if ($existingPr) {
-    Write-Host "  PR        : #$($existingPr.number) ya abierto - solo push (iteracion)" -ForegroundColor Yellow
+    Write-Host "  PR        : #$($existingPr.number) already open - push only (iteration)" -ForegroundColor Yellow
 } else {
-    Write-Host "  PR        : nuevo$(if ($Draft) { ' (draft)' })  titulo: $Title"
+    Write-Host "  PR        : new$(if ($Draft) { ' (draft)' })  title: $Title"
 }
 Write-Host ""
 
 if ($DryRun) {
-    Write-Host "DRY-RUN: no se empuja ni se crea nada." -ForegroundColor Yellow
+    Write-Host "DRY-RUN: nothing is pushed or created." -ForegroundColor Yellow
     exit 0
 }
 
@@ -354,28 +354,28 @@ try {
     git -c credential.helper= `
         -c 'credential.helper=!f(){ echo username=x-access-token; echo password=$ABIOS_PR_TOKEN; };f' `
         push "https://github.com/$Repo.git" "refs/heads/${Branch}:refs/heads/${Branch}"
-    if ($LASTEXITCODE -ne 0) { throw "git push fallo (exit $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) { throw "git push failed (exit $LASTEXITCODE)." }
 } finally {
     Remove-Item Env:ABIOS_PR_TOKEN -ErrorAction SilentlyContinue
 }
-Write-Host "OK  rama '$Branch' empujada a $Repo como $login" -ForegroundColor Green
+Write-Host "OK  branch '$Branch' pushed to $Repo as $login" -ForegroundColor Green
 
 # -- 7. PR: reuse the open one, or create ----------------------------------------
 if ($existingPr) {
     $prNum = $existingPr.number
     $prUrl = $existingPr.url
-    Write-Host "OK  PR #$prNum ya existia - commits nuevos empujados" -ForegroundColor Green
+    Write-Host "OK  PR #$prNum already existed - new commits pushed" -ForegroundColor Green
 } else {
     $ghArgs = @('pr','create','--repo',$Repo,'--head',$Branch,'--base',$Base,'--title',$Title,'--body',$prBody)
     if ($Draft) { $ghArgs += '--draft' }
     $prUrl = (gh @ghArgs).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $prUrl) { throw "gh pr create fallo." }
+    if ($LASTEXITCODE -ne 0 -or -not $prUrl) { throw "gh pr create failed." }
     $prNum = [int]($prUrl -replace '^.*/','')
-    Write-Host "OK  PR #$prNum creado: $prUrl" -ForegroundColor Green
+    Write-Host "OK  PR #$prNum created: $prUrl" -ForegroundColor Green
 }
 
 Write-Host ""
-Write-Host "Siguiente paso (gate obligatorio antes de mergear):" -ForegroundColor Yellow
-Write-Host "  corre el review gate sobre $Repo PR #$prNum"
+Write-Host "Next step (required gate before merging):" -ForegroundColor Yellow
+Write-Host "  run the review gate on $Repo PR #$prNum"
 Write-Host ""
 Write-Host "PR: $prUrl" -ForegroundColor Cyan

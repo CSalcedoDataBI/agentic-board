@@ -85,12 +85,12 @@ function ConvertTo-DependencyNumber {
     } elseif ($r -match '^https?://github\.com/([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)/issues/(\d+)/?$') {
         $other = $Matches[1]; $num = [int]$Matches[2]
     } else {
-        throw "Referencia de bloqueador no valida: '$Ref'. Usa un numero (12 o #12)."
+        throw "Invalid blocker reference: '$Ref'. Use a number (12 or #12)."
     }
-    if ($num -le 0) { throw "Numero de issue no valido en '$Ref'." }
+    if ($num -le 0) { throw "Invalid issue number in '$Ref'." }
     if ($other -and ($other -ne $TargetRepo)) {
-        throw ("'$Ref' es de OTRO repositorio ($other), no de $TargetRepo. Un bloqueador de otro repo es " +
-               "justo el caso accidental que este script existe para impedir (#521): no se crea.")
+        throw ("'$Ref' belongs to ANOTHER repository ($other), not $TargetRepo. A blocker from another repo is " +
+               "exactly the accident this script exists to prevent (#521): it is not created.")
     }
     return $num
 }
@@ -124,13 +124,13 @@ function ConvertTo-DependencyEntry {
 # Invoke-Gh) throws on a 404, so a number that does not exist is an error here, not $null.
 function Get-DependencyIssue {
     param([Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][int]$Number)
-    $raw = Invoke-Gh -GhArgs @('api', "repos/$Repo/issues/$Number") -What "leer el issue #$Number de $Repo" -Json
+    $raw = Invoke-Gh -GhArgs @('api', "repos/$Repo/issues/$Number") -What "read issue #$Number of $Repo" -Json
     $e = ConvertTo-DependencyEntry -Raw $raw
-    if ($e.id -le 0)          { throw "GitHub no devolvio un id de base de datos para $Repo#$Number." }
-    if ($e.number -ne $Number) { throw "Pedi $Repo#$Number y GitHub devolvio el issue #$($e.number)." }
-    if (-not $e.repo)         { throw "No puedo comprobar a que repositorio pertenece $Repo#$Number (la respuesta no lo dice)." }
-    if ($e.repo -ne $Repo)    { throw "Pedi $Repo#$Number y GitHub lo resuelve a $($e.repo)#$($e.number)." }
-    if ($e.isPr)              { throw "$Repo#$Number es un pull request, no un issue: no puede ser parte de una dependencia." }
+    if ($e.id -le 0)          { throw "GitHub returned no database id for $Repo#$Number." }
+    if ($e.number -ne $Number) { throw "Asked for $Repo#$Number and GitHub returned issue #$($e.number)." }
+    if (-not $e.repo)         { throw "Cannot check which repository $Repo#$Number belongs to (the response does not say)." }
+    if ($e.repo -ne $Repo)    { throw "Asked for $Repo#$Number and GitHub resolves it to $($e.repo)#$($e.number)." }
+    if ($e.isPr)              { throw "$Repo#$Number is a pull request, not an issue: it cannot be part of a dependency." }
     return $e
 }
 
@@ -139,9 +139,9 @@ function Get-DependencyIssue {
 function Get-BlockedByList {
     param([Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][int]$Issue)
     $raw = Invoke-Gh -GhArgs @('api', "repos/$Repo/issues/$Issue/dependencies/blocked_by?per_page=100") `
-                     -What "leer los bloqueadores de $Repo#$Issue" -Json
+                     -What "read the blockers of $Repo#$Issue" -Json
     $items = @($raw | Where-Object { $_ })
-    if ($items.Count -ge 100) { throw "$Repo#$Issue ya tiene 100 o mas bloqueadores: no puedo verificar el resultado en una sola pagina." }
+    if ($items.Count -ge 100) { throw "$Repo#$Issue already has 100 or more blockers: cannot verify the result in a single page." }
     return @($items | ForEach-Object { ConvertTo-DependencyEntry -Raw $_ })
 }
 
@@ -161,20 +161,20 @@ function Test-DependencyLanded {
     if ($strangers.Count -gt 0) {
         $names = ($strangers | ForEach-Object { "$(if ($_.repo) { $_.repo } else { '?' })#$($_.number)" }) -join ', '
         return @{ ok = $false; already = $false; strangers = $strangers
-                  reason = "aparecio un bloqueador que NO se pidio: $names. GitHub enlazo otro issue." }
+                  reason = "a blocker that was NOT asked for appeared: $names. GitHub linked another issue." }
     }
     if ($match.Count -eq 0) {
         return @{ ok = $false; already = $false; strangers = @()
-                  reason = "el enlace NO quedo: $($Target.repo)#$($Target.number) no aparece entre los bloqueadores tras escribir." }
+                  reason = "the link did NOT stick: $($Target.repo)#$($Target.number) is not among the blockers after the write." }
     }
     $m = $match[0]
     if (-not $m.repo) {
         return @{ ok = $false; already = $wasThere; strangers = @()
-                  reason = "no puedo comprobar el repositorio del bloqueador enlazado (la respuesta no lo dice); no lo doy por bueno." }
+                  reason = "cannot check the repository of the linked blocker (the response does not say); not accepting it." }
     }
     if ($m.repo -ne $Target.repo -or $m.number -ne $Target.number) {
         return @{ ok = $false; already = $wasThere; strangers = @()
-                  reason = "el bloqueador enlazado es $($m.repo)#$($m.number), no $($Target.repo)#$($Target.number)." }
+                  reason = "the linked blocker is $($m.repo)#$($m.number), not $($Target.repo)#$($Target.number)." }
     }
     return @{ ok = $true; already = $wasThere; strangers = @(); reason = '' }
 }
@@ -189,16 +189,16 @@ function Invoke-BoardDepend {
         [Parameter(Mandatory)][string[]]$BlockedBy,
         [switch]$DryRun
     )
-    if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi '$Repo')." }
-    if ($Issue -le 0)                    { throw 'Falta -Issue (el issue que queda bloqueado).' }
+    if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo must be owner/name (got '$Repo')." }
+    if ($Issue -le 0)                    { throw 'Missing -Issue (the issue that becomes blocked).' }
     $refs = @($BlockedBy | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    if ($refs.Count -eq 0)               { throw 'Falta -BlockedBy (uno o mas bloqueadores).' }
+    if ($refs.Count -eq 0)               { throw 'Missing -BlockedBy (one or more blockers).' }
 
     # 1. Validate every reference first: nothing is written if any of them is refused.
     $numbers = @()
     foreach ($ref in $refs) {
         $n = ConvertTo-DependencyNumber -Ref $ref -TargetRepo $Repo
-        if ($n -eq $Issue) { throw "#$Issue no puede bloquearse a si mismo." }
+        if ($n -eq $Issue) { throw "#$Issue cannot block itself." }
         if ($numbers -notcontains $n) { $numbers += $n }
     }
     # 2. Resolve number -> database id (and verify the answers) before any write.
@@ -217,7 +217,7 @@ function Invoke-BoardDepend {
     $allowed = $null
     foreach ($t in $targets) {
         $ref = "#$($t.number)"
-        if ($failed) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'skipped'; Message = 'no se intento: un enlace anterior fallo' }; continue }
+        if ($failed) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'skipped'; Message = 'not attempted: an earlier link failed' }; continue }
         $before = Get-BlockedByList -Repo $Repo -Issue $Issue
         if ($null -eq $allowed) {
             $allowed = New-Object System.Collections.Generic.HashSet[long]
@@ -228,26 +228,26 @@ function Invoke-BoardDepend {
                 $names = ($gap | ForEach-Object { "$(if ($_.repo) { $_.repo } else { '?' })#$($_.number)" }) -join ', '
                 $failed = $true
                 $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'FAILED'
-                    Message = "entre dos escrituras aparecio un bloqueador que NO se pidio: $names. No se escribio nada mas." }
+                    Message = "between two writes a blocker that was NOT asked for appeared: $names. Nothing more was written." }
                 continue
             }
         }
         if (@($before | Where-Object { $_.id -eq $t.id }).Count -gt 0) {
             $chk = Test-DependencyLanded -Before $before -After $before -Target $t
-            if ($chk.ok) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'already'; Message = 'ya estaba enlazado' } }
+            if ($chk.ok) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'already'; Message = 'already linked' } }
             else         { $failed = $true; $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'FAILED'; Message = $chk.reason } }
             continue
         }
-        if ($DryRun) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'dry-run'; Message = "se enlazaria $Repo#$($t.number) (id $($t.id))" }; continue }
+        if ($DryRun) { $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'dry-run'; Message = "would link $Repo#$($t.number) (id $($t.id))" }; continue }
 
         try {
             # The database id - NEVER the number. It travels in the body, as an integer.
             $body = '{"issue_id":' + $t.id + '}'
             $null = Invoke-Gh -GhArgs @('api', '-X', 'POST', "repos/$Repo/issues/$Issue/dependencies/blocked_by", '--input', '-') `
-                              -StdIn $body -What "enlazar $Repo#$($t.number) como bloqueador de #$Issue"
+                              -StdIn $body -What "link $Repo#$($t.number) as a blocker of #$Issue"
             $after = Get-BlockedByList -Repo $Repo -Issue $Issue
             $chk = Test-DependencyLanded -Before $before -After $after -Target $t
-            if ($chk.ok) { [void]$allowed.Add([long]$t.id); $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'linked'; Message = 'enlazado y verificado' } }
+            if ($chk.ok) { [void]$allowed.Add([long]$t.id); $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'linked'; Message = 'linked and verified' } }
             else         { $failed = $true; $results += [pscustomobject]@{ Ref = $ref; Number = $t.number; Status = 'FAILED'; Message = $chk.reason } }
         } catch {
             $failed = $true
@@ -263,7 +263,7 @@ if ($env:ABIOS_BOARDDEPEND_DOTSOURCE) { return }
 # ── Main ───────────────────────────────────────────────────────────────────────
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
 if (-not $Repo) { $Repo = Get-RepoFromOrigin }
-if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo debe ser owner/name (recibi '$Repo')." }
+if ($Repo -notmatch '^[^/]+/[^/]+$') { throw "-Repo must be owner/name (got '$Repo')." }
 $owner = ($Repo -split '/')[0]
 
 # Identity: the owner's account, or the AGENT's inside a braked run, decided by the one resolver
@@ -276,7 +276,7 @@ $ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $owner -Explic
 $env:GH_TOKEN = $ctx.token
 
 Write-Host "=== Board-Depend  $Repo  #$Issue ===" -ForegroundColor Cyan
-Write-Host "  Identidad: $($ctx.var)$(if ($DryRun) { '  [dry-run]' })"
+Write-Host "  Identity: $($ctx.var)$(if ($DryRun) { '  [dry-run]' })"
 
 $results = Invoke-BoardDepend -Repo $Repo -Issue $Issue -BlockedBy $BlockedBy -DryRun:$DryRun
 foreach ($r in $results) {
@@ -284,7 +284,7 @@ foreach ($r in $results) {
     Write-Host ("  {0,-8} {1}  {2}" -f $r.Status, $r.Ref, $r.Message) -ForegroundColor $color
 }
 if (@($results | Where-Object { $_.Status -eq 'FAILED' }).Count -gt 0) {
-    Write-Host "FALLO: al menos un enlace no se pudo verificar. Revisa la lista de bloqueadores del issue antes de seguir." -ForegroundColor Red
+    Write-Host "FAILED: at least one link could not be verified. Check the issue's blocker list before going on." -ForegroundColor Red
     exit 1
 }
 exit 0

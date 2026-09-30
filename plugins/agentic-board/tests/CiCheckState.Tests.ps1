@@ -177,7 +177,7 @@ Describe 'Get-ChecksVerdict - a bucket the gate does not recognise fails CLOSED 
         $v = Get-ChecksVerdict -Checks @([pscustomobject]@{ name = ''; bucket = '' }, [pscustomobject]@{ name = 'x' }) -Parsed $true
         $v.Ok | Should -BeFalse
         @($v.Unknown).Count | Should -Be 2
-        $v.Unknown | Should -Contain '(sin nombre)'
+        $v.Unknown | Should -Contain '(unnamed)'
     }
     It 'a bucket with stray whitespace is unknown, never silently recognised-but-uncounted (codex review)' {
         foreach ($b in ' fail ', ' pending ', 'fail ', ' pass') {
@@ -204,7 +204,7 @@ Describe 'Get-FailedCheckJobFacts - reads job facts for failed checks only, fail
         function script:Invoke-Gh {
             param([string[]]$GhArgs, [string]$What, [switch]$Json, [int]$Retries, [switch]$Graphql, [switch]$StdIn)
             $script:Calls.Add(($GhArgs -join ' '))
-            if ($env:FAKE_JOB_MODE -eq 'throw') { throw "No pude $What (gh exit 1)" }
+            if ($env:FAKE_JOB_MODE -eq 'throw') { throw "Could not $What (gh exit 1)" }
             if ($GhArgs -join ' ' -match '/jobs/89284023176$') { return $script:JobNeverRan }
             return $script:JobBroken
         }
@@ -308,28 +308,28 @@ function gh {
     It 'CI FAILED on a real step -> GATE BLOCKED, exit 1, reported as a failure' {
         $r = Run-Gate -JobJson $script:GoodJob -ChecksJson ('[{"name":"Pester","bucket":"fail","state":"FAILURE","link":"' + $script:LinkB + '"}]')
         $r.exit | Should -Be 1 -Because $r.out
-        $r.out  | Should -Match 'checks fallando'
-        $r.out  | Should -Not -Match 'NO SE EVALUO'
+        $r.out  | Should -Match 'checks failing'
+        $r.out  | Should -Not -Match 'NOT EVALUATED'
     }
-    It 'CI NEVER RAN (job with zero steps) -> still blocked, but exit 3 and named "no se evaluo"' {
+    It 'CI NEVER RAN (job with zero steps) -> still blocked, but exit 3 and named "not evaluated"' {
         $r = Run-Gate -JobJson ($script:JobNeverRan | ConvertTo-Json -Depth 5 -Compress) `
                       -ChecksJson ('[{"name":"Pester","bucket":"fail","state":"FAILURE","link":"' + $script:LinkA + '"}]')
         $r.exit | Should -Be 3 -Because $r.out
         $r.out  | Should -Match 'GATE BLOCKED'
-        $r.out  | Should -Match 'NO SE EVALUO'
-        $r.out  | Should -Match 'No re-empujes'
+        $r.out  | Should -Match 'NOT EVALUATED'
+        $r.out  | Should -Match 'Do not re-push'
         $r.out  | Should -Not -Match 'GATE PASSED'
     }
     It 'CI NEVER RAN (startup_failure state) -> exit 3 without needing any job lookup' {
         $r = Run-Gate -ChecksJson '[{"name":"CI","bucket":"fail","state":"STARTUP_FAILURE","link":"https://github.com/o/r/actions/runs/1/job/2"}]'
         $r.exit | Should -Be 3 -Because $r.out
-        $r.out  | Should -Match 'NO SE EVALUO'
+        $r.out  | Should -Match 'NOT EVALUATED'
     }
     It 'a real failure NEXT TO a never-ran check keeps exit 1 - the gate does not become permissive' {
         $checks = '[{"name":"Pester","bucket":"fail","state":"FAILURE","link":"' + $script:LinkB + '"},{"name":"claude-review","bucket":"fail","state":"STARTUP_FAILURE","link":"' + $script:LinkA + '"}]'
         $r = Run-Gate -JobJson $script:GoodJob -ChecksJson $checks
         $r.exit | Should -Be 1 -Because $r.out
-        $r.out  | Should -Match 'checks fallando'
+        $r.out  | Should -Match 'checks failing'
     }
     It 'a REVIEWER job that never ran, with a real recorded review, is still excused exactly as before (#481 must not remove that allowance)' {
         $r = Run-Gate -Reviewed -JobJson ($script:JobNeverRan | ConvertTo-Json -Depth 5 -Compress) `
@@ -353,7 +353,7 @@ function gh {
     It 'a check with a bucket the gate does not recognise BLOCKS (exit 1), named - it is never passed over (review thread)' {
         $r = Run-Gate -ChecksJson '[{"name":"Pester","bucket":"pass","state":"SUCCESS","link":"x"},{"name":"newthing","bucket":"brand_new","state":"WEIRD","link":"y"}]'
         $r.exit | Should -Be 1 -Because $r.out
-        $r.out  | Should -Match 'no reconoce'
+        $r.out  | Should -Match 'does not recognise'
         $r.out  | Should -Match 'newthing'
         $r.out  | Should -Not -Match 'GATE PASSED'
     }
@@ -365,7 +365,7 @@ function gh {
     It 'a STARTUP_FAILURE check with an unrecognised bucket is exit 1 (unknown), not the exit-3 never-ran path (codex review)' {
         $r = Run-Gate -ChecksJson '[{"name":"CI","bucket":"brand_new","state":"STARTUP_FAILURE","link":"y"}]'
         $r.exit | Should -Be 1 -Because $r.out
-        $r.out  | Should -Match 'no reconoce'
+        $r.out  | Should -Match 'does not recognise'
     }
     It 'a failed REVIEWER check that IS excused (recorded review) must not drag an unrecognised check through with it: exit 1' {
         # The allowance only looks at red names; without an explicit guard it would excuse the

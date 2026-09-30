@@ -1,7 +1,7 @@
 ﻿#Requires -Modules Pester
 <#  Tests for the reviewer liveness probe behind the review gate's way out (#537).
 
-    The gate exits 2 ("GATE SIN REVISAR") and used to recommend the external reviewer
+    The gate exits 2 ("GATE UNREVIEWED") and used to recommend the external reviewer
     unconditionally. Both external CLIs can be dead at once - Gemini fails at auth and still
     exits 0 - and then the only exit left is -AllowUnreviewed, the escape hatch the gate exists to
     discourage. These tests pin: a dead reviewer is never recommended, exit 0 is not a verdict, and
@@ -203,34 +203,34 @@ Describe 'Get-UnreviewedWayOut - the gate only recommends what is alive (#537)' 
     }
     It 'lists a dead reviewer as dead - it is never named as an option' {
         $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'auth'), (Live 'codex' 'codex' 'ok')))
-        $t | Should -Match 'responden ahora: codex \(codex\)'
-        $t | Should -Match 'no responde: antigravity - no esta autenticado'
-        $t | Should -Not -Match 'responden ahora:[^\n]*antigravity'
+        $t | Should -Match 'answering right now: codex \(codex\)'
+        $t | Should -Match 'not answering: antigravity - is not authenticated'
+        $t | Should -Not -Match 'answering right now:[^\n]*antigravity'
     }
     It 'when NOTHING answers, says so plainly and does not recommend second-opinion' {
         $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'unsupported'), (Live 'codex' 'codex' 'not-installed')))
-        $t | Should -Match 'NINGUN revisor externo responde'
-        $t | Should -Match 'no lo recomiendo'
-        $t | Should -Not -Match 'sirve'
-        $t | Should -Not -Match 'Usa la skill second-opinion'
+        $t | Should -Match 'NO external reviewer answers'
+        $t | Should -Match 'I do not recommend it'
+        $t | Should -Not -Match 'works in principle'
+        $t | Should -Not -Match 'Use the second-opinion skill'
     }
     It 'when nothing answers, gives the reason for EACH reviewer and a human way out' {
         $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'timeout'), (Live 'codex' 'codex' 'not-installed')))
-        $t | Should -Match 'antigravity \(agy\): no respondio a tiempo'
-        $t | Should -Match 'codex \(codex\): no esta instalado'
-        $t | Should -Match 'Lee el diff tu mismo'
+        $t | Should -Match 'antigravity \(agy\): did not answer in time'
+        $t | Should -Match 'codex \(codex\): is not installed'
+        $t | Should -Match 'Read the diff yourself'
         $t | Should -Match '-RecordReview'
     }
     It 'an exit-0-but-silent reviewer is reported as not alive' {
         $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'no-output')))
-        $t | Should -Match 'NINGUN revisor externo responde'
-        $t | Should -Match 'no es un revisor vivo'
+        $t | Should -Match 'NO external reviewer answers'
+        $t | Should -Match 'not a live reviewer'
     }
     It 'when the probe itself could not run, keeps the recommendation but labels it UNVERIFIED' {
         # Saying "nothing is alive" with no evidence would be the same defect turned around.
         $t = Text (Get-UnreviewedWayOut -Liveness $null)
-        $t | Should -Match 'no pude comprobar'
-        $t | Should -Not -Match 'NINGUN'
+        $t | Should -Match 'could not check'
+        $t | Should -Not -MatchExactly 'NO external'
     }
     It 'every line carries text and a colour for the gate to print' {
         $ls = @(Get-UnreviewedWayOut -Liveness @((Live 'codex' 'codex' 'ok')))
@@ -252,11 +252,11 @@ Describe 'Board-ReviewGate is wired to the probe, and the verdict is untouched (
         $script:Gate | Should -Match 'Get-UnreviewedWayOut'
     }
     It 'no longer recommends the external reviewer unconditionally' {
-        $script:Gate | Should -Not -Match 'el revisor externo \(second-opinion\) sirve'
+        $script:Gate | Should -Not -Match 'the external reviewer \(second-opinion\) works'
     }
-    It 'probes ONLY inside the GATE SIN REVISAR branch, before its exit 2 - never on a normal pass' {
+    It 'probes ONLY inside the GATE UNREVIEWED branch, before its exit 2 - never on a normal pass' {
         $probe = $script:Gate.IndexOf('Invoke-ReviewerProbes')
-        $sin   = $script:Gate.IndexOf('GATE SIN REVISAR')
+        $sin   = $script:Gate.IndexOf('GATE UNREVIEWED')
         $exit2 = $script:Gate.IndexOf('exit 2', $sin)
         $probe | Should -BeGreaterThan $sin
         $probe | Should -BeLessThan $exit2
@@ -264,7 +264,7 @@ Describe 'Board-ReviewGate is wired to the probe, and the verdict is untouched (
         ([regex]::Matches($script:Gate, 'Invoke-ReviewerProbes')).Count | Should -Be 1
     }
     It 'still exits 2 on that path, and still offers -AllowUnreviewed as the last resort' {
-        $sin = $script:Gate.IndexOf('GATE SIN REVISAR')
+        $sin = $script:Gate.IndexOf('GATE UNREVIEWED')
         $tail = $script:Gate.Substring($sin, [Math]::Min(6000, $script:Gate.Length - $sin))
         $tail | Should -Match 'exit 2'
         $tail | Should -Match '-AllowUnreviewed'

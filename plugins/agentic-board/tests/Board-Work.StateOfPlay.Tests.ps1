@@ -51,7 +51,7 @@ Describe 'Get-RunMarkerFinding' {
     It 'is IN FLIGHT while queued issues are still open, and says how many' {
         $f = Get-RunMarkerFinding -Marker (New-Marker) -OpenNumbers @(491, 494, 495) -Verified $true
         $f.Group | Should -Be 'inflight'
-        $f.Text  | Should -Match '1 de 3'
+        $f.Text  | Should -Match '1 of 3'
         $f.Text  | Should -Match '#494 #495'
     }
     It 'is in flight, not stale, when the marker declares no queue and the epic is open' {
@@ -155,7 +155,7 @@ Describe 'Get-UnreleasedFinding' {
     It 'is due when [Unreleased] holds entries, and names the commits since the tag' {
         $f = Get-UnreleasedFinding -Delta ([pscustomobject]@{ Ok = $true; Text = $script:Cl; Tag = 'v0.1.0'; Commits = 8; BaseRef = 'origin/main'; Skipped = ''; Error = '' })
         $f.Group | Should -Be 'due'
-        $f.Text  | Should -Match '2 entrada'
+        $f.Text  | Should -Match '2 entry'
         $f.Text  | Should -Match '8 commit'
         $f.Text  | Should -Match 'v0\.1\.0'
     }
@@ -189,9 +189,9 @@ Describe 'Get-BoardInFlightFindings / Get-OpenPrFindings' {
     It 'lists open PRs and marks a capped read as a floor' {
         $prs = @(1..3 | ForEach-Object { [pscustomobject]@{ number = $_; title = 't'; headRefName = "b$_"; isDraft = ($_ -eq 2) } })
         $f = @(Get-OpenPrFindings -Prs $prs)
-        $f[0].Text | Should -Match '3 PR\(s\)'
-        $f[0].Text | Should -Match 'borrador'
-        (@(Get-OpenPrFindings -Prs $prs -Cap 3))[0].Text | Should -Match '3\+ PR'
+        $f[0].Text | Should -Match '3 open PR\(s\)'
+        $f[0].Text | Should -Match '\[draft\]'
+        (@(Get-OpenPrFindings -Prs $prs -Cap 3))[0].Text | Should -Match '3\+ open PR'
     }
 }
 
@@ -199,7 +199,7 @@ Describe 'Format-StateOfPlay' {
     It 'is ONE line when there is nothing to report' {
         $l = @(Format-StateOfPlay -Findings @())
         $l.Count   | Should -Be 1
-        $l[0].Text | Should -Match 'sin novedades'
+        $l[0].Text | Should -Match 'nothing new'
     }
     It 'a skipped source alone does not make the repo dirty' {
         $skip = New-StateFinding -Source 'x' -Group 'skipped' -Text 'no aplica'
@@ -217,8 +217,8 @@ Describe 'Format-StateOfPlay' {
             (New-StateFinding -Source 'e' -Group 'unknown'  -Text 'EEE'))
         $text = (@(Format-StateOfPlay -Findings $all -Repo 'o/r') | ForEach-Object Text) -join "`n"
         foreach ($x in 'AAA', 'BBB', 'CCC', 'DDD', 'EEE') { $text | Should -Match $x }
-        $text | Should -Match 'Si quieres, lo hago yo: do b'
-        $text | Should -Match 'no toco nada sin tu si'
+        $text | Should -Match 'If you want, I can do it: do b'
+        $text | Should -Match 'I touch nothing without your yes'
     }
     It 'never prints a script name or a command for the user to run' {
         $all = @((New-StateFinding -Source 'b' -Group 'stale' -Text 'BBB' -Offer 'cerrar esa corrida'))
@@ -253,7 +253,7 @@ Describe 'Read-StateOpenIssues' {
         }
         $r = Read-StateOpenIssues -Repo 'o/r' -MaxPages 3
         $r.Ok | Should -BeFalse
-        $r.Error | Should -Match 'no leo la lista entera'
+        $r.Error | Should -Match 'not reading the whole list'
     }
     It 'turns a gh failure into a not-Ok result, not an exception' {
         Mock Invoke-Gh { throw 'HTTP 401' }
@@ -373,7 +373,7 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
         $wt = @($f | Where-Object { $_.Source -eq 'worktree' -and $_.Text -match 'issue-9-done' })
         $wt.Count | Should -Be 1
         $wt[0].Offer | Should -BeNullOrEmpty
-        $wt[0].Text  | Should -Match 'sin commitear'
+        $wt[0].Text  | Should -Match 'uncommitted'
     }
 
     It 'fails closed when git cannot tell whether a merged worktree is dirty' {
@@ -396,7 +396,7 @@ Describe 'Get-StateOfPlay over a real repo (the five-finding regression)' {
         $kept = @($f | Where-Object { $_.Source -eq 'worktree' -and $_.Text -match 'issue-12-broken' })
         $kept.Count | Should -Be 1
         $kept[0].Offer | Should -BeNullOrEmpty
-        $kept[0].Text  | Should -Match 'sin commitear'
+        $kept[0].Text  | Should -Match 'uncommitted'
     }
 
     It 'never offers to remove the worktree the session is standing in, even when its own PR merged' {
@@ -532,12 +532,12 @@ if ($line -match '^pr list') { Write-Output '[]'; exit 0 }
 
     It 'opens with the state of play and only then lists the pending items' {
         $out = Invoke-Wired
-        $out | Should -Match 'Estado del trabajo \(o/r\)'
+        $out | Should -Match 'State of work \(o/r\)'
         $out | Should -Match 'epic #300'
-        $out | Should -Match 'en progreso o en review: #101'
-        $out | Should -Match 'Total: 1 pendiente'
-        $out.IndexOf('Estado del trabajo') | Should -BeLessThan $out.IndexOf('Total: 1 pendiente')
-        $out.IndexOf('Estado del trabajo') | Should -BeLessThan $out.IndexOf('#100')
+        $out | Should -Match 'in progress or in review: #101'
+        $out | Should -Match 'Total: 1 pending'
+        $out.IndexOf('State of work') | Should -BeLessThan $out.IndexOf('Total: 1 pending')
+        $out.IndexOf('State of work') | Should -BeLessThan $out.IndexOf('#100')
     }
 
     It 'a corrupt sessions.json is reported as unknown, not read as no live sessions' {
@@ -545,13 +545,13 @@ if ($line -match '^pr list') { Write-Output '[]'; exit 0 }
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $dir 'sessions.json') -Value '{ not json'
         try { $out = Invoke-Wired } finally { Remove-Item -LiteralPath (Join-Path $dir 'sessions.json') -Force }
-        $out | Should -Match 'No pude leer el registro de sesiones vivas'
-        $out | Should -Match 'Total: 1 pendiente'
+        $out | Should -Match 'Could not read the live session registry'
+        $out | Should -Match 'Total: 1 pending'
     }
 
     It 'never takes the pending list down when the state of play cannot read GitHub' {
         $out = Invoke-Wired -Mode 'break-issues'
-        $out | Should -Match 'No pude leer los issues abiertos'
-        $out | Should -Match 'Total: 1 pendiente'
+        $out | Should -Match 'Could not read the open issues'
+        $out | Should -Match 'Total: 1 pending'
     }
 }

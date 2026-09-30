@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'Get-RepoFromOrigin.ps1')
 
 $Path = (Resolve-Path $Path).Path
-if (-not (Test-Path (Join-Path $Path ".git"))) { throw "$Path no es la raiz de un repo git." }
+if (-not (Test-Path (Join-Path $Path ".git"))) { throw "$Path is not the root of a git repo." }
 
 # Templates ship with the plugin, next to this script
 $src = Join-Path $PSScriptRoot "..\presets\templates"
@@ -85,7 +85,7 @@ foreach ($c in $copies) {
     $from = Join-Path $src  $c.From
     $to   = Join-Path $Path $c.To
     if ((Test-Path $to) -and -not $Force) {
-        Write-Host "  SKIP  $($c.To) ya existe (usa -Force para sobreescribir)" -ForegroundColor DarkYellow
+        Write-Host "  SKIP  $($c.To) already exists (use -Force to overwrite)" -ForegroundColor DarkYellow
         $skipped++
         continue
     }
@@ -101,7 +101,7 @@ if (-not $SkipLabels -and $Repo) {
         $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
     }
     Write-Host ""
-    Write-Host "  Asegurando labels de los forms..." -ForegroundColor Cyan
+    Write-Host "  Making sure the forms' labels exist..." -ForegroundColor Cyan
     $labels = @(
         @{ Name = "bug";     Color = "d73a4a"; Desc = "Something is broken" }
         @{ Name = "feature"; Color = "a2eeef"; Desc = "New capability or improvement" }
@@ -118,6 +118,6 @@ if (-not $SkipLabels -and $Repo) {
 }
 
 Write-Host ""
-Write-Host "Instalados: $installed  Omitidos: $skipped" -ForegroundColor Cyan
-if ($skipped -gt 0) { Write-Host "Los omitidos conservan la version del repo (personalizada)." -ForegroundColor DarkGray }
-Write-Host "Commitea .github/ por el flujo normal (PR si el trabajo esta trackeado en el board)." -ForegroundColor Cyan
+Write-Host "Installed: $installed  Skipped: $skipped" -ForegroundColor Cyan
+if ($skipped -gt 0) { Write-Host "Skipped files keep the repo's own (customized) version." -ForegroundColor DarkGray }
+Write-Host "Commit .github/ through the normal flow (a PR if the work is tracked on the board)." -ForegroundColor Cyan

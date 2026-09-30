@@ -60,12 +60,12 @@ Describe 'an unmapped owner is reported as a MAP problem, not a permissions prob
     }
     It 'says it is falling back, and to WHICH token - never silently' {
         $script:r.reason | Should -Match 'GITHUB_TOKEN_PERSONAL'
-        $script:r.reason | Should -Match 'por defecto'
+        $script:r.reason | Should -Match 'by default'
     }
     It 'points at the map, and does not read as an access-rights problem' {
-        $script:r.reason | Should -Match 'MAPA'
+        $script:r.reason | Should -MatchExactly 'MAP'
         $script:r.reason | Should -Match '-TokenVar'
-        $script:r.reason | Should -Not -Match 'NO tiene permiso'
+        $script:r.reason | Should -Not -Match 'does NOT have permission'
         $script:r.reason | Should -Not -Match 'fork'
     }
     It 'falls back to the PERSONAL token, never to the wider business one' {
@@ -100,7 +100,7 @@ Describe 'the account ID survives the NEXT rename (#665)' {
         $r.mapped | Should -BeTrue
         $r.how    | Should -Be 'account-id'
         $r.var    | Should -Be 'GITHUB_TOKEN_BUSINESS'
-        $r.reason | Should -Match 'se renombro'
+        $r.reason | Should -Match 'it was renamed'
     }
     It 'matches a renamed personal account to the personal token' {
         (Resolve-OwnerTokenVar -Owner 'SomeFutureName' -IdLookup { param($o) '73630372' }).var |
@@ -115,7 +115,7 @@ Describe 'the account ID survives the NEXT rename (#665)' {
     It 'stays unmapped, and says so, when GitHub cannot be asked' {
         $r = Resolve-OwnerTokenVar -Owner 'Stranger' -IdLookup { param($o) '' }
         $r.mapped | Should -BeFalse
-        $r.reason | Should -Match 'No se pudo consultar'
+        $r.reason | Should -Match 'Could not look up'
     }
     It 'a lookup that THROWS is an unmapped owner, not a crash' {
         $r = Resolve-OwnerTokenVar -Owner 'Stranger' -IdLookup { param($o) throw 'network down' }
@@ -188,7 +188,7 @@ Describe 'Get-GhTokenForContext - the path the push script takes' {
         $r.ctx.var    | Should -Be 'GITHUB_TOKEN_PERSONAL'
         $r.ctx.mapped | Should -BeFalse
         $r.warn | Should -Match "'BrandNewName'"
-        $r.warn | Should -Match 'MAPA'
+        $r.warn | Should -MatchExactly 'MAP'
     }
     It 'is silent for an owner it can place' {
         $r = script:Invoke-Ctx -StartDir $script:plain -Owner 'PesanteAnalytics' -IdLookup { param($o) '' }
@@ -211,11 +211,11 @@ Describe 'Get-GhTokenForContext - the path the push script takes' {
     It 'a braked run without an agent token still FAILS - the rename work did not open a fallback' {
         Mock Get-GhTokenValue { if ($VarName -eq 'GITHUB_TOKEN_AGENT') { '' } else { "value-of-$VarName" } }
         { Get-GhTokenForContext -StartDir $script:braked -Owner 'PesanteAnalytics' -IdLookup { param($o) '248682413' } } |
-            Should -Throw -ExpectedMessage '*FRENADO*'
+            Should -Throw -ExpectedMessage '*BRAKED*'
     }
     It 'a braked run cannot name the business variable explicitly' {
         { Get-GhTokenForContext -StartDir $script:braked -Owner 'PesanteAnalytics' -ExplicitVar 'GITHUB_TOKEN_BUSINESS' } |
-            Should -Throw -ExpectedMessage '*no esta permitido*'
+            Should -Throw -ExpectedMessage '*is not allowed*'
     }
 }
 

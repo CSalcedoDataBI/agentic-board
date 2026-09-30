@@ -510,7 +510,7 @@ if ($Resume) {
     if ($Issue -gt 0) {
         try {
             $comments = Invoke-Gh -GhArgs @('api','--paginate',"repos/$Repo/issues/$Issue/comments?per_page=100") `
-                                  -What "leer el handoff de $Repo#$Issue" -Json
+                                  -What "read the handoff of $Repo#$Issue" -Json
             $marker = @($comments | Where-Object { $_.body -like "*$script:HandoffMarker*" }) | Select-Object -Last 1
             if ($marker) {
                 $body = Get-HandoffBodyFromComment $marker.body
@@ -606,7 +606,7 @@ try {
     # -Json throws on a real failure so a false-empty read does not write `pr: null` into the
     # handoff frontmatter when an open PR actually exists (a genuinely PR-less branch returns []).
     $prJson = Invoke-Gh -GhArgs @('pr','list','--repo',$Repo,'--head',$branch,'--state','open','--json','number') `
-                        -What "buscar el PR abierto de $branch" -Json
+                        -What "find the open PR of $branch" -Json
     if ($prJson -and $prJson.Count) { $pr = [int]$prJson[0].number }
 } catch {
     Write-Host "  WARN could not resolve the open PR for $branch ($($_.Exception.Message)) - the handoff will omit it." -ForegroundColor DarkYellow
@@ -747,7 +747,7 @@ _Last saved $($fm.saved)._
     $canUpsert  = $true
     try {
         $comments = Invoke-Gh -GhArgs @('api','--paginate',"repos/$Repo/issues/$Issue/comments?per_page=100") `
-                              -What "leer los comentarios de $Repo#$Issue" -Json
+                              -What "read the comments of $Repo#$Issue" -Json
         $existingId = (@($comments | Where-Object { $_.body -like "*$script:HandoffMarker*" }) | Select-Object -Last 1).id
     } catch {
         $canUpsert = $false
@@ -761,11 +761,11 @@ _Last saved $($fm.saved)._
                 # non-zero exit so the catch actually fires (a bare native failure never threw -> the
                 # old code printed "OK updated" for a PATCH that silently failed) (#316).
                 $null = Invoke-Gh -GhArgs @('api','--method','PATCH',"repos/$Repo/issues/comments/$existingId",'-F','body=@-') `
-                                  -StdIn $commentBody -What "actualizar el comentario de handoff en $Repo#$Issue"
+                                  -StdIn $commentBody -What "update the handoff comment on $Repo#$Issue"
                 Write-Host "  OK  Handoff comment updated on $Repo#$Issue (durable source of truth)" -ForegroundColor Green
             } else {
                 $null = Invoke-Gh -GhArgs @('issue','comment',"$Issue",'--repo',$Repo,'--body-file','-') `
-                                  -StdIn $commentBody -What "postear el comentario de handoff en $Repo#$Issue"
+                                  -StdIn $commentBody -What "post the handoff comment on $Repo#$Issue"
                 Write-Host "  OK  Handoff comment posted on $Repo#$Issue (durable source of truth)" -ForegroundColor Green
             }
         } catch {

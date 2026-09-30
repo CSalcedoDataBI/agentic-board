@@ -196,11 +196,11 @@ Describe 'Read-SessionRegistry drops a recycled PID but keeps the file (#520)' {
 }
 
 Describe 'Get-SessionLiveStatus uses real liveness (#520)' {
-    It 'reports a recycled-PID session as FINISHED (proceso terminado), not "en progreso"' {
+    It 'reports a recycled-PID session as FINISHED (process ended), not "in progress"' {
         $s = [pscustomobject]@{ issue = 281; sessionPid = $PID; started = $script:StampBefore }   # no repo -> no gh
         $st = Get-SessionLiveStatus $s
         $st.done   | Should -BeTrue
-        $st.reason | Should -Be 'proceso terminado'
+        $st.reason | Should -Be 'process ended'
     }
     It 'reports the same session as in progress while its PID is genuinely its own' {
         $s = [pscustomobject]@{ issue = 281; sessionPid = $PID; started = $script:StampAfter }

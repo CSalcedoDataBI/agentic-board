@@ -30,13 +30,13 @@ function New-StateFinding {
 }
 
 # "#1 #2 #3" for a list of numbers, capped so a 60-issue backlog does not bury the rest of the
-# picture. The cap is SAID ("y N mas"), never silent.
+# picture. The cap is SAID ("and N more"), never silent.
 function Format-StateNumberList {
     param([int[]]$Numbers, [int]$Max = 12)
     $n = @($Numbers)
     if ($n.Count -eq 0) { return '' }
     $shown = @($n | Select-Object -First $Max | ForEach-Object { "#$_" }) -join ' '
-    if ($n.Count -gt $Max) { $shown += " y $($n.Count - $Max) mas" }
+    if ($n.Count -gt $Max) { $shown += " and $($n.Count - $Max) more" }
     return $shown
 }
 
@@ -51,7 +51,7 @@ function Get-BoardInFlightFindings {
     if ($active.Count -eq 0) { return @() }
     $nums = @($active | ForEach-Object { [int]$_.content.number } | Sort-Object -Unique)
     @(New-StateFinding -Source 'board' -Group 'inflight' `
-        -Text ("El board tiene {0} item(s) en progreso o en review: {1}." -f $nums.Count, (Format-StateNumberList $nums)))
+        -Text ("The board has {0} item(s) in progress or in review: {1}." -f $nums.Count, (Format-StateNumberList $nums)))
 }
 
 # Is this PR parked work? `/cleanup sessions` parks unmerged work as a draft PR with this
@@ -70,12 +70,12 @@ function Get-ParkedWorkFindings {
     if ($parked.Count -eq 0) { return @() }
     $desc = @($parked | Select-Object -First 10 | ForEach-Object {
         $issue = if ("$($_.headRefName)" -match '^issue-(\d+)') { ", issue #$($Matches[1])" } else { '' }
-        "PR #$($_.number) (rama $($_.headRefName)$issue; retomar: git switch $($_.headRefName))"
+        "PR #$($_.number) (branch $($_.headRefName)$issue; resume: git switch $($_.headRefName))"
     }) -join '; '
-    if ($parked.Count -gt 10) { $desc += "; y $($parked.Count - 10) mas" }
+    if ($parked.Count -gt 10) { $desc += "; and $($parked.Count - 10) more" }
     @(New-StateFinding -Source 'parked' -Group 'parked' `
-        -Text ("{0} trabajo(s) aparcado(s) como PR en borrador, sin mergear: {1}." -f $parked.Count, $desc) `
-        -Offer 'retomar uno (te cambio a su rama y sigues donde quedo)')
+        -Text ("{0} piece(s) of work parked as unmerged draft PRs: {1}." -f $parked.Count, $desc) `
+        -Offer 'resume one (I switch you to its branch and you pick up where it stopped)')
 }
 
 # Open PRs of the repo. Pure over `gh pr list` rows. A capped read is flagged: "N PRs" off a list
@@ -87,11 +87,11 @@ function Get-OpenPrFindings {
     if ($rows.Count -eq 0) { return @() }
     $plus = if ($plusFromCap) { '+' } else { '' }
     $desc = @($rows | Sort-Object { [int]$_.number } | Select-Object -First 8 | ForEach-Object {
-        $draft = if ($_.isDraft) { ' [borrador]' } else { '' }
-        "PR #$($_.number)$draft (rama $($_.headRefName))"
+        $draft = if ($_.isDraft) { ' [draft]' } else { '' }
+        "PR #$($_.number)$draft (branch $($_.headRefName))"
     }) -join '; '
-    if ($rows.Count -gt 8) { $desc += "; y $($rows.Count - 8) mas" }
-    @(New-StateFinding -Source 'pr' -Group 'inflight' -Text ("{0}{1} PR(s) abiertos: {2}." -f $rows.Count, $plus, $desc))
+    if ($rows.Count -gt 8) { $desc += "; and $($rows.Count - 8) more" }
+    @(New-StateFinding -Source 'pr' -Group 'inflight' -Text ("{0}{1} open PR(s): {2}." -f $rows.Count, $plus, $desc))
 }
 
 # The autonomous-run marker (.agentic-board/active-run.json). Pure. $OpenNumbers is the set of
@@ -108,11 +108,11 @@ function Get-RunMarkerFinding {
 
     $epic  = [int]$Marker.epic
     $queue = @(@($Marker.queue) | Where-Object { $null -ne $_ -and "$_" -match '^\d+$' } | ForEach-Object { [int]$_ })
-    $when  = if ($Marker.updated) { " (ultima actualizacion $("$($Marker.updated)".Substring(0, [math]::Min(10, "$($Marker.updated)".Length))))" } else { '' }
+    $when  = if ($Marker.updated) { " (last updated $("$($Marker.updated)".Substring(0, [math]::Min(10, "$($Marker.updated)".Length))))" } else { '' }
 
     if (-not $Verified) {
         return New-StateFinding -Source 'run' -Group 'unknown' `
-            -Text "Hay una corrida autonoma marcada activa sobre el epic #$epic y no pude comprobar si su cola sigue abierta."
+            -Text "An autonomous run is marked active on epic #$epic and I could not check whether its queue is still open."
     }
 
     $open       = @($OpenNumbers)
@@ -124,24 +124,24 @@ function Get-RunMarkerFinding {
         # The epic was closed but the run's own queue still has open issues: that is not a run to
         # close on the tool's say-so, it is a disagreement the user should see (no offer attached).
         return New-StateFinding -Source 'run' -Group 'inflight' `
-            -Text ("Corrida autonoma activa cuyo epic #{0} ya esta cerrado, pero de su cola siguen abiertos {1}{2}." -f $epic, (Format-StateNumberList $stillOpen), $when)
+            -Text ("Autonomous run active whose epic #{0} is already closed, but from its queue these are still open: {1}{2}." -f $epic, (Format-StateNumberList $stillOpen), $when)
     }
     if (-not $epicOpen) {
         return New-StateFinding -Source 'run' -Group 'stale' `
-            -Text "Una corrida autonoma sigue marcada como activa sobre el epic #$epic, pero ese epic ya esta cerrado$when." `
-            -Offer 'cerrar esa corrida'
+            -Text "An autonomous run is still marked active on epic #$epic, but that epic is already closed$when." `
+            -Offer 'close that run'
     }
     if ($queue.Count -gt 0 -and $stillOpen.Count -eq 0) {
         return New-StateFinding -Source 'run' -Group 'stale' `
-            -Text ("Una corrida autonoma sigue marcada como activa sobre el epic #{0}, pero toda su cola ({1}) ya esta cerrada{2}." -f $epic, (Format-StateNumberList $queue), $when) `
-            -Offer 'cerrar esa corrida'
+            -Text ("An autonomous run is still marked active on epic #{0}, but its whole queue ({1}) is already closed{2}." -f $epic, (Format-StateNumberList $queue), $when) `
+            -Offer 'close that run'
     }
     if ($queue.Count -eq 0) {
         return New-StateFinding -Source 'run' -Group 'inflight' `
-            -Text "Corrida autonoma activa sobre el epic #$epic (sin cola declarada)$when."
+            -Text "Autonomous run active on epic #$epic (no queue declared)$when."
     }
     New-StateFinding -Source 'run' -Group 'inflight' `
-        -Text ("Corrida autonoma activa sobre el epic #{0}: {1} de {2} de su cola cerrada, siguen abiertos {3}{4}." -f $epic, $closedCnt, $queue.Count, (Format-StateNumberList $stillOpen), $when)
+        -Text ("Autonomous run active on epic #{0}: {1} of {2} in its queue closed, still open: {3}{4}." -f $epic, $closedCnt, $queue.Count, (Format-StateNumberList $stillOpen), $when)
 }
 
 # Open issues that ARE epics (they have sub-issues) with every sub-issue closed. Pure over rows of
@@ -154,8 +154,8 @@ function Get-FinishedEpicFindings {
     } | Sort-Object { [int]$_.number })
     foreach ($e in $done) {
         New-StateFinding -Source 'epic' -Group 'stale' `
-            -Text ("El epic #{0} ('{1}') sigue abierto con sus {2} sub-issue(s) cerrados." -f $e.number, $e.title, $e.subIssuesSummary.total) `
-            -Offer "cerrar el epic #$($e.number)"
+            -Text ("Epic #{0} ('{1}') is still open with its {2} sub-issue(s) closed." -f $e.number, $e.title, $e.subIssuesSummary.total) `
+            -Offer "close epic #$($e.number)"
     }
 }
 
@@ -171,19 +171,19 @@ function Get-OffBoardFindings {
         [bool]$OpenVerified = $true, [bool]$BoardTruncated = $false
     )
     if (-not $OpenVerified) {
-        return @(New-StateFinding -Source 'offboard' -Group 'unknown' -Text 'No pude leer los issues abiertos del repo, asi que no se cuales faltan en el board.')
+        return @(New-StateFinding -Source 'offboard' -Group 'unknown' -Text 'Could not read the repo''s open issues, so I cannot tell which are missing from the board.')
     }
     $mine = @($Items | Where-Object { $_ -and $_.content -and $_.content.number -and $_.content.type -ne 'DraftIssue' -and
                                        ((Get-ItemRepoName $_) -ieq $Repo) })
     if ($BoardTruncated) {
-        return @(New-StateFinding -Source 'offboard' -Group 'unknown' -Text 'La lectura del board se corto, asi que no puedo decir que issues abiertos faltan en el.')
+        return @(New-StateFinding -Source 'offboard' -Group 'unknown' -Text 'The board read was cut short, so I cannot say which open issues are missing from it.')
     }
     # Another project's board is the only reason to skip: it HAS issues, just none of this repo's. A
     # board with no issue at all is a board this repo simply has not been put on yet - every open
-    # issue is off it, and saying "no comparo" there would hide exactly that.
+    # issue is off it, and saying "not comparing" there would hide exactly that.
     $anyIssue = @($Items | Where-Object { $_ -and $_.content -and $_.content.number -and $_.content.type -ne 'DraftIssue' })
     if ($mine.Count -eq 0 -and $anyIssue.Count -gt 0) {
-        return @(New-StateFinding -Source 'offboard' -Group 'skipped' -Text "Issues fuera del board: no comparo, este board no tiene ningun item de $Repo.")
+        return @(New-StateFinding -Source 'offboard' -Group 'skipped' -Text "Issues off the board: not comparing, this board has no item from $Repo.")
     }
     $onBoard = @{}
     foreach ($m in $mine) { $onBoard[[int]$m.content.number] = $true }
@@ -191,8 +191,8 @@ function Get-OffBoardFindings {
                  ForEach-Object { [int]$_.number } | Sort-Object)
     if ($missing.Count -eq 0) { return @() }
     @(New-StateFinding -Source 'offboard' -Group 'offboard' `
-        -Text ("{0} issue(s) abiertos no estan en el board: {1}." -f $missing.Count, (Format-StateNumberList $missing 15)) `
-        -Offer 'agregarlos al board')
+        -Text ("{0} open issue(s) are not on the board: {1}." -f $missing.Count, (Format-StateNumberList $missing 15)) `
+        -Offer 'add them to the board')
 }
 
 # Worktrees (other than the one you stand in) whose branch already merged. Pure over rows built by
@@ -213,18 +213,18 @@ function Get-MergedWorktreeFindings {
     if ($cleanable.Count -gt 0) {
         $desc = @($cleanable | ForEach-Object { "$($_.Branch) (PR #$($_.Pr))" }) -join ', '
         $out += New-StateFinding -Source 'worktree' -Group 'stale' `
-            -Text ("{0} worktree(s) de ramas que ya se mergearon: {1}." -f $cleanable.Count, $desc) `
-            -Offer 'limpiarlos (con la confirmacion de siempre por rama)'
+            -Text ("{0} worktree(s) of branches already merged: {1}." -f $cleanable.Count, $desc) `
+            -Offer 'clean them up (with the usual per-branch confirmation)'
     }
     if ($kept.Count -gt 0) {
         $desc = @($kept | ForEach-Object { "$($_.Branch) (PR #$($_.Pr))" }) -join ', '
         $out += New-StateFinding -Source 'worktree' -Group 'stale' `
-            -Text ("{0} worktree(s) de ramas ya mergeadas, pero con cambios sin commitear (o que no pude comprobar): {1}. Los conservo, no los ofrezco para limpiar." -f $kept.Count, $desc)
+            -Text ("{0} worktree(s) of branches already merged, but with uncommitted changes (or that I could not check): {1}. I keep them and do not offer them for cleanup." -f $kept.Count, $desc)
     }
     $bad = @($rows | Where-Object { $_.Error })
     if ($bad.Count -gt 0) {
         $out += New-StateFinding -Source 'worktree' -Group 'unknown' `
-            -Text ("No pude comprobar el PR de {0} worktree(s): {1}." -f $bad.Count, ((@($bad | ForEach-Object { $_.Branch })) -join ', '))
+            -Text ("Could not check the PR of {0} worktree(s): {1}." -f $bad.Count, ((@($bad | ForEach-Object { $_.Branch })) -join ', '))
     }
     return @($out)
 }
@@ -255,17 +255,17 @@ function Get-UnreleasedFinding {
     param($Delta)
     if (-not $Delta) { return $null }
     if (-not $Delta.Ok) {
-        if ($Delta.Skipped) { return New-StateFinding -Source 'release' -Group 'skipped' -Text "Release: no comparo ($($Delta.Skipped))." }
-        return New-StateFinding -Source 'release' -Group 'unknown' -Text "No pude leer el CHANGELOG de la rama por defecto ($($Delta.Error)), asi que no se si hay un release pendiente."
+        if ($Delta.Skipped) { return New-StateFinding -Source 'release' -Group 'skipped' -Text "Release: not comparing ($($Delta.Skipped))." }
+        return New-StateFinding -Source 'release' -Group 'unknown' -Text "Could not read the default branch's CHANGELOG ($($Delta.Error)), so I cannot tell whether a release is pending."
     }
     $u = Get-UnreleasedEntryCount $Delta.Text
     if (-not $u.HasSection -or $u.Entries -eq 0) { return $null }
     $since = if ($Delta.Tag) {
-        if ($Delta.Commits -ge 0) { " y hay $($Delta.Commits) commit(s) en $($Delta.BaseRef) desde $($Delta.Tag)" } else { " (ultimo release: $($Delta.Tag))" }
-    } else { ' y el repo no tiene ningun tag de release todavia' }
+        if ($Delta.Commits -ge 0) { " and there are $($Delta.Commits) commit(s) on $($Delta.BaseRef) since $($Delta.Tag)" } else { " (last release: $($Delta.Tag))" }
+    } else { ' and the repo has no release tag yet' }
     New-StateFinding -Source 'release' -Group 'due' `
-        -Text ("El [Unreleased] del CHANGELOG tiene {0} entrada(s){1}: hay un release pendiente." -f $u.Entries, $since) `
-        -Offer 'preparar el release'
+        -Text ("The CHANGELOG's [Unreleased] has {0} entry(ies){1}: a release is pending." -f $u.Entries, $since) `
+        -Offer 'prepare the release'
 }
 
 # ---------------------------------------------------------------------------- presentation
@@ -273,12 +273,12 @@ function Get-UnreleasedFinding {
 $script:StateGroupOrder = @(
     # First on purpose (#735): parked work is what you set aside to come back to - the answer to
     # "what did I leave pending?" - so it leads, before what is merely in flight.
-    [pscustomobject]@{ Group = 'parked';   Label = 'Trabajo aparcado (para retomar)';         Color = 'Magenta'    }
-    [pscustomobject]@{ Group = 'inflight'; Label = 'En curso';                                Color = 'Cyan'       }
-    [pscustomobject]@{ Group = 'stale';    Label = 'Colgado o listo para cerrar';             Color = 'Yellow'     }
-    [pscustomobject]@{ Group = 'offboard'; Label = 'Fuera del board';                         Color = 'Yellow'     }
-    [pscustomobject]@{ Group = 'due';      Label = 'Toca hacer';                              Color = 'Yellow'     }
-    [pscustomobject]@{ Group = 'unknown';  Label = 'No pude comprobar (no afirmo que este limpio)'; Color = 'Red'   }
+    [pscustomobject]@{ Group = 'parked';   Label = 'Parked work (to resume)';                 Color = 'Magenta'    }
+    [pscustomobject]@{ Group = 'inflight'; Label = 'In flight';                               Color = 'Cyan'       }
+    [pscustomobject]@{ Group = 'stale';    Label = 'Stuck or ready to close';                 Color = 'Yellow'     }
+    [pscustomobject]@{ Group = 'offboard'; Label = 'Off the board';                           Color = 'Yellow'     }
+    [pscustomobject]@{ Group = 'due';      Label = 'Due';                                     Color = 'Yellow'     }
+    [pscustomobject]@{ Group = 'unknown';  Label = 'Could not check (I do not claim it is clean)'; Color = 'Red'    }
 )
 
 # A repo is CLEAN when nothing is in flight, stale, off-board, due or unreadable. 'skipped' sources
@@ -296,13 +296,13 @@ function Format-StateOfPlay {
     $lines = @()
     $all = @($Findings | Where-Object { $_ })
     if (Test-StateOfPlayClean $all) {
-        $lines += [pscustomobject]@{ Text = 'Estado del trabajo: sin novedades (nada en curso, colgado, fuera del board ni por releasear).'; Color = 'Green' }
+        $lines += [pscustomobject]@{ Text = 'State of work: nothing new (nothing in flight, stuck, off the board or waiting for a release).'; Color = 'Green' }
         foreach ($s in @($all | Where-Object { $_.Group -eq 'skipped' })) {
             $lines += [pscustomobject]@{ Text = "  ($($s.Text))"; Color = 'DarkGray' }
         }
         return @($lines)
     }
-    $head = if ($Repo) { "=== Estado del trabajo ($Repo) ===" } else { '=== Estado del trabajo ===' }
+    $head = if ($Repo) { "=== State of work ($Repo) ===" } else { '=== State of work ===' }
     $lines += [pscustomobject]@{ Text = $head; Color = 'Cyan' }
     $offers = 0
     foreach ($g in $script:StateGroupOrder) {
@@ -313,7 +313,7 @@ function Format-StateOfPlay {
             $lines += [pscustomobject]@{ Text = "    - $($f.Text)"; Color = $g.Color }
             if ($f.Offer) {
                 $offers++
-                $lines += [pscustomobject]@{ Text = "        Si quieres, lo hago yo: $($f.Offer)."; Color = 'DarkGray' }
+                $lines += [pscustomobject]@{ Text = "        If you want, I can do it: $($f.Offer)."; Color = 'DarkGray' }
             }
         }
     }
@@ -321,7 +321,7 @@ function Format-StateOfPlay {
         $lines += [pscustomobject]@{ Text = "  ($($s.Text))"; Color = 'DarkGray' }
     }
     if ($offers -gt 0) {
-        $lines += [pscustomobject]@{ Text = '  Dime cuales y los hago; no toco nada sin tu si.'; Color = 'DarkGray' }
+        $lines += [pscustomobject]@{ Text = '  Tell me which ones and I will do them; I touch nothing without your yes.'; Color = 'DarkGray' }
     }
     return @($lines)
 }
@@ -338,16 +338,16 @@ function Format-StateOfPlay {
 function Read-StateOpenIssues {
     param([Parameter(Mandatory)][string]$Repo, [int]$MaxPages = 40)
     $parts = $Repo -split '/'
-    if ($parts.Count -ne 2) { return [pscustomobject]@{ Ok = $false; Issues = @(); Error = "repo '$Repo' no tiene la forma owner/name" } }
+    if ($parts.Count -ne 2) { return [pscustomobject]@{ Ok = $false; Issues = @(); Error = "repo '$Repo' is not in owner/name form" } }
     $query = 'query($o:String!,$r:String!,$cursor:String){repository(owner:$o,name:$r){issues(states:OPEN,first:100,after:$cursor){pageInfo{hasNextPage endCursor} nodes{number title subIssuesSummary{total completed}}}}}'
     $all = @(); $cursor = ''; $pages = 0
     try {
         do {
             $ghArgs = @('api', 'graphql', '-f', "query=$query", '-f', "o=$($parts[0])", '-f', "r=$($parts[1])")
             if ($cursor) { $ghArgs += @('-f', "cursor=$cursor") }
-            $resp = Invoke-Gh -GhArgs $ghArgs -What "leer los issues abiertos de $Repo" -Graphql
+            $resp = Invoke-Gh -GhArgs $ghArgs -What "read the open issues of $Repo" -Graphql
             $page = $resp.data.repository.issues
-            if (-not $page -or -not $page.pageInfo) { throw "respuesta sin la lista de issues de $Repo" }
+            if (-not $page -or -not $page.pageInfo) { throw "response without the issue list of $Repo" }
             $all += @($page.nodes | Where-Object { $null -ne $_ })
             $cursor = if ($page.pageInfo.hasNextPage) { [string]$page.pageInfo.endCursor } else { '' }
             $pages++
@@ -355,7 +355,7 @@ function Read-StateOpenIssues {
     } catch {
         return [pscustomobject]@{ Ok = $false; Issues = @(); Error = $_.Exception.Message }
     }
-    if ($cursor) { return [pscustomobject]@{ Ok = $false; Issues = @(); Error = "mas de $($MaxPages * 100) issues abiertos; no leo la lista entera" } }
+    if ($cursor) { return [pscustomobject]@{ Ok = $false; Issues = @(); Error = "more than $($MaxPages * 100) open issues; not reading the whole list" } }
     [pscustomobject]@{ Ok = $true; Issues = @($all); Error = '' }
 }
 
@@ -364,7 +364,7 @@ function Read-StateOpenPrs {
     try {
         $prs = @((Invoke-Gh -GhArgs @('pr', 'list', '--repo', $Repo, '--state', 'open', '--limit', "$Cap",
                                       '--json', 'number,title,headRefName,isDraft,labels') `
-                            -What "listar los PRs abiertos de $Repo" -Json) | Where-Object { $null -ne $_ })
+                            -What "list the open PRs of $Repo" -Json) | Where-Object { $null -ne $_ })
         [pscustomobject]@{ Ok = $true; Prs = $prs; Error = '' }
     } catch {
         [pscustomobject]@{ Ok = $false; Prs = @(); Error = $_.Exception.Message }
@@ -382,7 +382,7 @@ function Read-StateRunMarker {
         $m = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
         [pscustomobject]@{ Ok = $true; Marker = $m; Error = '' }
     } catch {
-        [pscustomobject]@{ Ok = $false; Marker = $null; Error = "active-run.json ilegible: $($_.Exception.Message)" }
+        [pscustomobject]@{ Ok = $false; Marker = $null; Error = "active-run.json unreadable: $($_.Exception.Message)" }
     }
 }
 
@@ -394,7 +394,7 @@ function Read-StateRunMarker {
 function Read-StateWorktreeVerdicts {
     param([Parameter(Mandatory)][string]$Repo)
     $porcelain = @(git worktree list --porcelain 2>$null)
-    if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ Ok = $false; Rows = @(); Error = 'git worktree list fallo' } }
+    if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ Ok = $false; Rows = @(); Error = 'git worktree list failed' } }
     $records = @(Get-WorktreeRecords -Porcelain ($porcelain -join "`n"))
     $top = "$(@(git rev-parse --show-toplevel 2>$null)[0])".Trim()
     $curBranch = "$(@(git branch --show-current 2>$null)[0])".Trim()
@@ -410,7 +410,7 @@ function Read-StateWorktreeVerdicts {
         try {
             $prs = @((Invoke-Gh -GhArgs @('pr', 'list', '--repo', $Repo, '--head', $w.Branch, '--state', 'all',
                                           '--json', 'number,state,headRefOid', '--limit', '20') `
-                                -What "leer el PR de la rama $($w.Branch)" -Json) | Where-Object { $null -ne $_ })
+                                -What "read the PR of branch $($w.Branch)" -Json) | Where-Object { $null -ne $_ })
             $mine = @($prs | Where-Object { $w.Head -and $_.headRefOid -eq $w.Head }) | Select-Object -First 1
             $merged = $false; $pr = 0
             if ($mine) {
@@ -437,10 +437,10 @@ function Read-StateWorktreeVerdicts {
 # half-edited CHANGELOG is not what is unreleased) and its distance from the last release tag.
 function Read-StateReleaseDelta {
     param([string]$BaseRef)
-    if (-not $BaseRef) { return [pscustomobject]@{ Ok = $false; Skipped = 'no pude resolver la rama por defecto'; Error = '' } }
+    if (-not $BaseRef) { return [pscustomobject]@{ Ok = $false; Skipped = 'could not resolve the default branch'; Error = '' } }
     $blob = @(git show "${BaseRef}:CHANGELOG.md" 2>$null)
     if ($LASTEXITCODE -ne 0) {
-        return [pscustomobject]@{ Ok = $false; Skipped = "$BaseRef no tiene un CHANGELOG.md en la raiz"; Error = '' }
+        return [pscustomobject]@{ Ok = $false; Skipped = "$BaseRef has no CHANGELOG.md at the root"; Error = '' }
     }
     $tag = "$(@(git describe --tags --abbrev=0 $BaseRef 2>$null)[0])".Trim()
     if ($LASTEXITCODE -ne 0) { $tag = '' }
@@ -468,28 +468,28 @@ function Get-StateOfPlay {
     $f += @(Get-BoardInFlightFindings -Items $Items)
 
     if (-not $Repo) {
-        $f += New-StateFinding -Source 'scope' -Group 'skipped' -Text 'No estoy dentro de un repo git: solo puedo describir el board, no las corridas, worktrees ni releases.'
+        $f += New-StateFinding -Source 'scope' -Group 'skipped' -Text 'Not inside a git repo: I can only describe the board, not the runs, worktrees or releases.'
         return @($f)
     }
 
     $open = Read-StateOpenIssues -Repo $Repo
     $openNums = @($open.Issues | ForEach-Object { [int]$_.number })
     if ($open.Ok) { $f += @(Get-FinishedEpicFindings -OpenIssues $open.Issues) }
-    else          { $f += New-StateFinding -Source 'epic' -Group 'unknown' -Text "No pude leer los issues abiertos de $Repo ($($open.Error)), asi que no se si algun epic esta listo para cerrar." }
+    else          { $f += New-StateFinding -Source 'epic' -Group 'unknown' -Text "Could not read the open issues of $Repo ($($open.Error)), so I cannot tell whether any epic is ready to close." }
     $f += @(Get-OffBoardFindings -OpenIssues $open.Issues -Items $Items -Repo $Repo -OpenVerified $open.Ok -BoardTruncated $BoardTruncated)
 
     $prs = Read-StateOpenPrs -Repo $Repo
     if ($prs.Ok) { $f += @(Get-ParkedWorkFindings -Prs $prs.Prs); $f += @(Get-OpenPrFindings -Prs $prs.Prs) }
-    else         { $f += New-StateFinding -Source 'pr' -Group 'unknown' -Text "No pude listar los PRs abiertos de $Repo ($($prs.Error))." }
+    else         { $f += New-StateFinding -Source 'pr' -Group 'unknown' -Text "Could not list the open PRs of $Repo ($($prs.Error))." }
 
     $local = [bool]($HereRepo -and ($HereRepo -ieq $Repo))
     if (-not $local) {
-        $f += New-StateFinding -Source 'local' -Group 'skipped' -Text "Corridas, worktrees y release: no los miro, esta carpeta no es un clon de $Repo."
+        $f += New-StateFinding -Source 'local' -Group 'skipped' -Text "Runs, worktrees and release: not checked, this folder is not a clone of $Repo."
         return @($f)
     }
 
     $marker = Read-StateRunMarker -StateDir $StateDir
-    if (-not $marker.Ok) { $f += New-StateFinding -Source 'run' -Group 'unknown' -Text "No pude leer el registro de la corrida autonoma ($($marker.Error))." }
+    if (-not $marker.Ok) { $f += New-StateFinding -Source 'run' -Group 'unknown' -Text "Could not read the autonomous run record ($($marker.Error))." }
     else {
         $rf = Get-RunMarkerFinding -Marker $marker.Marker -OpenNumbers $openNums -Verified $open.Ok
         if ($rf) { $f += $rf }
@@ -498,10 +498,10 @@ function Get-StateOfPlay {
     $wt = Read-StateWorktreeVerdicts -Repo $Repo
     if (-not $LiveKnown) {
         # Without the live-session list a merged worktree could belong to a session still working it.
-        $f += New-StateFinding -Source 'worktree' -Group 'unknown' -Text 'No pude leer el registro de sesiones vivas, asi que no ofrezco limpiar worktrees (uno podria tener una sesion trabajandolo).'
+        $f += New-StateFinding -Source 'worktree' -Group 'unknown' -Text 'Could not read the live session registry, so I do not offer to clean up worktrees (one could have a session working in it).'
     }
     elseif ($wt.Ok) { $f += @(Get-MergedWorktreeFindings -Rows $wt.Rows -LiveBranches $LiveBranches) }
-    else        { $f += New-StateFinding -Source 'worktree' -Group 'unknown' -Text "No pude listar los worktrees ($($wt.Error))." }
+    else        { $f += New-StateFinding -Source 'worktree' -Group 'unknown' -Text "Could not list the worktrees ($($wt.Error))." }
 
     $rel = Get-UnreleasedFinding -Delta (Read-StateReleaseDelta -BaseRef $BaseRef)
     if ($rel) { $f += $rel }

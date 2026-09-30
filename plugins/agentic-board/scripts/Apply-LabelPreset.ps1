@@ -48,7 +48,7 @@ if (-not $Repo) {
     $originUrl = git remote get-url origin 2>$null
     $Repo = Get-RepoFromOriginUrl $originUrl
 }
-if (-not $Repo) { throw "No pude derivar el repo del origin - pasa -Repo owner/name." }
+if (-not $Repo) { throw "Could not derive the repo from origin - pass -Repo owner/name." }
 
 if (-not $PresetPath) { $PresetPath = Join-Path $PSScriptRoot "..\presets\labels.json" }
 $preset = (Get-Content (Resolve-Path $PresetPath) -Raw | ConvertFrom-Json).labels

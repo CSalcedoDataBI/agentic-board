@@ -271,7 +271,7 @@ are the method.
    Then act on what you decided: an in-scope problem → fix it in the loop and continue;
    an out-of-scope finding → file a sanitized 'discovered' issue on the board and keep going.
 6. **Loop until done or budget**: never loop on a CI that did not run - if the review gate exits **3**
-   (``CI NO SE EVALUO``) no code change can turn that CI green: stop re-pushing, record the ``ci`` gate
+   (``CI NOT EVALUATED``) no code change can turn that CI green: stop re-pushing, record the ``ci`` gate
    as ``NOT-EVALUATED``, finish the rest and report it plainly (exit 1, a real failure, is what the loop
    is for). Otherwise keep iterating until the DoD is green — then leave the PR ready
    and STOP before merge — or the budget is spent -> ``/board handoff -Save``. $budgetSentence
@@ -653,7 +653,7 @@ if (-not $env:GH_TOKEN -and $Owner) {
     # Routed through Invoke-Gh for the raw-gh ratchet (#571); an unauthenticated login makes
     # it THROW, which this guard tolerates on purpose - the catch text simply carries no
     # 'project' scope, so the check falls through to the registry PAT exactly as before.
-    $ghStatus         = try { (Invoke-Gh -GhArgs @('auth', 'status') -What 'leer los scopes del login gh ambiente') | Out-String } catch { "$_" }
+    $ghStatus         = try { (Invoke-Gh -GhArgs @('auth', 'status') -What 'read the scopes of the ambient gh login') | Out-String } catch { "$_" }
     $ambientOk        = Test-GhScope -Scope 'project' -StatusText $ghStatus
     $registryToken    = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
     if ($ambientOk) {
@@ -730,7 +730,7 @@ $stopAtPR = Test-IsIrreversible -Action 'merge' -Contract $contract
 
 # ── The epic walker (#566): dispatch the next ready wave, then hand back ────────
 if ($Epic -gt 0) {
-    if (-not $repo) { throw "Expert-Auto: no pude derivar el repo del origin - corre esto dentro del clon." }
+    if (-not $repo) { throw "Expert-Auto: could not derive the repo from origin - run this inside the clone." }
     $rp = $repo -split '/'
     # The wave decision is driven by gh READS, so they go through the fail-closed wrapper
     # (external review round 2): raw `gh api graphql` exits 0 with an errors[] payload, and an
@@ -740,7 +740,7 @@ if ($Epic -gt 0) {
     # The epic and its NATIVE sub-issues. Both reads fail CLOSED: a wave dispatched from a
     # guessed list is exactly the reporting-intent-as-fact shape this tool keeps relearning.
     $epicJson = gh issue view $Epic --repo $repo --json title,body,comments 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $epicJson) { throw "Expert-Auto: no pude leer el epic #$Epic en $repo." }
+    if ($LASTEXITCODE -ne 0 -or -not $epicJson) { throw "Expert-Auto: could not read epic #$Epic in $repo." }
     $epicObj  = $epicJson | ConvertFrom-Json
     # The epic's own thread (#473): decisions about the whole plan live there, not in its body.
     $epicText = Format-IssueContext -Title "$($epicObj.title)" -Body "$($epicObj.body)" -Comments $epicObj.comments -IssueNum $Epic
@@ -763,13 +763,13 @@ query($o:String!,$r:String!,$n:Int!,$c:String){
 }','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$Epic")
         if ($cursor) { $ghArgs += @('-f',"c=$cursor") }
         # -Graphql throws on exit code OR errors[] - a partial list must never classify a wave.
-        $pageData = Invoke-Gh -GhArgs $ghArgs -What "leer los sub-issues del epic #$Epic" -Graphql
+        $pageData = Invoke-Gh -GhArgs $ghArgs -What "read the sub-issues of epic #$Epic" -Graphql
         $page = $pageData.data.repository.issue.subIssues
-        if ($null -eq $page -or $null -eq $page.pageInfo) { throw "Expert-Auto: respuesta sin subIssues para el epic #$Epic - no despacho sobre una lista a medias." }
+        if ($null -eq $page -or $null -eq $page.pageInfo) { throw "Expert-Auto: the response for epic #$Epic has no subIssues - not dispatching from a partial list." }
         $subs += @($page.nodes | Where-Object { $_ })
         $cursor = if ($page.pageInfo.hasNextPage) { "$($page.pageInfo.endCursor)" } else { '' }
     } while ($cursor)
-    if ($subs.Count -eq 0) { throw "Expert-Auto: el epic #$Epic no tiene sub-issues nativos - usa /board plan para crearlos, o -Issue para un issue suelto." }
+    if ($subs.Count -eq 0) { throw "Expert-Auto: epic #$Epic has no native sub-issues - use /board plan to create them, or -Issue for a single issue." }
 
     # Enrich each sub-issue with its OPEN blockers and its linked-PR facts. Blockers are
     # best-effort (the dependencies API may not exist for the account - degrade to unblocked,
@@ -781,7 +781,7 @@ query($o:String!,$r:String!,$n:Int!,$c:String){
     # scope - saying so beats guessing.
     $foreign = @($subs | Where-Object { "$($_.repository.nameWithOwner)" -and "$($_.repository.nameWithOwner)" -ne $repo })
     foreach ($f in $foreign) {
-        Write-Host ("  WARN sub-issue #{0} vive en {1} (otro repo) - el caminante no lo despacha; trabajalo alla." -f $f.number, $f.repository.nameWithOwner) -ForegroundColor DarkYellow
+        Write-Host ("  WARN sub-issue #{0} lives in {1} (another repo) - the walker does not dispatch it; work it there." -f $f.number, $f.repository.nameWithOwner) -ForegroundColor DarkYellow
     }
     $subs = @($subs | Where-Object { -not "$($_.repository.nameWithOwner)" -or "$($_.repository.nameWithOwner)" -eq $repo })
 
@@ -805,12 +805,12 @@ query($o:String!,$r:String!,$n:Int!){
       pageInfo { hasNextPage }
       nodes { number state } } }
   }
-}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$($s.number)") -What "leer los PRs del sub-issue #$($s.number)" -Graphql
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$($s.number)") -What "read the PRs of sub-issue #$($s.number)" -Graphql
             $issueNode = $lw.data.repository.issue
-            if ($null -eq $issueNode) { throw "sin nodo issue" }
+            if ($null -eq $issueNode) { throw "no issue node" }
             # Another page = facts we did not see (round 3): an OPEN PR could hide there, so the
             # state is UNKNOWN -> InFlight, same fail direction as an unreadable list.
-            if ($issueNode.closedByPullRequestsReferences.pageInfo.hasNextPage) { throw "mas de 50 PRs vinculados - estado no verificable" }
+            if ($issueNode.closedByPullRequestsReferences.pageInfo.hasNextPage) { throw "more than 50 linked PRs - state cannot be verified" }
             $prs = @($issueNode.closedByPullRequestsReferences.nodes | Where-Object { $_ })
             $hasOpen   = [bool]($prs | Where-Object { $_.state -eq 'OPEN' })
             $hasMerged = [bool]($prs | Where-Object { $_.state -eq 'MERGED' })
@@ -824,26 +824,26 @@ query($o:String!,$r:String!,$n:Int!){
 
     $wave = Get-EpicWaveVerdict -SubIssues $enriched
     Write-Host "=== /board expert auto -Epic $Epic  ($($enriched.Count) sub-issues) ===" -ForegroundColor Cyan
-    Write-Host ("  Done: {0}   In flight (PR abierto): {1}   Bloqueados: {2}   LISTOS: {3}" -f `
+    Write-Host ("  Done: {0}   In flight (PR open): {1}   Blocked: {2}   READY: {3}" -f `
         @($wave.Done).Count, @($wave.InFlight).Count, @($wave.Blocked).Count, @($wave.Ready).Count) -ForegroundColor Cyan
-    foreach ($s in @($wave.InFlight)) { Write-Host ("    ~ #{0} {1} (en vuelo)" -f $s.number, $s.title) -ForegroundColor DarkCyan }
-    foreach ($s in @($wave.Blocked))  { Write-Host ("    x #{0} {1} (bloqueado por: {2})" -f $s.number, $s.title, (@($s.openBlockers) -join ', ')) -ForegroundColor DarkYellow }
+    foreach ($s in @($wave.InFlight)) { Write-Host ("    ~ #{0} {1} (in flight)" -f $s.number, $s.title) -ForegroundColor DarkCyan }
+    foreach ($s in @($wave.Blocked))  { Write-Host ("    x #{0} {1} (blocked by: {2})" -f $s.number, $s.title, (@($s.openBlockers) -join ', ')) -ForegroundColor DarkYellow }
 
     if (@($wave.Ready).Count -eq 0) {
         $openForeign = @($foreign | Where-Object { "$($_.state)".ToUpperInvariant() -eq 'OPEN' }).Count
         $openLeft = @($wave.InFlight).Count + @($wave.Blocked).Count + $openForeign
         if ($openLeft -eq 0) {
             Write-Host ""
-            Write-Host "  EPIC COMPLETO: todos los sub-issues estan cerrados o mergeados. Cierra #$Epic si sigue abierto." -ForegroundColor Green
+            Write-Host "  EPIC COMPLETE: every sub-issue is closed or merged. Close #$Epic if it is still open." -ForegroundColor Green
         } elseif ($openForeign -gt 0 -and (@($wave.InFlight).Count + @($wave.Blocked).Count) -eq 0) {
             # Round 5: an epic whose only open children live in ANOTHER repo is not complete -
             # it is simply outside this walker's reach, and saying "complete" would be false.
             Write-Host ""
-            Write-Host ("  Sin trabajo local pendiente, pero {0} sub-issue(s) ABIERTOS viven en otro repo - el epic NO esta completo; trabajalos alla." -f $openForeign) -ForegroundColor Yellow
+            Write-Host ("  No local work left, but {0} OPEN sub-issue(s) live in another repo - the epic is NOT complete; work them there." -f $openForeign) -ForegroundColor Yellow
         } else {
             Write-Host ""
-            Write-Host "  Nada listo para despachar: mergea los PRs en vuelo (el humano cierra cada ola) y re-ejecuta" -ForegroundColor Yellow
-            Write-Host "  este mismo comando - la siguiente ola se despacha sola cuando sus bloqueadores cierren." -ForegroundColor Yellow
+            Write-Host "  Nothing ready to dispatch: merge the in-flight PRs (a human closes each wave) and re-run" -ForegroundColor Yellow
+            Write-Host "  this same command - the next wave dispatches itself once its blockers close." -ForegroundColor Yellow
         }
         exit 0
     }
@@ -852,7 +852,7 @@ query($o:String!,$r:String!,$n:Int!){
     . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
     $stateDirEpic = Get-AbiosStateDir
     Write-Host ""
-    Write-Host ("  Despachando la ola: {0}" -f ((@($wave.Ready) | ForEach-Object { "#$($_.number)" }) -join ', ')) -ForegroundColor Green
+    Write-Host ("  Dispatching the wave: {0}" -f ((@($wave.Ready) | ForEach-Object { "#$($_.number)" }) -join ', ')) -ForegroundColor Green
     foreach ($s in @($wave.Ready)) {
         # Per-issue brief: the epic's enriched plan + this sub-issue's own text. An unreadable
         # body SKIPS the dispatch (round 2): launching a session briefed with only a title is
@@ -876,7 +876,7 @@ query($o:String!,$r:String!,$n:Int!){
             } catch { $subBody = $null }
         }
         if ($null -eq $subBody) {
-            Write-Host ("  WARN #{0}: no pude leer el cuerpo del sub-issue - NO se despacha esta vez; re-ejecuta para reintentarlo." -f $s.number) -ForegroundColor DarkYellow
+            Write-Host ("  WARN #{0}: could not read the sub-issue body - NOT dispatched this time; re-run to retry." -f $s.number) -ForegroundColor DarkYellow
             continue
         }
         $wavePlan = "$epicText`n`n## Your sub-issue (deliver THIS, the epic above is context)`n#$($s.number) $($s.title)`n`n$subBody"
@@ -915,14 +915,14 @@ query($o:String!,$r:String!,$n:Int!){
         } else {
             & pwsh -NoProfile -Command $bwCmd
             if ($LASTEXITCODE -ne 0) {
-                Write-Host ("  WARN #{0}: el lanzamiento devolvio {1} - revisa arriba; la ola continua." -f $s.number, $LASTEXITCODE) -ForegroundColor DarkYellow
+                Write-Host ("  WARN #{0}: the launch returned {1} - check above; the wave continues." -f $s.number, $LASTEXITCODE) -ForegroundColor DarkYellow
             }
         }
     }
     Write-Host ""
-    Write-Host "  Ola despachada. Cuando sus PRs esten mergeados, re-ejecuta:" -ForegroundColor Cyan
-    Write-Host "    /board expert auto -Epic $Epic     (despacha la siguiente ola; es idempotente)" -ForegroundColor Cyan
-    Write-Host "  Monitor: /board work -Sessions -Watch (el supervisor publica [abios-stall] solo)." -ForegroundColor DarkGray
+    Write-Host "  Wave dispatched. Once its PRs are merged, re-run:" -ForegroundColor Cyan
+    Write-Host "    /board expert auto -Epic $Epic     (dispatches the next wave; it is idempotent)" -ForegroundColor Cyan
+    Write-Host "  Monitor: /board work -Sessions -Watch (the supervisor posts [abios-stall] on its own)." -ForegroundColor DarkGray
     exit 0
 }
 
@@ -1000,7 +1000,7 @@ if ($ProjectNum -gt 0) {
     $boardOwner = if ($Owner) { $Owner } elseif ($repo) { ($repo -split '/')[0] } else { 'CSalcedoDataBI' }
     $resolvedUrl = ''
     try {
-        $pv = Invoke-Gh -GhArgs @('project', 'view', "$ProjectNum", '--owner', $boardOwner, '--format', 'json') -What "leer el board #$ProjectNum de $boardOwner" -Json
+        $pv = Invoke-Gh -GhArgs @('project', 'view', "$ProjectNum", '--owner', $boardOwner, '--format', 'json') -What "read board #$ProjectNum of $boardOwner" -Json
         $resolvedUrl = "$($pv.url)"
     } catch { }
     Write-Host ""

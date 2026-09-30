@@ -239,7 +239,7 @@ function Write-FleetFinding {
 function Show-FleetFindings {
     param([object[]]$Findings)
     if (-not $Findings -or @($Findings).Count -eq 0) {
-        Write-Host "  (pizarra vacia)" -ForegroundColor DarkGray
+        Write-Host "  (blackboard is empty)" -ForegroundColor DarkGray
         return
     }
     foreach ($f in @($Findings | Sort-Object { [int]$_.issue })) {
@@ -258,14 +258,14 @@ if ($env:ABIOS_FLEETFINDINGS_DOTSOURCE) { return }
 
 # ------------------------------------------------------------------------ main entry
 if ($Add) {
-    if ($Issue -le 0) { throw "-Add requiere -Issue <n>." }
+    if ($Issue -le 0) { throw "-Add needs -Issue <n>." }
     $now     = Get-Date -Format 'yyyy-MM-dd HH:mm'
     $machine = "$env:COMPUTERNAME"
     $finding = New-FleetFinding -Issue $Issue -Repo $Repo -Branch $Branch -Files $Files `
                    -Decisions $Decisions -Gotchas $Gotchas -Labels $Labels -Pr $Pr `
                    -Status $Status -HostName $machine -Now $now
     Write-FleetFinding -Finding $finding
-    Write-Host ("  OK  Finding registrado en la pizarra para #{0} ({1})" -f $Issue, $Status) -ForegroundColor Green
+    Write-Host ("  OK  Finding recorded on the blackboard for #{0} ({1})" -f $Issue, $Status) -ForegroundColor Green
     $p = Get-FleetFindingsPath
     if ($p) { Write-Host ("      {0}" -f $p) -ForegroundColor DarkGray }
     return
@@ -275,12 +275,12 @@ if ($List) {
     $all = Read-FleetFindings
     $sel = @(Select-FleetFindings $all -Issue $Issue -Label $Label -Text $Text)
     if ($Json) { $sel | ConvertTo-Json -Depth 6 -AsArray; return }
-    Write-Host "=== Pizarra de findings del fleet ===" -ForegroundColor Cyan
+    Write-Host "=== Fleet findings blackboard ===" -ForegroundColor Cyan
     Show-FleetFindings $sel
     Write-Host ("Total: {0} finding(s)." -f $sel.Count) -ForegroundColor Cyan
     return
 }
 
-Write-Host "Uso:" -ForegroundColor DarkGray
-Write-Host "  registro de findings: -Add -Issue <n> [-Files ..] [-Decisions ..] [-Gotchas ..] [-Labels ..] [-Pr ..] [-Status done]" -ForegroundColor DarkGray
-Write-Host "  registro de findings: -List [-Issue <n>] [-Label <x>] [-Text <y>] [-Json]" -ForegroundColor DarkGray
+Write-Host "Usage:" -ForegroundColor DarkGray
+Write-Host "  fleet findings: -Add -Issue <n> [-Files ..] [-Decisions ..] [-Gotchas ..] [-Labels ..] [-Pr ..] [-Status done]" -ForegroundColor DarkGray
+Write-Host "  fleet findings: -List [-Issue <n>] [-Label <x>] [-Text <y>] [-Json]" -ForegroundColor DarkGray

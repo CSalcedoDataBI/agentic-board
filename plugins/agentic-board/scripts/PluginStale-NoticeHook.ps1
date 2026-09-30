@@ -47,9 +47,9 @@ function Format-StaleNotice {
     param([object[]]$Items)
     $lines = foreach ($i in $Items) {
         $loaded = ($i.Loaded -join ', ')
-        $head = "Se actualizo el plugin `"$($i.Plugin)`" a la version $($i.Installed) (esta sesion sigue con la $loaded)."
-        if ($i.NeedsNewSession) { "$head Trae un servidor MCP (o no pude comprobarlo): abre una sesion nueva para usarla." }
-        else { "$head Escribe /reload-plugins para usarla." }
+        $head = "Plugin `"$($i.Plugin)`" was updated to version $($i.Installed) (this session is still on $loaded)."
+        if ($i.NeedsNewSession) { "$head It ships an MCP server (or I could not check): open a new session to use it." }
+        else { "$head Type /reload-plugins to use it." }
     }
     return (@($lines) -join "`n")
 }

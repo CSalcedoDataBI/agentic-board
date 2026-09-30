@@ -37,42 +37,42 @@ function Format-SessionMap {
     $acc = [System.Collections.Generic.List[object]]::new()
     $add = { param($t, $c) $acc.Add([pscustomobject]@{ Text = $t; Color = $c }) }
     if (-not $Map.Ok) {
-        & $add "No pude comprobar las sesiones: $($Map.Reason)." 'Red'
+        & $add "Could not check the sessions: $($Map.Reason)." 'Red'
         return @($acc)
     }
     $ss = @($Map.Sessions)
     $stale = @($ss | Where-Object { $_.State -eq 'stale' })
     $current = @($ss | Where-Object { $_.State -eq 'current' })
     $nodata = @($ss | Where-Object { $_.State -eq 'unknown' })
-    & $add "Sesiones abiertas de Claude Code: $($ss.Count)" 'Cyan'
-    & $add ("  {0} con plugins desactualizados | {1} al dia | {2} sin datos para comprobarlo" -f $stale.Count, $current.Count, $nodata.Count) 'Gray'
+    & $add "Open Claude Code sessions: $($ss.Count)" 'Cyan'
+    & $add ("  {0} with outdated plugins | {1} up to date | {2} with no data to check" -f $stale.Count, $current.Count, $nodata.Count) 'Gray'
     & $add '' 'Gray'
 
     foreach ($s in $stale) {
-        $name = ConvertTo-SafeLabel $s.Name; if (-not $name) { $name = '(sin nombre)' }
-        & $add ("`"{0}`"  carpeta: {1}" -f $name, (ConvertTo-SafeLabel $s.Cwd)) 'Yellow'
+        $name = ConvertTo-SafeLabel $s.Name; if (-not $name) { $name = '(unnamed)' }
+        & $add ("`"{0}`"  folder: {1}" -f $name, (ConvertTo-SafeLabel $s.Cwd)) 'Yellow'
         foreach ($p in $s.Stale) {
-            $fix = if ($p.NeedsNewSession) { 'abre una sesion nueva (trae un servidor MCP, o no pude comprobarlo)' } else { 'basta con /reload-plugins en esa sesion' }
-            & $add ("    {0}: cargo {1} -> instalado {2}   [{3}]" -f $p.Key, ($p.Loaded -join ', '), $p.Installed, $fix) 'Yellow'
+            $fix = if ($p.NeedsNewSession) { 'open a new session (it ships an MCP server, or I could not check)' } else { '/reload-plugins in that session is enough' }
+            & $add ("    {0}: loaded {1} -> installed {2}   [{3}]" -f $p.Key, ($p.Loaded -join ', '), $p.Installed, $fix) 'Yellow'
         }
     }
     foreach ($s in $current) {
-        $name = ConvertTo-SafeLabel $s.Name; if (-not $name) { $name = '(sin nombre)' }
-        & $add ("`"{0}`"  carpeta: {1}  -> al dia" -f $name, (ConvertTo-SafeLabel $s.Cwd)) 'Green'
+        $name = ConvertTo-SafeLabel $s.Name; if (-not $name) { $name = '(unnamed)' }
+        & $add ("`"{0}`"  folder: {1}  -> up to date" -f $name, (ConvertTo-SafeLabel $s.Cwd)) 'Green'
     }
     foreach ($s in $nodata) {
-        $name = ConvertTo-SafeLabel $s.Name; if (-not $name) { $name = '(sin nombre)' }
-        & $add ("`"{0}`"  carpeta: {1}  -> SIN DATOS: no encuentro que plugins cargo, asi que no puedo decir que este al dia" -f $name, (ConvertTo-SafeLabel $s.Cwd)) 'Yellow'
+        $name = ConvertTo-SafeLabel $s.Name; if (-not $name) { $name = '(unnamed)' }
+        & $add ("`"{0}`"  folder: {1}  -> NO DATA: I cannot find which plugins it loaded, so I cannot say it is up to date" -f $name, (ConvertTo-SafeLabel $s.Cwd)) 'Yellow'
     }
     if ($Map.UnknownLiveness -gt 0) {
-        & $add ("Hay {0} sesion(es) mas cuyo estado no pude confirmar; no se listan." -f $Map.UnknownLiveness) 'Gray'
+        & $add ("{0} more session(s) whose state I could not confirm; not listed." -f $Map.UnknownLiveness) 'Gray'
     }
     if ($Map.Unreadable -gt 0) {
-        & $add ("Hay {0} registro(s) de sesion que no pude leer." -f $Map.Unreadable) 'Gray'
+        & $add ("{0} session record(s) I could not read." -f $Map.Unreadable) 'Gray'
     }
     if ($stale.Count -gt 0) {
         & $add '' 'Gray'
-        & $add 'Solo el usuario puede escribir /reload-plugins dentro de una sesion; ni otro agente ni el control remoto pueden hacerlo por ti.' 'Gray'
+        & $add 'Only the user can type /reload-plugins inside a session; neither another agent nor remote control can do it for you.' 'Gray'
     }
     return @($acc)
 }

@@ -34,7 +34,7 @@ guiding principle: **total self-use of agentic-board — never improvise your ow
    - out-of-scope finding → file a sanitized `discovered` issue on the board (`/board`, the
      `abios-feedback` sanitization criteria) and keep going.
 6. **Loop until done or budget** — but **never loop on a CI that did not run** (#481): if the review
-   gate exits **3** (`CI NO SE EVALUO`), no code change can turn that CI green, so stop re-pushing,
+   gate exits **3** (`CI NOT EVALUATED`), no code change can turn that CI green, so stop re-pushing,
    record the `ci` gate as `NOT-EVALUATED`, finish the rest and report it plainly. Exit 1 (a real
    failure) is the case the loop exists for. Otherwise keep iterating until the DoD is green — then **leave the PR
    ready and STOP before merge** (the irreversible line) — or the budget is spent →

@@ -109,7 +109,7 @@ Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
         # behaviour. The terminating error is the real contract, and it is what makes
         # Resolve-Board warn instead of printing "preset applied" over a half-built board.
         { & $script:Script -Number 13 -Owner 'X' -Lang en -Yes *> (Join-Path $TestDrive 'throw.log') } |
-            Should -Throw -ExpectedMessage '*NO se crearon*Task Type*'
+            Should -Throw -ExpectedMessage '*were NOT created*Task Type*'
     }
 
     It 'never reads $failedFields before the line that declares it (review of #672)' {

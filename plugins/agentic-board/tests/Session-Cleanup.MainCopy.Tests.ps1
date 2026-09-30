@@ -68,14 +68,14 @@ Describe 'Invoke-SessionCleanup never tears down the main working copy (#555)' {
         Set-Registry $sub
         $acts = @(Invoke-SessionCleanup -Session (New-Legacy $sub) -PrMerged)
         Test-Path (Join-Path $sub 'code.ps1') | Should -BeTrue
-        ($acts -join ' ') | Should -Not -Match 'carpeta del worktree eliminada'
+        ($acts -join ' ') | Should -Not -Match 'worktree folder deleted'
         ($acts -join ' ') | Should -Not -Match 'worktree remove'
-        ($acts -join ' ') | Should -Match 'SKIP no toco'
+        ($acts -join ' ') | Should -Match 'SKIP not touching'
     }
     It 'the clone root is skipped with a reason, and the legacy entry is PRUNED instead of retried forever' {
         Set-Registry $script:Clone
         $acts = @(Invoke-SessionCleanup -Session (New-Legacy $script:Clone) -PrMerged)
-        ($acts -join ' ') | Should -Match 'SKIP no toco'
+        ($acts -join ' ') | Should -Match 'SKIP not touching'
         ($acts -join ' ') | Should -Not -Match 'FAIL'
         ($acts -join ' ') | Should -Match 'prune #30'
         Test-Path (Join-Path $script:Clone 'a.txt') | Should -BeTrue
@@ -86,20 +86,20 @@ Describe 'Invoke-SessionCleanup never tears down the main working copy (#555)' {
         'wip' | Set-Content (Join-Path $script:Clone 'wip.txt')
         Set-Registry $script:Clone
         $acts = @(Invoke-SessionCleanup -Session (New-Legacy $script:Clone))    # NOT merged
-        ($acts -join ' ') | Should -Not -Match 'sin commitear'
+        ($acts -join ' ') | Should -Not -Match 'uncommitted'
         ($acts -join ' ') | Should -Match 'prune #30'
         Test-Path (Join-Path $script:Clone 'wip.txt') | Should -BeTrue
     }
     It '-ForceRemoveWorktree does NOT license removing the primary checkout' {
         Set-Registry $script:Clone
         $acts = @(Invoke-SessionCleanup -Session (New-Legacy $script:Clone) -ForceRemoveWorktree)
-        ($acts -join ' ') | Should -Match 'SKIP no toco'
+        ($acts -join ' ') | Should -Match 'SKIP not touching'
         ($acts -join ' ') | Should -Not -Match 'worktree remove'
         Test-Path (Join-Path $script:Clone 'a.txt') | Should -BeTrue
     }
     It '-DryRun previews the SKIP, not a worktree removal' {
         $acts = @(Invoke-SessionCleanup -Session (New-Legacy $script:Clone) -DryRun -PrMerged)
-        ($acts -join ' ') | Should -Match 'SKIP no toco'
+        ($acts -join ' ') | Should -Match 'SKIP not touching'
         ($acts -join ' ') | Should -Not -Match 'worktree remove'
     }
     It 'CONTROL: a genuine linked worktree is still torn down exactly as before' {
@@ -108,7 +108,7 @@ Describe 'Invoke-SessionCleanup never tears down the main working copy (#555)' {
         Set-Registry $wt
         $acts = @(Invoke-SessionCleanup -Session (New-Legacy $wt) -PrMerged)
         ($acts -join ' ') | Should -Match 'git worktree remove --force'
-        ($acts -join ' ') | Should -Not -Match 'SKIP no toco'
+        ($acts -join ' ') | Should -Not -Match 'SKIP not touching'
         Test-Path $wt | Should -BeFalse
         (git branch --list 'issue-30-legacy') | Should -BeNullOrEmpty
         (Get-Content $script:Reg -Raw) | Should -Not -Match '"issue"'

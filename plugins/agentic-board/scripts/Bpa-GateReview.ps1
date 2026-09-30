@@ -83,17 +83,17 @@ if ($env:ABIOS_BPA_DOTSOURCE) { return }
 # or config — only on violations it actually found.
 function Exit-BpaSkip([string]$Why) {
     if ($Json) { [pscustomobject]@{ ran = $false; skipped = $Why; summary = $null } | ConvertTo-Json -Depth 5 }
-    else       { Write-Host "  BPA: $Why - salteado (no bloquea)." -ForegroundColor DarkYellow }
+    else       { Write-Host "  BPA: $Why - skipped (does not block)." -ForegroundColor DarkYellow }
     exit 0
 }
 
 # 1. PR mode: only act when the PR touches a semantic model (*.tmdl). A read failure throws (#316).
 if ($PR -gt 0) {
-    if (-not $Repo) { throw "-PR necesita -Repo owner/name." }
+    if (-not $Repo) { throw "-PR needs -Repo owner/name." }
     if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
     $tmdlChanged = Invoke-Gh -GhArgs @('api',"repos/$Repo/pulls/$PR/files",'--paginate','--jq','.[] | select(.filename | endswith(".tmdl")) | .filename') `
-                             -What "leer los archivos del PR #$PR"
-    if (-not $tmdlChanged) { Exit-BpaSkip "el PR no toca ningun modelo (*.tmdl)" }
+                             -What "read the files of PR #$PR"
+    if (-not $tmdlChanged) { Exit-BpaSkip "the PR touches no model (*.tmdl)" }
 }
 
 # 2. Resolve the model source: -Model, else a .pbip or a TMDL definition folder in the cwd.
@@ -106,7 +106,7 @@ if (-not $Model) {
         if ($anyTmdl) { $Model = $anyTmdl.Directory.FullName }
     }
 }
-if (-not $Model) { Exit-BpaSkip "no encontre un modelo (.pbip / carpeta .tmdl) para analizar" }
+if (-not $Model) { Exit-BpaSkip "found no model (.pbip / .tmdl folder) to analyze" }
 
 # 3. Resolve the BPA rules file. No rules = no objective bar; skip rather than block every BI PR.
 if (-not $Rules) { $Rules = $env:ABIOS_BPA_RULES }
@@ -116,18 +116,18 @@ if (-not $Rules) {
     if ($cand) { $Rules = $cand.FullName }
 }
 if (-not $Rules -or -not (Test-Path $Rules)) {
-    Exit-BpaSkip "no hay archivo de reglas BPA (pasa -Rules, define ABIOS_BPA_RULES, o commitea BPARules.json)"
+    Exit-BpaSkip "no BPA rules file (pass -Rules, set ABIOS_BPA_RULES, or commit BPARules.json)"
 }
 
 # 4. Resolve Tabular Editor: `te` (TE3) preferred, else TabularEditor.exe (TE2). Absence = skip.
 $te3 = Get-Command te -ErrorAction SilentlyContinue
 $te2 = Get-Command TabularEditor.exe -ErrorAction SilentlyContinue
 if (-not $te3 -and -not $te2) {
-    Exit-BpaSkip "Tabular Editor no esta instalado (ni 'te' TE3 ni TabularEditor.exe TE2)"
+    Exit-BpaSkip "Tabular Editor is not installed (neither 'te' TE3 nor TabularEditor.exe TE2)"
 }
 
 # 5. Run BPA with GitHub-annotation output so both CLIs' results parse the same way.
-Write-Host "  BPA: analizando '$([System.IO.Path]::GetFileName($Model))' con reglas '$([System.IO.Path]::GetFileName($Rules))'..." -ForegroundColor Cyan
+Write-Host "  BPA: analyzing '$([System.IO.Path]::GetFileName($Model))' with rules '$([System.IO.Path]::GetFileName($Rules))'..." -ForegroundColor Cyan
 if ($te3) {
     # TE3: `te bpa run` returns non-zero on --fail-on; we parse annotations for the report and let
     # Get-BpaVerdict decide, so run it warn-only here (--fail-on none) and own the verdict ourselves.
@@ -150,7 +150,7 @@ if ($Json) {
     if ($verdict.Blocked) { exit 1 } else { exit 0 }
 }
 
-Write-Host ("  BPA: {0} error(es), {1} warning(s), {2} info." -f $parsed.error, $parsed.warning, $parsed.info) `
+Write-Host ("  BPA: {0} error(s), {1} warning(s), {2} info." -f $parsed.error, $parsed.warning, $parsed.info) `
     -ForegroundColor $(if ($parsed.error) { 'Red' } elseif ($parsed.warning) { 'DarkYellow' } else { 'Green' })
 foreach ($f in ($parsed.findings | Select-Object -First 30)) {
     $c = switch ($f.severity) { 'error' { 'Red' } 'warning' { 'DarkYellow' } default { 'DarkGray' } }
@@ -160,5 +160,5 @@ if ($verdict.Blocked) {
     Write-Host ("  BPA GATE BLOCKED: {0} (-FailOn {1})." -f $verdict.Reason, $FailOn) -ForegroundColor Red
     exit 1
 }
-Write-Host "  BPA OK (sin violaciones que bloqueen con -FailOn $FailOn)." -ForegroundColor Green
+Write-Host "  BPA OK (no violations that block with -FailOn $FailOn)." -ForegroundColor Green
 exit 0

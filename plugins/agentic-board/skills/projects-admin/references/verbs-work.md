@@ -43,8 +43,8 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      | Open issues not on the board | `/board add` for each (references/issue-ops.md), then `/board fill` to set their Status/Priority/Size |
      | `[Unreleased]` waiting for a release | the release flow (`New-Release.ps1`) — never tag or publish without the user's go-ahead |
 
-     A source that could not be read appears under `No pude comprobar` — say so; it is NOT "clean".
-     A repo with nothing to report prints ONE line (`sin novedades`) and goes straight to the
+     A source that could not be read appears under `Could not check` — say so; it is NOT "clean".
+     A repo with nothing to report prints ONE line (`nothing new`) and goes straight to the
      pending list. The marker, worktrees and CHANGELOG belong to the CLONE you stand in, so they are
      skipped (and the line says so) when `-Repo` names a different repository.
   3. **Pick an issue.** The pending items follow the state of play, sorted by Priority. Show them
@@ -89,10 +89,10 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      not a preference. Recording it needs no GitHub token: it is a local decision, so it works on
      a machine with no PAT configured.
      **Seeing it.** `Board-Work.ps1 -PreferGroupedPRs show` prints the current setting and where
-     it came from — `PRs agrupados: on (config del repo)`, or `auto (por defecto)` when the repo
-     recorded nothing (a recorded `auto` is stored as "no decision", so it also reads `por
-     defecto`). It writes no preference and needs no token, and outside a git repo it answers `auto
-     (por defecto)`. The `/board` menu runs it to show the value under `work`, and every group the
+     it came from — `Grouped PRs: on (repo config)`, or `auto (default)` when the repo
+     recorded nothing (a recorded `auto` is stored as "no decision", so it also reads
+     `default`). It writes no preference and needs no token, and outside a git repo it answers `auto
+     (default)`. The `/board` menu runs it to show the value under `work`, and every group the
      pending list proposes says which setting produced it and how to change it (#681).
 
      Note what `on` does NOT mean: it never invents a group out of issues that share nothing.
@@ -168,12 +168,12 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         and prints decision + feedback + unresolved threads. **Exit 0 = passed; 1 = blocked;
         2 = nobody reviewed; 3 = CI never ran (#481).** Address printed feedback with new commits,
         push, and RE-RUN the gate until it passes.
-        **Exit 3 — "CI NO SE EVALUO" (#481)** means the only blocker is that CI never executed a
+        **Exit 3 — "CI NOT EVALUATED" (#481)** means the only blocker is that CI never executed a
         step (`startup_failure`, or a job GitHub refused to start — exhausted Actions minutes, a
         spending limit, no runner). It is still a block, never a pass, but no code change can clear
         it: **do not re-push**. Tell the user the CI could not run (quota / billing / workflow) and
         let them decide; a real failing check keeps exit 1.
-        **Exit 2 — "GATE SIN REVISAR" (#510)** means the checks are green but no one read the code:
+        **Exit 2 — "GATE UNREVIEWED" (#510)** means the checks are green but no one read the code:
         a `claude-review` check can report a PASS having left zero reviews, and that used to print
         the same `GATE PASSED` as a genuinely clean review. **Never merge on exit 2.** Clear it by
         reviewing for real — the `second-opinion` skill is the reviewer that actually shows up here;
@@ -278,7 +278,7 @@ and wait for; never assume the account or the scope:
 | 2. Pick a board | `Board-Work.ps1 -ListBoards [-Repo <owner/name>]` | With `-Repo`: only boards LINKED to that repo (`repository.projectsV2`) — exactly one result skips this pick. Without: every board of the owner (backups excluded). Both show pending count (Backlog or no Status) + URL, most pending first |
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
-| 3a. Read the state of play | (printed at the top of the same run) | **`Estado del trabajo` (#660)** — what is in flight (board In Progress / In Review, open PRs, a run with an open queue) and what is stale or due: a run marker still `active` over a closed queue, an epic open with every sub-issue closed, worktrees of already-merged branches, open issues missing from the board, `[Unreleased]` waiting for a release. Read + offer only; on a yes the agent performs it through the owning verb (table in step 2b). A repo with nothing to report prints one `sin novedades` line; an unreadable source is listed as `No pude comprobar`, never as clean |
+| 3a. Read the state of play | (printed at the top of the same run) | **`State of work` (#660)** — what is in flight (board In Progress / In Review, open PRs, a run with an open queue) and what is stale or due: a run marker still `active` over a closed queue, an epic open with every sub-issue closed, worktrees of already-merged branches, open issues missing from the board, `[Unreleased]` waiting for a release. Read + offer only; on a yes the agent performs it through the owning verb (table in step 2b). A repo with nothing to report prints one `nothing new` line; an unreadable source is listed as `Could not check`, never as clean |
 | 3b. Choose the PR shape | (read the offer printed under the pending list) | **Grouped is the default when the issues overlap (#662)**: the listing names each group, the evidence behind it (same repo file named in both issues, or a shared board Area), what it saves in review rounds, and what it held back to keep the PR reviewable (cap 4). One PR per issue is the case that needs a reason — independent risk, or a separate approver |
 | 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` (or `show` to read the current value and its source without changing anything) | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide. `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
 | 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, for a group chosen at 3b (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch, so all of them close through ONE PR/gate/merge |
@@ -298,7 +298,7 @@ Notes:
   one (`-StartGroup` would drop it anyway), and it never proposes a group on evidence it cannot
   name: if it cannot say WHY two issues belong together, it does not suggest them.
 - After step 4, the agent continues working the issue in-session — the printed context is the briefing.
-- **Gate exit 2 — "GATE SIN REVISAR" (#510).** Checks are green but *nobody looked at the code*: no
+- **Gate exit 2 — "GATE UNREVIEWED" (#510).** Checks are green but *nobody looked at the code*: no
   GitHub review, no registered external review. This used to print `GATE PASSED` with a reminder
   underneath, so a green `claude-review` check that had left **zero** reviews read as approved —
   in the exact window where it was the only reviewer (Copilot quota-blocked). Do **not** merge on
@@ -397,7 +397,7 @@ Notes:
     with `-DryRun`) it closes nothing, so run it once, show the user the list, and re-run with `-Force` after
     their yes. It never closes on the first merged PR, and never when a PR is open, closed unmerged, has no
     readable state, when no PR is recorded, or when the issue has no session (exit 1, nothing closed). An issue
-    that is already closed is left alone. `-Sessions` says `LISTO PARA CERRAR` or why not, per session.
+    that is already closed is left alone. `-Sessions` says `READY TO CLOSE` or why not, per session.
 - **Compaction-survival (long single-session queues)**: when you work a queue of issues tied to an
   **epic** in ONE session, keep a durable run-ledger so the run survives auto-compaction. Three
   touch-points (see [references/compact-survival.md](references/compact-survival.md)):

@@ -96,8 +96,8 @@ Describe 'ConvertTo-DependencyNumber - what may be a blocker reference' {
         ConvertTo-DependencyNumber -Ref 'https://github.com/me/proj/issues/8' -TargetRepo 'me/proj' | Should -Be 8
     }
     It 'REFUSES another repository, in either form - the accidental case is always cross-repo' {
-        { ConvertTo-DependencyNumber -Ref 'jbarnette/johnson#3' -TargetRepo 'me/proj' } | Should -Throw -ExpectedMessage '*OTRO repositorio*'
-        { ConvertTo-DependencyNumber -Ref 'https://github.com/x/y/issues/3' -TargetRepo 'me/proj' } | Should -Throw -ExpectedMessage '*OTRO repositorio*'
+        { ConvertTo-DependencyNumber -Ref 'jbarnette/johnson#3' -TargetRepo 'me/proj' } | Should -Throw -ExpectedMessage '*ANOTHER repository*'
+        { ConvertTo-DependencyNumber -Ref 'https://github.com/x/y/issues/3' -TargetRepo 'me/proj' } | Should -Throw -ExpectedMessage '*ANOTHER repository*'
     }
     It 'rejects junk and zero' {
         foreach ($bad in @('abc', '12abc', '0', '#0', '', 'me/proj', '-3')) {
@@ -152,11 +152,11 @@ Describe 'Invoke-BoardDepend - refuses BEFORE writing anything' {
         Mock Invoke-GhRaw { Invoke-FakeGh $script:W $GhArgs $StdIn }
     }
     It 'a cross-repo reference blocks the whole batch, even when the other references are fine' {
-        { Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11', 'me/other#4') } | Should -Throw -ExpectedMessage '*OTRO repositorio*'
+        { Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11', 'me/other#4') } | Should -Throw -ExpectedMessage '*ANOTHER repository*'
         $script:W.Posts.Count | Should -Be 0
     }
     It 'refuses a self-dependency' {
-        { Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('40') } | Should -Throw -ExpectedMessage '*a si mismo*'
+        { Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('40') } | Should -Throw -ExpectedMessage '*cannot block itself*'
         $script:W.Posts.Count | Should -Be 0
     }
     It 'refuses a pull request as a blocker' {
@@ -193,15 +193,15 @@ Describe 'Get-DependencyIssue - the resolver checks the answer, not just the sta
     }
     It 'refuses an answer that resolves to a different repository' {
         $script:W.Mode = 'issue-other-repo'
-        { Get-DependencyIssue -Repo 'me/proj' -Number 17 } | Should -Throw -ExpectedMessage '*resuelve a x/renamed*'
+        { Get-DependencyIssue -Repo 'me/proj' -Number 17 } | Should -Throw -ExpectedMessage '*resolves it to x/renamed*'
     }
     It 'refuses an answer for a different issue number' {
         $script:W.Mode = 'issue-other-number'
-        { Get-DependencyIssue -Repo 'me/proj' -Number 17 } | Should -Throw -ExpectedMessage '*devolvio el issue #18*'
+        { Get-DependencyIssue -Repo 'me/proj' -Number 17 } | Should -Throw -ExpectedMessage '*returned issue #18*'
     }
     It 'refuses an answer that does not say which repository it belongs to' {
         $script:W.Mode = 'issue-no-repo'
-        { Get-DependencyIssue -Repo 'me/proj' -Number 17 } | Should -Throw -ExpectedMessage '*No puedo comprobar*'
+        { Get-DependencyIssue -Repo 'me/proj' -Number 17 } | Should -Throw -ExpectedMessage '*Cannot check which repository*'
     }
 }
 
@@ -211,7 +211,7 @@ Describe 'Get-BlockedByList - a full page cannot be verified' {
             $items = 1..100 | ForEach-Object { @{ id = 1000 + $_; number = $_; state = 'open'; title = 't'; repository_url = 'https://api.github.com/repos/me/proj' } }
             [pscustomobject]@{ Output = @(($items | ConvertTo-Json -Depth 4 -Compress)); ExitCode = 0; StdErr = '' }
         }
-        { Get-BlockedByList -Repo 'me/proj' -Issue 40 } | Should -Throw -ExpectedMessage '*100 o mas*'
+        { Get-BlockedByList -Repo 'me/proj' -Issue 40 } | Should -Throw -ExpectedMessage '*100 or more*'
     }
     It 'returns the entries (with repository) below the limit' {
         Mock Invoke-GhRaw {
@@ -239,7 +239,7 @@ Describe 'Invoke-BoardDepend - a write that did not do what was asked FAILS LOUD
         $script:W.Mode = 'drop'
         $r = @(Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11'))
         $r[0].Status  | Should -Be 'FAILED'
-        $r[0].Message | Should -Match 'NO quedo'
+        $r[0].Message | Should -Match 'did NOT stick'
     }
     It 'an API error on the POST: FAILED with the gh message, not a success' {
         $script:W.Mode = 'post-fails'
@@ -251,7 +251,7 @@ Describe 'Invoke-BoardDepend - a write that did not do what was asked FAILS LOUD
         $script:W.Mode = 'no-repo'
         $r = @(Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11'))
         $r[0].Status  | Should -Be 'FAILED'
-        $r[0].Message | Should -Match 'no puedo comprobar el repositorio'
+        $r[0].Message | Should -Match 'cannot check the repository'
     }
     It 'a stranger added in the GAP between two blockers fails the batch - it does not become the next baseline' {
         # Reads: 1 = before(A), 2 = after(A), 3 = before(B). The stranger appears just before read 3.
@@ -259,7 +259,7 @@ Describe 'Invoke-BoardDepend - a write that did not do what was asked FAILS LOUD
         $r = @(Invoke-BoardDepend -Repo 'me/proj' -Issue 40 -BlockedBy @('11', '12'))
         $r[0].Status | Should -Be 'linked'
         $r[1].Status | Should -Be 'FAILED'
-        $r[1].Message | Should -Match 'entre dos escrituras'
+        $r[1].Message | Should -Match 'between two writes'
         $r[1].Message | Should -Match 'jbarnette/johnson#3'
         $script:W.Posts.Count | Should -Be 1 -Because 'nothing more is written once an unrequested link is seen'
     }

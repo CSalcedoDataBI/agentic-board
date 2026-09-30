@@ -98,7 +98,7 @@ Describe 'prior-work guard on a real git history (#507 #502 #471)' {
             @($l.commits).Count | Should -Be 1
             $l.commits[0].sha | Should -Be $script:LandedSha
             $r = Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt
-            $r | Should -Match 'ya cita este issue'
+            $r | Should -Match 'already cites this issue'
             $r | Should -Match $script:LandedSha.Substring(0, 7)
         }
         It 'matches the exact number: (#5) is not (#50), (#500) is not (#50)' {
@@ -156,11 +156,11 @@ Describe 'prior-work guard on a real git history (#507 #502 #471)' {
             Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Be ''
 
             $l = Get-LinkedFor 84 ('[{"number":9,"state":"MERGED","mergedAt":"' + $after + '"}]')
-            Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Match 'PR MERGED'
+            Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Match 'MERGED PR'
         }
         It 'an unreadable mergedAt can only keep the refusal, never lift it' {
             $l = Get-LinkedFor 84 '[{"number":9,"state":"MERGED"}]'
-            Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Match 'PR MERGED'
+            Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Match 'MERGED PR'
         }
         It 'a revert that cites a DIFFERENT issue does not unlock this one' {
             $null = Add-FixtureCommit 'feat(work): kept change (#85) (#98)'
@@ -172,9 +172,9 @@ Describe 'prior-work guard on a real git history (#507 #502 #471)' {
     Context 'the PR half of the guard is untouched' {
         It 'a MERGED PR with no revert still refuses, an OPEN PR still refuses' {
             $l = Get-LinkedFor 900 '[{"number":9,"state":"MERGED","mergedAt":"2026-01-01T00:00:00Z"}]'
-            Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Match 'PR MERGED'
+            Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Match 'MERGED PR'
             $l = Get-LinkedFor 900 '[{"number":9,"state":"OPEN"}]'
-            Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Match 'PR abierto'
+            Get-PriorWorkRefusal -Prs $l.prs -Commits $l.commits -RevertedAt $l.revertedAt | Should -Match 'open PR'
         }
     }
 }
@@ -213,7 +213,7 @@ Describe 'Select-IssueCitingCommits ties and a capped search stay fail-closed' {
     }
     It 'a MERGED PR merged at the SAME instant as the revert still refuses' {
         $pr = @([pscustomobject]@{ number = 9; state = 'MERGED'; mergedAt = '2026-02-01T00:00:00Z' })
-        Get-PriorWorkRefusal -Prs $pr -Commits @() -RevertedAt ([datetimeoffset]'2026-02-01T00:00:00Z') | Should -Match 'PR MERGED'
+        Get-PriorWorkRefusal -Prs $pr -Commits @() -RevertedAt ([datetimeoffset]'2026-02-01T00:00:00Z') | Should -Match 'MERGED PR'
     }
     It 'when the search hit its cap, a revert is NOT trusted to mean nothing landed' {
         $h = @([pscustomobject]@{ sha = '7777777aaaa'; commit = [pscustomobject]@{ message = 'revert(x): undo (#5) (#10)'; committer = [pscustomobject]@{ date = '2026-02-01T00:00:00Z' } } })
@@ -285,7 +285,7 @@ Describe 'Invoke-IssueStart with the REAL prior-work guard (#507 #471, only the 
         $null = Add-FixtureCommit 'fix(work): landed (#702) (#703)'
         $script:HitsJson = Get-FixtureHits
         $r = Invoke-IssueStart -IssueNum 702 -Ctx $script:Ctx2 -Owner 'me' -DryRunStart
-        $r.skipped | Should -Match 'YA TRABAJADO'
+        $r.skipped | Should -Match 'ALREADY WORKED'
     }
     It 'restarts an issue whose only landed PR was reverted (the revert date reaches the PR check)' {
         $null = Add-FixtureCommit 'revert(work): back out the PR (#704) (#705)'

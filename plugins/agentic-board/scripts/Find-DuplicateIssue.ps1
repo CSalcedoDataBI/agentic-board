@@ -72,14 +72,14 @@ $ErrorActionPreference = 'Stop'
 # ── CLI ────────────────────────────────────────────────────────────────────────
 # Report text from files is read as DATA (UTF-8), never through a shell.
 if ($TitleFile) {
-    if (-not (Test-Path -LiteralPath $TitleFile)) { Write-Host "No existe -TitleFile '$TitleFile'." -ForegroundColor Red; exit 2 }
+    if (-not (Test-Path -LiteralPath $TitleFile)) { Write-Host "-TitleFile '$TitleFile' does not exist." -ForegroundColor Red; exit 2 }
     $Title = [System.IO.File]::ReadAllText($TitleFile, [System.Text.Encoding]::UTF8).Trim()
 }
 if ($BodyFile) {
-    if (-not (Test-Path -LiteralPath $BodyFile)) { Write-Host "No existe -BodyFile '$BodyFile'." -ForegroundColor Red; exit 2 }
+    if (-not (Test-Path -LiteralPath $BodyFile)) { Write-Host "-BodyFile '$BodyFile' does not exist." -ForegroundColor Red; exit 2 }
     $Body = [System.IO.File]::ReadAllText($BodyFile, [System.Text.Encoding]::UTF8)
 }
-if (-not $Title.Trim()) { Write-Host 'Falta -Title (o -TitleFile).' -ForegroundColor Red; exit 2 }
+if (-not $Title.Trim()) { Write-Host 'Missing -Title (or -TitleFile).' -ForegroundColor Red; exit 2 }
 
 # Identity: the personal account, or the agent's inside a braked run - the same single resolver.
 $prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
@@ -88,7 +88,7 @@ $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
 $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
 try {
     if ($CandidatesFile) {
-        if (-not (Test-Path -LiteralPath $CandidatesFile)) { throw "no existe -CandidatesFile '$CandidatesFile'" }
+        if (-not (Test-Path -LiteralPath $CandidatesFile)) { throw "-CandidatesFile '$CandidatesFile' does not exist" }
         $cands = @([System.IO.File]::ReadAllText($CandidatesFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
     } else {
         $ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner (($Repo -split '/')[0])
@@ -96,8 +96,8 @@ try {
         $cands = Get-IssueCandidates -Repo $Repo -ClosedDays $ClosedDays
     }
 } catch {
-    Write-Host "NO SE PUDO BUSCAR duplicados en $Repo : $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Eso NO significa 'sin duplicados'. Dilo al usuario antes de crear el issue." -ForegroundColor Red
+    Write-Host "COULD NOT SEARCH for duplicates in $Repo : $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "That does NOT mean 'no duplicates'. Tell the user before creating the issue." -ForegroundColor Red
     exit 2
 }
 
@@ -107,17 +107,17 @@ $likely = @($hits | Where-Object { $_.level -eq 'likely' })
 if ($Json) {
     [pscustomobject]@{ repo = $Repo; searched = @($cands).Count; likely = $likely.Count; matches = $hits } | ConvertTo-Json -Depth 5
 } else {
-    Write-Host ("=== Find-DuplicateIssue  {0}  ({1} issues buscados: abiertos + cerrados en {2} dias) ===" -f $Repo, @($cands).Count, $ClosedDays) -ForegroundColor Cyan
-    if ($hits.Count -eq 0) { Write-Host '  Nada parecido: se puede crear el issue.' -ForegroundColor Green }
+    Write-Host ("=== Find-DuplicateIssue  {0}  ({1} issues searched: open + closed in {2} days) ===" -f $Repo, @($cands).Count, $ClosedDays) -ForegroundColor Cyan
+    if ($hits.Count -eq 0) { Write-Host '  Nothing similar: the issue can be created.' -ForegroundColor Green }
     foreach ($h in $hits) {
-        $tag = if ($h.level -eq 'likely') { 'PROBABLE DUPLICADO' } else { 'relacionado' }
-        $st  = if ($h.state -eq 'OPEN') { 'abierto' } else { "cerrado ($($h.stateReason))" }
+        $tag = if ($h.level -eq 'likely') { 'LIKELY DUPLICATE' } else { 'related' }
+        $st  = if ($h.state -eq 'OPEN') { 'open' } else { "closed ($($h.stateReason))" }
         $col = if ($h.level -eq 'likely') { 'Red' } else { 'DarkYellow' }
         Write-Host ("  {0,-18} #{1} [{2}] {3:N2}  {4}" -f $tag, $h.number, $st, $h.score, $h.title) -ForegroundColor $col
         Write-Host ("  {0,-18} {1}" -f '', $h.url) -ForegroundColor DarkGray
     }
     if ($likely.Count -gt 0) {
-        Write-Host "NO CREES un issue nuevo sin mirar estos: si es el mismo defecto, agrega la evidencia al existente (o reabrelo si esta cerrado)." -ForegroundColor Red
+        Write-Host "Do NOT create a new issue without looking at these: if it is the same defect, add the evidence to the existing one (or reopen it if it is closed)." -ForegroundColor Red
     }
 }
 if ($likely.Count -gt 0) { exit 3 }

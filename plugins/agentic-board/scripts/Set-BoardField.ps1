@@ -64,9 +64,9 @@ function Resolve-FieldValue([string]$title) {
 if (-not $env:GH_TOKEN) { Write-Error "GH_TOKEN not set — run the gh-account skill first."; exit 1 }
 
 $proj   = (Invoke-Gh -GhArgs @('project','view',"$Number",'--owner',$Owner,'--format','json') `
-                     -What "leer el board #$Number" -Json).id
+                     -What "read board #$Number" -Json).id
 $fields = (Invoke-Gh -GhArgs @('project','field-list',"$Number",'--owner',$Owner,'--format','json') `
-                     -What "leer los campos del board #$Number" -Json).fields
+                     -What "read the fields of board #$Number" -Json).fields
 $fdef   = $fields | Where-Object { $_.name -eq $Field }
 if (-not $fdef) { Write-Error "Field '$Field' not found on project #$Number (owner $Owner)."; exit 1 }
 $isSelect = [bool]$fdef.options
@@ -74,13 +74,13 @@ $optById  = @{}; if ($isSelect) { foreach ($o in $fdef.options) { $optById[$o.na
 $fieldKey = ($Field -replace '[^A-Za-z0-9]','').ToLower()   # how item-list surfaces the value
 
 $itemRead = Get-BoardItems -Number $Number -Owner $Owner -Limit $Limit `
-                           -What "listar los items del board #$Number"
+                           -What "list the items of board #$Number"
 $items    = $itemRead.Items
 # Say it BEFORE the sweep, not after: the user needs to know the pass was partial while the
 # "set=N" summary is still ahead of them, not once it already reads like a full sweep.
 if ($itemRead.Truncated) {
   Write-Host (Get-BoardTruncationWarning $itemRead) -ForegroundColor Yellow
-  Write-Host "  El barrido de abajo cubre solo esos items - los demas quedan sin tocar. Sube -Limit para cubrirlos." -ForegroundColor Yellow
+  Write-Host "  The sweep below covers only those items - the rest are left untouched. Raise -Limit to cover them." -ForegroundColor Yellow
 }
 $set=0; $skip=0; $fail=0
 foreach ($it in $items) {
@@ -109,7 +109,7 @@ Write-Host "Field '$Field' -> set=$set  skipped=$skip  failed=$fail  (of $($item
 # subset while reading like a full one. Repeat it here, after the numbers, and exit non-zero - a
 # partial sweep is not a success for a command whose contract is "every item on the board" (#484).
 if ($itemRead.Truncated) {
-  Write-Warning "BARRIDO PARCIAL: solo lei $($itemRead.Read) items (el tope de lectura), asi que los que estan mas alla NO se tocaron. Sube -Limit y re-corre para cubrirlos."
+  Write-Warning "PARTIAL SWEEP: only read $($itemRead.Read) items (the read cap), so the ones beyond it were NOT touched. Raise -Limit and re-run to cover them."
 }
 
 # Post-fill visibility check — the #1 "the tool didn't work" false alarm: the field IS filled but

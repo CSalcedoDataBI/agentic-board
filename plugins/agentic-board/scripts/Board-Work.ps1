@@ -594,7 +594,7 @@ function Get-RepoTrackedFiles {
 # a research task.
 function Format-GroupingSettingLabel {
     param($Setting)
-    $where = if ($Setting.source -eq 'config') { 'config del repo' } else { 'por defecto' }
+    $where = if ($Setting.source -eq 'config') { 'repo config' } else { 'default' }
     return "$($Setting.value) ($where)"
 }
 
@@ -604,7 +604,7 @@ function Show-GroupingOffer {
         [object[]] $Suggestions,
         [string]   $Posture = 'auto',
         [string]   $CurrentRepo = '',
-        # 'auto (por defecto)' / 'on (config del repo)': the setting that produced these proposals
+        # 'auto (default)' / 'on (repo config)': the setting that produced these proposals
         # and where its value came from (#681). Empty = say nothing about it (older callers).
         [string]   $SettingLabel = '',
         # Twelve groups is a wall, not an offer. Show the biggest savings and COUNT the rest -
@@ -614,7 +614,7 @@ function Show-GroupingOffer {
 
     if ($Posture -eq 'never') {
         Write-Host ""
-        Write-Host "Este repo pidio un PR por issue: no agrupo nada aunque se solapen." -ForegroundColor DarkGray
+        Write-Host "This repo asked for one PR per issue: nothing is grouped, even when issues overlap." -ForegroundColor DarkGray
         return
     }
     # 'always' does not invent groups out of nothing - there is no honest way to batch issues
@@ -625,8 +625,8 @@ function Show-GroupingOffer {
     if (@($Suggestions).Count -eq 0) {
         if ($Posture -eq 'always') {
             Write-Host ""
-            Write-Host "Este repo pidio juntar los PRs, pero no hay dos pendientes que se solapen:" -ForegroundColor DarkYellow
-            Write-Host "ninguno comparte archivo ni area del board, asi que cada uno va en el suyo." -ForegroundColor DarkGray
+            Write-Host "This repo asked for grouped PRs, but no two pending issues overlap:" -ForegroundColor DarkYellow
+            Write-Host "none share a file or a board area, so each one gets its own PR." -ForegroundColor DarkGray
         }
         return
     }
@@ -637,41 +637,41 @@ function Show-GroupingOffer {
     $rest  = @($all | Select-Object -Skip  $MaxShown)
 
     Write-Host ""
-    Write-Host "Se pueden juntar en menos PRs:" -ForegroundColor Cyan
+    Write-Host "These can be merged into fewer PRs:" -ForegroundColor Cyan
     foreach ($s in $show) {
         $nums   = ($s.issues | ForEach-Object { "#$_" }) -join ', '
-        $porque = if ($s.reason -eq 'file') { "los $(@($s.issues).Count) tocan el mismo archivo ($($s.evidence))" }
-                  else                      { "los $(@($s.issues).Count) estan en la misma area del board ($($s.evidence))" }
-        Write-Host ("  {0}  ->  un solo PR" -f $nums) -ForegroundColor Yellow
-        Write-Host ("        porque {0}" -f $porque) -ForegroundColor DarkGray
+        $porque = if ($s.reason -eq 'file') { "all $(@($s.issues).Count) touch the same file ($($s.evidence))" }
+                  else                      { "all $(@($s.issues).Count) are in the same board area ($($s.evidence))" }
+        Write-Host ("  {0}  ->  a single PR" -f $nums) -ForegroundColor Yellow
+        Write-Host ("        because {0}" -f $porque) -ForegroundColor DarkGray
         if ($SettingLabel) {
-            Write-Host ("        propuesta de PR agrupado - ajuste 'PRs agrupados': {0}" -f $SettingLabel) -ForegroundColor DarkGray
+            Write-Host ("        grouped PR proposal - 'Grouped PRs' setting: {0}" -f $SettingLabel) -ForegroundColor DarkGray
         }
         # On a board holding several repos, WHICH repo the batch lands in is part of the offer:
         # the PR can only be opened where the issues live.
         if ($CurrentRepo -and $s.repo -and $s.repo -ne $CurrentRepo) {
-            Write-Host ("        (en {0}, no en este repo - el PR va alli)" -f $s.repo) -ForegroundColor DarkGray
+            Write-Host ("        (in {0}, not this repo - the PR goes there)" -f $s.repo) -ForegroundColor DarkGray
         }
         # Never let a cap pass for a complete answer: say what was held back and why.
         if (@($s.dropped).Count -gt 0) {
             $more = ($s.dropped | ForEach-Object { "#$_" }) -join ', '
-            Write-Host ("        (dejo fuera {0} para que el PR siga siendo revisable - van en un segundo lote)" -f $more) -ForegroundColor DarkGray
+            Write-Host ("        (leaving out {0} so the PR stays reviewable - they go in a second batch)" -f $more) -ForegroundColor DarkGray
         }
     }
     if ($rest.Count -gt 0) {
         $restIssues = 0
         foreach ($r in $rest) { $restIssues += @($r.issues).Count }
-        Write-Host ("  ... y {0} grupo(s) mas ({1} issues), por si prefieres empezar por otro lado." -f $rest.Count, $restIssues) -ForegroundColor DarkGray
+        Write-Host ("  ... and {0} more group(s) ({1} issues), in case you prefer to start elsewhere." -f $rest.Count, $restIssues) -ForegroundColor DarkGray
     }
     Write-Host ""
-    Write-Host ("Te ahorra {0} ronda(s) de revision y {0} confirmacion(es) de merge." -f $saved) -ForegroundColor Green
+    Write-Host ("Saves you {0} review round(s) and {0} merge confirmation(s)." -f $saved) -ForegroundColor Green
     if ($Posture -eq 'always') {
-        Write-Host "Este repo ya pidio juntar lo que se solape, asi que es lo que hare salvo que digas otra cosa." -ForegroundColor DarkGray
+        Write-Host "This repo already asked to group whatever overlaps, so that is what I will do unless you say otherwise." -ForegroundColor DarkGray
     } else {
-        Write-Host "Separalos solo si alguno tiene riesgo propio o alguien debe poder aprobarlo o rechazarlo aparte." -ForegroundColor DarkGray
+        Write-Host "Keep them separate only if one carries its own risk or someone must be able to approve or reject it alone." -ForegroundColor DarkGray
     }
     if ($SettingLabel) {
-        Write-Host ("Ajuste 'PRs agrupados' de este repo: {0}. Cambiarlo: /board work -PreferGroupedPRs on|off|auto" -f $SettingLabel) -ForegroundColor DarkGray
+        Write-Host ("This repo's 'Grouped PRs' setting: {0}. Change it: /board work -PreferGroupedPRs on|off|auto" -f $SettingLabel) -ForegroundColor DarkGray
     }
 }
 
@@ -714,7 +714,7 @@ function Get-StatusOptionNames([int]$num) {
         # Invoke-Gh.ps1's header (a 401 read as "the board has no fields"), still live here.
         # Board field schemas change rarely; 5 minutes of staleness is free speed.
         $fields = (Invoke-GhCached -GhArgs @('project','field-list',"$num",'--owner',$Owner,'--format','json','--limit','50') `
-                       -What "leer los campos del board #$num" -Json -TtlSec 300).fields
+                       -What "read the fields of board #$num" -Json -TtlSec 300).fields
         @(($fields | Where-Object { $_.name -eq 'Status' } | Select-Object -First 1).options | ForEach-Object { $_.name })
     } catch { @() }
 }
@@ -725,9 +725,9 @@ function Show-StatusSchemaWarning([string[]]$OptionNames, [int]$num) {
     $legacy = Get-LegacyStatusOptions $OptionNames
     if ($legacy.Count -eq 0) { return }
     $map = @($legacy | ForEach-Object { "$_ -> $(Get-CanonicalOptionName 'Status' $_)" }) -join ', '
-    Write-Host "AVISO: el board no usa el estandar canonico de Status ($map)." -ForegroundColor Yellow
-    Write-Host "       Los cuento como pendientes igual, pero para estandarizarlo (renombra en sitio, conserva las asignaciones):" -ForegroundColor DarkGray
-    Write-Host "       /board field apply en --migrate      (previsualiza con --dry-run)" -ForegroundColor DarkGray
+    Write-Host "WARNING: the board does not use the canonical Status standard ($map)." -ForegroundColor Yellow
+    Write-Host "       I still count them as pending, but to standardize it (renames in place, keeps assignments):" -ForegroundColor DarkGray
+    Write-Host "       /board field apply en --migrate      (preview with --dry-run)" -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -1091,10 +1091,10 @@ function Get-BranchDriftWarning {
     # started is "yyyy-MM-dd HH:mm" (lexically sortable) -> newest in-place start wins.
     $entry = $mine | Sort-Object -Property started -Descending | Select-Object -First 1
     if ($entry.branch -ieq $CurrentBranch) { return $null }
-    return ("HEAD esta en '{0}' pero empezaste el issue #{1} en la rama '{2}' aqui. " -f `
+    return ("HEAD is on '{0}' but you started issue #{1} on branch '{2}' here. " -f `
                 $CurrentBranch, $entry.issue, $entry.branch) +
-           "Algo te movio de rama (posible hook Stop ajeno que hace git checkout). " +
-           ("Vuelve con: git checkout {0}" -f $entry.branch)
+           "Something moved you off the branch (possibly a foreign Stop hook running git checkout). " +
+           ("Go back with: git checkout {0}" -f $entry.branch)
 }
 
 # Emit the branch-drift warning (side-effecting wrapper around Get-BranchDriftWarning).
@@ -1168,13 +1168,13 @@ query($owner:String!, $num:Int!) {
   }
 }'
     $projData = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$statusQuery",'-F',"owner=$owner",'-F',"num=$projectNum") `
-                          -What "resolver el board #$projectNum de $owner" -Graphql
+                          -What "resolve board #$projectNum of $owner" -Graphql
 
     $projectId  = $projData.data.user.projectV2.id
-    if (-not $projectId) { throw "Board #$projectNum no encontrado para $owner." }
+    if (-not $projectId) { throw "Board #$projectNum not found for $owner." }
     $statusNode = $projData.data.user.projectV2.fields.nodes | Where-Object { $_.name -eq "Status" }
     $inProgId   = ($statusNode.options | Where-Object { $_.name -eq "In Progress" }).id
-    if (-not $inProgId) { throw "El board #$projectNum no tiene la opcion 'In Progress' en Status." }
+    if (-not $inProgId) { throw "Board #$projectNum has no 'In Progress' option in Status." }
     return [PSCustomObject]@{ projectId = $projectId; statusNode = $statusNode; inProgId = $inProgId }
 }
 
@@ -1243,7 +1243,7 @@ query(`$proj:ID!, `$cursor:String) {
             # instead of silently truncating pagination -> a target issue falsely "not on board" (#314).
             $ghArgs = @('api','graphql','-f',"query=$q",'-F',"proj=$projectId")
             if ($cursor) { $ghArgs += @('-f',"cursor=$cursor") }
-            $resp  = Invoke-Gh -GhArgs $ghArgs -What "leer los items del board" -Graphql -Retries 2
+            $resp  = Invoke-Gh -GhArgs $ghArgs -What "read the board items" -Graphql -Retries 2
             $items = $resp.data.node.items
             return @{ nodes = $items.nodes; hasNext = $items.pageInfo.hasNextPage; endCursor = $items.pageInfo.endCursor }
         }
@@ -1252,7 +1252,7 @@ query(`$proj:ID!, `$cursor:String) {
                 Select-Object -First 1
         if ($item) { return $item }
         if ($attempt -eq 1) {
-            Write-Host "  (issue #$issueNum aun no visible en el board - reintentando en 4s...)" -ForegroundColor DarkGray
+            Write-Host "  (issue #$issueNum not visible on the board yet - retrying in 4s...)" -ForegroundColor DarkGray
             Start-Sleep -Seconds 4
         }
     }
@@ -1264,16 +1264,16 @@ function Get-IssueBlockers([string]$repo, [int]$issueNum) {
     $blockers = @()
     try {
         $issueLabels = @((gh issue view $issueNum --repo $repo --json labels | ConvertFrom-Json).labels.name)
-        if ($issueLabels -contains "blocked") { $blockers += "label 'blocked' presente" }
+        if ($issueLabels -contains "blocked") { $blockers += "label 'blocked' present" }
     } catch { }
     # Native blocked-by dependencies (best-effort: API may not exist for the account). Through
     # the wrapper (#571): the raw 2>$null read made a 401 indistinguishable from "no blockers" -
     # the try/catch keeps the degrade, but now only a REAL absence degrades silently.
     try {
         $deps = Invoke-Gh -GhArgs @('api',"repos/$repo/issues/$issueNum/dependencies/blocked_by") `
-                          -What "leer los bloqueadores de #$issueNum" -Json
+                          -What "read the blockers of #$issueNum" -Json
         foreach ($d in @($deps | Where-Object { $_.state -eq "open" })) {
-            $blockers += "bloqueado por #$($d.number) '$($d.title)' (abierto)"
+            $blockers += "blocked by #$($d.number) '$($d.title)' (open)"
         }
     } catch { }
     return $blockers
@@ -1285,7 +1285,7 @@ function Get-IssueBlockers([string]$repo, [int]$issueNum) {
 function Get-LastClaim([string]$repo, [int]$issueNum) {
     try {
         return (Invoke-Gh -GhArgs @('api',"repos/$repo/issues/$issueNum/comments",'--jq','[.[] | select(.body | startswith("[abios-claim]"))] | last | .body') `
-                          -What "leer los claims de #$issueNum")
+                          -What "read the claims of #$issueNum")
     } catch { return '' }
 }
 
@@ -1294,8 +1294,8 @@ function Get-LastClaim([string]$repo, [int]$issueNum) {
 # and the -Lock/-Unlock subcommand posts it (LOCK/UNLOCK) so they never drift.
 function Format-ClaimFingerprint {
     param([string]$Note, [string]$Computer, [int]$ProcessId, [string]$Date, [string]$Branch = '')
-    $tail = if ($Branch) { " - rama $Branch" } else { "" }
-    return "[abios-claim] $Note por sesion Claude en $Computer (PID $ProcessId) - $Date$tail"
+    $tail = if ($Branch) { " - branch $Branch" } else { "" }
+    return "[abios-claim] $Note by Claude session on $Computer (PID $ProcessId) - $Date$tail"
 }
 
 # A timestamp from gh JSON as a DateTimeOffset, or $null when it cannot be read.
@@ -1403,16 +1403,16 @@ function Get-PriorWorkRefusal {
         return ($null -eq $at -or $at -ge $revertedAtDto)
     })
     if ($merged.Count -gt 0) {
-        return "ya tiene un PR MERGED (#$($merged[0].number)) - el trabajo ya esta en la rama por defecto"
+        return "already has a MERGED PR (#$($merged[0].number)) - the work is already on the default branch"
     }
     if (@($Commits).Count -gt 0) {
         $sha   = "$($Commits[0].sha)"
         $short = if ($sha.Length -ge 7) { $sha.Substring(0, 7) } else { $sha }
-        return "un commit ($short) ya cita este issue en la rama por defecto - trabajo integrado"
+        return "a commit ($short) already cites this issue on the default branch - work integrated"
     }
     $open = @($Prs | Where-Object { $_.state -eq 'OPEN' })
     if ($open.Count -gt 0) {
-        return "tiene un PR abierto (#$($open[0].number)) - otra sesion probablemente lo trabaja"
+        return "has an open PR (#$($open[0].number)) - another session is probably working on it"
     }
     return ''
 }
@@ -1436,7 +1436,7 @@ query($o:String!,$r:String!,$n:Int!){
       }
     }
   }
-}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$IssueNum") -What "leer los PRs de #$IssueNum" -Graphql
+}','-F',"o=$($rp[0])",'-F',"r=$($rp[1])",'-F',"n=$IssueNum") -What "read the PRs of #$IssueNum" -Graphql
         $prs = @($data.data.repository.issue.closedByPullRequestsReferences.nodes)
     } catch { }
     # GitHub commit search indexes the DEFAULT branch. The search matches the number
@@ -1445,7 +1445,7 @@ query($o:String!,$r:String!,$n:Int!){
     # Select-IssueCitingCommits for why the body and reverts do not count.
     try {
         $hits = Invoke-Gh -GhArgs @('search','commits',"#$IssueNum",'--repo',$Repo,'--json','sha,commit','--limit',"$commitSearchLimit") `
-                          -What "buscar commits de #$IssueNum" -Json
+                          -What "find the commits of #$IssueNum" -Json
         $sel = Select-IssueCitingCommits -Hits @($hits) -IssueNum $IssueNum -Truncated:(@($hits).Count -ge $commitSearchLimit)
         $commits    = @($sel.commits)
         $revertedAt = $sel.revertedAt
@@ -1520,22 +1520,22 @@ function New-IssueBranchInPlace([string]$branchName, [string]$baseRef = "") {
     git rev-parse --verify --quiet $branchName 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         git checkout $branchName 2>&1 | Out-Null
-        Write-Host "  OK  Rama $branchName ya existia - checkout hecho" -ForegroundColor Green
+        Write-Host "  OK  Branch $branchName already existed - checked out" -ForegroundColor Green
         return 'existing'
     }
     if ($baseRef) {
         git checkout -b $branchName $baseRef 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "  OK  Rama $branchName creada y activa (desde $baseRef)" -ForegroundColor Green
+            Write-Host "  OK  Branch $branchName created and active (from $baseRef)" -ForegroundColor Green
             return $baseRef
         }
         # An unresolvable base must not silently become "branch off HEAD" - that is the
         # #294 failure mode wearing a different hat. Say so, then fall back loudly.
-        Write-Host "  WARN no pude basar la rama en '$baseRef' - uso el HEAD actual." -ForegroundColor DarkYellow
-        Write-Host "       Revisa que el PR no arrastre commits ajenos antes de mergear." -ForegroundColor DarkYellow
+        Write-Host "  WARN could not base the branch on '$baseRef' - using the current HEAD." -ForegroundColor DarkYellow
+        Write-Host "       Check that the PR does not drag in unrelated commits before merging." -ForegroundColor DarkYellow
     }
     git checkout -b $branchName 2>&1 | Out-Null
-    Write-Host "  OK  Rama $branchName creada y activa (desde el HEAD actual)" -ForegroundColor Green
+    Write-Host "  OK  Branch $branchName created and active (from the current HEAD)" -ForegroundColor Green
     return ''
 }
 
@@ -1549,12 +1549,12 @@ function New-IssueWorktree([string]$repo, [int]$issueNum, [string]$branchName, [
     $wtList = git worktree list --porcelain 2>$null | Out-String
     if ($wtList -match "(?m)^worktree (.+)\r?\n(?:.*\r?\n)?branch refs/heads/$([regex]::Escape($branchName))") {
         $existingPath = $Matches[1]
-        Write-Host "  OK  Worktree ya existia para la rama: $existingPath" -ForegroundColor Green
-        Write-Host "       TRABAJA EL ISSUE ALLI: cd `"$existingPath`"" -ForegroundColor Cyan
+        Write-Host "  OK  Worktree already existed for the branch: $existingPath" -ForegroundColor Green
+        Write-Host "       WORK THE ISSUE THERE: cd `"$existingPath`"" -ForegroundColor Cyan
         return $existingPath
     }
     if (Test-Path $wtPath) {
-        Write-Host "  WARN la carpeta $wtPath existe pero no es worktree de $branchName - resuelvelo manualmente." -ForegroundColor DarkYellow
+        Write-Host "  WARN folder $wtPath exists but is not a worktree of $branchName - resolve it manually." -ForegroundColor DarkYellow
         return $null
     }
     # Ensure the grouping folder (<repo>--worktrees) exists before adding into it.
@@ -1566,12 +1566,12 @@ function New-IssueWorktree([string]$repo, [int]$issueNum, [string]$branchName, [
     elseif ($baseRef)            { git worktree add $wtPath -b $branchName $baseRef 2>&1 | Out-Null }
     else                         { git worktree add $wtPath -b $branchName 2>&1 | Out-Null }
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "  OK  Worktree creado: $wtPath (rama $branchName)" -ForegroundColor Green
-        Write-Host "       TRABAJA EL ISSUE ALLI: cd `"$wtPath`"" -ForegroundColor Cyan
-        Write-Host "       Al mergear el PR, limpia con: git worktree remove `"$wtPath`"" -ForegroundColor DarkGray
+        Write-Host "  OK  Worktree created: $wtPath (branch $branchName)" -ForegroundColor Green
+        Write-Host "       WORK THE ISSUE THERE: cd `"$wtPath`"" -ForegroundColor Cyan
+        Write-Host "       Once the PR is merged, clean up with: git worktree remove `"$wtPath`"" -ForegroundColor DarkGray
         return $wtPath
     }
-    Write-Host "  FAIL no se pudo crear el worktree para #$issueNum - crea la rama manualmente: git checkout -b $branchName" -ForegroundColor Red
+    Write-Host "  FAIL could not create the worktree for #$issueNum - create the branch manually: git checkout -b $branchName" -ForegroundColor Red
     return $null
 }
 
@@ -1594,22 +1594,22 @@ function New-IssueWorkspace {
     )
     $originUrl = git remote get-url origin 2>$null
     if ($LASTEXITCODE -ne 0 -or $originUrl -notmatch [regex]::Escape($repo)) {
-        Write-Host "  WARN el directorio actual no es un clon de $repo - rama NO creada." -ForegroundColor DarkYellow
-        Write-Host "       Crea la rama en ese repo con: git checkout -b $branchName" -ForegroundColor DarkYellow
+        Write-Host "  WARN the current directory is not a clone of $repo - branch NOT created." -ForegroundColor DarkYellow
+        Write-Host "       Create the branch in that repo with: git checkout -b $branchName" -ForegroundColor DarkYellow
         return ""
     }
 
     # -- The base (#294). Explicit wins; otherwise resolve the remote default. -----
     $baseRef = ""
     if ($BaseCurrent) {
-        Write-Host "  -BaseCurrent: la rama nace del HEAD actual (trabajo dependiente)." -ForegroundColor DarkGray
+        Write-Host "  -BaseCurrent: the branch starts from the current HEAD (dependent work)." -ForegroundColor DarkGray
     } elseif ($Base) {
         $baseRef = $Base
     } else {
         $baseRef = Resolve-IssueBaseRef -repo $repo
         if (-not $baseRef) {
-            Write-Host "  WARN no pude resolver la rama por defecto del remoto - la rama nace del HEAD actual." -ForegroundColor DarkYellow
-            Write-Host "       Revisa que el PR no arrastre commits ajenos antes de mergear." -ForegroundColor DarkYellow
+            Write-Host "  WARN could not resolve the remote's default branch - the branch starts from the current HEAD." -ForegroundColor DarkYellow
+            Write-Host "       Check that the PR does not drag in unrelated commits before merging." -ForegroundColor DarkYellow
         }
     }
 
@@ -1643,11 +1643,11 @@ function New-IssueWorkspace {
     if ($needWorktree) {
         if (-not $PreferWorktree) {
             $reason = if ($liveConflict) {
-                "otra sesion viva (issue #$($conflictEntry.issue), PID $($conflictEntry.sessionPid)) usa este mismo directorio de trabajo"
+                "another live session (issue #$($conflictEntry.issue), PID $($conflictEntry.sessionPid)) uses this same working directory"
             } elseif ($carriesWork -and $dirty.Count -eq 0 -and -not ($curBranch -match '^issue-\d+')) {
-                "la rama actual ($(if ($curBranch) { $curBranch } else { 'HEAD suelto' })) tiene $ahead commit(s) que $baseRef no tiene - es trabajo en curso"
-            } else { "working tree ocupado (rama actual: $curBranch)" }
-            Write-Host "  OCUPADO: $reason - uso un worktree aislado:" -ForegroundColor Yellow
+                "the current branch ($(if ($curBranch) { $curBranch } else { 'detached HEAD' })) has $ahead commit(s) that $baseRef does not - it is work in progress"
+            } else { "working tree busy (current branch: $curBranch)" }
+            Write-Host "  BUSY: $reason - using an isolated worktree:" -ForegroundColor Yellow
         }
         return (New-IssueWorktree $repo $issueNum $branchName $baseRef)
     }
@@ -1686,7 +1686,7 @@ function Invoke-IssueStart {
 
     $item = Get-BoardItem $Ctx.projectId $IssueNum
     if (-not $item) {
-        $result.skipped = "no esta en el board (agregalo con /board add)"
+        $result.skipped = "not on the board (add it with /board add)"
         Write-Host "  SKIP #${IssueNum}: $($result.skipped)" -ForegroundColor DarkYellow
         return $result
     }
@@ -1695,10 +1695,10 @@ function Invoke-IssueStart {
     $repo         = $item.content.repository.nameWithOwner
     $result.repo  = $repo
     $currentStatus = ($item.fieldValues.nodes | Where-Object { $_.field.name -eq "Status" }).name
-    if (-not $currentStatus) { $currentStatus = "(vacio)" }
+    if (-not $currentStatus) { $currentStatus = "(empty)" }
 
     if ($item.content.state -eq "CLOSED") {
-        $result.skipped = "CERRADO (reabre con gh issue reopen $IssueNum --repo $repo)"
+        $result.skipped = "CLOSED (reopen with gh issue reopen $IssueNum --repo $repo)"
         Write-Host "  SKIP #${IssueNum}: $($result.skipped)" -ForegroundColor Red
         return $result
     }
@@ -1706,8 +1706,8 @@ function Invoke-IssueStart {
     if (-not $IgnoreBlocked) {
         $blockers = @(Get-IssueBlockers $repo $IssueNum)
         if ($blockers.Count -gt 0) {
-            $result.skipped = "BLOQUEADO: " + ($blockers -join "; ")
-            Write-Host "  SKIP #${IssueNum}: bloqueado (usa -IgnoreBlocked si es falso positivo):" -ForegroundColor Red
+            $result.skipped = "BLOCKED: " + ($blockers -join "; ")
+            Write-Host "  SKIP #${IssueNum}: blocked (use -IgnoreBlocked if it is a false positive):" -ForegroundColor Red
             $blockers | ForEach-Object { Write-Host "         - $_" -ForegroundColor Red }
             return $result
         }
@@ -1715,11 +1715,11 @@ function Invoke-IssueStart {
 
     $assignees = @($item.content.assignees.nodes.login)
     if (-not $TakeOver -and $currentStatus -eq "In Progress" -and $assignees.Count -gt 0) {
-        $result.skipped = "OCUPADO (In Progress, asignado a $($assignees -join ', '))"
-        Write-Host "  SKIP #${IssueNum}: $($result.skipped) - otra sesion probablemente lo trabaja." -ForegroundColor Red
+        $result.skipped = "BUSY (In Progress, assigned to $($assignees -join ', '))"
+        Write-Host "  SKIP #${IssueNum}: $($result.skipped) - another session is probably working on it." -ForegroundColor Red
         $lastClaim = Get-LastClaim $repo $IssueNum
-        if ($lastClaim -and $lastClaim -ne "null") { Write-Host "         Ultimo claim: $lastClaim" -ForegroundColor Yellow }
-        Write-Host "         Re-ejecuta con -TakeOver si la sesion esta muerta o quieres retomarlo." -ForegroundColor Yellow
+        if ($lastClaim -and $lastClaim -ne "null") { Write-Host "         Last claim: $lastClaim" -ForegroundColor Yellow }
+        Write-Host "         Re-run with -TakeOver if that session is dead or you want to take it over." -ForegroundColor Yellow
         return $result
     }
 
@@ -1730,9 +1730,9 @@ function Invoke-IssueStart {
         $linked = Get-IssueLinkedWork $repo $IssueNum
         $priorReason = Get-PriorWorkRefusal -Prs $linked.prs -Commits $linked.commits -RevertedAt $linked.revertedAt
         if ($priorReason) {
-            $result.skipped = "YA TRABAJADO: $priorReason"
+            $result.skipped = "ALREADY WORKED: $priorReason"
             Write-Host "  SKIP #${IssueNum}: $($result.skipped)" -ForegroundColor Red
-            Write-Host "         Re-ejecuta con -TakeOver si de verdad quieres re-trabajarlo." -ForegroundColor Yellow
+            Write-Host "         Re-run with -TakeOver if you really want to rework it." -ForegroundColor Yellow
             return $result
         }
     }
@@ -1749,15 +1749,15 @@ function Invoke-IssueStart {
     $result.targetRepos = @($xr.Repos)
 
     Write-Host ("  #{0} {1}" -f $IssueNum, $item.content.title) -ForegroundColor Yellow
-    Write-Host ("       Repo: {0} | Status actual: {1} -> In Progress | Assignee -> {2}" -f $repo, $currentStatus, $Owner) -ForegroundColor DarkGray
-    if ($MakeBranch) { Write-Host "       Rama de trabajo: $branchName" -ForegroundColor DarkGray }
+    Write-Host ("       Repo: {0} | Current Status: {1} -> In Progress | Assignee -> {2}" -f $repo, $currentStatus, $Owner) -ForegroundColor DarkGray
+    if ($MakeBranch) { Write-Host "       Work branch: $branchName" -ForegroundColor DarkGray }
     if ($xr.CrossRepo) {
-        $where = if (@($xr.Repos).Count -gt 0) { (@($xr.Repos) -join ', ') } else { '(el issue no lista los repos: leelo)' }
-        Write-Host "       CROSS-REPO: el trabajo va a otros repos -> $where. Este worktree es la base; un PR por repo objetivo." -ForegroundColor Magenta
+        $where = if (@($xr.Repos).Count -gt 0) { (@($xr.Repos) -join ', ') } else { '(the issue does not list the repos: read it)' }
+        Write-Host "       CROSS-REPO: the work goes to other repos -> $where. This worktree is the base; one PR per target repo." -ForegroundColor Magenta
     }
 
     if ($DryRunStart) {
-        Write-Host "  #${IssueNum}: DRY-RUN - nada ejecutado." -ForegroundColor Gray
+        Write-Host "  #${IssueNum}: DRY-RUN - nothing executed." -ForegroundColor Gray
         return $result
     }
 
@@ -1773,7 +1773,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
   }) { projectV2Item { id } }
 }'
     $null = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$startStatusMutation",'-f',"proj=$($Ctx.projectId)",'-f',"item=$($item.id)",'-f',"field=$($Ctx.statusNode.id)",'-f',"opt=$($Ctx.inProgId)") `
-                      -What "mover #$IssueNum a In Progress" -Graphql
+                      -What "move #$IssueNum to In Progress" -Graphql
     Write-Host "  OK  Status -> In Progress" -ForegroundColor Green
 
     # -- Execute: assign owner --------------------------------------------------
@@ -1785,7 +1785,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
                           -What "asignar #$IssueNum a $Owner"
         Write-Host "  OK  Assignee -> $Owner" -ForegroundColor Green
     } catch {
-        Write-Host "  WARN no se pudo asignar: $_" -ForegroundColor DarkYellow
+        Write-Host "  WARN could not assign: $_" -ForegroundColor DarkYellow
     }
 
     # -- Execute: claim fingerprint (multi-session diagnostics) -----------------
@@ -1793,10 +1793,10 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
     $fingerprint = Format-ClaimFingerprint -Note $claimNote -Computer $env:COMPUTERNAME -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm') -Branch $branchName
     try {
         $null = Invoke-Gh -GhArgs @('issue','comment',"$IssueNum",'--repo',$repo,'--body',$fingerprint) `
-                          -What "registrar el claim en #$IssueNum"
-        Write-Host "  OK  Claim registrado ($claimNote)" -ForegroundColor Green
+                          -What "record the claim on #$IssueNum"
+        Write-Host "  OK  Claim recorded ($claimNote)" -ForegroundColor Green
     } catch {
-        Write-Host "  WARN no se pudo registrar el claim: $_" -ForegroundColor DarkYellow
+        Write-Host "  WARN could not record the claim: $_" -ForegroundColor DarkYellow
     }
 
     # -- Execute: work branch (only if cwd is a clone of the issue's repo) -------
@@ -1809,7 +1809,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
         if ($result.workPath) {
             Write-SessionRegistryEntry -IssueNum $IssueNum -Branch $branchName -WorkPath $result.workPath -Repo $repo `
                                        -TargetRepos @($xr.Repos) -CrossRepo ([bool]$xr.CrossRepo)
-            Write-Host "  OK  Sesion registrada en .agentic-board/sessions.json" -ForegroundColor Green
+            Write-Host "  OK  Session recorded in .agentic-board/sessions.json" -ForegroundColor Green
         }
     }
 
@@ -1820,14 +1820,14 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
 # Print the full issue context so an in-session agent can start working (mode 3).
 function Write-IssueContext([int]$issueNum, [string]$repo) {
     $issue = gh issue view $issueNum --repo $repo --json title,body,labels,milestone,url,state | ConvertFrom-Json
-    Write-Host "----- CONTEXTO DEL ISSUE -----" -ForegroundColor Cyan
-    Write-Host ("Titulo : {0}" -f $issue.title)
+    Write-Host "----- ISSUE CONTEXT -----" -ForegroundColor Cyan
+    Write-Host ("Title  : {0}" -f $issue.title)
     Write-Host ("URL    : {0}" -f $issue.url)
     $labelNames = @($issue.labels | ForEach-Object { $_.name })
     if ($labelNames.Count -gt 0) { Write-Host ("Labels : {0}" -f ($labelNames -join ", ")) }
-    if ($issue.milestone)        { Write-Host ("Hito   : {0}" -f $issue.milestone.title) }
+    if ($issue.milestone)        { Write-Host ("Milestone: {0}" -f $issue.milestone.title) }
     Write-Host ""
-    if ($issue.body) { Write-Host $issue.body } else { Write-Host "(sin descripcion)" -ForegroundColor DarkGray }
+    if ($issue.body) { Write-Host $issue.body } else { Write-Host "(no description)" -ForegroundColor DarkGray }
     Write-Host ""
     try {
         $repoParts = $repo -split "/"
@@ -2194,7 +2194,7 @@ function Start-WorktreeSession {
     }
 
     if (-not $WorkPath -or -not (Test-Path $WorkPath)) {
-        Write-Host "  WARN #${IssueNum}: worktree '$WorkPath' no existe - no se lanza sesion." -ForegroundColor DarkYellow
+        Write-Host "  WARN #${IssueNum}: worktree '$WorkPath' does not exist - no session launched." -ForegroundColor DarkYellow
         return $null
     }
     # ARM THE BRAKE (#516). The briefing below still ASKS the session to stop at a reviewed PR;
@@ -2220,22 +2220,22 @@ function Start-WorktreeSession {
                     -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
                     -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes -Repo $Repo -BudgetOnly $budgetOnly
         if ($state -eq 'armed') {
-            Write-Host ("  OK  #{0}: freno ARMADO (control real, no solo instruccion) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
+            Write-Host ("  OK  #{0}: brake ARMED (a real control, not just an instruction) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
             if ($SessionBudgetMinutes -gt 0) {
-                Write-Host ("      presupuesto: {0} min - vencido, el hook solo deja pasar el cierre (handoff/commit/report)" -f $SessionBudgetMinutes) -ForegroundColor DarkGray
+                Write-Host ("      budget: {0} min - once spent, the hook only lets the wrap-up through (handoff/commit/report)" -f $SessionBudgetMinutes) -ForegroundColor DarkGray
             }
         } elseif ($state -eq 'disarmed') {
-            Write-Host ("  OK  #{0}: freno DESARMADO (marcador de un run previo retirado)" -f $IssueNum) -ForegroundColor DarkGray
+            Write-Host ("  OK  #{0}: brake DISARMED (marker from a previous run removed)" -f $IssueNum) -ForegroundColor DarkGray
         }
     } catch {
         if ($StopAtPR -or $SessionBudgetMinutes -gt 0) {
             # An unarmed run that believes it is armed is the #440 failure. Say so and refuse to
             # launch rather than spawn a session with a brake that exists only on paper.
-            Write-Host "  FAIL #${IssueNum}: no se pudo armar el freno ($_). No se lanza la sesion." -ForegroundColor Red
+            Write-Host "  FAIL #${IssueNum}: could not arm the brake ($_). The session is not launched." -ForegroundColor Red
             return $null
         }
         # A marker we failed to CLEAR only ever over-blocks, so that direction warns and continues.
-        Write-Host "  WARN #${IssueNum}: no pude retirar el marcador de freno previo ($_). El merge seguira bloqueado en ese worktree." -ForegroundColor DarkYellow
+        Write-Host "  WARN #${IssueNum}: could not remove the previous brake marker ($_). Merging stays blocked in that worktree." -ForegroundColor DarkYellow
     }
     # Persist the briefing so the spawned session reads it without command-line quoting.
     # Cross-repo facts were recorded in the session registry when the issue was started (#487), so a
@@ -2255,10 +2255,10 @@ function Start-WorktreeSession {
     try {
         if ($plan.usesWt) { $proc = Start-Process $plan.launcher -ArgumentList $plan.args -PassThru }
         else              { $proc = Start-Process $plan.launcher -ArgumentList $plan.args -WorkingDirectory $WorkPath -PassThru }
-        $how = if ($plan.usesWt) { "WT tab 'issue-$IssueNum'" } else { "ventana pwsh" }
-        Write-Host ("  OK  #{0}: sesion Claude lanzada ({1}) en {2}" -f $IssueNum, $how, $WorkPath) -ForegroundColor Green
+        $how = if ($plan.usesWt) { "WT tab 'issue-$IssueNum'" } else { "pwsh window" }
+        Write-Host ("  OK  #{0}: Claude session launched ({1}) in {2}" -f $IssueNum, $how, $WorkPath) -ForegroundColor Green
     } catch {
-        Write-Host "  FAIL #${IssueNum}: no se pudo lanzar la sesion: $_" -ForegroundColor Red
+        Write-Host "  FAIL #${IssueNum}: could not launch the session: $_" -ForegroundColor Red
     }
     # Attach the spawned process so the caller can track its real PID in the registry.
     # NOTE: a 'wt' process forks the terminal host and exits fast, so its PID is not a
@@ -2308,7 +2308,7 @@ function Get-SessionMetrics([int]$SessionPid) {
 
 # One-line CPU/RAM cell for the dashboard. Pure -> unit-testable.
 function Format-SessionMetric([object]$Metrics) {
-    if (-not $Metrics -or -not $Metrics.Alive) { return "PID muerto" }
+    if (-not $Metrics -or -not $Metrics.Alive) { return "PID dead" }
     return ("RAM {0} MB | CPU {1}s" -f $Metrics.RamMB, $Metrics.CpuSec)
 }
 
@@ -2318,10 +2318,10 @@ function Format-SessionMetric([object]$Metrics) {
 # PR opened for its branch.
 function Show-SessionFleet {
     $sessions = @(Read-SessionRegistry)
-    Write-Host "=== Flota de sesiones activas (esta maquina) ===" -ForegroundColor Cyan
+    Write-Host "=== Active session fleet (this machine) ===" -ForegroundColor Cyan
     Write-Host ""
     if ($sessions.Count -eq 0) {
-        Write-Host "No hay sesiones vivas registradas en .agentic-board/sessions.json." -ForegroundColor DarkGray
+        Write-Host "No live sessions recorded in .agentic-board/sessions.json." -ForegroundColor DarkGray
         return
     }
     foreach ($s in ($sessions | Sort-Object issue)) {
@@ -2330,17 +2330,17 @@ function Show-SessionFleet {
         Write-Host ("  #{0,-4} {1}  [{2}]" -f $s.issue, $s.branch, $cli) -ForegroundColor Yellow
         $hostSessionId = "$($s.hostSessionId)".Trim()
         if (Test-HostManagedSession $s) {
-            if (-not $hostSessionId) { $hostSessionId = "(pendiente de registrar)" }
+            if (-not $hostSessionId) { $hostSessionId = "(not registered yet)" }
             # Host-managed surface (#710 P1): sessionPid here is Get-HostManagedPidMarker, NOT a
             # real Windows process - never hand it to Get-Process (Get-SessionMetrics would just
-            # report it dead, which is exactly the false "PID muerto" this branch exists to avoid).
-            Write-Host ("        host-session {0} [{1}] | host {2} | desde {3}" -f $hostSessionId, "$($s.surface)", $s.host, $s.started) -ForegroundColor DarkGray
+            # report it dead, which is exactly the false "PID dead" this branch exists to avoid).
+            Write-Host ("        host-session {0} [{1}] | host {2} | since {3}" -f $hostSessionId, "$($s.surface)", $s.host, $s.started) -ForegroundColor DarkGray
         } else {
             # Live CPU/RAM for the tracked PID (mockable Get-Process behind Get-SessionMetrics).
             # Best-effort: a provider exception or a bad pid must never crash the dashboard loop.
-            $metric = "metricas n/d"
+            $metric = "metrics n/a"
             try { $metric = Format-SessionMetric (Get-SessionMetrics ([int]$s.sessionPid)) } catch { }
-            Write-Host ("        PID {0} via {1} | {2} | host {3} | desde {4}" -f $s.sessionPid, $via, $metric, $s.host, $s.started) -ForegroundColor DarkGray
+            Write-Host ("        PID {0} via {1} | {2} | host {3} | since {4}" -f $s.sessionPid, $via, $metric, $s.host, $s.started) -ForegroundColor DarkGray
         }
         if ($s.workPath) { Write-Host ("        {0}" -f $s.workPath) -ForegroundColor DarkGray }
         # Cross-repo (#487): the row says where the work goes and which PRs the session really has
@@ -2353,17 +2353,17 @@ function Show-SessionFleet {
         if ($xrTargets.Count -gt 0) {
             Write-Host ("        CROSS-REPO -> {0}" -f ($xrTargets -join ', ')) -ForegroundColor Magenta
         } elseif ($xrFlag) {
-            Write-Host "        CROSS-REPO (los repos objetivo estan en el issue)" -ForegroundColor Magenta
+            Write-Host "        CROSS-REPO (the target repos are listed in the issue)" -ForegroundColor Magenta
         }
         if ($xrPrs.Count -gt 0) {
             $xrStates = Get-SessionPrStates -Prs $xrPrs
             foreach ($ln in (Format-SessionPrLines -Prs $xrPrs -States $xrStates)) { Write-Host ("        {0}" -f $ln) -ForegroundColor DarkCyan }
             # Closure (#487): say whether the issue may be closed - only when EVERY recorded PR is merged.
             $xrVerdict = Get-IssueClosureVerdict -Prs $xrPrs -States $xrStates -TargetRepos $xrTargets
-            if ($xrVerdict.CanClose) { Write-Host "        LISTO PARA CERRAR: todos sus PRs estan mergeados (el issue se cierra a peticion tuya)." -ForegroundColor Green }
-            else                     { Write-Host ("        Todavia no se cierra: {0}." -f $xrVerdict.Reason) -ForegroundColor DarkYellow }
+            if ($xrVerdict.CanClose) { Write-Host "        READY TO CLOSE: all its PRs are merged (the issue closes when you ask)." -ForegroundColor Green }
+            else                     { Write-Host ("        Not closable yet: {0}." -f $xrVerdict.Reason) -ForegroundColor DarkYellow }
         } elseif ($xrFlag -or $xrTargets.Count -gt 0) {
-            Write-Host "        (aun no hay PRs anotados para esta sesion)" -ForegroundColor DarkGray
+            Write-Host "        (no PRs recorded for this session yet)" -ForegroundColor DarkGray
         } elseif ($s.repo -and $s.branch) {
             try {
                 $pr = @(gh pr list --repo $s.repo --head $s.branch --state all --json number,state,url --limit 1 2>$null | ConvertFrom-Json)
@@ -2379,7 +2379,7 @@ function Show-SessionFleet {
         } catch { }
     }
     Write-Host ""
-    Write-Host ("Total: {0} sesion(es) viva(s). Las de PID muerto se podaron automaticamente." -f $sessions.Count) -ForegroundColor Cyan
+    Write-Host ("Total: {0} live session(s). Sessions with a dead PID were pruned automatically." -f $sessions.Count) -ForegroundColor Cyan
 }
 
 # =======================================================================
@@ -2538,7 +2538,7 @@ function Invoke-CliProbe([string[]]$CommandLine, [int]$TimeoutSec = 30) {
 function Test-CliAvailability {
     param([Parameter(Mandatory)][object]$Adapter)
     if (-not (Get-Command $Adapter.Command -ErrorAction SilentlyContinue)) {
-        return [PSCustomObject]@{ Cli=$Adapter.Name; Status='not-installed'; Detail="$($Adapter.Command) no esta en PATH" }
+        return [PSCustomObject]@{ Cli=$Adapter.Name; Status='not-installed'; Detail="$($Adapter.Command) is not on PATH" }
     }
     $status = & $Adapter.Probe $null
     return [PSCustomObject]@{ Cli=$Adapter.Name; Status=$status; Detail='' }
@@ -2577,9 +2577,9 @@ function Show-CliAvailability([hashtable]$Availability) {
 
 # Install a not-installed CLI after explicit user approval, then re-probe. Impure.
 function Install-CliOnApproval([object]$Adapter) {
-    Write-Host ("  {0} no esta instalada. Comando: {1}" -f $Adapter.Name, $Adapter.InstallCmd) -ForegroundColor Yellow
-    $ans = Read-Host "  Instalar ahora? (s/N)"
-    if ($ans -notmatch '^[sSyY]') { Write-Host "  Omitida." -ForegroundColor DarkGray; return $false }
+    Write-Host ("  {0} is not installed. Command: {1}" -f $Adapter.Name, $Adapter.InstallCmd) -ForegroundColor Yellow
+    $ans = Read-Host "  Install now? (y/N)"
+    if ($ans -notmatch '^[sSyY]') { Write-Host "  Skipped." -ForegroundColor DarkGray; return $false }
     Invoke-Expression $Adapter.InstallCmd
     return ($LASTEXITCODE -eq 0)
 }
@@ -2591,7 +2591,7 @@ function Select-CliPerIssue([int[]]$Issues, [hashtable]$Availability) {
     $available = @($Availability.Keys | Where-Object { $Availability[$_] -eq 'ok' })
     $choices = @{}
     foreach ($i in $Issues) {
-        $ans = Read-Host ("  Que asistente trabaja el issue #{0}? [{1}] (Enter = claude)" -f $i, ($available -join '/'))
+        $ans = Read-Host ("  Which assistant works issue #{0}? [{1}] (Enter = claude)" -f $i, ($available -join '/'))
         if ($ans) { $choices[$i] = $ans.Trim().ToLower() }
     }
     return Resolve-IssueCliMap -Issues $Issues -Choices $choices -Availability $Availability
@@ -2646,9 +2646,9 @@ function Get-SessionCompletion {
     if ($PrState -eq 'MERGED' -and $PrHeadOid -and $BranchTip -and $PrHeadOid -eq $BranchTip) {
         return [pscustomobject]@{ done = $true; reason = 'PR merged'; merged = $true }
     }
-    if ($IssueState -eq 'CLOSED') { return [pscustomobject]@{ done = $true;  reason = 'issue cerrado';    merged = $false } }
-    if (-not $PidAlive)           { return [pscustomobject]@{ done = $true;  reason = 'proceso terminado'; merged = $false } }
-    return [pscustomobject]@{ done = $false; reason = 'en progreso'; merged = $false }
+    if ($IssueState -eq 'CLOSED') { return [pscustomobject]@{ done = $true;  reason = 'issue closed';    merged = $false } }
+    if (-not $PidAlive)           { return [pscustomobject]@{ done = $true;  reason = 'process ended'; merged = $false } }
+    return [pscustomobject]@{ done = $false; reason = 'in progress'; merged = $false }
 }
 
 # Classify the CURRENT branch's disposition for close-cycle (#302/#650), and route it. PURE:
@@ -2709,7 +2709,7 @@ function Get-CloseLoopDisposition {
 # Rate-limit protection (#414): when gh reports a rate-limit error we return
 # { done=$false; reason='UNKNOWN (rate limit)' } rather than falling through to the PID
 # signal. A dead PID after a rate-limit failure looks identical to a verified completion —
-# both print "LISTO: proceso terminado" — so the distinction matters.
+# both print "DONE: process ended" — so the distinction matters.
 function Get-SessionLiveStatus {
     param([object]$Session)
     $prState = ''; $issueState = ''; $prHeadOid = ''; $branchTip = ''; $rateLimited = $false
@@ -2976,7 +2976,7 @@ function Invoke-SessionCleanup {
     if ($PrMerged -and $Session.workPath -and -not $ForceRemoveWorktree) {
         $brake = Get-SessionBrakeVerdict -WorkPath $Session.workPath
         if ($brake.Armed -and $brake.BrakesMerge) {
-            $actions += "WARN conservo TODO de #$($Session.issue) ($($Session.workPath)): su PR quedo MERGEADO y esa corrida tenia el FRENO armado (merge = irreversible). O mergeaste tu tras revisar (esperado) o la corrida se salto el freno; el worktree guarda la evidencia (brake-armed.json, denials.jsonl). Verifica quien mergeo y, si esta bien, reintenta con -ForceRemoveWorktree"
+            $actions += "WARN keeping EVERYTHING of #$($Session.issue) ($($Session.workPath)): its PR ended up MERGED and that run had the BRAKE armed (merge = irreversible). Either you merged after reviewing (expected) or the run skipped the brake; the worktree holds the evidence (brake-armed.json, denials.jsonl). Check who merged and, if it is fine, retry with -ForceRemoveWorktree"
             return $actions
         }
     }
@@ -2989,7 +2989,7 @@ function Invoke-SessionCleanup {
     # below by its launch script; in-place skips the kill and lets the worktree removal report
     # a held handle if a shell still has it open.
     if ($Session.sessionPid -and $Session.via -eq 'pwsh') {
-        $actions += "kill PID $($Session.sessionPid) (ventana pwsh propia - libera el worktree)"
+        $actions += "kill PID $($Session.sessionPid) (its own pwsh window - frees the worktree)"
         if (-not $DryRun) { Stop-ProcessTree -TargetPid ([int]$Session.sessionPid) | Out-Null }
     } elseif ($Session.via -eq 'wt') {
         # Find the tab shell by its launch script: `wt` spawns `pwsh -NoExit -File launch-<n>.ps1`.
@@ -2997,13 +2997,13 @@ function Invoke-SessionCleanup {
         # for a different issue. Find-WtTabShell is mockable in tests (#413).
         $tabShell = Find-WtTabShell $Session.issue
         if ($tabShell) {
-            $actions += "kill PID $($tabShell.ProcessId) (pwsh tab shell de wt, launch-$($Session.issue).ps1 - libera el worktree)"
+            $actions += "kill PID $($tabShell.ProcessId) (wt pwsh tab shell, launch-$($Session.issue).ps1 - frees the worktree)"
             if (-not $DryRun) {
                 Stop-ProcessTree -TargetPid ([int]$tabShell.ProcessId) | Out-Null
                 Start-Sleep -Milliseconds 500   # give the OS time to release the directory handle
             }
         } else {
-            $actions += "tab shell de wt no encontrado para issue #$($Session.issue) (ya cerrado o no lanzado via wt)"
+            $actions += "wt tab shell not found for issue #$($Session.issue) (already closed or not launched via wt)"
         }
     }
     # The removal below is --force, which also wipes a DIRTY worktree, destroying whatever the
@@ -3029,13 +3029,13 @@ function Invoke-SessionCleanup {
         # output, which must NOT be read as "clean" - that would hand the --force exactly the
         # case we cannot vouch for (Codex review, PR #277).
         if ($LASTEXITCODE -ne 0) {
-            $actions += "WARN conservo el worktree $($Session.workPath) (#$($Session.issue)): no pude comprobar si tiene cambios sin commitear [git status fallo]. Revisalo a mano, o descartalo con -ForceRemoveWorktree"
+            $actions += "WARN keeping worktree $($Session.workPath) (#$($Session.issue)): could not check for uncommitted changes [git status failed]. Review it by hand, or discard it with -ForceRemoveWorktree"
             return $actions
         }
         $dirty = ($out -join "`n").Trim()
         if ($dirty) {
             $n = @($dirty -split "`n" | Where-Object { $_.Trim() }).Count
-            $actions += "WARN conservo el worktree $($Session.workPath) (#$($Session.issue)): $n archivo(s) sin commitear se perderian. Revisalos y commitealos, o descartalos con -ForceRemoveWorktree"
+            $actions += "WARN keeping worktree $($Session.workPath) (#$($Session.issue)): $n uncommitted file(s) would be lost. Review and commit them, or discard them with -ForceRemoveWorktree"
             return $actions
         }
     }
@@ -3054,7 +3054,7 @@ function Invoke-SessionCleanup {
     # This is the designed case for a `wt` session, whose shell is deliberately never killed above.
     $worktreeGone = $true
     if ($isMainCopy) {
-        $actions += "SKIP no toco $($Session.workPath) (#$($Session.issue)): es el working copy principal (o una carpeta dentro de el), no un worktree enlazado - nunca se borra. Sesion anterior al flujo de worktrees: solo se poda su registro"
+        $actions += "SKIP not touching $($Session.workPath) (#$($Session.issue)): it is the main working copy (or a folder inside it), not a linked worktree - it is never deleted. Session from before the worktree flow: only its registry entry is pruned"
     } elseif ($Session.workPath) {
         $actions += "git worktree remove --force $($Session.workPath)"
         if (-not $DryRun) {
@@ -3065,7 +3065,7 @@ function Invoke-SessionCleanup {
             $after = (git worktree list --porcelain 2>$null) -join "`n"
             if ($LASTEXITCODE -ne 0) {
                 # FAIL CLOSED: "I could not ask git" is not "it is gone" (the #277 rule).
-                $actions += "FAIL no pude releer 'git worktree list' tras el remove - conservo la rama y el registro de #$($Session.issue) para reintentar"
+                $actions += "FAIL could not re-read 'git worktree list' after the remove - keeping the branch and registry entry of #$($Session.issue) to retry"
                 return $actions
             }
             $worktreeGone = -not (Test-WorktreeStillRegistered -Porcelain $after -Path $wtPathForGit -Branch $Session.branch)
@@ -3074,15 +3074,15 @@ function Invoke-SessionCleanup {
             if ($worktreeGone -and (Test-Path -LiteralPath $Session.workPath)) {
                 Remove-Item -LiteralPath $Session.workPath -Recurse -Force -ErrorAction SilentlyContinue
                 if (Test-Path $Session.workPath) {
-                    $actions += "NOTA git solto el worktree pero la carpeta sigue en disco: $($Session.workPath) - borrarla a mano si persiste"
+                    $actions += "NOTE git released the worktree but the folder is still on disk: $($Session.workPath) - delete it by hand if it persists"
                 } else {
-                    $actions += "carpeta del worktree eliminada: $($Session.workPath)"
+                    $actions += "worktree folder deleted: $($Session.workPath)"
                 }
             }
         }
     }
     if (-not $worktreeGone) {
-        $actions += "FAIL git sigue registrando el worktree de #$($Session.issue) (handle abierto?) - conservo la rama y el registro para reintentar"
+        $actions += "FAIL git still registers the worktree of #$($Session.issue) (open handle?) - keeping the branch and registry entry to retry"
         return $actions
     }
     # Deleting the branch is only safe once the work is somewhere else (#273). -PrMerged is
@@ -3108,11 +3108,11 @@ function Invoke-SessionCleanup {
             # branch checked out elsewhere - do not assert a cause we did not verify.
             $why = ((git branch $flag $Session.branch 2>&1) -join ' ').Trim()
             if ($LASTEXITCODE -ne 0) {
-                $actions += "WARN conservo la rama $($Session.branch) (#$($Session.issue)): git no la borro [$why]. Revisala antes de descartarla (-ForceDeleteBranch reintenta con -D)"
+                $actions += "WARN keeping branch $($Session.branch) (#$($Session.issue)): git did not delete it [$why]. Review it before discarding it (-ForceDeleteBranch retries with -D)"
             }
         }
     }
-    $actions += "prune #$($Session.issue) de sessions.json"
+    $actions += "prune #$($Session.issue) from sessions.json"
     if (-not $DryRun) { Remove-SessionRegistryEntry -IssueNum ([int]$Session.issue) -Outcome $(if ($PrMerged) { 'pr-merged' } else { 'cleaned' }) }
     return $actions
 }
@@ -3159,7 +3159,7 @@ function Invoke-SessionWatch {
                         -WindowStyle Hidden -PassThru -RedirectStandardOutput $outF -RedirectStandardError $errF
                 if (-not $p.WaitForExit(120000)) {
                     try { $p.Kill() } catch { }
-                    Write-Host "  WARN supervisor: no termino en 120s - se corto (senal best-effort)." -ForegroundColor DarkYellow
+                    Write-Host "  WARN supervisor: did not finish in 120s - it was cut off (best-effort signal)." -ForegroundColor DarkYellow
                 }
                 if (Test-Path $outF) { Get-Content $outF | ForEach-Object { Write-Host $_ }; Remove-Item $outF, $errF -Force -ErrorAction SilentlyContinue }
             } catch {
@@ -3177,7 +3177,7 @@ function Invoke-SessionWatch {
         # Only poll sessions not yet known to be done (#414 — drop from polling set on LISTO).
         $sessions = @(& $ReadSessions | Where-Object { -not $doneSet.ContainsKey([int]$_.issue) })
         if ($sessions.Count -eq 0) {
-            Write-Host "  No hay sesiones vivas que observar." -ForegroundColor DarkGray
+            Write-Host "  No live sessions to watch." -ForegroundColor DarkGray
             return [pscustomobject]@{ allDone = $true; timedOut = $false; cleaned = @($cleaned.Keys) }
         }
         $pending = 0
@@ -3185,7 +3185,7 @@ function Invoke-SessionWatch {
             # Zombie stale-prune (#414): dead PID + workPath missing → nothing to clean up,
             # skip the gh calls and remove the entry directly.
             if (& $IsStale $s) {
-                Write-Host ("  #{0,-4} SKIP: zombie session pruned (PID muerto, worktree ausente)" -f $s.issue) -ForegroundColor DarkGray
+                Write-Host ("  #{0,-4} SKIP: zombie session pruned (PID dead, worktree missing)" -f $s.issue) -ForegroundColor DarkGray
                 $doneSet[[int]$s.issue] = $true
                 if (-not $DryRun) { Remove-SessionRegistryEntry -IssueNum ([int]$s.issue) -Outcome 'stale-prune' }
                 continue
@@ -3193,7 +3193,7 @@ function Invoke-SessionWatch {
             $st = & $GetStatus $s
             if ($st.done) {
                 $doneSet[[int]$s.issue] = $true   # don't re-poll this session (#414)
-                Write-Host ("  #{0,-4} LISTO: {1}" -f $s.issue, $st.reason) -ForegroundColor Green
+                Write-Host ("  #{0,-4} DONE: {1}" -f $s.issue, $st.reason) -ForegroundColor Green
                 if ($AutoClean -and -not $cleaned.ContainsKey([int]$s.issue)) {
                     $cleaned[[int]$s.issue] = $true
                     # Carry the completion REASON into the teardown: only a merged PR licenses
@@ -3212,11 +3212,11 @@ function Invoke-SessionWatch {
             }
         }
         if ($pending -eq 0) {
-            Write-Host "  Todas las sesiones terminaron." -ForegroundColor Green
+            Write-Host "  All sessions finished." -ForegroundColor Green
             return [pscustomobject]@{ allDone = $true; timedOut = $false; cleaned = @($cleaned.Keys) }
         }
         if ((((& $Now) - $start)).TotalSeconds -ge $TimeoutSec) {
-            Write-Host ("  Timeout ({0}s) con {1} sesion(es) aun en progreso." -f $TimeoutSec, $pending) -ForegroundColor DarkYellow
+            Write-Host ("  Timeout ({0}s) with {1} session(s) still in progress." -f $TimeoutSec, $pending) -ForegroundColor DarkYellow
             # Final supervisor pass BEFORE leaving (#565 review): with the defaults, the stall
             # threshold (30 min) and the watch timeout (30 min) coincide, so returning here
             # without one last -Post pass meant a full default watch could end with the stall
@@ -3247,10 +3247,10 @@ function Invoke-BatchIssueStart {
                                  -Base $Base -BaseCurrent:$BaseCurrent -DryRunStart:$DryRun `
                                  -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver -SkipWorktree:$SkipWorktree
     } catch {
-        Write-Host ("  SKIP #{0}: error al iniciar - {1}" -f $IssueNum, $_.Exception.Message) -ForegroundColor Red
+        Write-Host ("  SKIP #{0}: error while starting - {1}" -f $IssueNum, $_.Exception.Message) -ForegroundColor Red
         return [PSCustomObject]@{
             issue = $IssueNum; title = ""; repo = ""; branch = ""; workPath = ""
-            started = $false; dryRun = [bool]$DryRun; skipped = "error al iniciar: $($_.Exception.Message)"
+            started = $false; dryRun = [bool]$DryRun; skipped = "error while starting: $($_.Exception.Message)"
         }
     }
 }
@@ -3318,88 +3318,88 @@ if ($Reap -or $KillAll) {
         $filter = "Name='pwsh.exe' OR Name='node.exe'"
         $procs  = @(Get-CimInstance -ClassName Win32_Process -Filter $filter -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
         $candidates = @($procs | Where-Object { (Get-FleetIssueFromCommandLine $_.CommandLine) -gt 0 })
-        $label = "TODA la flota (-KillAll)"
+        $label = "the WHOLE fleet (-KillAll)"
     } else {
         $candidates = @(Find-FleetOrphans)
-        $label = "huerfanos escapados (-Reap)"
+        $label = "escaped orphans (-Reap)"
     }
     Write-Host ("=== Fleet reap: {0} ===" -f $label) -ForegroundColor Cyan
-    if ($candidates.Count -eq 0) { Write-Host "  No hay candidatos. Nada que hacer." -ForegroundColor DarkGray; exit 0 }
+    if ($candidates.Count -eq 0) { Write-Host "  No candidates. Nothing to do." -ForegroundColor DarkGray; exit 0 }
     $plan = @(Invoke-FleetReap -Candidates $candidates -KillLive:$killLive -DryRun)
     foreach ($r in $plan) {
         $cand  = $candidates | Where-Object { [int]$_.ProcessId -eq $r.Pid } | Select-Object -First 1
         $issue = if ($cand) { Get-FleetIssueFromCommandLine $cand.CommandLine } else { 0 }
-        if ($r.Refused) { Write-Host ("  #{0,-4} PID {1} PROTEGIDO: {2}" -f $issue, $r.Pid, $r.Reason) -ForegroundColor DarkYellow }
+        if ($r.Refused) { Write-Host ("  #{0,-4} PID {1} PROTECTED: {2}" -f $issue, $r.Pid, $r.Reason) -ForegroundColor DarkYellow }
         else            { Write-Host ("  #{0,-4} PID {1} -> {2}" -f $issue, $r.Pid, $r.Command) -ForegroundColor Yellow }
     }
     $killable = @($plan | Where-Object { -not $_.Refused })
     if (-not $Force) {
         Write-Host ""
-        Write-Host ("  {0} matable(s), {1} protegido(s). Re-ejecuta con -Force para matarlos." -f $killable.Count, ($plan.Count - $killable.Count)) -ForegroundColor Cyan
+        Write-Host ("  {0} killable, {1} protected. Re-run with -Force to kill them." -f $killable.Count, ($plan.Count - $killable.Count)) -ForegroundColor Cyan
         exit 0
     }
     $done = @(Invoke-FleetReap -Candidates $candidates -KillLive:$killLive)
-    Write-Host ("  Matados: {0} de {1} candidato(s)." -f @($done | Where-Object { $_.Killed }).Count, $done.Count) -ForegroundColor Green
+    Write-Host ("  Killed: {0} of {1} candidate(s)." -f @($done | Where-Object { $_.Killed }).Count, $done.Count) -ForegroundColor Green
     exit 0
 }
 
 if ($Stop -gt 0) {
     $sess = @(Read-SessionRegistry | Where-Object { $_.issue -eq $Stop }) | Select-Object -First 1
-    if (-not $sess) { Write-Host "  No hay sesion viva registrada para #$Stop." -ForegroundColor DarkYellow; exit 0 }
+    if (-not $sess) { Write-Host "  No live session recorded for #$Stop." -ForegroundColor DarkYellow; exit 0 }
     # Host-managed (#710 P1, external review round 1): Read-SessionRegistry reports this row alive
     # via Get-HostManagedPidMarker, NOT a real pid - Stop-ProcessTree must never be handed that
     # sentinel (it would build a kill command for a process that is not this session's, if it
     # exists at all). The host owns this process; only the host can stop it.
     if (Test-HostManagedSession $sess) {
         if ("$($sess.hostSessionId)".Trim()) {
-            Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): detenla desde el host - no hay proceso local que -Stop pueda matar." -f $Stop, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
+            Write-Host ("  #{0} is a host-managed session (surface {1}, hostSessionId {2}): stop it from the host - there is no local process -Stop can kill." -f $Stop, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
             exit 0
         }
-        # Despachada pero nunca registrada: no hay sesion del host que detener, solo una fila
-        # pendiente. Refusarla dejaba al usuario sin forma de quitarla (external review round 7),
-        # asi que -Stop la des-registra, que es exactamente lo unico que hay que deshacer aqui.
+        # Dispatched but never registered: there is no host session to stop, only a pending row.
+        # Refusing it left the user with no way to remove it (external review round 7), so -Stop
+        # unregisters it, which is exactly the only thing to undo here.
         if (-not $Force) {
-            Write-Host ("  #{0} esta despachada en surface {1} pero nunca se registro: no hay proceso que matar. -Force quita la fila pendiente." -f $Stop, "$($sess.surface)") -ForegroundColor Cyan
+            Write-Host ("  #{0} was dispatched on surface {1} but never registered: there is no process to kill. -Force removes the pending row." -f $Stop, "$($sess.surface)") -ForegroundColor Cyan
             exit 0
         }
         Remove-SessionRegistryEntry -IssueNum $Stop -Outcome 'pending-dispatch-cancelled'
-        Write-Host ("  #{0} fila pendiente quitada (nunca se registro con el host)." -f $Stop) -ForegroundColor Green
-        # El despacho ya habia movido el issue a In Progress y lo habia asignado. Quitar la fila es
-        # lo unico que -Stop puede hacer sin token (es un modo LOCAL por contrato), asi que decirlo
-        # es obligatorio: callarlo dejaba el board reclamado para siempre sin que nadie lo supiera
-        # (external review round 8). -Unlock es el paso que lo revierte en uno solo.
-        Write-Host ("  OJO: en el board el issue #{0} sigue En Progreso y asignado - quitar la fila no toca GitHub." -f $Stop) -ForegroundColor DarkYellow
-        Write-Host ("       Para liberarlo: /board work -Unlock {0} -ProjectNum <n>" -f $Stop) -ForegroundColor DarkGray
+        Write-Host ("  #{0} pending row removed (it never registered with the host)." -f $Stop) -ForegroundColor Green
+        # The dispatch had already moved the issue to In Progress and assigned it. Removing the row is
+        # the only thing -Stop can do without a token (it is a LOCAL mode by contract), so saying so
+        # is mandatory: keeping quiet left the board claimed forever without anyone knowing
+        # (external review round 8). -Unlock is the single step that reverts it.
+        Write-Host ("  NOTE: on the board, issue #{0} is still In Progress and assigned - removing the row does not touch GitHub." -f $Stop) -ForegroundColor DarkYellow
+        Write-Host ("       To release it: /board work -Unlock {0} -ProjectNum <n>" -f $Stop) -ForegroundColor DarkGray
         exit 0
     }
     $r = Stop-ProcessTree -TargetPid ([int]$sess.sessionPid) -DryRun:(-not $Force)
-    if ($r.Refused)  { Write-Host ("  #{0} PID {1} PROTEGIDO: {2}" -f $Stop, $r.Pid, $r.Reason) -ForegroundColor DarkYellow; exit 0 }
-    if (-not $Force) { Write-Host ("  #{0} -> {1}`n  (re-ejecuta con -Force para matar)" -f $Stop, $r.Command) -ForegroundColor Cyan; exit 0 }
+    if ($r.Refused)  { Write-Host ("  #{0} PID {1} PROTECTED: {2}" -f $Stop, $r.Pid, $r.Reason) -ForegroundColor DarkYellow; exit 0 }
+    if (-not $Force) { Write-Host ("  #{0} -> {1}`n  (re-run with -Force to kill)" -f $Stop, $r.Command) -ForegroundColor Cyan; exit 0 }
     Write-Host ("  #{0} PID {1} killed={2}" -f $Stop, $r.Pid, $r.Killed) -ForegroundColor Green
     exit 0
 }
 
 if ($Relaunch -gt 0) {
     $sess = @(Read-SessionRegistry | Where-Object { $_.issue -eq $Relaunch }) | Select-Object -First 1
-    if (-not $sess) { Write-Host "  No hay sesion registrada para #$Relaunch." -ForegroundColor DarkYellow; exit 0 }
+    if (-not $sess) { Write-Host "  No session recorded for #$Relaunch." -ForegroundColor DarkYellow; exit 0 }
     # Host-managed (#710 P1, external review round 1): same reason as -Stop above - the sentinel pid
     # must never reach Stop-ProcessTree, and there is no local worktree this script controls to
     # relaunch a session into (the host created it, and only the host can relaunch it).
     if (Test-HostManagedSession $sess) {
-        Write-Host ("  #{0} es una sesion host-managed (surface {1}, hostSessionId {2}): relanzala desde el host - no hay proceso ni worktree local que -Relaunch pueda controlar." -f $Relaunch, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
+        Write-Host ("  #{0} is a host-managed session (surface {1}, hostSessionId {2}): relaunch it from the host - there is no local process or worktree -Relaunch can control." -f $Relaunch, "$($sess.surface)", $sess.hostSessionId) -ForegroundColor DarkYellow
         exit 0
     }
     $cli = if ($sess.cli) { $sess.cli } else { 'claude' }
     if (-not $Force) {
-        Write-Host ("  Relaunch #{0}: mataria PID {1} y relanzaria [{2}] en {3}." -f $Relaunch, $sess.sessionPid, $cli, $sess.workPath) -ForegroundColor Cyan
-        Write-Host "  (re-ejecuta con -Force para ejecutar)" -ForegroundColor DarkGray
+        Write-Host ("  Relaunch #{0}: would kill PID {1} and relaunch [{2}] in {3}." -f $Relaunch, $sess.sessionPid, $cli, $sess.workPath) -ForegroundColor Cyan
+        Write-Host "  (re-run with -Force to execute)" -ForegroundColor DarkGray
         exit 0
     }
     # Honor the guarded stop: if it was refused (self/ancestor, or fail-closed no-map) the
     # old session is still alive - do NOT relaunch or rewrite the registry.
     $stopRes = Stop-ProcessTree -TargetPid ([int]$sess.sessionPid)
     if ($stopRes.Refused) {
-        Write-Host ("  Relaunch #{0} ABORTADO: no se pudo detener PID {1}: {2}" -f $Relaunch, $stopRes.Pid, $stopRes.Reason) -ForegroundColor Red
+        Write-Host ("  Relaunch #{0} ABORTED: could not stop PID {1}: {2}" -f $Relaunch, $stopRes.Pid, $stopRes.Reason) -ForegroundColor Red
         exit 1
     }
     $oauthPresent = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN','User')
@@ -3412,7 +3412,7 @@ if ($Relaunch -gt 0) {
     # then would fall back to the coordinator PID and poison the registry - so only record a
     # session that actually launched.
     if (-not $spawn) {
-        Write-Host ("  Relaunch #{0} FALLO: el worktree no existe o no se pudo lanzar - registro intacto." -f $Relaunch) -ForegroundColor Red
+        Write-Host ("  Relaunch #{0} FAILED: the worktree does not exist or could not be launched - registry untouched." -f $Relaunch) -ForegroundColor Red
         exit 1
     }
     Register-LaunchedSession -Spawn $spawn -IssueNum $Relaunch -Cli $cli -FleetSession $marker
@@ -3427,10 +3427,10 @@ if ($Relaunch -gt 0) {
 # =======================================================================
 if ($RecordPr) {
     $ref = Get-PullRequestRef $RecordPr
-    if (-not $ref)         { Write-Host "  -RecordPr espera owner/name#numero (o la URL del PR); recibi '$RecordPr'." -ForegroundColor Red; exit 1 }
-    if ($ForIssue -le 0)   { Write-Host "  -RecordPr necesita -ForIssue <numero del issue de la sesion>." -ForegroundColor Red; exit 1 }
+    if (-not $ref)         { Write-Host "  -RecordPr expects owner/name#number (or the PR URL); got '$RecordPr'." -ForegroundColor Red; exit 1 }
+    if ($ForIssue -le 0)   { Write-Host "  -RecordPr needs -ForIssue <the session's issue number>." -ForegroundColor Red; exit 1 }
     $rec = Add-SessionPullRequest -IssueNum $ForIssue -Repo $ref.Repo -Number $ref.Number
-    if (-not $rec.Ok) { Write-Host "  NO anotado: $($rec.Message)" -ForegroundColor Red; exit 1 }
+    if (-not $rec.Ok) { Write-Host "  NOT recorded: $($rec.Message)" -ForegroundColor Red; exit 1 }
     Write-Host "  OK  $($rec.Message)" -ForegroundColor Green
     exit 0
 }
@@ -3442,10 +3442,10 @@ if ($RecordPr) {
 # started that way - the same "never invent a session" rule -RecordPr follows above.
 # =======================================================================
 if ($RegisterSession) {
-    if ($Issue -le 0)        { Write-Host "  -RegisterSession necesita -Issue <numero>." -ForegroundColor Red; exit 1 }
-    if (-not $HostSessionId) { Write-Host "  -RegisterSession necesita -HostSessionId <id> (el id que devolvio la herramienta del host)." -ForegroundColor Red; exit 1 }
+    if ($Issue -le 0)        { Write-Host "  -RegisterSession needs -Issue <number>." -ForegroundColor Red; exit 1 }
+    if (-not $HostSessionId) { Write-Host "  -RegisterSession needs -HostSessionId <id> (the id the host tool returned)." -ForegroundColor Red; exit 1 }
     $rec = Register-HostSession -IssueNum $Issue -HostSessionId $HostSessionId -RunId $RunId
-    if (-not $rec.Ok) { Write-Host "  NO registrado: $($rec.Message)" -ForegroundColor Red; exit 1 }
+    if (-not $rec.Ok) { Write-Host "  NOT registered: $($rec.Message)" -ForegroundColor Red; exit 1 }
     Write-Host "  OK  $($rec.Message)" -ForegroundColor Green
     exit 0
 }
@@ -3461,18 +3461,18 @@ if ($PreferGroupedPRs -eq 'show') {
     # in silence - but the first line still carries the value the tool will actually use.
     $read    = Read-BoardConfig -Path (Get-BoardConfigPath)
     $setting = Get-GroupingSetting $read.config
-    Write-Host ("PRs agrupados: " + (Format-GroupingSettingLabel $setting))
+    Write-Host ("Grouped PRs: " + (Format-GroupingSettingLabel $setting))
     if (-not $read.ok) {
-        Write-Host "  No pude leer la preferencia del repo ($($read.error)); se usa el criterio por defecto." -ForegroundColor Yellow
+        Write-Host "  Could not read the repo preference ($($read.error)); using the default." -ForegroundColor Yellow
     }
-    Write-Host "  on = juntar en un solo PR lo que se solape, sin preguntar | off = un PR por issue | auto = proponerlo y decides tu" -ForegroundColor DarkGray
-    Write-Host "  Cambiarlo: /board work -PreferGroupedPRs on|off|auto" -ForegroundColor DarkGray
+    Write-Host "  on = put whatever overlaps in a single PR, without asking | off = one PR per issue | auto = propose it and you decide" -ForegroundColor DarkGray
+    Write-Host "  Change it: /board work -PreferGroupedPRs on|off|auto" -ForegroundColor DarkGray
     exit 0
 }
 if ($PreferGroupedPRs) {
     $cfgPath = Get-BoardConfigPath
     if (-not $cfgPath) {
-        Write-Host "No estoy dentro de un repo git, asi que no hay donde guardar la preferencia." -ForegroundColor Red
+        Write-Host "Not inside a git repo, so there is nowhere to save the preference." -ForegroundColor Red
         exit 1
     }
     $value = switch ($PreferGroupedPRs) {
@@ -3488,20 +3488,20 @@ if ($PreferGroupedPRs) {
     $posture = Resolve-GroupingPosture $check.config
     $expected = switch ($PreferGroupedPRs) { 'on' { 'always' } 'off' { 'never' } 'auto' { 'auto' } }
     if (-not $check.ok -or $posture -ne $expected) {
-        Write-Host "No pude guardar la preferencia: la volvi a leer y no dice lo que escribi." -ForegroundColor Red
+        Write-Host "Could not save the preference: I read it back and it does not say what I wrote." -ForegroundColor Red
         if ($check.error) { Write-Host "  $($check.error)" -ForegroundColor DarkGray }
         exit 1
     }
 
     $said = switch ($posture) {
-        'always' { 'juntar en un solo PR los que se solapen, sin preguntarte cada vez' }
-        'never'  { 'un PR por issue, sin agrupar' }
-        'auto'   { 'proponerte juntarlos cuando se solapen, y lo decides tu' }
+        'always' { 'put the issues that overlap in a single PR, without asking you each time' }
+        'never'  { 'one PR per issue, no grouping' }
+        'auto'   { 'propose grouping them when they overlap, and you decide' }
     }
-    Write-Host "=== Preferencia del repo guardada ===" -ForegroundColor Cyan
+    Write-Host "=== Repo preference saved ===" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  De ahora en adelante: $said." -ForegroundColor Green
-    Write-Host "  Queda con el repo, asi que no hay que repetirlo cada sesion." -ForegroundColor DarkGray
+    Write-Host "  From now on: $said." -ForegroundColor Green
+    Write-Host "  It stays with the repo, so you do not have to repeat it every session." -ForegroundColor DarkGray
     Write-Host ""
     exit 0
 }
@@ -3527,24 +3527,24 @@ if ($Base -and $BaseCurrent) { throw "-Base and -BaseCurrent are mutually exclus
 # ==============================================================================
 if ($CloseCrossRepo -gt 0) {
     $plan = Get-CrossRepoClosurePlan -IssueNum $CloseCrossRepo
-    if (-not $plan.Ok) { Write-Host "  NO cierro: $($plan.Error)" -ForegroundColor Red; exit 1 }
+    if (-not $plan.Ok) { Write-Host "  NOT closing: $($plan.Error)" -ForegroundColor Red; exit 1 }
     foreach ($ln in (Format-ClosurePlanLines -IssueNum $CloseCrossRepo -Repo $plan.Repo -Prs $plan.Prs -States $plan.States -Verdict $plan.Verdict)) {
         Write-Host "  $ln" -ForegroundColor $(if ($plan.Verdict.CanClose) { 'Green' } else { 'Yellow' })
     }
     if (-not $plan.Verdict.CanClose) { exit 1 }
     try {
         $now = Invoke-Gh -GhArgs @('issue', 'view', "$CloseCrossRepo", '--repo', $plan.Repo, '--json', 'state') `
-                         -What "leer el estado del issue $($plan.Repo)#$CloseCrossRepo" -Json
-    } catch { Write-Host "  NO cierro: no pude leer el estado del issue ($($_.Exception.Message))." -ForegroundColor Red; exit 1 }
-    if ("$($now.state)" -ne 'OPEN') { Write-Host "  El issue ya esta '$($now.state)': nada que hacer." -ForegroundColor DarkGray; exit 0 }
+                         -What "read the state of issue $($plan.Repo)#$CloseCrossRepo" -Json
+    } catch { Write-Host "  NOT closing: could not read the issue state ($($_.Exception.Message))." -ForegroundColor Red; exit 1 }
+    if ("$($now.state)" -ne 'OPEN') { Write-Host "  The issue is already '$($now.state)': nothing to do." -ForegroundColor DarkGray; exit 0 }
     if ($DryRun -or -not $Force) {
-        Write-Host "  No cerre nada. Confirma y lo cierro." -ForegroundColor Cyan
+        Write-Host "  Nothing closed. Confirm and I will close it." -ForegroundColor Cyan
         exit 0
     }
     $body = "All $($plan.Verdict.Total) recorded pull request(s) are merged: " + ((@($plan.Prs) | ForEach-Object { "$($_.repo)#$($_.number)" }) -join ', ') + '.'
     $null = Invoke-Gh -GhArgs @('issue', 'close', "$CloseCrossRepo", '--repo', $plan.Repo, '--reason', 'completed', '--comment', $body) `
-                      -What "cerrar el issue $($plan.Repo)#$CloseCrossRepo"
-    Write-Host "  OK  issue $($plan.Repo)#$CloseCrossRepo cerrado (todos sus PRs estaban mergeados)." -ForegroundColor Green
+                      -What "close issue $($plan.Repo)#$CloseCrossRepo"
+    Write-Host "  OK  issue $($plan.Repo)#$CloseCrossRepo closed (all its PRs were merged)." -ForegroundColor Green
     exit 0
 }
 
@@ -3552,7 +3552,7 @@ if ($CloseCrossRepo -gt 0) {
 # -Parallel would leave it ambiguous which mode actually ran.
 $groupQueue = @(Get-ParallelQueue $StartGroup)
 if ($groupQueue.Count -gt 0 -and ($Start -gt 0 -or $Parallel.Count -gt 0)) {
-    throw "-StartGroup es mutuamente exclusivo con -Start y -Parallel: son tres modos distintos de arrancar issues."
+    throw "-StartGroup is mutually exclusive with -Start and -Parallel: they are three different ways to start issues."
 }
 
 # =======================================================================
@@ -3565,13 +3565,13 @@ if ($groupQueue.Count -gt 0 -and ($Start -gt 0 -or $Parallel.Count -gt 0)) {
 # claim, moves Status back to Backlog, and unassigns the owner.
 # =======================================================================
 if ($Lock -gt 0 -or $Unlock -gt 0) {
-    if ($ProjectNum -le 0) { throw "-Lock/-Unlock necesitan -ProjectNum <n> para mover el Status." }
+    if ($ProjectNum -le 0) { throw "-Lock/-Unlock need -ProjectNum <n> to move the Status." }
     $lockUrl = Get-BoardUrl $ProjectNum
     $locking = ($Lock -gt 0)
     $n       = if ($locking) { $Lock } else { $Unlock }
     $ctx     = Resolve-BoardStatus $Owner $ProjectNum
     $item    = Get-BoardItem $ctx.projectId $n
-    if (-not $item) { throw "Issue #$n no esta en el board #$ProjectNum." }
+    if (-not $item) { throw "Issue #$n is not on board #$ProjectNum." }
     $repo       = $item.content.repository.nameWithOwner
     $note       = if ($locking) { 'LOCK' } else { 'UNLOCK' }
     # Resolve through the vocabulary: on a legacy board the release target is 'Todo', and
@@ -3580,13 +3580,13 @@ if ($Lock -gt 0 -or $Unlock -gt 0) {
     $targetName = if ($locking) { 'In Progress' } else { 'Backlog' }
     $targetOpt  = if ($locking) { $ctx.inProgId } else { Resolve-StatusOptionId $ctx.statusNode 'Backlog' }
     if (-not $targetOpt) {
-        throw "El board #$ProjectNum no tiene una opcion de Status para '$targetName' (ni un nombre legacy equivalente). Aplica el preset con /board field apply en."
+        throw "Board #$ProjectNum has no Status option for '$targetName' (nor an equivalent legacy name). Apply the preset with /board field apply en."
     }
     $fingerprint = Format-ClaimFingerprint -Note $note -Computer $env:COMPUTERNAME -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm')
 
-    $assignVerb = if ($locking) { "asignar a $Owner" } else { "desasignar a $Owner" }
+    $assignVerb = if ($locking) { "assign to $Owner" } else { "unassign $Owner" }
     if ($DryRun) {
-        Write-Host ("DRY-RUN: #{0} -> Status {1} + {2} + comentario [abios-claim] {3} (no ejecutado)." -f $n, $targetName, $assignVerb, $note) -ForegroundColor Gray
+        Write-Host ("DRY-RUN: #{0} -> Status {1} + {2} + [abios-claim] {3} comment (not executed)." -f $n, $targetName, $assignVerb, $note) -ForegroundColor Gray
         Write-Host "Board: $lockUrl" -ForegroundColor Cyan
         exit 0
     }
@@ -3595,7 +3595,7 @@ if ($Lock -gt 0 -or $Unlock -gt 0) {
     # post, -Start would not see the lock. Fail closed (throw) so a lock that did not happen is
     # never reported as posted (#314).
     $null = Invoke-Gh -GhArgs @('issue','comment',"$n",'--repo',$repo,'--body',$fingerprint) `
-                      -What "postear el comentario [abios-claim] en #$n"
+                      -What "post the [abios-claim] comment on #$n"
     if ($targetOpt) {
         # -Graphql throws on exit OR errors[]: the multi-session LOCK the user believes protects
         # their work must not be reported "OK" when the status move silently no-op'd (#314).
@@ -3607,10 +3607,10 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
   }) { projectV2Item { id } }
 }'
         $null = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$lockStatusMutation",'-f',"proj=$($ctx.projectId)",'-f',"item=$($item.id)",'-f',"field=$($ctx.statusNode.id)",'-f',"opt=$targetOpt") `
-                          -What "mover #$n a $targetName" -Graphql
+                          -What "move #$n to $targetName" -Graphql
         Write-Host ("OK  #{0} Status -> {1}" -f $n, $targetName) -ForegroundColor Green
     } else {
-        Write-Host ("WARN el board no tiene la opcion '{0}' en Status - solo se posteo el comentario {1}." -f $targetName, $note) -ForegroundColor DarkYellow
+        Write-Host ("WARN the board has no '{0}' option in Status - only the {1} comment was posted." -f $targetName, $note) -ForegroundColor DarkYellow
     }
     # Assign (lock) / unassign (unlock) the owner so the In Progress + assigned state
     # that Invoke-IssueStart's guard checks for is real - a status move alone is not
@@ -3622,10 +3622,10 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
                           -What "$assignVerb en #$n"
         Write-Host ("OK  #{0} {1}" -f $n, $assignVerb) -ForegroundColor Green
     } catch {
-        Write-Host ("WARN no se pudo {0}: {1}" -f $assignVerb, $_) -ForegroundColor DarkYellow
+        Write-Host ("WARN could not {0}: {1}" -f $assignVerb, $_) -ForegroundColor DarkYellow
     }
-    $verb = if ($locking) { 'bloqueado (otra sesion lo trabaja)' } else { 'desbloqueado (liberado)' }
-    Write-Host ("OK  #{0} {1} - [abios-claim] {2} posteado." -f $n, $verb, $note) -ForegroundColor Green
+    $verb = if ($locking) { 'locked (another session works on it)' } else { 'unlocked (released)' }
+    Write-Host ("OK  #{0} {1} - [abios-claim] {2} posted." -f $n, $verb, $note) -ForegroundColor Green
     Write-Host "Board: $lockUrl" -ForegroundColor Cyan
     exit 0
 }
@@ -3642,7 +3642,7 @@ if ($CloseLoop) {
     $repo = $Repo
     if (-not $repo) { try { $repo = Get-RepoFromOrigin } catch { $repo = '' } }
     $curBranch = (git branch --show-current 2>$null)
-    if (-not $curBranch) { throw "HEAD detached - close-cycle opera sobre la rama actual." }
+    if (-not $curBranch) { throw "HEAD detached - close-cycle works on the current branch." }
 
     $baseRef      = Resolve-IssueBaseRef $repo
     $defaultShort = if ($baseRef -match '/') { ($baseRef -split '/', 2)[1] } else { $baseRef }
@@ -3682,9 +3682,9 @@ if ($CloseLoop) {
     $entry    = @(Read-SessionRegistryRaw | Where-Object { $_.branch -eq $curBranch }) | Select-Object -First 1
     $issueNum = if ($entry) { [int]$entry.issue } elseif ($curBranch -match '^issue-(\d+)') { [int]$Matches[1] } else { 0 }
 
-    Write-Host ("=== close-cycle  ({0})  rama {1} ===" -f $(if ($repo) { $repo } else { '(repo desconocido)' }), $curBranch) -ForegroundColor Cyan
+    Write-Host ("=== close-cycle  ({0})  branch {1} ===" -f $(if ($repo) { $repo } else { '(unknown repo)' }), $curBranch) -ForegroundColor Cyan
     Write-Host ""
-    Write-Host ("  Estado: {0}" -f $disp.State) -ForegroundColor Yellow
+    Write-Host ("  State: {0}" -f $disp.State) -ForegroundColor Yellow
     Write-Host ("  {0}" -f $disp.Summary)
 
     switch ($disp.Action) {
@@ -3694,52 +3694,52 @@ if ($CloseLoop) {
             # Switch off the branch first (you cannot delete the one you are on), never on a dirty tree.
             if ($DryRun) {
                 Write-Host ""
-                Write-Host ("  DRY-RUN: cambiaria a '{0}', borraria la rama '{1}' (-D, merge probado) y purgaria su entrada de sesion." -f $defaultShort, $curBranch) -ForegroundColor Yellow
+                Write-Host ("  DRY-RUN: would switch to '{0}', delete branch '{1}' (-D, merge proven) and purge its session entry." -f $defaultShort, $curBranch) -ForegroundColor Yellow
                 exit 0
             }
             $go = [bool]$Force
             if (-not $go) {
-                $ans = Read-Host ("Este trabajo ya se mergeo (PR #{0}). Te cambio a '{1}' y limpio la rama vieja '{2}'? (s/n)" -f $pr.number, $defaultShort, $curBranch)
-                $go = ($ans -match '^(s|si|y|yes)$')
+                $ans = Read-Host ("This work is already merged (PR #{0}). Switch you to '{1}' and clean up the old branch '{2}'? (y/n)" -f $pr.number, $defaultShort, $curBranch)
+                $go = ($ans -match '^(s|si|sí|y|yes)$')
             }
-            if (-not $go) { Write-Host "  Cancelado - la rama se conserva." -ForegroundColor DarkGray; exit 0 }
+            if (-not $go) { Write-Host "  Cancelled - the branch is kept." -ForegroundColor DarkGray; exit 0 }
 
-            if (-not $defaultShort) { throw "No pude resolver la rama por defecto para cambiarme antes de borrar." }
+            if (-not $defaultShort) { throw "Could not resolve the default branch to switch to before deleting." }
             git checkout $defaultShort 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "No pude cambiar a '$defaultShort' (working tree ocupado?) - no borro la rama." }
+            if ($LASTEXITCODE -ne 0) { throw "Could not switch to '$defaultShort' (working tree busy?) - not deleting the branch." }
             git pull --ff-only --quiet 2>&1 | Out-Null
             git branch -D $curBranch 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Host ("  WARN no pude borrar '{0}' (checkouteada en otro worktree?) - conservada." -f $curBranch) -ForegroundColor DarkYellow
+                Write-Host ("  WARN could not delete '{0}' (checked out in another worktree?) - kept." -f $curBranch) -ForegroundColor DarkYellow
             } else {
-                Write-Host ("  OK  rama '{0}' borrada; ahora en '{1}'." -f $curBranch, $defaultShort) -ForegroundColor Green
+                Write-Host ("  OK  branch '{0}' deleted; now on '{1}'." -f $curBranch, $defaultShort) -ForegroundColor Green
             }
             if ($issueNum -gt 0) {
                 Remove-SessionRegistryEntry -IssueNum $issueNum -Outcome 'close-loop'
-                Write-Host ("  OK  entrada de sesion del issue #{0} purgada." -f $issueNum) -ForegroundColor DarkGray
+                Write-Host ("  OK  session entry of issue #{0} purged." -f $issueNum) -ForegroundColor DarkGray
             }
         }
         'save-handoff' {
             # Non-destructive by construction: a handoff never touches the working tree, so there is
             # nothing here that -DryRun needs to preview or -Force needs to skip past.
-            $ans = Read-Host "Tenes cambios sin guardar. Guardo un handoff para retomar despues? (s/n)"
-            if ($ans -match '^(s|si|y|yes)$') {
+            $ans = Read-Host "You have unsaved changes. Save a handoff to resume later? (y/n)"
+            if ($ans -match '^(s|si|sí|y|yes)$') {
                 if ($issueNum -le 0) {
-                    Write-Host "  No pude identificar el issue de esta rama - guarda el handoff a mano indicando el numero." -ForegroundColor DarkYellow
+                    Write-Host "  Could not identify this branch's issue - save the handoff by hand, giving the number." -ForegroundColor DarkYellow
                 } elseif ($DryRun) {
-                    Write-Host ("  DRY-RUN: guardaria un handoff para el issue #{0}." -f $issueNum) -ForegroundColor Yellow
+                    Write-Host ("  DRY-RUN: would save a handoff for issue #{0}." -f $issueNum) -ForegroundColor Yellow
                 } else {
                     & (Join-Path $PSScriptRoot 'Board-Handoff.ps1') -Save -Issue $issueNum -Repo $repo -TokenVar $TokenVar
                 }
             } else {
-                Write-Host "  Ok - seguis trabajando, no se guardo nada." -ForegroundColor DarkGray
+                Write-Host "  Ok - keep working, nothing was saved." -ForegroundColor DarkGray
             }
         }
         'run-gate' {
             # Purely informational (checks + reports; never merges), so it needs no confirmation -
-            # the only question the gate can raise ("mergeo?") stays with the human, downstream.
+            # the only question the gate can raise ("merge it?") stays with the human, downstream.
             if ($DryRun) {
-                Write-Host ("  DRY-RUN: correria el review gate sobre el PR #{0}." -f $pr.number) -ForegroundColor Yellow
+                Write-Host ("  DRY-RUN: would run the review gate on PR #{0}." -f $pr.number) -ForegroundColor Yellow
             } else {
                 & (Join-Path $PSScriptRoot 'Board-ReviewGate.ps1') -Repo $repo -PR $pr.number -TokenVar $TokenVar
             }
@@ -3749,9 +3749,9 @@ if ($CloseLoop) {
             # (close it again) - no question needed, matching how 'merged'-cleanup is the only path
             # that still asks (deleting a branch is the one step here that is not trivially undone).
             if ($issueNum -le 0) {
-                Write-Host "  No pude identificar el issue de esta rama - abre el PR a mano indicando el numero." -ForegroundColor DarkYellow
+                Write-Host "  Could not identify this branch's issue - open the PR by hand, giving the number." -ForegroundColor DarkYellow
             } elseif ($DryRun) {
-                Write-Host ("  DRY-RUN: abriria el PR para el issue #{0}." -f $issueNum) -ForegroundColor Yellow
+                Write-Host ("  DRY-RUN: would open the PR for issue #{0}." -f $issueNum) -ForegroundColor Yellow
             } else {
                 & (Join-Path $PSScriptRoot 'New-BoardPR.ps1') -Issue $issueNum -Repo $repo -TokenVar $TokenVar
             }
@@ -3761,35 +3761,35 @@ if ($CloseLoop) {
             # UNMERGED work, unlike 'cleanup' which only ever deletes a branch already proven safe
             # by a merged PR. The question spells that out instead of hiding it behind git jargon.
             if ($DryRun) {
-                Write-Host ("  DRY-RUN: preguntaria si reabrir el PR #{0} o descartar la rama '{1}' (esto SI perderia trabajo sin mergear)." -f $pr.number, $curBranch) -ForegroundColor Yellow
+                Write-Host ("  DRY-RUN: would ask whether to reopen PR #{0} or discard branch '{1}' (this WOULD lose unmerged work)." -f $pr.number, $curBranch) -ForegroundColor Yellow
                 exit 0
             }
-            $ans = Read-Host ("El PR #{0} se cerro sin mergear. Lo reabro y seguimos, o descarto la rama '{1}' para siempre? [reabrir/descartar]" -f $pr.number, $curBranch)
+            $ans = Read-Host ("PR #{0} was closed without merging. Reopen it and keep going, or discard branch '{1}' for good? [reopen/discard]" -f $pr.number, $curBranch)
             if ($ans -match '^(reabrir|reopen|r)$') {
                 try {
-                    $null = Invoke-Gh -GhArgs @('pr','reopen',"$($pr.number)",'--repo',$repo) -What "reabrir el PR #$($pr.number)"
-                    Write-Host ("  OK  PR #{0} reabierto - segui trabajando en esta rama." -f $pr.number) -ForegroundColor Green
+                    $null = Invoke-Gh -GhArgs @('pr','reopen',"$($pr.number)",'--repo',$repo) -What "reopen PR #$($pr.number)"
+                    Write-Host ("  OK  PR #{0} reopened - keep working on this branch." -f $pr.number) -ForegroundColor Green
                 } catch {
-                    Write-Host "  WARN no pude reabrir el PR - revisalo a mano." -ForegroundColor DarkYellow
+                    Write-Host "  WARN could not reopen the PR - check it by hand." -ForegroundColor DarkYellow
                 }
             } elseif ($ans -match '^(descartar|discard|d)$') {
-                $confirm = Read-Host ("Esto borra el trabajo sin mergear de '{0}' PARA SIEMPRE. Seguro? (s/n)" -f $curBranch)
-                if ($confirm -match '^(s|si|y|yes)$') {
-                    if (-not $defaultShort) { throw "No pude resolver la rama por defecto para cambiarme antes de borrar." }
+                $confirm = Read-Host ("This deletes the unmerged work of '{0}' FOR GOOD. Are you sure? (y/n)" -f $curBranch)
+                if ($confirm -match '^(s|si|sí|y|yes)$') {
+                    if (-not $defaultShort) { throw "Could not resolve the default branch to switch to before deleting." }
                     git checkout $defaultShort 2>&1 | Out-Null
-                    if ($LASTEXITCODE -ne 0) { throw "No pude cambiar a '$defaultShort' (working tree ocupado?) - no borro la rama." }
+                    if ($LASTEXITCODE -ne 0) { throw "Could not switch to '$defaultShort' (working tree busy?) - not deleting the branch." }
                     git branch -D $curBranch 2>&1 | Out-Null
                     if ($LASTEXITCODE -ne 0) {
-                        Write-Host ("  WARN no pude borrar '{0}' (checkouteada en otro worktree?) - conservada." -f $curBranch) -ForegroundColor DarkYellow
+                        Write-Host ("  WARN could not delete '{0}' (checked out in another worktree?) - kept." -f $curBranch) -ForegroundColor DarkYellow
                     } else {
-                        Write-Host ("  OK  rama '{0}' descartada; ahora en '{1}'." -f $curBranch, $defaultShort) -ForegroundColor Green
+                        Write-Host ("  OK  branch '{0}' discarded; now on '{1}'." -f $curBranch, $defaultShort) -ForegroundColor Green
                         if ($issueNum -gt 0) { Remove-SessionRegistryEntry -IssueNum $issueNum -Outcome 'close-loop-discard' }
                     }
                 } else {
-                    Write-Host "  Cancelado - la rama se conserva." -ForegroundColor DarkGray
+                    Write-Host "  Cancelled - the branch is kept." -ForegroundColor DarkGray
                 }
             } else {
-                Write-Host "  No entendi la respuesta - la rama se conserva sin cambios." -ForegroundColor DarkGray
+                Write-Host "  Did not understand the answer - the branch is kept unchanged." -ForegroundColor DarkGray
             }
         }
         default { } # 'none': the Summary above already said everything there is to say.
@@ -3826,7 +3826,7 @@ if ($Watch -and $Parallel.Count -eq 0) {
 if ($ListBoards) {
     if ($Repo) {
         # Current-repo scope: only boards LINKED to this repository
-        Write-Host "=== Boards vinculados a $Repo (contando pendientes) ===" -ForegroundColor Cyan
+        Write-Host "=== Boards linked to $Repo (counting pending) ===" -ForegroundColor Cyan
         Write-Host ""
         $rp = $Repo -split "/"
         # -Graphql fails closed: a read failure must not read as "the repo has no linked boards"
@@ -3843,23 +3843,23 @@ query($o:String!, $r:String!) {
   }
 }'
         $linked = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$linkedQuery",'-f',"o=$($rp[0])",'-f',"r=$($rp[1])") `
-                            -What "leer los boards vinculados a $Repo" -Graphql
+                            -What "read the boards linked to $Repo" -Graphql
         $boards = @($linked.data.repository.projectsV2.nodes |
                     Where-Object { -not $_.closed -and $_.title -notmatch '(?i)backup' } |
                     ForEach-Object { [PSCustomObject]@{ number = $_.number; title = $_.title; ownerLogin = $_.owner.login } })
         if ($boards.Count -eq 0) {
-            Write-Host "El repo $Repo no tiene boards vinculados. Crea/vincula uno con /board init." -ForegroundColor Yellow
+            Write-Host "Repo $Repo has no linked boards. Create/link one with /board init." -ForegroundColor Yellow
             exit 0
         }
     } else {
         # Account scope: every board of the owner
-        Write-Host "=== Boards de $Owner (contando pendientes, puede tardar unos segundos) ===" -ForegroundColor Cyan
+        Write-Host "=== Boards of $Owner (counting pending, may take a few seconds) ===" -ForegroundColor Cyan
         Write-Host ""
         $projects = (Invoke-Gh -GhArgs @('project','list','--owner',$Owner,'--format','json','--limit','30') `
-                               -What "listar los boards de $Owner" -Json).projects
+                               -What "list the boards of $Owner" -Json).projects
         $boards   = @($projects | Where-Object { $_.title -notmatch '(?i)backup' } |
                       ForEach-Object { [PSCustomObject]@{ number = $_.number; title = $_.title; ownerLogin = $Owner } })
-        if ($boards.Count -eq 0) { Write-Host "No hay boards para $Owner."; exit 0 }
+        if ($boards.Count -eq 0) { Write-Host "No boards for $Owner."; exit 0 }
     }
 
     $rows = @()
@@ -3870,7 +3870,7 @@ query($o:String!, $r:String!) {
             # It ALSO reports a capped read, which the old --limit 200 swallowed: this picker
             # under-counted every board past the cap and so looked emptier than it was (#484).
             $read    = Get-BoardItems -Number $b.number -Owner $b.ownerLogin `
-                                      -What "listar los items del board #$($b.number)"
+                                      -What "list the items of board #$($b.number)"
             $pending = @($read.Items | Where-Object { Test-Pending $_ }).Count
             $total   = $read.Read
             $trunc   = $read.Truncated
@@ -3879,8 +3879,8 @@ query($o:String!, $r:String!) {
         }
         $rows += [PSCustomObject]@{
             Num       = $b.number
-            Titulo    = $b.title
-            Pendientes = $pending
+            Title     = $b.title
+            Pending    = $pending
             Items     = $total
             Trunc     = $trunc
             Url       = "https://github.com/users/$($b.ownerLogin)/projects/$($b.number)"
@@ -3888,32 +3888,32 @@ query($o:String!, $r:String!) {
     }
 
     # Boards with pending work first, most pending on top
-    $rows = $rows | Sort-Object -Property @{Expression={ if ($_.Pendientes -is [int]) { -$_.Pendientes } else { 1 } }}
+    $rows = $rows | Sort-Object -Property @{Expression={ if ($_.Pending -is [int]) { -$_.Pending } else { 1 } }}
 
     foreach ($r in $rows) {
-        $color = if ($r.Pendientes -is [int] -and $r.Pendientes -gt 0) { "Yellow" } else { "DarkGray" }
+        $color = if ($r.Pending -is [int] -and $r.Pending -gt 0) { "Yellow" } else { "DarkGray" }
         # A capped read makes both numbers a FLOOR, not a count - so they are rendered as "N+".
         # Printing a bare "pendientes: 0" off a short read is the whole bug (#484).
         $sfx   = if ($r.Trunc) { "+" } else { "" }
-        Write-Host ("  #{0,-3} {1,-45} pendientes: {2,-4} items: {3}" -f `
-                    $r.Num, $r.Titulo, "$($r.Pendientes)$sfx", "$($r.Items)$sfx") -ForegroundColor $color
+        Write-Host ("  #{0,-3} {1,-45} pending: {2,-4} items: {3}" -f `
+                    $r.Num, $r.Title, "$($r.Pending)$sfx", "$($r.Items)$sfx") -ForegroundColor $color
         Write-Host ("        {0}" -f $r.Url) -ForegroundColor DarkCyan
     }
     if (@($rows | Where-Object { $_.Trunc }).Count -gt 0) {
         Write-Host ""
-        Write-Host "TRUNCADO: los boards marcados con '+' tienen mas items de los que pude leer - sus cuentas son un minimo, no un total." -ForegroundColor Yellow
+        Write-Host "TRUNCATED: boards marked with '+' have more items than I could read - their counts are a minimum, not a total." -ForegroundColor Yellow
     }
     Write-Host ""
-    Write-Host "Siguiente paso: /board work para ver los pendientes de un board." -ForegroundColor Cyan
+    Write-Host "Next step: /board work to see a board's pending items." -ForegroundColor Cyan
     exit 0
 }
 
 if ($ProjectNum -le 0) {
-    throw "Usa -ListBoards, o -ProjectNum <n> (opcionalmente con -Start <issueNum> o -Parallel <nums>)."
+    throw "Use -ListBoards, or -ProjectNum <n> (optionally with -Start <issueNum> or -Parallel <nums>)."
 }
 
 if ($Start -gt 0 -and $Parallel.Count -gt 0) {
-    throw "-Start y -Parallel son mutuamente exclusivos: usa uno u otro."
+    throw "-Start and -Parallel are mutually exclusive: use one or the other."
 }
 
 $boardUrl = Get-BoardUrl $ProjectNum
@@ -3922,7 +3922,7 @@ $boardUrl = Get-BoardUrl $ProjectNum
 # MODE 2: -ProjectNum  -> pending items of one board
 # =======================================================================
 if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueue.Count -eq 0) {
-    Write-Host "=== Pendientes del board #$ProjectNum de $Owner ===" -ForegroundColor Cyan
+    Write-Host "=== Pending items of board #$ProjectNum of $Owner ===" -ForegroundColor Cyan
     Write-Host ""
 
     # Guard: if a foreign checkout moved this session off its work branch, say so up front.
@@ -3937,7 +3937,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     # work and the Backlog falls off the end. At --limit 200 against a 291-item board this printed a
     # confident "Sin pendientes" over 37 open Backlog items (#484).
     $read    = Get-BoardItems -Number $ProjectNum -Owner $Owner `
-                              -What "listar los items del board #$ProjectNum"
+                              -What "list the items of board #$ProjectNum"
     $items   = $read.Items
     $truncWarn = Get-BoardTruncationWarning $read
     $pending = @($items | Where-Object { Test-Pending $_ })
@@ -3962,7 +3962,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
             Write-Host $spLine.Text -ForegroundColor $spLine.Color
         }
     } catch {
-        Write-Host "No pude armar el estado del trabajo ($($_.Exception.Message)); sigo con los pendientes." -ForegroundColor Yellow
+        Write-Host "Could not build the state of work ($($_.Exception.Message)); continuing with the pending list." -ForegroundColor Yellow
     }
     Write-Host ""
 
@@ -3976,12 +3976,12 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         $unknown = Get-UnknownStatusValues $items
         if ($truncWarn) {
             Write-Host $truncWarn -ForegroundColor Yellow
-            Write-Host "No hay pendientes ENTRE LOS $($read.Read) items que lei - no afirmo que el board este limpio." -ForegroundColor Yellow
+            Write-Host "Nothing pending AMONG THE $($read.Read) items I read - I do not claim the board is clean." -ForegroundColor Yellow
         } elseif ($unknown.Count -gt 0) {
-            Write-Host "No puedo saber que hay pendiente: 0 items en Backlog, pero el board usa estados que no reconozco ($($unknown -join ', '))." -ForegroundColor Yellow
-            Write-Host "No afirmo que no haya pendientes - revisa el board, o estandarizalo con /board field apply en --migrate." -ForegroundColor DarkGray
+            Write-Host "I cannot tell what is pending: 0 items in Backlog, but the board uses statuses I do not recognize ($($unknown -join ', '))." -ForegroundColor Yellow
+            Write-Host "I do not claim nothing is pending - check the board, or standardize it with /board field apply en --migrate." -ForegroundColor DarkGray
         } else {
-            Write-Host "Sin pendientes. Todo el board esta en progreso o terminado." -ForegroundColor Green
+            Write-Host "Nothing pending. The whole board is in progress or done." -ForegroundColor Green
         }
         Write-Host ""
         Write-Host "Board: $boardUrl" -ForegroundColor Cyan
@@ -3992,7 +3992,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     # matters more than after: the user picks an issue off the top of this list.
     if ($truncWarn) {
         Write-Host $truncWarn -ForegroundColor Yellow
-        Write-Host "Los pendientes de abajo son los que alcance a ver; pueden faltar." -ForegroundColor Yellow
+        Write-Host "The pending items below are the ones I managed to see; some may be missing." -ForegroundColor Yellow
         Write-Host ""
     }
 
@@ -4000,15 +4000,15 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     $pending = $pending | Sort-Object -Property @{Expression={ if ($_.priority) { $_.priority } else { "zz" } }}
 
     foreach ($p in $pending) {
-        $prio = if ($p.priority) { $p.priority } else { "(sin prio)" }
+        $prio = if ($p.priority) { $p.priority } else { "(no prio)" }
         $size = if ($p.size)     { $p.size }     else { "-" }
         $type = if ($p.type)     { $p.type }     else { "-" }
         if ($p.content.type -eq "DraftIssue") {
             Write-Host ("  [draft]  {0}" -f $p.title) -ForegroundColor DarkYellow
-            Write-Host  "           (nota draft - conviertela a issue real con /board fill antes de trabajarla)" -ForegroundColor DarkGray
+            Write-Host  "           (draft note - convert it to a real issue with /board fill before working on it)" -ForegroundColor DarkGray
         } elseif (@($p.labels) -contains "blocked") {
             Write-Host ("  #{0,-4} [BLOCKED] {1}" -f $p.content.number, (Get-PendingItemTitle $p)) -ForegroundColor Red
-            Write-Host  "        bloqueado por una dependencia - no se puede empezar (quita el label 'blocked' al desbloquearse)" -ForegroundColor DarkGray
+            Write-Host  "        blocked by a dependency - cannot start (remove the 'blocked' label once unblocked)" -ForegroundColor DarkGray
         } else {
             $repo = $p.content.repository
             Write-Host ("  #{0,-4} {1}" -f $p.content.number, (Get-PendingItemTitle $p)) -ForegroundColor Yellow
@@ -4018,7 +4018,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     Write-Host ""
     # "Total" is an exact claim, and a capped read cannot make one - the warning above says the
     # list may be short, so the number that closes it must agree with the warning, not contradict it.
-    Write-Host ("Total: {0}{1} pendiente(s)." -f $pending.Count, $(if ($truncWarn) { '+ (vistos; la lectura se corto)' } else { '' })) -ForegroundColor Yellow
+    Write-Host ("Total: {0}{1} pending." -f $pending.Count, $(if ($truncWarn) { '+ (seen; the read was cut short)' } else { '' })) -ForegroundColor Yellow
 
     # Multi-session: show what other LIVE local sessions are working right now.
     # NOT named $sessions: at SCRIPT scope that is the [switch]$Sessions parameter
@@ -4030,9 +4030,9 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     $liveSessions = @(Read-SessionRegistry)
     if ($liveSessions.Count -gt 0) {
         Write-Host ""
-        Write-Host "Sesiones activas en esta maquina:" -ForegroundColor Cyan
+        Write-Host "Active sessions on this machine:" -ForegroundColor Cyan
         foreach ($s in $liveSessions) {
-            Write-Host ("  #{0}  rama {1}  (PID {2} vivo, desde {3}) en {4}" -f $s.issue, $s.branch, $s.sessionPid, $s.started, $s.workPath) -ForegroundColor DarkCyan
+            Write-Host ("  #{0}  branch {1}  (PID {2} alive, since {3}) in {4}" -f $s.issue, $s.branch, $s.sessionPid, $s.started, $s.workPath) -ForegroundColor DarkCyan
         }
     }
 
@@ -4042,8 +4042,8 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     $cfgRead = Read-BoardConfig -Path (Get-BoardConfigPath)
     if (-not $cfgRead.ok) {
         Write-Host ""
-        Write-Host "No pude leer la preferencia de este repo sobre agrupar PRs ($($cfgRead.error))." -ForegroundColor Yellow
-        Write-Host "Sigo con el criterio por defecto; no asumo que no haya preferencia." -ForegroundColor DarkGray
+        Write-Host "Could not read this repo's preference on grouping PRs ($($cfgRead.error))." -ForegroundColor Yellow
+        Write-Host "Continuing with the default; I do not assume there is no preference." -ForegroundColor DarkGray
     }
     $posture = Resolve-GroupingPosture $cfgRead.config
     # Not being in a clone is a SUPPORTED way to run this listing - the contract's step 1 says so
@@ -4060,15 +4060,15 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     $startable = if ($posture -ne 'never') { Select-StartableGroup -Suggestions $groups -CurrentRepo $hereRepo } else { $null }
     if ($startable) {
         $first = ($startable.issues) -join ','
-        Write-Host "Siguiente paso: /board work -StartGroup $first (un PR), o -Start <issueNum> para uno suelto." -ForegroundColor Cyan
+        Write-Host "Next step: /board work -StartGroup $first (one PR), or -Start <issueNum> for a single one." -ForegroundColor Cyan
     } else {
         if ($posture -ne 'never' -and $groups.Count -gt 0 -and $hereRepo) {
             # There ARE groups, just none in this folder. Offering the biggest one anyway would
             # start issues here whose PR cannot close them.
             $otros = (@($groups | ForEach-Object { $_.repo } | Sort-Object -Unique) -join ', ')
-            Write-Host "Los lotes de arriba son de otros repos ($otros): hay que abrirlos desde su propia copia." -ForegroundColor DarkYellow
+            Write-Host "The batches above belong to other repos ($otros): open them from their own clone." -ForegroundColor DarkYellow
         }
-        Write-Host "Siguiente paso: /board work -Start <issueNum> (o -Parallel <n1,n2,...>)." -ForegroundColor Cyan
+        Write-Host "Next step: /board work -Start <issueNum> (or -Parallel <n1,n2,...>)." -ForegroundColor Cyan
     }
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
@@ -4093,25 +4093,25 @@ query($owner:String!, $num:Int!) {
   }
 }'
     $projData = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$toReviewQuery",'-F',"owner=$Owner",'-F',"num=$ProjectNum") `
-                          -What "resolver el board #$ProjectNum de $Owner" -Graphql
+                          -What "resolve board #$ProjectNum of $Owner" -Graphql
 
     $projectId  = $projData.data.user.projectV2.id
-    if (-not $projectId) { throw "Board #$ProjectNum no encontrado para $Owner." }
+    if (-not $projectId) { throw "Board #$ProjectNum not found for $Owner." }
     $statusNode = $projData.data.user.projectV2.fields.nodes | Where-Object { $_.name -eq "Status" }
     # Vocabulary-aware, like every other Status write: a board whose column is called
     # 'Review' is understood instead of being refused (Codex review, PR #279).
     $reviewId   = Resolve-StatusOptionId $statusNode "In Review"
     if (-not $reviewId) {
-        throw "El board #$ProjectNum no tiene la opcion 'In Review' en Status. Agregala (/board field apply en) antes de usar -ToReview."
+        throw "Board #$ProjectNum has no 'In Review' option in Status. Add it (/board field apply en) before using -ToReview."
     }
 
     # Find the item by reusing Get-BoardItem, which paginates the whole board (#246)
     # and retries for eventual consistency - no separate capped query here.
     $item = Get-BoardItem $projectId $ToReview
-    if (-not $item) { throw "Issue #$ToReview no esta en el board #$ProjectNum." }
+    if (-not $item) { throw "Issue #$ToReview is not on board #$ProjectNum." }
 
     if ($DryRun) {
-        Write-Host "DRY-RUN: #$ToReview '$($item.content.title)' -> Status In Review (no ejecutado)." -ForegroundColor Gray
+        Write-Host "DRY-RUN: #$ToReview '$($item.content.title)' -> Status In Review (not executed)." -ForegroundColor Gray
         Write-Host "Board: $boardUrl" -ForegroundColor Cyan
         exit 0
     }
@@ -4126,8 +4126,8 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
   }) { projectV2Item { id } }
 }'
     $null = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$toReviewMutation",'-f',"proj=$projectId",'-f',"item=$($item.id)",'-f',"field=$($statusNode.id)",'-f',"opt=$reviewId") `
-                      -What "mover #$ToReview a In Review" -Graphql
-    Write-Host "OK  #$ToReview '$($item.content.title)' -> Status In Review (en review/testing)." -ForegroundColor Green
+                      -What "move #$ToReview to In Review" -Graphql
+    Write-Host "OK  #$ToReview '$($item.content.title)' -> Status In Review (in review/testing)." -ForegroundColor Green
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
 }
@@ -4138,20 +4138,20 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
 if ($Parallel.Count -gt 0) {
     # Normalize to the batch queue (drop <=0, de-dup, keep order).
     $queue = @(Get-ParallelQueue $Parallel)
-    if ($queue.Count -eq 0) { throw "-Parallel no recibio numeros de issue validos." }
+    if ($queue.Count -eq 0) { throw "-Parallel received no valid issue numbers." }
 
     # -Surface headless (#710 P1): accepted so callers can NAME it, but not yet dispatchable - a
     # later phase. Refuse loudly, before touching the board, rather than silently falling back to a
     # visible terminal (the exact "never fake it" rule #710 states for this surface).
     if ($Surface -eq 'headless') {
-        throw "-Surface headless todavia no esta implementado (fases posteriores de #710). Usa -Surface terminal (por defecto) o -Surface app."
+        throw "-Surface headless is not implemented yet (later phases of #710). Use -Surface terminal (the default) or -Surface app."
     }
     $isAppSurface = ($Surface -eq 'app')
 
-    Write-Host "=== Parallel batch-start (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
+    Write-Host "=== Parallel batch-start (board #$ProjectNum of $Owner) ===" -ForegroundColor Cyan
     Write-Host ("  Issues: {0}" -f ($queue -join ', ')) -ForegroundColor DarkGray
-    if ($DryRun) { Write-Host "  Modo DRY-RUN - planifica sin mutar el board ni tocar git." -ForegroundColor Gray }
-    if ($isAppSurface) { Write-Host "  Surface: app - sin worktree local, sin proceso local; se emite un manifiesto de despacho." -ForegroundColor DarkGray }
+    if ($DryRun) { Write-Host "  DRY-RUN mode - plans without changing the board or touching git." -ForegroundColor Gray }
+    if ($isAppSurface) { Write-Host "  Surface: app - no local worktree, no local process; a dispatch manifest is emitted." -ForegroundColor DarkGray }
     Write-Host ""
 
     $ctx = Resolve-BoardStatus $Owner $ProjectNum
@@ -4182,7 +4182,7 @@ if ($Parallel.Count -gt 0) {
     }
 
     # -- Summary ---------------------------------------------------------------
-    Write-Host "===== RESUMEN PARALELO =====" -ForegroundColor Cyan
+    Write-Host "===== PARALLEL SUMMARY =====" -ForegroundColor Cyan
     $started = @($results | Where-Object { $_.started })
     $planned = @($results | Where-Object { $_.dryRun -and -not $_.skipped })
     $skipped = @($results | Where-Object { $_.skipped })
@@ -4190,7 +4190,7 @@ if ($Parallel.Count -gt 0) {
         if ($r.skipped) {
             Write-Host ("  #{0,-4} SKIP  {1}" -f $r.issue, $r.skipped) -ForegroundColor Red
         } elseif ($r.dryRun) {
-            Write-Host ("  #{0,-4} plan  -> rama {1}" -f $r.issue, $r.branch) -ForegroundColor Gray
+            Write-Host ("  #{0,-4} plan  -> branch {1}" -f $r.issue, $r.branch) -ForegroundColor Gray
         } else {
             Write-Host ("  #{0,-4} OK    -> {1}" -f $r.issue, $r.workPath) -ForegroundColor Green
         }
@@ -4198,22 +4198,22 @@ if ($Parallel.Count -gt 0) {
     Write-Host ""
 
     if ($DryRun) {
-        Write-Host ("DRY-RUN: {0} se iniciarian, {1} se saltarian. Ningun cambio hecho." -f $planned.Count, $skipped.Count) -ForegroundColor Gray
+        Write-Host ("DRY-RUN: {0} would start, {1} would be skipped. No changes made." -f $planned.Count, $skipped.Count) -ForegroundColor Gray
     } else {
         if ($isAppSurface) {
-            Write-Host ("Iniciados: {0} / {1}. Sin worktree local (surface app) - el manifiesto sigue abajo." -f $started.Count, $queue.Count) -ForegroundColor Yellow
+            Write-Host ("Started: {0} / {1}. No local worktree (surface app) - the manifest follows below." -f $started.Count, $queue.Count) -ForegroundColor Yellow
         } else {
-            Write-Host ("Iniciados: {0} / {1}. Worktrees listos, uno por issue." -f $started.Count, $queue.Count) -ForegroundColor Yellow
+            Write-Host ("Started: {0} / {1}. Worktrees ready, one per issue." -f $started.Count, $queue.Count) -ForegroundColor Yellow
         }
         if ($started.Count -gt 0 -and -not $Launch -and -not $Fleet -and -not $isAppSurface) {
             Write-Host ""
-            Write-Host "Cada worktree tiene su rama y su claim. Trabaja cada issue en su carpeta:" -ForegroundColor Cyan
+            Write-Host "Each worktree has its own branch and claim. Work each issue in its folder:" -ForegroundColor Cyan
             foreach ($r in $started) {
                 if ($r.workPath) { Write-Host ("  cd `"{0}`"   # #{1}" -f $r.workPath, $r.issue) -ForegroundColor DarkCyan }
             }
             Write-Host ""
-            Write-Host "Al terminar cada uno: PR con 'Closes #<num>' + el gate de review obligatorio." -ForegroundColor DarkGray
-            Write-Host "Agrega -Launch para abrir una sesion Claude por worktree automaticamente." -ForegroundColor DarkGray
+            Write-Host "When each one is done: a PR with 'Closes #<num>' + the mandatory review gate." -ForegroundColor DarkGray
+            Write-Host "Add -Launch to open one Claude session per worktree automatically." -ForegroundColor DarkGray
         }
     }
 
@@ -4247,22 +4247,22 @@ if ($Parallel.Count -gt 0) {
             ConvertTo-DispatchManifestJson -Entries $entries
         } else {
             Write-Host ""
-            Write-Host ("===== MANIFIESTO DE DESPACHO (surface app, runId {0}) =====" -f $runId) -ForegroundColor Cyan
+            Write-Host ("===== DISPATCH MANIFEST (surface app, runId {0}) =====" -f $runId) -ForegroundColor Cyan
             if ($entries.Count -eq 0) {
-                Write-Host "  (ningun issue arranco - nada que despachar)" -ForegroundColor DarkGray
+                Write-Host "  (no issue started - nothing to dispatch)" -ForegroundColor DarkGray
             } else {
-                foreach ($e in $entries) { Write-Host ("  #{0,-4} {1}  -> rama {2}" -f $e.issue, $e.title, $e.branch) -ForegroundColor Gray }
+                foreach ($e in $entries) { Write-Host ("  #{0,-4} {1}  -> branch {2}" -f $e.issue, $e.title, $e.branch) -ForegroundColor Gray }
                 Write-Host ""
-                Write-Host "Esta herramienta no puede abrir sesiones del host por si misma: entrega CADA entrada a la" -ForegroundColor Yellow
-                Write-Host "herramienta de sesiones del host (un clic por tarea) y registra el id que devuelva con:" -ForegroundColor Yellow
-                # El runId va SIEMPRE en la instruccion impresa (external review round 6): sin el,
-                # seguir esta linea al pie de la letra salta la comprobacion de corrida y un id de
-                # una ola anterior puede quedar anotado sobre la fila de la ola actual.
+                Write-Host "This tool cannot open host sessions by itself: hand EACH entry to the host's" -ForegroundColor Yellow
+                Write-Host "session tool (one click per task) and record the id it returns with:" -ForegroundColor Yellow
+                # The runId ALWAYS goes in the printed instruction (external review round 6): without
+                # it, following this line to the letter skips the run check, and an id from an
+                # earlier wave could be recorded on the current wave's row.
                 Write-Host ("  /board work -RegisterSession -Issue <n> -HostSessionId <id> -RunId {0}" -f $runId) -ForegroundColor DarkGray
             }
             if ($DryRun) {
                 Write-Host ""
-                Write-Host "Modo DRY-RUN - ningun cambio ejecutado (ni worktree, ni sesion registrada)." -ForegroundColor Gray
+                Write-Host "DRY-RUN mode - no changes made (no worktree, no session recorded)." -ForegroundColor Gray
             }
             Write-Host ""
             Write-Host "Board: $boardUrl" -ForegroundColor Cyan
@@ -4283,7 +4283,7 @@ if ($Parallel.Count -gt 0) {
     # -Fleet TAKES OVER the launch (elseif), so the two never both spawn in one run.
     if ($Fleet) {
         Write-Host ""
-        Write-Host "----- FLEET (una CLI por issue, fallback claude) -----" -ForegroundColor Cyan
+        Write-Host "----- FLEET (one CLI per issue, fallback claude) -----" -ForegroundColor Cyan
         # Availability across every adapter. A not-installed CLI is offered for install
         # (only in a real run); if still unavailable it just stays that way (fallback).
         $availability = @{}
@@ -4298,12 +4298,12 @@ if ($Parallel.Count -gt 0) {
         if ($DryRun) {
             # No prompt / install / spawn under -DryRun: just show the probe table and
             # the default plan (every started issue -> claude; the real picker runs live).
-            Write-Host "  CLIs disponibles (probe):" -ForegroundColor DarkGray
+            Write-Host "  Available CLIs (probe):" -ForegroundColor DarkGray
             Show-CliAvailability $availability | Out-Null
             $defaultMap = @{}
             foreach ($r in $planned) { $defaultMap[$r.issue] = 'claude' }
             $dryPlan = Build-FleetPlan -Started $planned -CliMap $defaultMap
-            Write-Host "  Plan por defecto (el picker por-issue corre en la ejecucion real):" -ForegroundColor DarkGray
+            Write-Host "  Default plan (the per-issue picker runs in the real execution):" -ForegroundColor DarkGray
             foreach ($e in $dryPlan) { Write-Host ("    #{0,-4} -> {1}" -f $e.issue, $e.cli) -ForegroundColor Gray }
         } else {
             # Auth preflight: a claude fallback session is headless, so it needs an explicit
@@ -4311,16 +4311,16 @@ if ($Parallel.Count -gt 0) {
             $oauthPresent  = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN', 'User')
             $ClaudeAuthVar = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
             if ($ClaudeAuthVar -eq 'CLAUDE_CODE_OAUTH_TOKEN') {
-                Write-Host "  Auth: usando CLAUDE_CODE_OAUTH_TOKEN (suscripcion)." -ForegroundColor DarkGray
+                Write-Host "  Auth: using CLAUDE_CODE_OAUTH_TOKEN (subscription)." -ForegroundColor DarkGray
             }
             $claudeAuth = [System.Environment]::GetEnvironmentVariable($ClaudeAuthVar, "User")
             if (-not $claudeAuth) {
                 Write-Host ""
-                Write-Host ("  AUTH REQUERIDA - las sesiones headless necesitan '{0}' en tus variables de usuario." -f $ClaudeAuthVar) -ForegroundColor Red
-                Write-Host "  (El login del Desktop NO se comparte con procesos hijos, darian 401.)" -ForegroundColor DarkYellow
-                Write-Host "  Opcion A (API key): setx ANTHROPIC_API_KEY <tu-api-key>" -ForegroundColor Gray
-                Write-Host "  Opcion B (suscripcion): claude setup-token ; setx CLAUDE_CODE_OAUTH_TOKEN <token> ; -ClaudeAuthVar CLAUDE_CODE_OAUTH_TOKEN" -ForegroundColor Gray
-                Write-Host "  Reinicia la terminal y re-lanza con -Fleet (los worktrees ya estan listos; monitorea con -Sessions)." -ForegroundColor Yellow
+                Write-Host ("  AUTH REQUIRED - headless sessions need '{0}' in your user environment variables." -f $ClaudeAuthVar) -ForegroundColor Red
+                Write-Host "  (The Desktop login is NOT shared with child processes; they would get 401.)" -ForegroundColor DarkYellow
+                Write-Host "  Option A (API key): setx ANTHROPIC_API_KEY <your-api-key>" -ForegroundColor Gray
+                Write-Host "  Option B (subscription): claude setup-token ; setx CLAUDE_CODE_OAUTH_TOKEN <token> ; -ClaudeAuthVar CLAUDE_CODE_OAUTH_TOKEN" -ForegroundColor Gray
+                Write-Host "  Restart the terminal and re-run with -Fleet (the worktrees are ready; monitor with -Sessions)." -ForegroundColor Yellow
                 Write-Host ""
                 Write-Host "Board: $boardUrl" -ForegroundColor Cyan
                 exit 0
@@ -4353,8 +4353,8 @@ if ($Parallel.Count -gt 0) {
             # -MaxConcurrent (0 = capacity-only) caps how many run at once.
             $dispatched = @(Invoke-FleetDispatch -Queue $fleetPlan -NoQuotaClis $noQuota -LaunchSession $launchHook -MaxConcurrent $MaxConcurrent)
             Write-Host ""
-            $fleetBrakeMsg = if ($launchBrake) { "freno ARMADO (sesiones paran en el PR listo)." } else { "ATENCION: freno desarmado con -AllowMerge." }
-            Write-Host ("Fleet lanzada: {0} sesion(es) en oleadas por capacidad (fallback claude). {1}" -f $dispatched.Count, $fleetBrakeMsg) -ForegroundColor Yellow
+            $fleetBrakeMsg = if ($launchBrake) { "brake ARMED (sessions stop at the ready PR)." } else { "WARNING: brake disarmed with -AllowMerge." }
+            Write-Host ("Fleet launched: {0} session(s) in capacity-sized waves (fallback claude). {1}" -f $dispatched.Count, $fleetBrakeMsg) -ForegroundColor Yellow
         }
     } elseif ($Launch) {
         Write-Host ""
@@ -4363,10 +4363,10 @@ if ($Parallel.Count -gt 0) {
         $oauthPresent  = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN', 'User')
         $ClaudeAuthVar = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
         if ($ClaudeAuthVar -eq 'CLAUDE_CODE_OAUTH_TOKEN') {
-            Write-Host "  Auth: usando CLAUDE_CODE_OAUTH_TOKEN (suscripcion)." -ForegroundColor DarkGray
+            Write-Host "  Auth: using CLAUDE_CODE_OAUTH_TOKEN (subscription)." -ForegroundColor DarkGray
         }
         if ($DryRun) {
-            Write-Host "----- LAUNCH (preview, -DryRun no lanza nada) -----" -ForegroundColor Cyan
+            Write-Host "----- LAUNCH (preview, -DryRun launches nothing) -----" -ForegroundColor Cyan
             $runId = New-FleetRunId
             foreach ($r in $planned) {
                 # Use the SAME path logic as real creation so the preview matches (see
@@ -4376,20 +4376,20 @@ if ($Parallel.Count -gt 0) {
                 Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Preview | Out-Null
             }
         } else {
-            Write-Host "----- LANZANDO SESIONES CLAUDE -----" -ForegroundColor Cyan
+            Write-Host "----- LAUNCHING CLAUDE SESSIONS -----" -ForegroundColor Cyan
             # Preflight: unattended headless sessions need an explicit credential in
             # the Windows USER env (the Desktop host's OAuth is not shared with child
             # processes). Without it every tab would 401 silently - warn and don't spawn.
             $claudeAuth = [System.Environment]::GetEnvironmentVariable($ClaudeAuthVar, "User")
             if (-not $claudeAuth) {
                 Write-Host ""
-                Write-Host ("  AUTH REQUERIDA - las sesiones headless necesitan '{0}' en tus variables de usuario." -f $ClaudeAuthVar) -ForegroundColor Red
-                Write-Host "  (El login del Desktop NO se comparte con procesos hijos, darian 401.)" -ForegroundColor DarkYellow
-                Write-Host "  Opcion A (API key, facturacion por consumo a tu cuenta de consola):" -ForegroundColor Yellow
-                Write-Host "    setx ANTHROPIC_API_KEY <tu-api-key>" -ForegroundColor Gray
-                Write-Host "  Opcion B (suscripcion Claude): genera un token y apunta el launcher a el:" -ForegroundColor Yellow
-                Write-Host "    claude setup-token   ; setx CLAUDE_CODE_OAUTH_TOKEN <token>   ; luego -ClaudeAuthVar CLAUDE_CODE_OAUTH_TOKEN" -ForegroundColor Gray
-                Write-Host "  Reinicia la terminal y re-lanza con -Launch (los worktrees ya estan listos; monitorea con -Sessions)." -ForegroundColor Yellow
+                Write-Host ("  AUTH REQUIRED - headless sessions need '{0}' in your user environment variables." -f $ClaudeAuthVar) -ForegroundColor Red
+                Write-Host "  (The Desktop login is NOT shared with child processes; they would get 401.)" -ForegroundColor DarkYellow
+                Write-Host "  Option A (API key, usage billing to your console account):" -ForegroundColor Yellow
+                Write-Host "    setx ANTHROPIC_API_KEY <your-api-key>" -ForegroundColor Gray
+                Write-Host "  Option B (Claude subscription): generate a token and point the launcher at it:" -ForegroundColor Yellow
+                Write-Host "    claude setup-token   ; setx CLAUDE_CODE_OAUTH_TOKEN <token>   ; then -ClaudeAuthVar CLAUDE_CODE_OAUTH_TOKEN" -ForegroundColor Gray
+                Write-Host "  Restart the terminal and re-run with -Launch (the worktrees are ready; monitor with -Sessions)." -ForegroundColor Yellow
                 Write-Host ""
                 Write-Host "Board: $boardUrl" -ForegroundColor Cyan
                 exit 0
@@ -4408,8 +4408,8 @@ if ($Parallel.Count -gt 0) {
                 }
             }
             Write-Host ""
-            $brakeMsg = if ($launchBrake) { "el freno esta ARMADO: las sesiones paran en el PR listo (no mergean solas)." } else { "ATENCION: freno desarmado con -AllowMerge - las sesiones PUEDEN mergear autonomamente." }
-            Write-Host ("Lanzadas: {0} sesion(es). {1}" -f $launched, $brakeMsg) -ForegroundColor Yellow
+            $brakeMsg = if ($launchBrake) { "the brake is ARMED: sessions stop at the ready PR (they do not merge on their own)." } else { "WARNING: brake disarmed with -AllowMerge - sessions CAN merge autonomously." }
+            Write-Host ("Launched: {0} session(s). {1}" -f $launched, $brakeMsg) -ForegroundColor Yellow
         }
     }
 
@@ -4439,7 +4439,7 @@ if ($Parallel.Count -gt 0) {
 # leader's branch/workPath, so /board watch and cleanup see the whole group as one session.
 # =======================================================================
 if ($groupQueue.Count -gt 0) {
-    Write-Host "=== Empezando lote de issues $($groupQueue -join ', ') (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
+    Write-Host "=== Starting issue batch $($groupQueue -join ', ') (board #$ProjectNum of $Owner) ===" -ForegroundColor Cyan
     Write-Host ""
 
     $ctx = Resolve-BoardStatus $Owner $ProjectNum
@@ -4448,7 +4448,7 @@ if ($groupQueue.Count -gt 0) {
                               -DryRunStart:$DryRun -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver
     if ($lead.skipped) {
         Write-Host ""
-        Write-Host "Lote ABORTADO: el issue lider #$($groupQueue[0]) no pudo empezar - ningun issue del lote fue tocado." -ForegroundColor Red
+        Write-Host "Batch ABORTED: lead issue #$($groupQueue[0]) could not start - no issue in the batch was touched." -ForegroundColor Red
         Write-Host "Board: $boardUrl" -ForegroundColor Cyan
         exit 1
     }
@@ -4459,7 +4459,7 @@ if ($groupQueue.Count -gt 0) {
                                -Base $Base -BaseCurrent:$BaseCurrent `
                                -DryRunStart:$DryRun -IgnoreBlocked:$IgnoreBlocked -TakeOver:$TakeOver
         if ($r.skipped) {
-            Write-Host "  (#$n queda fuera del lote - la rama compartida sigue siendo valida para el resto)" -ForegroundColor DarkYellow
+            Write-Host "  (#$n is left out of the batch - the shared branch is still valid for the rest)" -ForegroundColor DarkYellow
             continue
         }
         if (-not $DryRun -and $lead.workPath) {
@@ -4470,7 +4470,7 @@ if ($groupQueue.Count -gt 0) {
 
     if ($DryRun) {
         Write-Host ""
-        Write-Host "Modo DRY-RUN - ningun cambio ejecutado." -ForegroundColor Gray
+        Write-Host "DRY-RUN mode - no changes made." -ForegroundColor Gray
         Write-Host ""
         Write-Host "Board: $boardUrl" -ForegroundColor Cyan
         exit 0
@@ -4478,9 +4478,9 @@ if ($groupQueue.Count -gt 0) {
 
     $startedNums = ($started | ForEach-Object { $_.issue }) -join ','
     Write-Host ""
-    Write-Host ("Lote listo: {0} de {1} issue(s) en UNA sola rama ({2})." -f $started.Count, $groupQueue.Count, $lead.branch) -ForegroundColor Green
-    Write-Host "AL TERMINAR (un solo PR para todo el lote): abre el PR citando los issues $startedNums" -ForegroundColor Yellow
-    Write-Host "(un solo review gate + un solo merge cierran los $($started.Count) issues a la vez)" -ForegroundColor DarkGray
+    Write-Host ("Batch ready: {0} of {1} issue(s) on ONE single branch ({2})." -f $started.Count, $groupQueue.Count, $lead.branch) -ForegroundColor Green
+    Write-Host "WHEN DONE (a single PR for the whole batch): open the PR citing issues $startedNums" -ForegroundColor Yellow
+    Write-Host "(a single review gate + a single merge close all $($started.Count) issues at once)" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
@@ -4489,7 +4489,7 @@ if ($groupQueue.Count -gt 0) {
 # =======================================================================
 # MODE 3: -ProjectNum -Start <issueNum>  -> move to In Progress + assign + context
 # =======================================================================
-Write-Host "=== Empezando issue #$Start (board #$ProjectNum de $Owner) ===" -ForegroundColor Cyan
+Write-Host "=== Starting issue #$Start (board #$ProjectNum of $Owner) ===" -ForegroundColor Cyan
 Write-Host ""
 
 $ctx = Resolve-BoardStatus $Owner $ProjectNum
@@ -4505,7 +4505,7 @@ if ($r.skipped) {
 
 if ($DryRun) {
     Write-Host ""
-    Write-Host "Modo DRY-RUN - ningun cambio ejecutado." -ForegroundColor Gray
+    Write-Host "DRY-RUN mode - no changes made." -ForegroundColor Gray
     Write-Host ""
     Write-Host "Board: $boardUrl" -ForegroundColor Cyan
     exit 0
@@ -4514,9 +4514,9 @@ if ($DryRun) {
 Write-Host ""
 Write-IssueContext $Start $r.repo
 Write-Host ""
-Write-Host "Issue #$Start listo para trabajar (In Progress, asignado a $Owner)." -ForegroundColor Green
-Write-Host "AL TERMINAR: abre el PR citando 'Closes #$Start' con la cuenta correcta - NO commit directo a main." -ForegroundColor Yellow
-Write-Host "(asi GitHub llena solo la columna 'Linked pull requests' del board)" -ForegroundColor DarkGray
+Write-Host "Issue #$Start ready to work (In Progress, assigned to $Owner)." -ForegroundColor Green
+Write-Host "WHEN DONE: open the PR citing 'Closes #$Start' with the right account - NO direct commit to main." -ForegroundColor Yellow
+Write-Host "(that way GitHub fills the board's 'Linked pull requests' column by itself)" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Board: $boardUrl" -ForegroundColor Cyan
 

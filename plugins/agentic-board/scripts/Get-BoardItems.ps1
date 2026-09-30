@@ -64,7 +64,7 @@ function Get-BoardItems {
         [string]$What
     )
     if ($Limit -le 0) { $Limit = $script:BoardItemReadLimit }
-    if (-not $What)   { $What  = "listar los items del board #$Number" }
+    if (-not $What)   { $What  = "list the items of board #$Number" }
 
     # -Json fails closed: a read failure THROWS rather than yielding an empty list the caller
     # would report as "sin pendientes" - the green all-clear over a full board (#278/#303/#314).
@@ -92,6 +92,6 @@ function Get-BoardItems {
 function Get-BoardTruncationWarning {
     param([Parameter(Mandatory)][object]$Read)
     if (-not $Read.Truncated) { return $null }
-    "TRUNCADO: lei $($Read.Read) items, que es el tope de la lectura - puede haber mas que no vi. " +
-    "NO puedo afirmar que no queden pendientes; revisa el board directamente."
+    "TRUNCATED: read $($Read.Read) items, which is the read cap - there may be more I did not see. " +
+    "I CANNOT claim nothing is pending; check the board directly."
 }

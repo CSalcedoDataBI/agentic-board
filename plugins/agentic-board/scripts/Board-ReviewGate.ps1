@@ -384,8 +384,8 @@ function Get-ReviewEvidence {
 #>
 function Get-RefusalNotice {
     param([int]$Count)
-    if ($Count -le 1) { return "El unico revisor contesto que NO pudo revisar (sin cuota / no disponible)." }
-    return "Hay $Count respuestas de 'no pude revisar' sobre este commit (sin cuota / no disponible)."
+    if ($Count -le 1) { return "The only reviewer answered that it could NOT review (no quota / unavailable)." }
+    return "There are $Count 'could not review' answers on this commit (no quota / unavailable)."
 }
 
 <#  Did the review side of the wait get an ANSWER? (#651)
@@ -455,7 +455,7 @@ function Get-CodexVerifiedComments {
             # Leaf filename only (review round 1, Copilot on #645): the full path can carry a
             # username / home-directory structure that a shared CI log should not echo.
             $leafForLog = try { Split-Path -Leaf $m.RolloutPath } catch { '(unparseable path)' }
-            Write-Host ("  WARN marcador de codex-rescue no verifica en disco (rollout='{0}' thread='{1}') - se ignora como evidencia (#644)." -f $leafForLog, $m.ThreadId) -ForegroundColor DarkYellow
+            Write-Host ("  WARN codex-rescue marker does not verify on disk (rollout='{0}' thread='{1}') - ignored as evidence (#644)." -f $leafForLog, $m.ThreadId) -ForegroundColor DarkYellow
         }
         return $ok
     })
@@ -551,7 +551,7 @@ function Get-ChecksVerdict {
     # too. And NO Trim(): the Failed/Pending tests above compare the raw value, so trimming here
     # would make ' fail ' look recognised while it matched neither list - passed over again.
     $unknown = @($list | Where-Object { "$($_.bucket)" -notin @('pass','fail','cancel','pending','skipping') } |
-                 ForEach-Object { $n = "$($_.name)".Trim(); if ($n) { $n } else { '(sin nombre)' } })
+                 ForEach-Object { $n = "$($_.name)".Trim(); if ($n) { $n } else { '(unnamed)' } })
     return @{
         Parsed       = $true
         Settled      = ($pending.Count -eq 0)
@@ -581,7 +581,7 @@ function Get-FailedCheckJobFacts {
         $jobId = Get-CheckJobId -Link $link
         if ($jobId -le 0 -or $facts.ContainsKey($link)) { continue }
         try {
-            $job = Invoke-Gh -GhArgs @('api',"repos/$Repo/actions/jobs/$jobId") -What "leer el job $jobId del check '$($c.name)'" -Json
+            $job = Invoke-Gh -GhArgs @('api',"repos/$Repo/actions/jobs/$jobId") -What "read job $jobId of check '$($c.name)'" -Json
             $n = Get-JobStepCount -Job $job
             if ($n -ge 0) { $facts[$link] = @{ stepCount = $n } }
         } catch { }
@@ -649,7 +649,7 @@ function Test-RepoHasActiveWorkflows {
         # later page would answer "no active workflows" - a FALSE benign pass, i.e. exactly the
         # hole this function exists to close, reopened by pagination (review of #673).
         $resp = Invoke-Gh -GhArgs @('api',"repos/$Repo/actions/workflows?per_page=100") `
-                          -What "leer los workflows de $Repo" -Json
+                          -What "read the workflows of $Repo" -Json
         return (@($resp.workflows | Where-Object { $_.state -eq 'active' }).Count -gt 0)
     } catch {
         return $true
@@ -692,31 +692,31 @@ function Invoke-GateMulti {
         [System.Collections.IDictionary]$Bound = @{}, [string]$StateDir = ''
     )
     if ($Issue -gt 0 -and @($Specs).Count -gt 0) {
-        Write-Host "Usa -PullRequests O -Issue, no los dos: no se cual de las dos listas es la buena." -ForegroundColor Red
+        Write-Host "Use -PullRequests OR -Issue, not both: I cannot tell which of the two lists is the right one." -ForegroundColor Red
         return 4
     }
     $specList = @($Specs)
     if ($Issue -gt 0) {
         $p = if ($StateDir) { Join-Path $StateDir 'sessions.json' } else { '' }
         if (-not $p -or -not (Test-Path -LiteralPath $p)) {
-            Write-Host "No hay registro de sesiones (sessions.json): el issue #$Issue no tiene PRs anotados, asi que no hay nada que aprobar." -ForegroundColor Red
+            Write-Host "No session registry (sessions.json): issue #$Issue has no recorded PRs, so there is nothing to approve." -ForegroundColor Red
             return 4
         }
         try { $entries = @(Get-Content -LiteralPath $p -Raw | ConvertFrom-Json) }
-        catch { Write-Host "sessions.json ilegible ($($_.Exception.Message)): no puedo saber que PRs tiene el issue #$Issue." -ForegroundColor Red; return 4 }
+        catch { Write-Host "sessions.json is unreadable ($($_.Exception.Message)): I cannot tell which PRs issue #$Issue has." -ForegroundColor Red; return 4 }
         $specList = @(Get-RecordedPullRequests -Entries $entries -Issue $Issue)
         if ($specList.Count -eq 0) {
-            Write-Host "El issue #$Issue no tiene ningun PR anotado (Board-Work -RecordPr): no hay nada que aprobar." -ForegroundColor Red
+            Write-Host "Issue #$Issue has no recorded PR (Board-Work -RecordPr): there is nothing to approve." -ForegroundColor Red
             return 4
         }
     }
-    if ($specList.Count -eq 0) { Write-Host "No hay ningun PR que revisar." -ForegroundColor Red; return 4 }
+    if ($specList.Count -eq 0) { Write-Host "There is no PR to review." -ForegroundColor Red; return 4 }
 
     $refs = @(); $seen = @{}
     foreach ($s in $specList) {
         $r = Resolve-GatePullRequest -Spec $s -DefaultRepo $DefaultRepo
         if (-not $r) {
-            Write-Host "No entiendo '$s': espero owner/name#numero (o un numero con -Repo)." -ForegroundColor Red
+            Write-Host "Cannot parse '$s': expected owner/name#number (or a number with -Repo)." -ForegroundColor Red
             return 4
         }
         $k = "$($r.Repo)#$($r.Number)".ToLowerInvariant()
@@ -735,14 +735,14 @@ function Invoke-GateMulti {
 
     $run = Get-GateRunVerdict -Verdicts @($rows | ForEach-Object { $_.Verdict })
     Write-Host ""
-    Write-Host "===== VEREDICTO POR PR =====" -ForegroundColor Cyan
+    Write-Host "===== VERDICT PER PR =====" -ForegroundColor Cyan
     foreach ($row in $rows) {
         $label = switch ($row.Verdict) {
-            'pass'             { 'APROBADO' }
-            'block'            { 'BLOQUEADO' }
-            'unreviewed'       { 'SIN REVISAR' }
-            'ci-not-evaluated' { 'CI NO SE EVALUO' }
-            default            { 'DESCONOCIDO (no se pudo saber, no cuenta como aprobado)' }
+            'pass'             { 'PASSED' }
+            'block'            { 'BLOCKED' }
+            'unreviewed'       { 'UNREVIEWED' }
+            'ci-not-evaluated' { 'CI NOT EVALUATED' }
+            default            { 'UNKNOWN (could not tell; does not count as passed)' }
         }
         $color = if ($row.Verdict -eq 'pass') { 'Green' } elseif ($row.Verdict -eq 'block') { 'Red' } else { 'Yellow' }
         Write-Host ("  {0,-40} {1}  (exit {2})" -f $row.Ref, $label, $(if ($null -eq $row.Code) { '?' } else { $row.Code })) -ForegroundColor $color
@@ -750,11 +750,11 @@ function Invoke-GateMulti {
     $passed = @($rows | Where-Object { $_.Verdict -eq 'pass' }).Count
     Write-Host ""
     $runLabel = switch ($run.Name) {
-        'pass'             { "GATE APROBADO: los $($rows.Count) PR(s) pasaron." }
-        'block'            { "GATE BLOQUEADO: al menos un PR esta bloqueado ($passed de $($rows.Count) pasaron)." }
-        'ci-not-evaluated' { "GATE BLOQUEADO, CI NO EVALUADO en al menos un PR ($passed de $($rows.Count) pasaron)." }
-        'unreviewed'       { "RUN SIN REVISAR: al menos un PR no tiene revision ($passed de $($rows.Count) pasaron)." }
-        default            { "GATE DESCONOCIDO: no pude saber el estado de al menos un PR ($passed de $($rows.Count) pasaron). No es un aprobado." }
+        'pass'             { "GATE PASSED: all $($rows.Count) PR(s) passed." }
+        'block'            { "GATE BLOCKED: at least one PR is blocked ($passed of $($rows.Count) passed)." }
+        'ci-not-evaluated' { "GATE BLOCKED, CI NOT EVALUATED on at least one PR ($passed of $($rows.Count) passed)." }
+        'unreviewed'       { "RUN UNREVIEWED: at least one PR has no review ($passed of $($rows.Count) passed)." }
+        default            { "GATE UNKNOWN: could not tell the state of at least one PR ($passed of $($rows.Count) passed). This is not a pass." }
     }
     Write-Host $runLabel -ForegroundColor $(if ($run.Name -eq 'pass') { 'Green' } elseif ($run.Name -eq 'block') { 'Red' } else { 'Yellow' })
     return $run.ExitCode
@@ -765,7 +765,7 @@ if ($env:ABIOS_REVIEWGATE_DOTSOURCE) { return }
 
 if ($PSCmdlet.ParameterSetName -eq 'Multi') {
     if ($InstallRuleset -or $RecordReview) {
-        Write-Host "-PullRequests / -Issue no se combinan con -InstallRuleset ni -RecordReview: registra cada revision PR por PR." -ForegroundColor Red
+        Write-Host "-PullRequests / -Issue cannot be combined with -InstallRuleset or -RecordReview: record each review one PR at a time." -ForegroundColor Red
         exit 4
     }
     $multiState = Get-AbiosStateDir -NoCreate
@@ -790,9 +790,9 @@ $rp = $Repo -split "/"
 if ($InstallRuleset) {
     $name = "pr-before-merge (agentic-board)"
     # -Json fails closed: a read failure must not read as "no rulesets" and POST a DUPLICATE.
-    $existing = Invoke-Gh -GhArgs @('api',"repos/$Repo/rulesets") -What "leer los rulesets de $Repo" -Json
+    $existing = Invoke-Gh -GhArgs @('api',"repos/$Repo/rulesets") -What "read the rulesets of $Repo" -Json
     if (@($existing | Where-Object { $_.name -eq $name }).Count -gt 0) {
-        Write-Host "Ruleset '$name' ya existe en $Repo - nada que hacer." -ForegroundColor Green
+        Write-Host "Ruleset '$name' already exists in $Repo - nothing to do." -ForegroundColor Green
         exit 0
     }
     $payload = @{
@@ -816,14 +816,14 @@ if ($InstallRuleset) {
     # plain -StdIn: a native non-zero never threw, so the write silently no-op'd and still printed
     # "OK instalado" - the ruleset the user believes protects the branch was never created (#316).
     $null = Invoke-Gh -GhArgs @('api',"repos/$Repo/rulesets",'-X','POST','--input','-') -StdIn $payload `
-                      -What "instalar el ruleset '$name' en $Repo"
-    Write-Host "OK ruleset '$name' instalado: PRs obligatorios hacia la rama default de $Repo." -ForegroundColor Green
-    Write-Host "NOTA honesta: los admins del repo tienen bypass (el tooling sigue funcionando);" -ForegroundColor DarkGray
-    Write-Host "la proteccion dura para humanos, el gate del flujo work aplica para el agente." -ForegroundColor DarkGray
+                      -What "install the ruleset '$name' in $Repo"
+    Write-Host "OK ruleset '$name' installed: PRs required into the default branch of $Repo." -ForegroundColor Green
+    Write-Host "Honest note: repo admins have a bypass (the tooling keeps working);" -ForegroundColor DarkGray
+    Write-Host "the hard protection is for humans; the work-flow gate is what applies to the agent." -ForegroundColor DarkGray
     exit 0
 }
 
-if ($PR -le 0) { throw "Usa -PR <numero> (o -InstallRuleset)." }
+if ($PR -le 0) { throw "Use -PR <number> (or -InstallRuleset)." }
 
 # Is an empty `gh pr checks` really "this repo has no CI"?
 #
@@ -847,15 +847,15 @@ if ($RecordReview) {
     # read - the same empty assurance the whole issue is about, just with a different author.
     # Having to state what the review found is the cheapest available proof that one happened.
     if (-not "$Summary".Trim()) {
-        throw "-RecordReview exige -Summary: escribe QUE encontro la revision. Registrar una revision vacia es exactamente el problema que este gate arregla (#510)."
+        throw "-RecordReview requires -Summary: write WHAT the review found. Recording an empty review is exactly the problem this gate fixes (#510)."
     }
     # One read for both the head (always needed) and the author (only under
     # -RequireIndependentReviewer) - review round 1 on #629 flagged the two separate `gh pr view`
     # calls this used to be as a needless round-trip.
     $prMeta  = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','author,headRefOid') `
-                        -What "leer metadata del PR #$PR" -Json
+                        -What "read the metadata of PR #$PR" -Json
     $headSha = "$($prMeta.headRefOid)".Trim()
-    if (-not $headSha) { throw "No pude leer el head del PR #$PR - sin el, la revision no queda atada a este diff." }
+    if (-not $headSha) { throw "Could not read the head of PR #$PR - without it, the review is not tied to this diff." }
 
     # Self-certification guard (#541/#622): fail LOUD and immediately, not by silently leaving the
     # gate blocked later. Only checked under -RequireIndependentReviewer - the human solo fallback
@@ -865,13 +865,13 @@ if ($RecordReview) {
         # output left $whoAmI blank, and the guard below reads blank as "cannot compare" and skips
         # itself SILENTLY - fail-open in the one function whose entire job is not being fooled.
         # Every other read in this file fails closed on empty; this one now matches.
-        $whoAmI = "$((Invoke-Gh -GhArgs @('api','user') -What 'leer la identidad activa' -Json).login)".Trim()
+        $whoAmI = "$((Invoke-Gh -GhArgs @('api','user') -What 'read the active identity' -Json).login)".Trim()
         if (-not $whoAmI) {
-            throw "No pude leer la identidad activa (gh api user) - sin ella no puedo verificar independencia (#541), y seguir en silencio dejaria pasar exactamente lo que este guard existe para bloquear."
+            throw "Could not read the active identity (gh api user) - without it I cannot verify independence (#541), and carrying on silently would let through exactly what this guard exists to block."
         }
         $prAuthor = "$($prMeta.author.login)".Trim()
         if ($prAuthor -and $whoAmI -eq $prAuthor) {
-            throw "RequireIndependentReviewer: '$whoAmI' abrio este PR y no puede certificar su propia revision (#541). Se necesita una identidad genuinamente distinta - por ejemplo el agente codex-rescue, no otra invocacion de esta misma sesion."
+            throw "RequireIndependentReviewer: '$whoAmI' opened this PR and cannot certify its own review (#541). A genuinely different identity is needed - for example the codex-rescue agent, not another invocation of this same session."
         }
     }
 
@@ -880,17 +880,17 @@ if ($RecordReview) {
     # would silently ignore it later, which reads as "no marker" rather than "malformed marker").
     $haveRollout = "$RolloutPath".Trim(); $haveThread = "$ThreadId".Trim()
     if (($haveRollout -and -not $haveThread) -or ($haveThread -and -not $haveRollout)) {
-        throw "-RolloutPath y -ThreadId van juntos - falta uno de los dos."
+        throw "-RolloutPath and -ThreadId go together - one of the two is missing."
     }
     $codexFields = ""
     if ($haveRollout -and $haveThread) {
         # Fail fast: never post a marker the gate would later reject. A caller that just ran
         # codex-rescue and got a bogus path back should find out NOW, not when the gate blocks.
         if (-not (Test-CodexRescueMarkerOnDisk -RolloutPath $haveRollout -ThreadId $haveThread)) {
-            throw "El rollout '$haveRollout' no existe o su nombre no contiene el thread id '$haveThread' - no se registra un marcador que no verifica (#644)."
+            throw "The rollout '$haveRollout' does not exist or its name does not contain the thread id '$haveThread' - a marker that does not verify is not recorded (#644)."
         }
         $codexFields = " rollout=`"$haveRollout`" thread=$haveThread"
-        Write-Host "  OK marcador de codex-rescue verificado en disco (rollout + thread id coinciden)." -ForegroundColor Green
+        Write-Host "  OK codex-rescue marker verified on disk (rollout + thread id match)." -ForegroundColor Green
     }
 
     # The SHA is what makes the record mean something: it attests to THIS diff, not to the PR in
@@ -898,16 +898,16 @@ if ($RecordReview) {
     # reviewer never saw.
     $body = @"
 <!-- $script:ExternalReviewMarker $Reviewer sha=$headSha$codexFields -->
-## Revision externa - $Reviewer
+## External review - $Reviewer
 
-**Commit revisado:** ``$headSha``
+**Reviewed commit:** ``$headSha``
 
 $Summary
 "@
     $null = Invoke-Gh -GhArgs @('pr','comment',"$PR",'--repo',$Repo,'--body',$body) `
-                      -What "registrar la revision externa en el PR #$PR"
-    Write-Host "OK revision de '$Reviewer' registrada sobre el commit $($headSha.Substring(0,[Math]::Min(7,$headSha.Length))) del PR #$PR." -ForegroundColor Green
-    Write-Host "   Si empujas commits nuevos, esta revision deja de contar - y debe ser asi." -ForegroundColor DarkGray
+                      -What "record the external review on PR #$PR"
+    Write-Host "OK review by '$Reviewer' recorded on commit $($headSha.Substring(0,[Math]::Min(7,$headSha.Length))) of PR #$PR." -ForegroundColor Green
+    Write-Host "   If you push new commits, this review stops counting - as it should." -ForegroundColor DarkGray
     exit 0
 }
 
@@ -932,7 +932,7 @@ function Test-CopilotPending {
 
 # -EnableCopilot: forget the "unavailable" marker for this owner and try Copilot again this run (#367).
 if ($EnableCopilot -and (Clear-CopilotUnavailable $copilotOwner)) {
-    Write-Host "  Copilot re-habilitado para $copilotOwner (marcador borrado)." -ForegroundColor DarkGray
+    Write-Host "  Copilot re-enabled for $copilotOwner (marker deleted)." -ForegroundColor DarkGray
 }
 
 # If we already know this ACCOUNT has no Copilot, skip the request AND the wait entirely and route to
@@ -941,10 +941,10 @@ if ($EnableCopilot -and (Clear-CopilotUnavailable $copilotOwner)) {
 $copilotSkip = Test-CopilotShouldSkip -Owner $copilotOwner -Now (Get-Date)
 if ($copilotSkip.Skip) {
     $copilotSkipped = $true
-    $untilTxt = if ($copilotSkip.Until) { " hasta $($copilotSkip.Until)" } else { "" }
-    Write-Host "  Copilot marcado como NO disponible para $copilotOwner$untilTxt - salto la solicitud y la espera (#367)." -ForegroundColor DarkYellow
-    Write-Host "       Fallback obligatorio: self-review explicito de 'gh pr diff $PR' antes de mergear" -ForegroundColor DarkYellow
-    Write-Host "       (usa -EnableCopilot para reintentar ahora, o la skill second-opinion como revisor)." -ForegroundColor DarkYellow
+    $untilTxt = if ($copilotSkip.Until) { " until $($copilotSkip.Until)" } else { "" }
+    Write-Host "  Copilot marked as NOT available for $copilotOwner$untilTxt - skipping the request and the wait (#367)." -ForegroundColor DarkYellow
+    Write-Host "       Required fallback: an explicit self-review of 'gh pr diff $PR' before merging" -ForegroundColor DarkYellow
+    Write-Host "       (use -EnableCopilot to retry now, or the second-opinion skill as reviewer)." -ForegroundColor DarkYellow
 }
 
 if (-not $copilotSkipped) {
@@ -968,11 +968,11 @@ if (-not $copilotSkipped) {
     }
 
     if ($copilotRequested) {
-        Write-Host "  OK  Review de Copilot solicitado (reviewer pendiente confirmado)" -ForegroundColor Green
+        Write-Host "  OK  Copilot review requested (pending reviewer confirmed)" -ForegroundColor Green
     } else {
-        Write-Host "  WARN Copilot code review no disponible en esta cuenta/repo." -ForegroundColor DarkYellow
-        Write-Host "       Fallback obligatorio: self-review explicito de 'gh pr diff $PR' antes de mergear," -ForegroundColor DarkYellow
-        Write-Host "       y si la skill second-opinion esta disponible, usala como segundo revisor." -ForegroundColor DarkYellow
+        Write-Host "  WARN Copilot code review not available on this account/repo." -ForegroundColor DarkYellow
+        Write-Host "       Required fallback: an explicit self-review of 'gh pr diff $PR' before merging," -ForegroundColor DarkYellow
+        Write-Host "       and if the second-opinion skill is available, use it as a second reviewer." -ForegroundColor DarkYellow
     }
 }
 
@@ -980,7 +980,7 @@ if (-not $copilotSkipped) {
 # -Json fails closed: a read failure must not yield null additions (-> 0 lines) that silently
 # skips the small-PR guard for a PR that could be huge (#316).
 $size = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','additions,deletions,changedFiles,author') `
-                  -What "leer el tamano del PR #$PR" -Json
+                  -What "read the size of PR #$PR" -Json
 $totalLines = $size.additions + $size.deletions
 # The identity a self-certified review would have to impersonate (#541/#622): the account that
 # opened THIS PR. Read once, up front, from the same authoritative call as the size guard - never
@@ -989,12 +989,12 @@ $totalLines = $size.additions + $size.deletions
 # gate (human /board work, including its own -RecordReview fallback) is unaffected.
 $prAuthorLogin = if ($RequireIndependentReviewer) { "$($size.author.login)" } else { '' }
 Write-Host ""
-Write-Host ("  Tamano del PR: {0} archivo(s), +{1}/-{2} ({3} lineas)" -f $size.changedFiles, $size.additions, $size.deletions, $totalLines) -ForegroundColor Cyan
+Write-Host ("  PR size: {0} file(s), +{1}/-{2} ({3} lines)" -f $size.changedFiles, $size.additions, $size.deletions, $totalLines) -ForegroundColor Cyan
 if ($totalLines -gt $MaxLines -or $size.changedFiles -gt $MaxFiles) {
-    Write-Host "  WARN PR grande (umbral: $MaxLines lineas / $MaxFiles archivos)." -ForegroundColor DarkYellow
-    Write-Host "       Un PR chico se revisa mejor y mete menos bugs. Considera dividir el issue con:" -ForegroundColor DarkYellow
-    Write-Host "       divide el issue en partes mas chicas antes de seguir" -ForegroundColor DarkYellow
-    Write-Host "       (advertencia, no bloqueo - los umbrales se ajustan con -MaxLines/-MaxFiles)" -ForegroundColor DarkGray
+    Write-Host "  WARN large PR (threshold: $MaxLines lines / $MaxFiles files)." -ForegroundColor DarkYellow
+    Write-Host "       A small PR is easier to review and ships fewer bugs. Consider splitting the issue:" -ForegroundColor DarkYellow
+    Write-Host "       split the issue into smaller parts before going on" -ForegroundColor DarkYellow
+    Write-Host "       (warning, not a block - tune the thresholds with -MaxLines/-MaxFiles)" -ForegroundColor DarkGray
 }
 
 # ── 1.6. Foreign-commit guard (#309): warn when the PR carries commits from another PR ─────────
@@ -1004,7 +1004,7 @@ if ($totalLines -gt $MaxLines -or $size.changedFiles -gt $MaxFiles) {
 # a DIFFERENT PR is not this issue's work. Warn-only, like the small-PR guard — it never feeds
 # $blockers below.
 $prCommits = Invoke-Gh -GhArgs @('pr','view',"$PR",'--repo',$Repo,'--json','commits') `
-                       -What "leer los commits del PR #$PR" -Json
+                       -What "read the commits of PR #$PR" -Json
 $commitInfo = @()
 foreach ($c in @($prCommits.commits)) {
     $sha = $c.oid
@@ -1014,7 +1014,7 @@ foreach ($c in @($prCommits.commits)) {
     $pulls = @()
     try {
         $assoc = Invoke-Gh -GhArgs @('api',"repos/$Repo/commits/$sha/pulls",'--jq','[.[].number]') `
-                           -What "leer los PRs del commit $sha"
+                           -What "read the PRs of commit $sha"
         if ($assoc) { $pulls = @(($assoc | ConvertFrom-Json)) }
     } catch { }
     $commitInfo += [pscustomobject]@{ Sha = $sha; Pulls = $pulls }
@@ -1022,13 +1022,13 @@ foreach ($c in @($prCommits.commits)) {
 $foreign = Find-ForeignCommits -SelfPr $PR -Commits $commitInfo
 if (@($foreign).Count -gt 0) {
     Write-Host ""
-    Write-Host ("  WARN el PR trae {0} commit(s) asociado(s) a OTRO PR - probablemente no son el trabajo de este issue (#309):" -f @($foreign).Count) -ForegroundColor DarkYellow
+    Write-Host ("  WARN the PR carries {0} commit(s) tied to ANOTHER PR - probably not this issue's work (#309):" -f @($foreign).Count) -ForegroundColor DarkYellow
     foreach ($f in $foreign) {
         $short = $f.Sha.Substring(0, [Math]::Min(9, $f.Sha.Length))
         Write-Host ("       {0}  -> PR(s) {1}" -f $short, ($f.OtherPrs -join ', ')) -ForegroundColor DarkYellow
     }
-    Write-Host "       Verifica que la rama haya salido de la default branch fresca (Board-Work sale de origin/main)." -ForegroundColor DarkGray
-    Write-Host "       (advertencia, no bloqueo - un commit contaminante sin PR propio es invisible a esta senal)" -ForegroundColor DarkGray
+    Write-Host "       Check that the branch was cut from a fresh default branch (Board-Work branches off origin/main)." -ForegroundColor DarkGray
+    Write-Host "       (warning, not a block - a stray commit with no PR of its own is invisible to this signal)" -ForegroundColor DarkGray
 }
 
 # ── 1.7 + 1.8. Semantic-model quality gates (M3.3): breaking schema changes AND BPA ──
@@ -1041,17 +1041,17 @@ if (@($foreign).Count -gt 0) {
 $tmdlBlocked = $false
 $bpaBlocked  = $false
 $tmdlChanged = Invoke-Gh -GhArgs @('api',"repos/$Repo/pulls/$PR/files",'--paginate','--jq','.[] | select(.filename | endswith(".tmdl")) | .filename') `
-                         -What "leer los archivos del PR #$PR"
+                         -What "read the files of PR #$PR"
 if ($tmdlChanged) {
     Write-Host ""
-    Write-Host "  Cambios en modelo TMDL detectados - corriendo reviews de esquema + BPA..." -ForegroundColor Cyan
+    Write-Host "  TMDL model changes detected - running schema + BPA reviews..." -ForegroundColor Cyan
     # 1.7 TMDL breaking-change diff - now BLOCKING (M3.3): -FailOnBreaking exits 1 on a BREAKING change.
     $tmdlScript = Join-Path $PSScriptRoot "Tmdl-DiffReview.ps1"
     if (Test-Path $tmdlScript) {
         & $tmdlScript -Repo $Repo -PR $PR -FailOnBreaking
         if ($LASTEXITCODE -ne 0) { $tmdlBlocked = $true }
     } else {
-        Write-Host "  WARN revisor de esquema TMDL no encontrado junto al gate - salteando review TMDL." -ForegroundColor DarkYellow
+        Write-Host "  WARN TMDL schema reviewer not found next to the gate - skipping the TMDL review." -ForegroundColor DarkYellow
     }
     # 1.8 Best Practice Analyzer - BLOCKING on error-severity violations (#16). Skips safely when the
     # repo has no BPA rules or Tabular Editor is absent (those are never a block).
@@ -1060,7 +1060,7 @@ if ($tmdlChanged) {
         & $bpaScript -Repo $Repo -PR $PR -FailOn error
         if ($LASTEXITCODE -ne 0) { $bpaBlocked = $true }
     } else {
-        Write-Host "  WARN el analizador de mejores practicas (BPA) no encontrado junto al gate - salteando BPA." -ForegroundColor DarkYellow
+        Write-Host "  WARN Best Practice Analyzer (BPA) not found next to the gate - skipping BPA." -ForegroundColor DarkYellow
     }
 }
 
@@ -1086,15 +1086,15 @@ query($o:String!, $r:String!, $n:Int!) {
   }
 }'
     $q = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$reviewQuery",'-f',"o=$($rp[0])",'-f',"r=$($rp[1])",'-F',"n=$PR") `
-                   -What "leer el estado del review del PR #$PR" -Graphql -Retries 2
+                   -What "read the review state of PR #$PR" -Graphql -Retries 2
     return $q.data.repository.pullRequest
 }
 
 Write-Host ""
 if ($copilotRequested) {
-    Write-Host "  Esperando checks de CI (max $CiTimeoutMinutes min) y el review (max $TimeoutMinutes min) EN PARALELO..." -ForegroundColor Cyan
+    Write-Host "  Waiting for CI checks (max $CiTimeoutMinutes min) and the review (max $TimeoutMinutes min) IN PARALLEL..." -ForegroundColor Cyan
 } else {
-    Write-Host "  Esperando checks de CI (max $CiTimeoutMinutes min)..." -ForegroundColor Cyan
+    Write-Host "  Waiting for CI checks (max $CiTimeoutMinutes min)..." -ForegroundColor Cyan
 }
 
 $ciDeadline     = (Get-Date).AddMinutes([Math]::Max(1, $CiTimeoutMinutes))
@@ -1182,29 +1182,29 @@ $notEvaluatedChecks = @($verdictCi.NotEvaluated)
 $unknownChecks = @($verdictCi.Unknown)
 $checksParsed = [bool]$verdictCi.Parsed
 if ($verdictCi.NoChecks) {
-    Write-Host "  (sin checks configurados - cuenta como pass, considera /board automate)" -ForegroundColor DarkGray
+    Write-Host "  (no checks configured - counts as a pass; consider /board automate)" -ForegroundColor DarkGray
 } elseif (-not $verdictCi.Parsed) {
     $checksOk = $false
-    Write-Host "  FAIL no pude leer los checks del PR dentro del limite - se bloquea por precaucion, no como pass." -ForegroundColor Red
+    Write-Host "  FAIL could not read the PR checks within the limit - blocked as a precaution, not a pass." -ForegroundColor Red
 } elseif (-not $verdictCi.Settled) {
     $checksOk = $false; $ciTimedOut = $true
-    Write-Host ("  FAIL checks aun PENDIENTES tras {0} min: {1}" -f $CiTimeoutMinutes, (@($verdictCi.Pending) -join ', ')) -ForegroundColor Red
-    Write-Host "       (limite del gate #562 - antes esto esperaba sin techo y colgaba la sesion)" -ForegroundColor DarkGray
+    Write-Host ("  FAIL checks still PENDING after {0} min: {1}" -f $CiTimeoutMinutes, (@($verdictCi.Pending) -join ', ')) -ForegroundColor Red
+    Write-Host "       (gate limit #562 - this used to wait with no ceiling and hang the session)" -ForegroundColor DarkGray
 } elseif (-not $verdictCi.Ok) {
     $checksOk = $false
     if ($failedChecks.Count -gt 0) {
-        Write-Host ("  FAIL hay checks fallando: {0}" -f ($failedChecks -join ', ')) -ForegroundColor Red
+        Write-Host ("  FAIL checks failing: {0}" -f ($failedChecks -join ', ')) -ForegroundColor Red
     }
     if ($unknownChecks.Count -gt 0) {
-        Write-Host ("  FAIL checks con un estado que este gate no reconoce (se bloquea por precaucion, no como pass): {0}" -f ($unknownChecks -join ', ')) -ForegroundColor Red
+        Write-Host ("  FAIL checks with a state this gate does not recognise (blocked as a precaution, not a pass): {0}" -f ($unknownChecks -join ', ')) -ForegroundColor Red
     }
     if ($notEvaluatedChecks.Count -gt 0) {
-        Write-Host ("  CI NO SE EVALUO (no corrio ningun paso): {0}" -f ($notEvaluatedChecks -join ', ')) -ForegroundColor Red
-        Write-Host "       No es un fallo del codigo: el workflow termino en startup_failure o el job fue rechazado antes de su primer paso" -ForegroundColor DarkGray
-        Write-Host "       (cuota de Actions agotada, limite de gasto, sin runner). Un push nuevo no lo arregla (#481)." -ForegroundColor DarkGray
+        Write-Host ("  CI NOT EVALUATED (no step ran): {0}" -f ($notEvaluatedChecks -join ', ')) -ForegroundColor Red
+        Write-Host "       Not a code failure: the workflow ended in startup_failure or the job was rejected before its first step" -ForegroundColor DarkGray
+        Write-Host "       (Actions quota exhausted, spending limit, no runner). A new push will not fix it (#481)." -ForegroundColor DarkGray
     }
 } else {
-    Write-Host "  OK  checks en verde" -ForegroundColor Green
+    Write-Host "  OK  checks green" -ForegroundColor Green
 }
 
 $reviews    = @($prState.reviews.nodes)
@@ -1221,7 +1221,7 @@ $decision   = $prState.reviewDecision
 if ($copilotRequested -and (Test-CopilotOnlyRefused -Reviews $reviews -HeadSha "$($prState.headRefOid)")) {
     $cooldownDays = [Math]::Max(1, $CopilotCooldownDays)
     if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays($cooldownDays) -Reason 'Copilot answered: unable to review (quota/limit)') {
-        Write-Host ("  Copilot sin disponibilidad detectada - marcado NO disponible para {0} por {1} dia(s); no lo volvere a solicitar/esperar hasta entonces (#367)." -f $copilotOwner, $cooldownDays) -ForegroundColor DarkYellow
+        Write-Host ("  Copilot unavailability detected - marked NOT available for {0} for {1} day(s); I will not request/wait for it again until then (#367)." -f $copilotOwner, $cooldownDays) -ForegroundColor DarkYellow
     }
 } elseif ($copilotRequested) {
     # SILENCE past the deadline arms the cooldown too (#563). Without this, a Copilot that never
@@ -1239,7 +1239,7 @@ if ($copilotRequested -and (Test-CopilotOnlyRefused -Reviews $reviews -HeadSha "
     })
     if (Test-CopilotSilentTimeout -Requested $copilotRequested -Answered $copilotAnswered -Now (Get-Date) -Deadline $reviewDeadline) {
         if (Set-CopilotUnavailable -Owner $copilotOwner -Until (Get-Date).AddDays(1) -Reason "Copilot stayed silent past the $TimeoutMinutes-minute review timeout") {
-            Write-Host ("  Copilot no contesto en {0} min - marcado NO disponible para {1} por 1 dia; el proximo PR no pagara esta espera (#563)." -f $TimeoutMinutes, $copilotOwner) -ForegroundColor DarkYellow
+            Write-Host ("  Copilot did not answer in {0} min - marked NOT available for {1} for 1 day; the next PR will not pay this wait (#563)." -f $TimeoutMinutes, $copilotOwner) -ForegroundColor DarkYellow
         }
     }
 }
@@ -1252,16 +1252,16 @@ $evidence = Get-ReviewEvidence -Reviews $reviews `
                                 -HeadSha "$($prState.headRefOid)" -PrAuthorLogin $prAuthorLogin
 
 Write-Host ""
-Write-Host "----- RESULTADO DEL REVIEW -----" -ForegroundColor Cyan
-Write-Host ("Decision      : {0}" -f ($(if ($decision) { $decision } else { "(sin reviews requeridos)" })))
+Write-Host "----- REVIEW RESULT -----" -ForegroundColor Cyan
+Write-Host ("Decision      : {0}" -f ($(if ($decision) { $decision } else { "(no reviews required)" })))
 Write-Host ("Reviews       : {0}" -f $reviews.Count)
 foreach ($r in $reviews) {
     Write-Host ("  [{0}] {1} - {2}" -f $r.state, $r.author.login, $r.submittedAt) -ForegroundColor Yellow
     if ($r.body) { Write-Host ("    {0}" -f $r.body) }
 }
-Write-Host ("Hilos abiertos: {0}" -f $unresolved)
+Write-Host ("Open threads  : {0}" -f $unresolved)
 if ($unresolved -gt 0) {
-    Write-Host "  Comentarios sin resolver (path:linea):" -ForegroundColor Yellow
+    Write-Host "  Unresolved comments (path:line):" -ForegroundColor Yellow
     gh api "repos/$Repo/pulls/$PR/comments" --jq '.[] | "  \(.path):\(.line // .original_line)  [\(.user.login)] \(.body)"' 2>$null |
         Select-Object -First 30 | ForEach-Object { Write-Host $_ }
 }
@@ -1281,9 +1281,9 @@ Write-Host ""
 $redChecks = @($failedChecks) + @($notEvaluatedChecks)
 if (-not $checksOk -and $evidence.reviewed -and @($verdictCi.NotEvaluatedUnexcusable).Count -eq 0 -and $unknownChecks.Count -eq 0 -and (Test-OnlyReviewerChecksFailed -FailedChecks $redChecks -Parsed $checksParsed -Settled ([bool]$verdictCi.Settled))) {
     $checksOk = $true
-    Write-Host ("  NOTA: el unico check en rojo es el revisor automatico ({0}), y ya hay una revision real" -f ($redChecks -join ', ')) -ForegroundColor DarkYellow
-    Write-Host ("        registrada para este commit ({0}). Su pregunta -'alguien reviso esto?'- ya esta" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray
-    Write-Host "        contestada, asi que deja de ser motivo de bloqueo." -ForegroundColor DarkGray
+    Write-Host ("  NOTE: the only red check is the automated reviewer ({0}), and a real review is already" -f ($redChecks -join ', ')) -ForegroundColor DarkYellow
+    Write-Host ("        recorded for this commit ({0}). Its question -'did anyone review this?'- is already" -f ($evidence.reviewers -join ', ')) -ForegroundColor DarkGray
+    Write-Host "        answered, so it is no longer a reason to block." -ForegroundColor DarkGray
 }
 
 $blockers = @()
@@ -1292,20 +1292,20 @@ $blockers = @()
 $ciNotEvaluatedOnly = $false
 if (-not $checksOk) {
     if ($ciTimedOut) {
-        $blockers += "checks de CI aun pendientes tras $CiTimeoutMinutes min (limite del gate, #562)"
+        $blockers += "CI checks still pending after $CiTimeoutMinutes min (gate limit, #562)"
     } elseif ($failedChecks.Count -eq 0 -and $unknownChecks.Count -eq 0 -and $notEvaluatedChecks.Count -gt 0 -and $checksParsed -and $verdictCi.Settled) {
         $ciNotEvaluatedOnly = $true
-        $blockers += "CI NO SE EVALUO: nunca corrio un paso, no es un fallo del codigo (#481)"
+        $blockers += "CI NOT EVALUATED: no step ever ran, this is not a code failure (#481)"
     } elseif ($failedChecks.Count -eq 0 -and $unknownChecks.Count -gt 0) {
-        $blockers += "checks de CI con un estado que el gate no reconoce: $($unknownChecks -join ', ')"
+        $blockers += "CI checks with a state the gate does not recognise: $($unknownChecks -join ', ')"
     } else {
-        $blockers += "checks de CI fallando"
+        $blockers += "CI checks failing"
     }
 }
-if ($decision -eq "CHANGES_REQUESTED")     { $blockers += "review pide cambios (CHANGES_REQUESTED)" }
-if ($unresolved -gt 0)                     { $blockers += "$unresolved hilo(s) de review sin resolver" }
-if ($tmdlBlocked)                          { $blockers += "cambios TMDL BREAKING en el modelo (M3.3)" }
-if ($bpaBlocked)                           { $blockers += "violaciones BPA de severidad error (M3.3)" }
+if ($decision -eq "CHANGES_REQUESTED")     { $blockers += "review requests changes (CHANGES_REQUESTED)" }
+if ($unresolved -gt 0)                     { $blockers += "$unresolved unresolved review thread(s)" }
+if ($tmdlBlocked)                          { $blockers += "BREAKING TMDL changes in the model (M3.3)" }
+if ($bpaBlocked)                           { $blockers += "error-severity BPA violations (M3.3)" }
 
 if ($blockers.Count -eq 0) {
     # THE #510 fix. "Reviewed and found nothing" and "nobody ever looked" used to print the same
@@ -1314,26 +1314,26 @@ if ($blockers.Count -eq 0) {
     # exit code: anything testing `-eq 0` now fails closed, while still telling it apart from a
     # real block (exit 1).
     if (-not $evidence.reviewed -and -not $AllowUnreviewed) {
-        Write-Host "GATE SIN REVISAR - los checks estan en verde, pero NADIE reviso ESTE diff." -ForegroundColor Yellow
+        Write-Host "GATE UNREVIEWED - the checks are green, but NOBODY reviewed THIS diff." -ForegroundColor Yellow
         if (-not "$($prState.headRefOid)".Trim()) {
             # Fail-closed, but say WHICH failure: blaming the user for not reviewing when the gate
             # could not even read the head commit would send them chasing the wrong thing.
-            Write-Host "  No pude leer el commit actual del PR, asi que no puedo probar que ninguna" -ForegroundColor Yellow
-            Write-Host "  revision corresponda a este codigo. Se rechaza por precaucion, no por falta de review." -ForegroundColor Yellow
+            Write-Host "  Could not read the PR's current commit, so I cannot prove that any" -ForegroundColor Yellow
+            Write-Host "  review matches this code. Rejected as a precaution, not for lack of review." -ForegroundColor Yellow
         } elseif ($evidence.refused -gt 0) {
             # Say it out loud, because the review list printed above SHOWS a Copilot review and a
             # bare "0 reviews" would read as a bug in the gate rather than the truth about it.
             Write-Host ("  {0}" -f (Get-RefusalNotice -Count $evidence.refused)) -ForegroundColor Yellow
-            Write-Host "  Eso es una respuesta, no una revision: nadie leyo este codigo (#651)." -ForegroundColor DarkGray
+            Write-Host "  That is an answer, not a review: nobody read this code (#651)." -ForegroundColor DarkGray
         } elseif ($evidence.stale -gt 0) {
-            Write-Host ("  Hay {0} revision(es) en el PR, pero de commits ANTERIORES - no cubren el codigo actual." -f $evidence.stale) -ForegroundColor Yellow
-            Write-Host "  Empujaste cambios despues de que se reviso; esos cambios no los ha visto nadie." -ForegroundColor DarkGray
+            Write-Host ("  There are {0} review(s) on the PR, but of EARLIER commits - they do not cover the current code." -f $evidence.stale) -ForegroundColor Yellow
+            Write-Host "  You pushed changes after the review; nobody has seen those changes." -ForegroundColor DarkGray
         } else {
-            Write-Host "  0 reviews de GitHub y 0 revisiones externas registradas." -ForegroundColor Yellow
+            Write-Host "  0 GitHub reviews and 0 recorded external reviews." -ForegroundColor Yellow
         }
-        Write-Host "  Un check verde de un reviewer que no dejo review no es evidencia de nada (#510)." -ForegroundColor DarkGray
+        Write-Host "  A green check from a reviewer that left no review is evidence of nothing (#510)." -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "  Salidas legitimas, en orden de preferencia:" -ForegroundColor Cyan
+        Write-Host "  Legitimate ways out, in order of preference:" -ForegroundColor Cyan
         # Way #1 names only reviewers that ANSWER right now (#537). It used to recommend the
         # external reviewer unconditionally, and with every external CLI dead (Gemini auth fails
         # and still exits 0) the only visible exit was -AllowUnreviewed - the gate pushed the user
@@ -1346,16 +1346,16 @@ if ($blockers.Count -eq 0) {
         foreach ($wl in (Get-UnreviewedWayOut -Liveness $reviewerLiveness)) {
             Write-Host $wl.Text -ForegroundColor $wl.Color
         }
-        Write-Host "   2. Si de verdad no amerita revision (typo, archivo generado): -AllowUnreviewed." -ForegroundColor DarkGray
+        Write-Host "   2. If it truly does not warrant a review (typo, generated file): -AllowUnreviewed." -ForegroundColor DarkGray
         Write-Host ""
         exit 2
     }
-    Write-Host "GATE PASSED - seguro mergear." -ForegroundColor Green
+    Write-Host "GATE PASSED - safe to merge." -ForegroundColor Green
     if ($evidence.reviewed) {
-        Write-Host ("  Revisado por: {0} ({1} review(s) de GitHub, {2} externa(s))." -f `
+        Write-Host ("  Reviewed by: {0} ({1} GitHub review(s), {2} external)." -f `
             ($evidence.reviewers -join ', '), $evidence.github, $evidence.external) -ForegroundColor Green
     } else {
-        Write-Host "  NOTA: pasa SIN revision porque se pidio -AllowUnreviewed. Nadie miro este codigo." -ForegroundColor DarkYellow
+        Write-Host "  NOTE: passes WITHOUT review because -AllowUnreviewed was given. Nobody looked at this code." -ForegroundColor DarkYellow
     }
     exit 0
 } else {
@@ -1365,11 +1365,11 @@ if ($blockers.Count -eq 0) {
         # Distinct exit (#481): nothing is wrong with the change and nothing the change can fix.
         # Still non-zero, so anything testing `-eq 0` fails closed; but a caller that loops "push,
         # re-run the gate" can tell this from a real block (1) and stop spending its budget on it.
-        Write-Host "No re-empujes: ningun cambio de codigo puede poner este CI en verde." -ForegroundColor Yellow
-        Write-Host "Registra el gate ci como NOT-EVALUATED en la evidencia, termina el resto y avisa a la persona (cuota, facturacion o workflow)." -ForegroundColor Yellow
+        Write-Host "Do not re-push: no code change can turn this CI green." -ForegroundColor Yellow
+        Write-Host "Record the ci gate as NOT-EVALUATED in the evidence, finish the rest and tell the person (quota, billing or workflow)." -ForegroundColor Yellow
         exit 3
     }
-    Write-Host "Atiende el feedback, push, y re-ejecuta este gate." -ForegroundColor Yellow
+    Write-Host "Address the feedback, push, and re-run this gate." -ForegroundColor Yellow
     exit 1
 }
 

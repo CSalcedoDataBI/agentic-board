@@ -164,8 +164,8 @@ Describe 'the session registry records cross-repo facts and PRs (real sessions.j
             $noIssue = pwsh -NoProfile -File $script:Script -RecordPr 'o/a#3' -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
             $row = @(Read-SessionRegistryRaw)[0]
         } finally { Pop-Location }
-        $ok | Should -Match 'anotado'
-        $bad | Should -Match 'owner/name#numero'
+        $ok | Should -Match 'recorded on the session'
+        $bad | Should -Match 'owner/name#number'
         $noIssue | Should -Match '-ForIssue'
         @($row.prs).Count | Should -Be 1
     }
@@ -269,13 +269,13 @@ Describe 'the dashboard lines for recorded PRs' {
         $lines = @(Format-SessionPrLines -Prs $prs -States @{ 'o/a#5' = 'MERGED'; 'o/b#9' = 'OPEN' })
         $lines[0] | Should -Be 'PR o/a#5 [MERGED]'
         $lines[1] | Should -Be 'PR o/b#9 [OPEN]'
-        $lines[2] | Should -Match '1 de 2 PR'
-        $lines[2] | Should -Match 'cuando estan todos'
+        $lines[2] | Should -Match '1 of 2 PR'
+        $lines[2] | Should -Match 'when all of them are'
     }
     It 'prints an unreadable PR as unknown, never as merged' {
         $lines = @(Format-SessionPrLines -Prs @([pscustomobject]@{ repo = 'o/a'; number = 5 }) -States @{})
-        $lines[0] | Should -Match 'desconocido'
-        $lines[1] | Should -Match '0 de 1'
+        $lines[0] | Should -Match 'unknown'
+        $lines[1] | Should -Match '0 of 1'
     }
     It 'prints nothing for a session with no recorded PRs' {
         @(Format-SessionPrLines -Prs @() -States @{}).Count | Should -Be 0

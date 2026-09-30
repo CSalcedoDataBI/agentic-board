@@ -86,7 +86,7 @@ Describe 'Invoke-PluginUpdate - marketplaces first, then every plugin, verdict f
         (Get-PluginRow $r 'beta').Status | Should -Be 'unchanged'
         $text = Get-ReportText $r
         $text | Should -Match 'alpha@mk-a: 1\.0\.0 \(aaaaaaa\) -> 1\.1\.0 \(bbbbbbb\)'
-        $text | Should -Match 'Sin cambios .*beta'
+        $text | Should -Match 'Unchanged .*beta'
         $r.ExitCode | Should -Be 0
     }
     It 'a failed update is FAILED with its reason, never "unchanged", and the exit code is non-zero' {
@@ -100,9 +100,9 @@ Describe 'Invoke-PluginUpdate - marketplaces first, then every plugin, verdict f
         $g.Reason | Should -Match 'could not reach the server'
         $r.ExitCode | Should -Be 1
         $text = Get-ReportText $r
-        $text | Should -Match 'NO se pudieron actualizar'
+        $text | Should -Match 'COULD NOT be updated'
         $text | Should -Match 'gamma@mk-b: .*could not reach'
-        ($text -split "`n" | Where-Object { $_ -match '^Sin cambios' }) | Should -Not -Match 'gamma'
+        ($text -split "`n" | Where-Object { $_ -match '^Unchanged' }) | Should -Not -Match 'gamma'
     }
     It 'a timeout is a failure, not a success' {
         $fx = New-UpdateFx
@@ -110,7 +110,7 @@ Describe 'Invoke-PluginUpdate - marketplaces first, then every plugin, verdict f
         $beh = @{ 'plugin update beta@mk-a' = { New-Run -1 '' $true } }
         $r = Invoke-PluginUpdate -ClaudeHome $fx.Root -Runner (New-FakeRunner $log $beh) -GetProcess $script:Gone
         (Get-PluginRow $r 'beta').Status | Should -Be 'failed'
-        (Get-PluginRow $r 'beta').Reason | Should -Match 'tiempo'
+        (Get-PluginRow $r 'beta').Reason | Should -Match 'timed out'
         $r.ExitCode | Should -Be 1
     }
     It 'exit 0 with the installed list unchanged is "unchanged" even if the CLI output claims an update' {
@@ -142,9 +142,9 @@ Describe 'Invoke-PluginUpdate - marketplaces first, then every plugin, verdict f
         }
         $r.ExitCode | Should -Be 1
         $text = Get-ReportText $r
-        $text | Should -Match 'NO se pudieron actualizar'
+        $text | Should -Match 'COULD NOT be updated'
         $text | Should -Match 'network unreachable'
-        ($text -split "`n" | Where-Object { $_ -match '^Sin cambios' }) | Should -Not -Match 'alpha|beta'
+        ($text -split "`n" | Where-Object { $_ -match '^Unchanged' }) | Should -Not -Match 'alpha|beta'
     }
     It 'a local-directory marketplace that fails to refresh is only a WARNING: its plugin is still updated and the run passes' {
         $fx = New-UpdateFx
@@ -157,7 +157,7 @@ Describe 'Invoke-PluginUpdate - marketplaces first, then every plugin, verdict f
         (Get-PluginRow $r 'devp').Status | Should -Be 'updated'
         $r.ExitCode | Should -Be 0
         $text = Get-ReportText $r
-        $text | Should -Match 'mk-dev \(carpeta local, solo aviso\)'
+        $text | Should -Match 'mk-dev \(local folder, warning only\)'
     }
     It 'does NOT pass --yes unless -AcceptMarketplaceCommands is given' {
         $fx = New-UpdateFx
@@ -184,7 +184,7 @@ Describe 'Invoke-PluginUpdate - marketplaces first, then every plugin, verdict f
         $log = [System.Collections.Generic.List[string]]::new()
         $r = Invoke-PluginUpdate -ClaudeHome $fx.Root -Runner (New-FakeRunner $log) -GetProcess $script:Gone
         (Get-PluginRow $r 'orphan').Status | Should -Be 'skipped'
-        (Get-PluginRow $r 'orphan').Reason | Should -Match 'ya no esta registrado'
+        (Get-PluginRow $r 'orphan').Reason | Should -Match 'is no longer registered'
     }
     It '-Only limits the run to that plugin and to the marketplace it belongs to' {
         $fx = New-UpdateFx
@@ -215,7 +215,7 @@ Describe 'Invoke-PluginUpdate - marketplaces first, then every plugin, verdict f
         $r.ExitCode | Should -Be 0
         $r.Commands | Should -Contain 'claude plugin update alpha@mk-a'
         $r.Commands | Should -Contain 'claude plugin marketplace update mk-dev'
-        (Get-ReportText $r) | Should -Match 'SIMULACION'
+        (Get-ReportText $r) | Should -Match 'DRY RUN'
         (Get-InstalledPluginEntries -ClaudeHome $fx.Root).Entries | Where-Object Key -eq 'alpha@mk-a' | ForEach-Object Version | Should -Be '1.0.0'
     }
     It 'unreadable installed_plugins.json is a clear failure, not an empty success' {
@@ -225,7 +225,7 @@ Describe 'Invoke-PluginUpdate - marketplaces first, then every plugin, verdict f
         $r = Invoke-PluginUpdate -ClaudeHome $fx.Root -Runner (New-FakeRunner $log) -GetProcess $script:Gone
         $r.ExitCode | Should -Be 1
         $log.Count | Should -Be 0
-        (Get-ReportText $r) | Should -Match 'No pude actualizar'
+        (Get-ReportText $r) | Should -Match 'Could not update'
     }
 }
 
@@ -241,17 +241,17 @@ Describe 'the report ends with how many open sessions still run old builds' {
         $r = Invoke-PluginUpdate -ClaudeHome $fx.Root -Runner (New-FakeRunner $log $beh) -GetProcess $table
         $r.Sessions.Stale | Should -Be 1
         $text = Get-ReportText $r
-        $text | Should -Match 'Sesiones abiertas: 1\. 1 siguen con una version vieja'
+        $text | Should -Match 'Open sessions: 1\. 1 still on an old version'
         $text | Should -Match '/cleanup plugins sessions'
     }
-    It 'a session with no record of what it loaded is reported as "sin datos", not as up to date' {
+    It 'a session with no record of what it loaded is reported as "no data", not as up to date' {
         $fx = New-UpdateFx
         $ft = '134344744676615681'
         [void](Add-FakeSession $fx -ProcId 111 -StartFt $ft -Name 'Blind')
         $table = New-FakeProcessTable @{ [long]111 = $ft }
         $r = Invoke-PluginUpdate -ClaudeHome $fx.Root -Runner (New-FakeRunner ([System.Collections.Generic.List[string]]::new())) -GetProcess $table
         $r.Sessions.NoData | Should -Be 1
-        (Get-ReportText $r) | Should -Match '0 al dia, 1 sin datos'
+        (Get-ReportText $r) | Should -Match '0 up to date, 1 with no data'
     }
 }
 
@@ -266,7 +266,7 @@ Describe 'the "what is new" excerpt is bounded, optional and plain' {
         $ex | Should -Match 'Faster refresh'
         $ex | Should -Match 'New chart'
         $ex | Should -Not -Match 'Old thing'
-        (Get-ReportText $r) | Should -Match 'Que hay de nuevo'
+        (Get-ReportText $r) | Should -Match "What's new"
     }
     It 'no changelog at all is fine: no excerpt, no failure' {
         $fx = New-UpdateFx
@@ -322,7 +322,7 @@ Describe 'cleanup after an update: counted always, deleted only with -Clean' {
         $r.Cleanup.Candidates | Should -Be 1
         $r.Cleanup.Ran | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fx.Root 'plugins' 'cache' 'mk-a' 'alpha' '0.9.0') | Should -BeTrue
-        (Get-ReportText $r) | Should -Match 'No se borra nada solo'
+        (Get-ReportText $r) | Should -Match 'Nothing is deleted on its own'
     }
     It '-Clean deletes exactly the removable builds' {
         $r = Invoke-PluginUpdate -ClaudeHome $fx.Root -Clean -Runner (New-FakeRunner ([System.Collections.Generic.List[string]]::new())) -GetProcess $script:Gone
@@ -368,7 +368,7 @@ Describe 'Invoke-ClaudeCli - the real runner, pointed at a harmless program' {
         [System.IO.File]::WriteAllText($shim, "@echo off`r`necho ran> `"%~dp0ran.txt`"`r`n")
         $bad = Invoke-ClaudeCli -Executable $shim -Arguments @('plugin', 'update', 'x&echo pwned>%~dp0pwned.txt')
         $bad.ExitCode | Should -Not -Be 0
-        $bad.Output | Should -Match 'caracteres no permitidos'
+        $bad.Output | Should -Match 'characters that are not allowed'
         Test-Path -LiteralPath (Join-Path $TestDrive 'ran.txt') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $TestDrive 'pwned.txt') | Should -BeFalse
         $ok = Invoke-ClaudeCli -Executable $shim -Arguments @('plugin', 'update', 'alpha@mk-a', '--yes', 'scope/plugin')
@@ -378,6 +378,6 @@ Describe 'Invoke-ClaudeCli - the real runner, pointed at a harmless program' {
     It 'a program that cannot start is a failed run with a reason, not an exception' {
         $r = Invoke-ClaudeCli -Executable (Join-Path $TestDrive 'no-such-program.exe') -Arguments @('x')
         $r.ExitCode | Should -Not -Be 0
-        $r.Output | Should -Match 'no pude ejecutar'
+        $r.Output | Should -Match 'could not run'
     }
 }

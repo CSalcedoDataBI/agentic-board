@@ -60,14 +60,14 @@ query($owner:String!, $num:Int!) {
   user(login:$owner) { projectV2(number:$num) { id title } }
 }'
 $projData = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$pidQuery",'-f',"owner=$Owner",'-F',"num=$ProjectNum") `
-                      -What "leer el board #$ProjectNum" -Graphql
+                      -What "read board #$ProjectNum" -Graphql
 $projectId = $projData.data.user.projectV2.id
-if (-not $projectId) { throw "Board #$ProjectNum no encontrado para $Owner." }
+if (-not $projectId) { throw "Board #$ProjectNum not found for $Owner." }
 
 # Auto-generate the body from live board data when not given
 if (-not $Body) {
     $read  = Get-BoardItems -Number $ProjectNum -Owner $Owner `
-                            -What "listar los items del board #$ProjectNum"
+                            -What "list the items of board #$ProjectNum"
     $items = $read.Items
     $done    = @($items | Where-Object { $_.status -eq "Done" }).Count
     $inProg  = @($items | Where-Object { $_.status -eq "In Progress" }).Count
@@ -83,11 +83,11 @@ if (-not $Body) {
     # retracting afterwards: "0 Backlog" followed by a footnote has already made the claim. The
     # "+" carries the caveat inside every number it applies to, and the note explains it (#484).
     $sfx  = if ($read.Truncated) { "+" } else { "" }
-    $Body = "**Progreso:** $done$sfx Done / $inProg$sfx In Progress / $($pending.Count)$sfx Backlog ($total$sfx items)."
-    if ($next) { $Body += "`n**Siguiente:** $next" }
+    $Body = "**Progress:** $done$sfx Done / $inProg$sfx In Progress / $($pending.Count)$sfx Backlog ($total$sfx items)."
+    if ($next) { $Body += "`n**Next:** $next" }
     if ($read.Truncated) {
-        $Body += "`n_Nota: solo pude leer $($read.Read) items del board, que es el tope de la lectura; " +
-                 "las cuentas de arriba son un minimo (de ahi el '+'), no un total._"
+        $Body += "`n_Note: I could only read $($read.Read) board items, which is the read cap; " +
+                 "the counts above are a minimum (hence the '+'), not a total._"
     }
 }
 
@@ -98,12 +98,12 @@ mutation($p:ID!, $b:String!, $s:ProjectV2StatusUpdateStatus!) {
   }
 }'
 $result = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$updQuery",'-f',"p=$projectId",'-f',"b=$Body",'-f',"s=$Status") `
-                    -What "publicar el status update" -Graphql
+                    -What "publish the status update" -Graphql
 
 $id = $result.data.createProjectV2StatusUpdate.statusUpdate.id
-if (-not $id) { throw "La mutacion no devolvio statusUpdate - revisa scopes del token." }
+if (-not $id) { throw "The mutation returned no statusUpdate - check the token scopes." }
 
-Write-Host "OK status update publicado ($Status):" -ForegroundColor Green
+Write-Host "OK status update published ($Status):" -ForegroundColor Green
 Write-Host $Body
 Write-Host ""
 Write-Host "Board: $boardUrl" -ForegroundColor Cyan

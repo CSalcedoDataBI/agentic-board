@@ -139,7 +139,7 @@ function Add-SessionPullRequest {
     param([Parameter(Mandatory)][int]$IssueNum, [Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][int]$Number)
     $p = Get-SessionRegistryPath
     if (-not $p -or -not (Test-Path -LiteralPath $p)) {
-        return [pscustomobject]@{ Ok = $false; Message = "no hay registro de sesiones (sessions.json): el issue #$IssueNum no tiene sesion registrada donde anotar el PR." }
+        return [pscustomobject]@{ Ok = $false; Message = "no session registry (sessions.json): issue #$IssueNum has no recorded session to note the PR on." }
     }
     # One critical section, like every other read-modify-write of sessions.json (#710 decision 5,
     # external review round 4 - this was the one writer still outside the lock). Unlocked, a session
@@ -147,10 +147,10 @@ function Add-SessionPullRequest {
     # snapshot and ERASED hostSessionId, after which the app session stopped reading as live.
     return (Invoke-WithSessionRegistryLock -Path $p -Body {
     try { $entries = @(Get-Content -LiteralPath $p -Raw | ConvertFrom-Json) }
-    catch { return [pscustomobject]@{ Ok = $false; Message = "sessions.json ilegible ($($_.Exception.Message)): no lo toco." } }
+    catch { return [pscustomobject]@{ Ok = $false; Message = "sessions.json unreadable ($($_.Exception.Message)): not touching it." } }
     $mine = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
     if ($mine.Count -eq 0) {
-        return [pscustomobject]@{ Ok = $false; Message = "el issue #$IssueNum no tiene sesion registrada: no invento una para anotar el PR." }
+        return [pscustomobject]@{ Ok = $false; Message = "issue #$IssueNum has no recorded session: I will not invent one to note the PR." }
     }
     $out = @()
     foreach ($e in $entries) {
@@ -161,7 +161,7 @@ function Add-SessionPullRequest {
         $out += $e
     }
     $out | ConvertTo-Json -Depth 5 -AsArray | Set-Content -LiteralPath $p
-    [pscustomobject]@{ Ok = $true; Message = "PR $Repo#$Number anotado en la sesion del issue #$IssueNum." }
+    [pscustomobject]@{ Ok = $true; Message = "PR $Repo#$Number recorded on the session of issue #$IssueNum." }
     })
 }
 
@@ -175,7 +175,7 @@ function Get-SessionPrStates {
     foreach ($p in @($Prs | Where-Object { $_ -and $_.repo -and $_.number })) {
         try {
             $one = Invoke-Gh -GhArgs @('pr', 'view', "$($p.number)", '--repo', "$($p.repo)", '--json', 'state') `
-                             -What "leer el PR $($p.repo)#$($p.number)" -Json
+                             -What "read PR $($p.repo)#$($p.number)" -Json
             if ($one -and $one.state) { $states["$($p.repo)#$($p.number)"] = [string]$one.state }
         } catch { }
     }
@@ -193,11 +193,11 @@ function Format-SessionPrLines {
     $merged = 0
     foreach ($p in $rows) {
         $k = "$($p.repo)#$($p.number)"
-        $st = if ($States.ContainsKey($k)) { $States[$k] } else { 'estado desconocido' }
+        $st = if ($States.ContainsKey($k)) { $States[$k] } else { 'unknown state' }
         if ($st -eq 'MERGED') { $merged++ }
         $lines += "PR $k [$st]"
     }
-    $lines += ("{0} de {1} PR(s) mergeados - el issue no se cierra solo con ninguno: se cierra cuando estan todos." -f $merged, $rows.Count)
+    $lines += ("{0} of {1} PR(s) merged - no single one closes the issue: it closes when all of them are." -f $merged, $rows.Count)
     return @($lines)
 }
 
@@ -240,10 +240,10 @@ function Get-IssueClosureVerdict {
     $have = @{}; foreach ($p in $rows) { $have["$($p.repo)".ToLowerInvariant()] = $true }
     $unrecorded = @(@($TargetRepos | Where-Object { $_ }) | Where-Object { -not $have.ContainsKey($_.ToLowerInvariant()) })
     $reason = ''
-    if ($rows.Count -eq 0)           { $reason = 'no hay ningun PR anotado para este issue' }
-    elseif ($unknown.Count -gt 0)    { $reason = "no pude leer el estado de: $($unknown -join ', ')" }
-    elseif ($notMerged.Count -gt 0)  { $reason = "siguen sin mergear: $($notMerged -join ', ')" }
-    elseif ($unrecorded.Count -gt 0) { $reason = "repos objetivo sin PR anotado: $($unrecorded -join ', ')" }
+    if ($rows.Count -eq 0)           { $reason = 'no PR recorded for this issue' }
+    elseif ($unknown.Count -gt 0)    { $reason = "could not read the state of: $($unknown -join ', ')" }
+    elseif ($notMerged.Count -gt 0)  { $reason = "still unmerged: $($notMerged -join ', ')" }
+    elseif ($unrecorded.Count -gt 0) { $reason = "target repos with no recorded PR: $($unrecorded -join ', ')" }
     [pscustomobject]@{
         CanClose = ($reason -eq ''); Reason = $reason; Merged = $merged; Total = $rows.Count
         Unknown = @($unknown); NotMerged = @($notMerged); Unrecorded = @($unrecorded)
@@ -256,14 +256,14 @@ function Get-CrossRepoClosurePlan {
     param([Parameter(Mandatory)][int]$IssueNum)
     $p = Get-SessionRegistryPath
     if (-not $p -or -not (Test-Path -LiteralPath $p)) {
-        return [pscustomobject]@{ Ok = $false; Error = "no hay registro de sesiones (sessions.json): el issue #$IssueNum no tiene sesion registrada." }
+        return [pscustomobject]@{ Ok = $false; Error = "no session registry (sessions.json): issue #$IssueNum has no recorded session." }
     }
     try { $entries = @(Get-Content -LiteralPath $p -Raw | ConvertFrom-Json) }
-    catch { return [pscustomobject]@{ Ok = $false; Error = "sessions.json ilegible ($($_.Exception.Message)): no cierro nada." } }
+    catch { return [pscustomobject]@{ Ok = $false; Error = "sessions.json unreadable ($($_.Exception.Message)): closing nothing." } }
     $mine = @($entries | Where-Object { [int]$_.issue -eq $IssueNum })
-    if ($mine.Count -eq 0) { return [pscustomobject]@{ Ok = $false; Error = "el issue #$IssueNum no tiene sesion registrada." } }
+    if ($mine.Count -eq 0) { return [pscustomobject]@{ Ok = $false; Error = "issue #$IssueNum has no recorded session." } }
     $repo = "$(@($mine | Where-Object { $_.repo } | Select-Object -First 1).repo)"
-    if (-not $repo) { return [pscustomobject]@{ Ok = $false; Error = "la sesion del issue #$IssueNum no registra su repo: no se donde cerrarlo." } }
+    if (-not $repo) { return [pscustomobject]@{ Ok = $false; Error = "the session of issue #$IssueNum does not record its repo: I do not know where to close it." } }
     $refs = @(Get-RecordedPullRequests -Entries $mine -Issue $IssueNum)
     $prs = @($refs | ForEach-Object { $r = Get-PullRequestRef $_; if ($r) { [pscustomobject]@{ repo = $r.Repo; number = $r.Number } } })
     $targets = @()
@@ -278,15 +278,15 @@ function Get-CrossRepoClosurePlan {
 # The lines that show the plan, so the user sees exactly what would be closed and why. PURE.
 function Format-ClosurePlanLines {
     param([int]$IssueNum, [string]$Repo, [object[]]$Prs = @(), [hashtable]$States = @{}, $Verdict)
-    $lines = @("Issue $Repo#$IssueNum - PRs anotados:")
+    $lines = @("Issue $Repo#$IssueNum - recorded PRs:")
     foreach ($p in @($Prs)) {
         $k = "$($p.repo)#$($p.number)"
-        $st = if ($States.ContainsKey($k)) { $States[$k] } else { 'estado desconocido' }
+        $st = if ($States.ContainsKey($k)) { $States[$k] } else { 'unknown state' }
         $lines += "  - $k [$st]"
     }
-    if (@($Prs).Count -eq 0) { $lines += '  (ninguno)' }
-    $lines += if ($Verdict.CanClose) { "Todos mergeados ($($Verdict.Merged) de $($Verdict.Total)): el issue se puede cerrar." }
-              else                   { "NO se cierra: $($Verdict.Reason)." }
+    if (@($Prs).Count -eq 0) { $lines += '  (none)' }
+    $lines += if ($Verdict.CanClose) { "All merged ($($Verdict.Merged) of $($Verdict.Total)): the issue can be closed." }
+              else                   { "NOT closing: $($Verdict.Reason)." }
     return @($lines)
 }
 

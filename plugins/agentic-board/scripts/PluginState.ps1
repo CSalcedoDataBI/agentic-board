@@ -434,28 +434,28 @@ function Get-VersionHoldVerdict {
         if ($e.Key -eq "$($Dir.Plugin)@$($Dir.Marketplace)" -and $e.Version -eq $Dir.Version) { $isInstalled = $true }
     }
     if (-not $isInstalled -and $real) { foreach ($ir in $InstalledReal) { if ($cmp.Equals($ir, $real)) { $isInstalled = $true } } }
-    if ($isInstalled) { return (& $hold 'installed' 'es la version instalada') }
+    if ($isInstalled) { return (& $hold 'installed' 'it is the installed version') }
 
     $mk = Read-DirMarkers -VersionDir $Dir.Path
-    if (-not $mk.Ok) { return (& $hold 'unknown-holder' 'no pude leer quien la usa') }
+    if (-not $mk.Ok) { return (& $hold 'unknown-holder' 'could not read who uses it') }
     foreach ($m in $mk.Markers) {
-        if (-not $m.Valid) { return (& $hold 'unknown-holder' "un registro de uso ilegible ($($m.Reason))") }
+        if (-not $m.Valid) { return (& $hold 'unknown-holder' "an unreadable usage record ($($m.Reason))") }
         $memoKey = "$($m.Pid)|$($m.StartFt)"
         if (-not $LiveMemo.ContainsKey($memoKey)) {
             $a = @{ ProcessId = $m.Pid; StartFt = $m.StartFt }
             if ($GetProcess) { $a.GetProcess = $GetProcess }
             $LiveMemo[$memoKey] = Get-HolderLiveness @a
         }
-        if ($LiveMemo[$memoKey] -eq 'live') { return (& $hold 'in-use' "la usa una sesion abierta (proceso $($m.Pid))") }
-        if ($LiveMemo[$memoKey] -ne 'dead') { return (& $hold 'unknown-holder' "no pude confirmar si el proceso $($m.Pid) sigue abierto") }
+        if ($LiveMemo[$memoKey] -eq 'live') { return (& $hold 'in-use' "an open session uses it (process $($m.Pid))") }
+        if ($LiveMemo[$memoKey] -ne 'dead') { return (& $hold 'unknown-holder' "could not confirm whether process $($m.Pid) is still open") }
     }
 
     $vItem = Get-Item -LiteralPath $Dir.Path -Force -ErrorAction SilentlyContinue
-    if (-not $vItem) { return (& $hold 'unknown-holder' 'no pude leer la carpeta') }
+    if (-not $vItem) { return (& $hold 'unknown-holder' 'could not read the folder') }
     $touched = $vItem.LastWriteTime
     $iuItem = Get-Item -LiteralPath (Join-Path $Dir.Path '.in_use') -Force -ErrorAction SilentlyContinue
     if ($iuItem -and $iuItem.LastWriteTime -gt $touched) { $touched = $iuItem.LastWriteTime }
-    if (($Now - $touched).TotalMinutes -lt $GraceMinutes) { return (& $hold 'recent' "se toco hace menos de $GraceMinutes minutos") }
+    if (($Now - $touched).TotalMinutes -lt $GraceMinutes) { return (& $hold 'recent' "touched less than $GraceMinutes minutes ago") }
     return $null
 }
 # Every cached build, each with a verdict: remove | keep + the reason. A build is removable only when
@@ -478,13 +478,13 @@ function Get-VersionCleanupPlan {
     )
     $refuse = { param($why) [pscustomobject]@{ Ok = $false; Reason = $why; Items = @() } }
     $inst = Get-InstalledPluginEntries -ClaudeHome $ClaudeHome
-    if (-not $inst.Ok) { return (& $refuse "no pude leer que plugins estan instalados ($($inst.Reason))") }
-    if (@($inst.Entries).Count -eq 0) { return (& $refuse 'la lista de plugins instalados esta vacia; no puedo distinguir lo viejo de lo instalado') }
+    if (-not $inst.Ok) { return (& $refuse "could not read which plugins are installed ($($inst.Reason))") }
+    if (@($inst.Entries).Count -eq 0) { return (& $refuse 'the installed plugin list is empty; I cannot tell old builds from installed ones') }
 
     $home_ = Get-ClaudeHomeDir $ClaudeHome
     $cacheRoot = Join-Path (Join-Path $home_ 'plugins') 'cache'
     if (-not (Test-Path -LiteralPath $cacheRoot)) { return [pscustomobject]@{ Ok = $true; Reason = ''; Items = @() } }
-    if (Test-IsLinkItem (Get-Item -LiteralPath $cacheRoot -Force)) { return (& $refuse 'la carpeta de versiones guardadas es un enlace') }
+    if (Test-IsLinkItem (Get-Item -LiteralPath $cacheRoot -Force)) { return (& $refuse 'the saved-versions folder is a link') }
 
     $installedReal = @($inst.Entries | ForEach-Object { Get-CanonicalPath $_.InstallPath } | Where-Object { $_ })
     $liveMemo = @{}
@@ -502,19 +502,19 @@ function Get-VersionCleanupPlan {
         $mDir  = Split-Path -Parent $pDir
         $pItem = Get-Item -LiteralPath $pDir -Force -ErrorAction SilentlyContinue
         $mItem = Get-Item -LiteralPath $mDir -Force -ErrorAction SilentlyContinue
-        if ((Test-IsLinkItem $vItem) -or (Test-IsLinkItem $pItem) -or (Test-IsLinkItem $mItem)) { $items.Add((& $keep 'link' 'es un enlace, no una carpeta real')); continue }
+        if ((Test-IsLinkItem $vItem) -or (Test-IsLinkItem $pItem) -or (Test-IsLinkItem $mItem)) { $items.Add((& $keep 'link' 'it is a link, not a real folder')); continue }
         if (-not (Test-PathStrictlyInside -Child $d.Path -Parent $pDir -DirectChild) -or
             -not (Test-PathStrictlyInside -Child $pDir -Parent $mDir -DirectChild) -or
             -not (Test-PathStrictlyInside -Child $mDir -Parent $cacheRoot -DirectChild)) {
-            $items.Add((& $keep 'outside' 'su ruta real queda fuera de la carpeta de versiones guardadas')); continue
+            $items.Add((& $keep 'outside' 'its real path is outside the saved-versions folder')); continue
         }
         $inner = @(Get-ChildItem -LiteralPath $d.Path -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
-        if ($inner.Count -gt 0) { $items.Add((& $keep 'link' 'contiene enlaces')); continue }
+        if ($inner.Count -gt 0) { $items.Add((& $keep 'link' 'it contains links')); continue }
 
         # (2) not installed, (3) no holder, (5) not touched lately
         $hold = Get-VersionHoldVerdict -Dir $d -Entries $inst.Entries -InstalledReal $installedReal -GetProcess $GetProcess -GraceMinutes $GraceMinutes -Now $Now -LiveMemo $liveMemo
         if ($hold) { $items.Add((& $keep $hold.Category $hold.Reason)); continue }
-        $items.Add((& $verdict 'remove' 'removable' 'nadie la usa y no es la version instalada' (Get-DirSizeBytes $d.Path)))
+        $items.Add((& $verdict 'remove' 'removable' 'nobody uses it and it is not the installed version' (Get-DirSizeBytes $d.Path)))
     }
     return [pscustomobject]@{ Ok = $true; Reason = ''; Items = @($items) }
 }
@@ -528,26 +528,26 @@ function Remove-PluginVersionDir {
     $cacheRoot = Join-Path (Join-Path (Get-ClaudeHomeDir $ClaudeHome) 'plugins') 'cache'
     $no = { param($why) [pscustomobject]@{ Removed = $false; Reason = $why } }
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-    if (-not $item -or -not $item.PSIsContainer) { return (& $no 'no es una carpeta existente') }
-    if (Test-IsLinkItem $item) { return (& $no 'es un enlace') }
+    if (-not $item -or -not $item.PSIsContainer) { return (& $no 'not an existing folder') }
+    if (Test-IsLinkItem $item) { return (& $no 'it is a link') }
     $pDir = Split-Path -Parent $item.FullName
     $mDir = Split-Path -Parent $pDir
     # A parent that became a junction would make the string-prefix checks below pass while the delete
     # walks through it to somewhere else (Get-Item reports the path as spelled, not where it leads).
     foreach ($up in @($pDir, $mDir, $cacheRoot)) {
-        if (Test-IsLinkItem (Get-Item -LiteralPath $up -Force -ErrorAction SilentlyContinue)) { return (& $no 'una carpeta que la contiene es un enlace') }
+        if (Test-IsLinkItem (Get-Item -LiteralPath $up -Force -ErrorAction SilentlyContinue)) { return (& $no 'a folder that contains it is a link') }
     }
     if (-not (Test-PathStrictlyInside -Child $item.FullName -Parent $pDir -DirectChild) -or
         -not (Test-PathStrictlyInside -Child $pDir -Parent $mDir -DirectChild) -or
         -not (Test-PathStrictlyInside -Child $mDir -Parent $cacheRoot -DirectChild)) {
-        return (& $no 'su ruta real no queda dentro de la carpeta de versiones guardadas')
+        return (& $no 'its real path is not inside the saved-versions folder')
     }
     if (@(Get-ChildItem -LiteralPath $item.FullName -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue).Count -gt 0) {
-        return (& $no 'contiene enlaces')
+        return (& $no 'it contains links')
     }
     try { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop }
-    catch { return (& $no "no se pudo borrar: $($_.Exception.Message)") }
-    if (Test-Path -LiteralPath $item.FullName) { return (& $no 'sigue existiendo despues de borrar') }
+    catch { return (& $no "could not delete it: $($_.Exception.Message)") }
+    if (Test-Path -LiteralPath $item.FullName) { return (& $no 'it still exists after deleting') }
     return [pscustomobject]@{ Removed = $true; Reason = '' }
 }
 
@@ -566,16 +566,16 @@ function Invoke-PluginCleanup {
     if ($fresh.Ok) { foreach ($f in @($fresh.Items | Where-Object { $_.Action -eq 'remove' })) { $stillOk[$f.Path] = $true } }
     foreach ($i in @($Plan.Items | Where-Object { $_.Action -eq 'remove' })) {
         if (-not $stillOk.ContainsKey($i.Path)) {
-            $i | Add-Member -NotePropertyName FailReason -NotePropertyValue 'ya no cumple las condiciones para borrarla (se volvio a comprobar justo antes)' -Force
+            $i | Add-Member -NotePropertyName FailReason -NotePropertyValue 'no longer meets the conditions for deletion (re-checked right before)' -Force
             $failed.Add($i); continue
         }
         # Last look at THIS build (deleting the earlier ones took time, and a session may have started meanwhile).
         $instNow = Get-InstalledPluginEntries -ClaudeHome $ClaudeHome
         $hold = if ($instNow.Ok -and @($instNow.Entries).Count -gt 0) {
             Get-VersionHoldVerdict -Dir $i -Entries $instNow.Entries -InstalledReal @($instNow.Entries | ForEach-Object { Get-CanonicalPath $_.InstallPath } | Where-Object { $_ }) -GetProcess $GetProcess -GraceMinutes $GraceMinutes
-        } else { [pscustomobject]@{ Category = 'unknown-holder'; Reason = 'no pude releer la lista de plugins instalados' } }
+        } else { [pscustomobject]@{ Category = 'unknown-holder'; Reason = 'could not re-read the installed plugin list' } }
         if ($hold) {
-            $i | Add-Member -NotePropertyName FailReason -NotePropertyValue "justo antes de borrarla: $($hold.Reason)" -Force
+            $i | Add-Member -NotePropertyName FailReason -NotePropertyValue "right before deleting it: $($hold.Reason)" -Force
             $failed.Add($i); continue
         }
         $r = Remove-PluginVersionDir -Path $i.Path -ClaudeHome $ClaudeHome

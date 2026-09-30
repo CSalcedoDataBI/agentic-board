@@ -43,12 +43,12 @@
     Requires $env:GH_TOKEN already set (via the gh-account skill).
     Usage:
       $env:GH_TOKEN = <token>
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -Lang en             # estandariza (default)
-      ./Apply-FieldPreset.ps1 -ProjectNum 13 -Owner CSalcedoDataBI -Preset en       # mismos: -ProjectNum=-Number, -Preset=-Lang
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -DryRun              # previsualiza el plan
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -Yes                 # CI / ya aprobado
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -MergeConflicts      # + resuelve duplicados viejos
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -NoMigrate           # no toca las opciones legacy
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -Lang en             # standardizes (default)
+      ./Apply-FieldPreset.ps1 -ProjectNum 13 -Owner CSalcedoDataBI -Preset en       # same: -ProjectNum=-Number, -Preset=-Lang
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -DryRun              # previews the plan
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -Yes                 # CI / already approved
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -MergeConflicts      # + resolves old duplicates
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -NoMigrate           # leaves the legacy options alone
       ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -PresetPath custom.json  #>
 [CmdletBinding()]
 param(
@@ -83,7 +83,7 @@ $ErrorActionPreference = 'Stop'
 # calls and docs do not break.
 $Migrate = -not $NoMigrate
 # Merging only ever resolves conflicts left over by the migration.
-if ($MergeConflicts -and $NoMigrate) { Write-Error "-MergeConflicts y -NoMigrate se contradicen: el merge ES la estandarizacion."; exit 1 }
+if ($MergeConflicts -and $NoMigrate) { Write-Error "-MergeConflicts and -NoMigrate contradict each other: the merge IS the standardization."; exit 1 }
 
 # The canonical/legacy option vocabulary — the map that says `Todo` MEANS `Backlog`.
 . (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
@@ -103,7 +103,7 @@ if (-not (Test-Path $PresetPath)) { Write-Error "Preset file not found: $PresetP
 # read as UTF-8 explicitly so accented names (ES preset: Área, revisión…) survive on Windows PowerShell 5.1
 $preset   = Get-Content $PresetPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $existing = (Invoke-Gh -GhArgs @('project','field-list',"$Number",'--owner',$Owner,'--format','json') `
-                       -What "leer los campos del board #$Number" -Json).fields.name
+                       -What "read the fields of board #$Number" -Json).fields.name
 
 function Get-OptName($o)  { if ($o -is [string]) { $o } else { $o.name } }
 function Get-OptColor($o) { if ($o -is [string]) { $null } else { $o.color } }
@@ -124,7 +124,7 @@ query($owner:String!,$num:Int!,$field:String!){
   }}
 }'
   $q = Invoke-Gh -GhArgs @('api','graphql','-f',"query=$ssfQuery",'-F',"owner=$Owner",'-F',"num=$Number",'-f',"field=$fieldName") `
-                 -What "leer el campo '$fieldName' del board #$Number" -Graphql
+                 -What "read field '$fieldName' of board #$Number" -Graphql
   $script:FieldCache[$fieldName] = $q.data.user.projectV2.field
   return $script:FieldCache[$fieldName]
 }
@@ -136,9 +136,9 @@ function Get-ProjectId {
     $json = gh project view $Number --owner $Owner --format json
     # gh signals failure ONLY through the exit code here — it does not throw, even under
     # $ErrorActionPreference='Stop'. Unchecked, a 401 reads as "the board has no id".
-    if ($LASTEXITCODE -ne 0) { throw "no pude leer el project #$Number (gh exit $LASTEXITCODE)" }
+    if ($LASTEXITCODE -ne 0) { throw "could not read project #$Number (gh exit $LASTEXITCODE)" }
     $script:ProjectId = ($json | ConvertFrom-Json).id
-    if (-not $script:ProjectId) { throw "el project #$Number no devolvio un id" }
+    if (-not $script:ProjectId) { throw "project #$Number returned no id" }
   }
   return $script:ProjectId
 }
@@ -154,7 +154,7 @@ function Get-ProjectId {
 function Get-ItemsOnOption($fieldName, $optionName) {
   $key  = ($fieldName -replace '[^A-Za-z0-9]','').ToLower()   # item-list lowercases/strips field names
   $read = Get-BoardItems -Number $Number -Owner $Owner `
-                         -What "listar los items del project #$Number"
+                         -What "list the items of project #$Number"
   [pscustomobject]@{
     Items     = @($read.Items | Where-Object { $_.$key -eq $optionName })
     Truncated = $read.Truncated
@@ -166,7 +166,7 @@ function Get-ItemsOnOption($fieldName, $optionName) {
 function Invoke-OptionMerge($merge) {
   $proj  = Get-ProjectId
   $field = Get-SingleSelectField $merge.Field
-  if (-not $field.id) { Write-Host "  (no pude leer '$($merge.Field)' para fusionar)" -ForegroundColor DarkYellow; return $false }
+  if (-not $field.id) { Write-Host "  (could not read '$($merge.Field)' to merge)" -ForegroundColor DarkYellow; return $false }
   $preRead = Get-ItemsOnOption $merge.Field $merge.FromName
   $items   = @($preRead.Items)
   Write-Host ("  merge: {0} '{1}' -> '{2}' ({3} item(s))" -f $merge.Field, $merge.FromName, $merge.ToName, $items.Count) -ForegroundColor Cyan
@@ -183,7 +183,7 @@ function Invoke-OptionMerge($merge) {
       if ($LASTEXITCODE -eq 0) { $ok = $true; break }
       Start-Sleep -Milliseconds (500 * ($i + 1))   # backoff for transient 5xx
     }
-    if ($ok) { $moved++ } else { Write-Host ("    WARN no pude mover '{0}'" -f $it.title) -ForegroundColor DarkYellow }
+    if ($ok) { $moved++ } else { Write-Host ("    WARN could not move '{0}'" -f $it.title) -ForegroundColor DarkYellow }
   }
 
   # 2. VERIFY before destroying anything. One un-moved item is enough to abort: the option
@@ -191,14 +191,14 @@ function Invoke-OptionMerge($merge) {
   $postRead = Get-ItemsOnOption $merge.Field $merge.FromName
   $left     = @($postRead.Items)
   if ($left.Count -gt 0) {
-    Write-Host ("    ABORT: quedan {0} item(s) en '{1}' - NO borro la opcion (se quedarian sin {2})." -f $left.Count, $merge.FromName, $merge.Field) -ForegroundColor Red
+    Write-Host ("    ABORT: {0} item(s) still on '{1}' - NOT deleting the option (they would lose their {2})." -f $left.Count, $merge.FromName, $merge.Field) -ForegroundColor Red
     return $false
   }
   # An EMPTY result only proves "nothing left" when the read saw the whole board. If it stopped at
   # the cap, the items that would lose their $($merge.Field) could be exactly the ones past it - so
   # a truncated verification aborts on the same grounds as a found item, and for the same stake (#484).
   if ($postRead.Truncated) {
-    Write-Host ("    ABORT: la verificacion se corto en el tope de lectura - no puedo probar que '{0}' quedo vacia, asi que NO borro la opcion." -f $merge.FromName) -ForegroundColor Red
+    Write-Host ("    ABORT: the verification stopped at the read cap - cannot prove '{0}' is empty, so NOT deleting the option." -f $merge.FromName) -ForegroundColor Red
     return $false
   }
 
@@ -213,12 +213,12 @@ function Invoke-OptionMerge($merge) {
   $body = @{ query = $mutation; variables = @{ fieldId = $live.id; opts = $keep } } | ConvertTo-Json -Depth 10
   $resp = $body | gh api graphql --input - | ConvertFrom-Json
   if ($resp.errors) {
-    Write-Host ("    WARN no pude borrar la opcion '{0}': {1}" -f $merge.FromName, $resp.errors[0].message) -ForegroundColor DarkYellow
-    Write-Host ("          (los {0} item(s) YA estan en '{1}' - re-corre para reintentar el borrado)" -f $moved, $merge.ToName) -ForegroundColor DarkGray
+    Write-Host ("    WARN could not delete option '{0}': {1}" -f $merge.FromName, $resp.errors[0].message) -ForegroundColor DarkYellow
+    Write-Host ("          (the {0} item(s) are ALREADY on '{1}' - re-run to retry the delete)" -f $moved, $merge.ToName) -ForegroundColor DarkGray
     return $false
   }
   $script:FieldCache.Remove($merge.Field) | Out-Null
-  Write-Host ("    borrada '{0}' - {1} item(s) ahora en '{2}'" -f $merge.FromName, $moved, $merge.ToName) -ForegroundColor Green
+  Write-Host ("    deleted '{0}' - {1} item(s) now on '{2}'" -f $merge.FromName, $moved, $merge.ToName) -ForegroundColor Green
   return $true
 }
 
@@ -228,7 +228,7 @@ function Invoke-OptionMerge($merge) {
 # option's id (renaming it in place) instead of being added beside it.
 function Set-OptionColors($fieldName, $presetOptions) {
   $field = Get-SingleSelectField $fieldName
-  if (-not $field.id) { Write-Host "  (no pude leer '$fieldName' para colorear)"; return }
+  if (-not $field.id) { Write-Host "  (could not read '$fieldName' to color it)"; return }
 
   $current = @($field.options)
   $desired = @()
@@ -247,14 +247,14 @@ function Set-OptionColors($fieldName, $presetOptions) {
       if ($legacy -and $Migrate) {
         # Adopt it: same id + new name = rename in place; assignments survive.
         $match = $legacy
-        Write-Host "  rename: $fieldName '$($legacy.name)' -> '$name' (conserva las asignaciones)" -ForegroundColor Cyan
+        Write-Host "  rename: $fieldName '$($legacy.name)' -> '$name' (keeps the assignments)" -ForegroundColor Cyan
       } elseif ($legacy) {
         # Not migrating. Emitting '$name' here would put it NEXT TO the legacy option that
         # already means it — two options for one meaning, which GitHub then forbids merging
         # by rename. That is the whole bug of #300, and this is where it was born. Refuse to
         # create it: leave the legacy option alone (the pass below re-sends it untouched).
-        Write-Host "  skip: $fieldName '$name' - ya existe '$($legacy.name)' con el mismo significado; no creo una opcion duplicada." -ForegroundColor DarkYellow
-        Write-Host "        (corre sin -NoMigrate para renombrar '$($legacy.name)' -> '$name' y estandarizar)" -ForegroundColor DarkGray
+        Write-Host "  skip: $fieldName '$name' - '$($legacy.name)' already exists with the same meaning; not creating a duplicate option." -ForegroundColor DarkYellow
+        Write-Host "        (run without -NoMigrate to rename '$($legacy.name)' -> '$name' and standardize)" -ForegroundColor DarkGray
         continue
       }
     }
@@ -274,7 +274,7 @@ function Set-OptionColors($fieldName, $presetOptions) {
   $mutation = 'mutation($fieldId:ID!, $opts:[ProjectV2SingleSelectFieldOptionInput!]!){ updateProjectV2Field(input:{ fieldId:$fieldId, singleSelectOptions:$opts }){ projectV2Field { ... on ProjectV2SingleSelectField { id } } } }'
   $body = @{ query = $mutation; variables = @{ fieldId = $field.id; opts = $desired } } | ConvertTo-Json -Depth 10
   $resp = $body | gh api graphql --input - | ConvertFrom-Json
-  if ($resp.errors) { Write-Host "  WARN no pude colorear '$fieldName': $($resp.errors[0].message)" -ForegroundColor DarkYellow }
+  if ($resp.errors) { Write-Host "  WARN could not color '$fieldName': $($resp.errors[0].message)" -ForegroundColor DarkYellow }
   else { Write-Host "  colors: $fieldName -> $(( $desired | ForEach-Object { $_.name } ) -join ', ')" -ForegroundColor DarkCyan }
 }
 
@@ -299,20 +299,20 @@ if ($Migrate) {
 }
 
 if ($DryRun -or ($Migrate -and ($renames.Count -gt 0 -or $merges.Count -gt 0))) {
-  Write-Host "=== Plan: preset '$Lang' sobre el board #$Number de $Owner ===" -ForegroundColor Cyan
+  Write-Host "=== Plan: preset '$Lang' on board #$Number of $Owner ===" -ForegroundColor Cyan
   if ($toCreate.Count -gt 0) {
-    Write-Host "  Campos a crear: $(($toCreate | ForEach-Object { $_.name }) -join ', ')" -ForegroundColor DarkCyan
+    Write-Host "  Fields to create: $(($toCreate | ForEach-Object { $_.name }) -join ', ')" -ForegroundColor DarkCyan
   } else {
-    Write-Host "  Campos a crear: ninguno (todos existen)" -ForegroundColor DarkGray
+    Write-Host "  Fields to create: none (all exist)" -ForegroundColor DarkGray
   }
   if ($Migrate) {
     $doable = @($renames | Where-Object { -not $_.Conflict })
     $stuck  = @($renames | Where-Object { $_.Conflict })
     if ($doable.Count -eq 0 -and $merges.Count -eq 0) {
-      Write-Host "  Renombres: ninguno (el board ya usa el vocabulario canonico)" -ForegroundColor DarkGray
+      Write-Host "  Renames: none (the board already uses the canonical vocabulary)" -ForegroundColor DarkGray
     }
     foreach ($r in $doable) {
-      Write-Host ("  rename: {0} '{1}' -> '{2}'  (los items asignados se conservan)" -f $r.Field, $r.From, $r.To) -ForegroundColor Yellow
+      Write-Host ("  rename: {0} '{1}' -> '{2}'  (assigned items are kept)" -f $r.Field, $r.From, $r.To) -ForegroundColor Yellow
     }
     if ($MergeConflicts) {
       # Show the blast radius BEFORE the prompt: a merge moves every item off the legacy
@@ -323,19 +323,19 @@ if ($DryRun -or ($Migrate -and ($renames.Count -gt 0 -or $merges.Count -gt 0))) 
         # line whose entire job is telling the user how big the destructive move is.
         $n = try {
           $r = Get-ItemsOnOption $m.Field $m.FromName
-          "$(@($r.Items).Count)$(if ($r.Truncated) { '+ (lectura truncada - puede haber mas)' } else { '' })"
+          "$(@($r.Items).Count)$(if ($r.Truncated) { '+ (read truncated - there may be more)' } else { '' })"
         } catch { '?' }
-        Write-Host ("  merge:  {0} '{1}' -> '{2}'  ({3} item(s) se mueven, luego se borra '{1}')" -f $m.Field, $m.FromName, $m.ToName, $n) -ForegroundColor Yellow
+        Write-Host ("  merge:  {0} '{1}' -> '{2}'  ({3} item(s) move, then '{1}' is deleted)" -f $m.Field, $m.FromName, $m.ToName, $n) -ForegroundColor Yellow
       }
     } else {
       foreach ($r in $stuck) {
         # ASCII only inside the string: this file is UTF-8 with no BOM, Windows PowerShell 5.1
         # reads it as cp1252, and an em dash decodes to a `"` smart quote that closes the
         # string early — a parse error for the whole script, not just this line.
-        Write-Host ("  SKIP:   {0} '{1}' -> '{2}' - '{2}' ya existe en el campo; GitHub no admite dos opciones con el mismo nombre." -f $r.Field, $r.From, $r.To) -ForegroundColor DarkYellow
+        Write-Host ("  SKIP:   {0} '{1}' -> '{2}' - '{2}' already exists on the field; GitHub does not allow two options with the same name." -f $r.Field, $r.From, $r.To) -ForegroundColor DarkYellow
       }
       if ($merges.Count -gt 0) {
-        Write-Host "          Se resuelve solo: corre con -MergeConflicts para mover los items a la opcion canonica y borrar la legacy." -ForegroundColor DarkGray
+        Write-Host "          This resolves itself: run with -MergeConflicts to move the items to the canonical option and delete the legacy one." -ForegroundColor DarkGray
         Write-Host ("          -> /board field -Number {0} -Owner {1} -MergeConflicts -DryRun" -f $Number, $Owner) -ForegroundColor DarkGray
       }
     }
@@ -344,7 +344,7 @@ if ($DryRun -or ($Migrate -and ($renames.Count -gt 0 -or $merges.Count -gt 0))) 
 }
 
 if ($DryRun) {
-  Write-Host "DRY-RUN: no se ejecuto ningun cambio." -ForegroundColor Cyan
+  Write-Host "DRY-RUN: no change was executed." -ForegroundColor Cyan
   Write-Host "Board: https://github.com/users/$Owner/projects/$Number" -ForegroundColor Cyan
 
   exit 0
@@ -353,13 +353,13 @@ if ($DryRun) {
 $willRename = @($renames | Where-Object { -not $_.Conflict }).Count -gt 0
 $willMerge  = $MergeConflicts -and $merges.Count -gt 0
 if ($Migrate -and ($willRename -or $willMerge) -and -not $Yes) {
-  $what = if ($willMerge) { "cambios (incluye BORRAR opcion(es) legacy)" } else { "renombres" }
-  $answer = Read-Host "Aplicar estos $what al board #$Number? (s/n)"
+  $what = if ($willMerge) { "changes (includes DELETING legacy option(s))" } else { "renames" }
+  $answer = Read-Host "Apply these $what to board #${Number}? [y/n]"
   if ($answer -notmatch '^(s|si|sí|y|yes)$') {
     # 'no' means "do not STANDARDIZE" — not "do nothing". The rest of the preset still applies
     # (missing fields, colors). Crucially this does NOT fall back to adding the canonical
     # option beside the legacy one: declining leaves the field exactly as it is.
-    Write-Host "Sin estandarizar: dejo las opciones legacy como estan (no se crea ninguna duplicada). Sigo con el resto del preset." -ForegroundColor Yellow
+    Write-Host "Not standardized: leaving the legacy options as they are (no duplicate is created). Continuing with the rest of the preset." -ForegroundColor Yellow
     $Migrate = $false; $MergeConflicts = $false; $willMerge = $false
   }
 }
@@ -397,15 +397,15 @@ foreach ($f in $preset.fields) {
     }
 
     try {
-      $null = Invoke-Gh -GhArgs $createArgs -What "crear el campo '$($f.name)' en el board #$Number"
+      $null = Invoke-Gh -GhArgs $createArgs -What "create field '$($f.name)' on board #$Number"
       $script:FieldCache.Remove($f.name) | Out-Null   # it exists now — re-read its live options
       Write-Host "created: $($f.name) ($($f.type))"
     } catch {
       $reason = ($_.Exception.Message -replace '\s+', ' ').Trim()
       Write-Host "FAILED: $($f.name) ($($f.type)) — $reason" -ForegroundColor Red
       if ($reason -match 'reserved value') {
-        Write-Host ("        GitHub reserva ese nombre de campo, asi que NINGUN reintento lo va a crear. " +
-                    "Renombralo en el preset ($PresetPath) y vuelve a correr.") -ForegroundColor DarkYellow
+        Write-Host ("        GitHub reserves that field name, so NO retry will create it. " +
+                    "Rename it in the preset ($PresetPath) and run again.") -ForegroundColor DarkYellow
       }
       $failedFields += $f.name
       continue   # no colors for a field that does not exist
@@ -440,16 +440,16 @@ $how = if ($MergeConflicts) { "canonical colors reconciled; legacy option names 
        else                 { "NOT standardized (-NoMigrate); legacy option names left as they are" }
 Write-Host "Preset '$Lang' applied to project #$Number ($how)."
 if ($mergedFail -gt 0) {
-  Write-Host "$mergedFail merge(s) no se completaron - revisa los WARN de arriba (los items movidos YA estan en su opcion canonica; re-correr es seguro)." -ForegroundColor DarkYellow
+  Write-Host "$mergedFail merge(s) did not complete - check the WARN lines above (the moved items are ALREADY on their canonical option; re-running is safe)." -ForegroundColor DarkYellow
 }
 if (-not $Migrate) {
-  Write-Host "(Corre sin -NoMigrate para renombrar las opciones legacy -> canonicas y estandarizar el board.)" -ForegroundColor DarkGray
+  Write-Host "(Run without -NoMigrate to rename the legacy options -> canonical ones and standardize the board.)" -ForegroundColor DarkGray
 }
 Write-Host "Board: https://github.com/users/$Owner/projects/$Number" -ForegroundColor Cyan
 
 # A half-applied preset must never read as a clean run. Last, so the report above is complete
 # and every field that COULD be created has been.
 if ($failedFields.Count -gt 0) {
-  Write-Error ("{0} campo(s) del preset NO se crearon: {1}. El board quedo incompleto — mira las lineas FAILED de arriba." -f `
+  Write-Error ("{0} preset field(s) were NOT created: {1}. The board is incomplete - see the FAILED lines above." -f `
                $failedFields.Count, ($failedFields -join ', '))
 }

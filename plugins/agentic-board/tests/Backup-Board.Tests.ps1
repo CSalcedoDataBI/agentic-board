@@ -149,7 +149,7 @@ Describe 'Backup-Board: a failed read must not become an empty backup' -Skip:(-n
         $out = Invoke-WithFakeGh -Path $script:Backup -Params @{ Number = 13; Owner = 'o'; BackupDir = $script:Dir } `
                                  -Env @{ FAKE_GH_OUT = '{"title":"My Board"}'; FAKE_GH_COUNT = $script:Count; FAKE_GH_FAIL_ON = '4' }
         $out | Should -Not -Match 'Backup OK'
-        $out | Should -Match 'Backup PARCIAL'
+        $out | Should -Match 'Backup PARTIAL'
         $out | Should -Match 'JSON snapshot OK'
         @(Get-ChildItem $script:Dir -File).Count | Should -Be 3   # they exist, and they are named
     }
@@ -179,7 +179,7 @@ Describe 'Export-BoardSnapshot: a failed read must not become a "0 of 0 done" re
                                  -Env @{ FAKE_GH_OUT = '{"message":"Not Found"}' }
         Test-Path $script:OutFile | Should -BeFalse
         $out | Should -Not -Match 'Snapshot written'
-        $out | Should -Match "sin 'items'"
+        $out | Should -Match "without 'items'"
     }
 
     It 'renders an EMPTY board as empty - a board with no items is not an error' {

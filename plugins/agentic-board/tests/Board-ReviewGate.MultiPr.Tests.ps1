@@ -132,21 +132,21 @@ Describe 'Invoke-GateMulti (children faked at the spawn seam)' {
         $r = Invoke-Multi -Codes @{} -Specs @('o/a#5', 'o/b#9')
         $r.Code | Should -Be 0
         $r.Calls.Count | Should -Be 2
-        $r.Text | Should -Match 'GATE APROBADO'
+        $r.Text | Should -Match 'GATE PASSED'
     }
     It 'one blocked PR blocks the run - and the others are still judged and reported' {
         $r = Invoke-Multi -Codes @{ 'o/a#5' = 1 } -Specs @('o/a#5', 'o/b#9', 'o/c#2')
         $r.Code | Should -Be 1
         $r.Calls.Count | Should -Be 3
-        $r.Text | Should -Match 'o/a#5\s+BLOQUEADO'
-        $r.Text | Should -Match 'o/b#9\s+APROBADO'
-        $r.Text | Should -Match 'GATE BLOQUEADO'
+        $r.Text | Should -Match 'o/a#5\s+BLOCKED'
+        $r.Text | Should -Match 'o/b#9\s+PASSED'
+        $r.Text | Should -Match 'GATE BLOCKED'
     }
     It 'a child that could not run (no exit code) is UNKNOWN and the run is not a pass' {
         $r = Invoke-Multi -Codes @{ 'o/b#9' = $null } -Specs @('o/a#5', 'o/b#9')
         $r.Code | Should -Be 4
-        $r.Text | Should -Match 'DESCONOCIDO'
-        $r.Text | Should -Match 'No es un aprobado'
+        $r.Text | Should -Match 'UNKNOWN'
+        $r.Text | Should -Match 'This is not a pass'
     }
     It 'passes the exit code 3 (CI never ran) and 2 (unreviewed) through as non-passes' {
         (Invoke-Multi -Codes @{ 'o/a#5' = 3 } -Specs @('o/a#5', 'o/b#9')).Code | Should -Be 3
@@ -168,7 +168,7 @@ Describe 'Invoke-GateMulti (children faked at the spawn seam)' {
     It 'refuses an empty selection - nothing to approve is not an approval' {
         $r = Invoke-Multi -Codes @{} -Specs @()
         $r.Code | Should -Be 4
-        $r.Text | Should -Match 'No hay ningun PR que revisar'
+        $r.Text | Should -Match 'There is no PR to review'
     }
     It 'forwards the caller''s switches to every child' {
         $r = Invoke-Multi -Codes @{} -Specs @('o/a#5', 'o/b#9') -Bound @{ RequireIndependentReviewer = [switch]$true; CiTimeoutMinutes = 3 }
@@ -190,7 +190,7 @@ Describe 'Invoke-GateMulti -Issue reads the PRs recorded for the session (real s
         $r = Invoke-Multi -Codes @{} -Specs @('o/z#1') -Issue 271 -StateDir $script:State
         $r.Code | Should -Be 4
         $r.Calls.Count | Should -Be 0
-        $r.Text | Should -Match 'no los dos'
+        $r.Text | Should -Match 'not both'
     }
     It 'gates every recorded PR of the issue' {
         $r = Invoke-Multi -Codes @{} -Issue 271 -StateDir $script:State
@@ -210,8 +210,8 @@ Describe 'Invoke-GateMulti -Issue reads the PRs recorded for the session (real s
         }
         $none = Invoke-Multi -Codes @{} -Issue 271 -StateDir (Join-Path $TestDrive 'nowhere')
         $none.Code | Should -Be 4
-        $none.Text | Should -Match 'No hay registro de sesiones'
-        (Invoke-Multi -Codes @{} -Issue 272 -StateDir $script:State).Text | Should -Match 'ningun PR anotado'
+        $none.Text | Should -Match 'No session registry'
+        (Invoke-Multi -Codes @{} -Issue 272 -StateDir $script:State).Text | Should -Match 'has no recorded PR'
     }
     It 'an unreadable sessions.json is unknown - never a pass' {
         $bad = Join-Path $TestDrive 'badstate'
@@ -220,23 +220,23 @@ Describe 'Invoke-GateMulti -Issue reads the PRs recorded for the session (real s
         $r = Invoke-Multi -Codes @{} -Issue 271 -StateDir $bad
         $r.Code | Should -Be 4
         $r.Calls.Count | Should -Be 0
-        $r.Text | Should -Match 'ilegible'
+        $r.Text | Should -Match 'unreadable'
     }
 }
 
 Describe 'the gate source keeps the anchors other tests slice it by' {
     # Get-ReviewerRoster.Tests.ps1 finds the single-PR "unreviewed" branch by the FIRST occurrence of
-    # the phrase 'GATE SIN REVISAR' and reads its `exit 2`. The multi-PR run label must therefore never
+    # the phrase 'GATE UNREVIEWED' and reads its `exit 2`. The multi-PR run label must therefore never
     # contain that phrase: it once did, sat earlier in the file, and sent that slice to the wrong place.
-    It 'has exactly one GATE SIN REVISAR, and it is the single-PR message followed by exit 2' {
+    It 'has exactly one GATE UNREVIEWED, and it is the single-PR message followed by exit 2' {
         $src = Get-Content -LiteralPath $script:Script -Raw
-        ([regex]::Matches($src, 'GATE SIN REVISAR')).Count | Should -Be 1
-        $sin = $src.IndexOf('GATE SIN REVISAR')
-        $src.Substring($sin, 200) | Should -Match 'NADIE reviso ESTE diff'
+        ([regex]::Matches($src, 'GATE UNREVIEWED')).Count | Should -Be 1
+        $sin = $src.IndexOf('GATE UNREVIEWED')
+        $src.Substring($sin, 200) | Should -Match 'NOBODY reviewed THIS diff'
         $src.Substring($sin, [Math]::Min(6000, $src.Length - $sin)) | Should -Match 'exit 2'
     }
     It 'the multi-PR run label for an unreviewed PR is still clearly a non-pass' {
-        (Invoke-Multi -Codes @{ 'o/a#5' = 2 } -Specs @('o/a#5', 'o/b#9')).Text | Should -Match 'RUN SIN REVISAR'
+        (Invoke-Multi -Codes @{ 'o/a#5' = 2 } -Specs @('o/a#5', 'o/b#9')).Text | Should -Match 'RUN UNREVIEWED'
     }
 }
 Describe 'Board-ReviewGate.ps1 as a real process' {
@@ -256,14 +256,14 @@ Describe 'Board-ReviewGate.ps1 as a real process' {
         # by hand. The run must read that as a block.
         $r = Invoke-Gate -GateArgs @('-PullRequests', 'o/r#1', '-TokenVar', 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST')
         $r.Code | Should -Be 1
-        $r.Text | Should -Match 'o/r#1\s+BLOQUEADO'
-        $r.Text | Should -Match 'GATE BLOQUEADO'
-        $r.Text | Should -Not -Match 'GATE APROBADO'
+        $r.Text | Should -Match 'o/r#1\s+BLOCKED'
+        $r.Text | Should -Match 'GATE BLOCKED'
+        $r.Text | Should -Not -Match 'GATE PASSED'
     }
     It '-Issue with no registry is exit 4 (unknown)' {
         $r = Invoke-Gate -GateArgs @('-Issue', '987654')
         $r.Code | Should -Be 4
-        $r.Text | Should -Match 'nada que aprobar'
+        $r.Text | Should -Match 'nothing to approve'
     }
     It 'refuses to combine the multi-PR form with -RecordReview / -InstallRuleset' {
         (Invoke-Gate -GateArgs @('-PullRequests', 'o/r#1', '-RecordReview')).Code | Should -Be 4
@@ -281,7 +281,7 @@ Describe 'Board-ReviewGate.ps1 as a real process' {
             $code = $LASTEXITCODE
         } finally { $env:GH_TOKEN = $saved }
         $code | Should -Be 1
-        $noPr | Should -Match 'Usa -PR'
+        $noPr | Should -Match 'Use -PR'
         $noRepo = pwsh -NoProfile -NonInteractive -File $script:Script -PR 5 2>&1 | Out-String
         $LASTEXITCODE | Should -Not -Be 0
     }

@@ -86,38 +86,38 @@ function Test-EndToEndAllowed {
     $missing = @()
 
     if (-not $Ordered) {
-        $missing += 'la orden explicita de llevarlo de punta a punta (sin ella, nada se cierra solo)'
+        $missing += 'the explicit order to take it end to end (without it, nothing closes on its own)'
     }
     if (Test-HumanMustApprove -Class $WorkClass -Policy $WorkClassPolicy) {
         $why = if ("$WorkClass".Trim().ToLowerInvariant() -eq 'unknown') {
-            'no se pudo determinar que cambio'
+            'could not determine what changed'
         } else {
-            "el cambio es de clase '$WorkClass' - se juzga mirandolo"
+            "the change is of class '$WorkClass' - it is judged by looking at it"
         }
-        $missing += "que el cambio sea codigo ($why)"
+        $missing += "the change must be code ($why)"
     }
     if (-not $ReviewedHead) {
-        $missing += 'una revision real de ESTE commit (un check verde no es una revision)'
+        $missing += 'a real review of THIS commit (a green check is not a review)'
     }
     if ($TestsRequired -and -not $TestsRecorded) {
-        $missing += 'constancia de que corrieron pruebas automaticas sobre este commit'
+        $missing += 'a record that automated tests ran on this commit'
     } elseif ($CiPresent -and -not $TestsRecorded) {
         # The contract does not demand a test suite, but CI EXISTS on this commit and is not green.
         # Waiving "you must have tests" never waives "the tests you have must pass" (#539).
-        $missing += 'que el CI de este commit este en verde (existe y no lo esta - eso no lo exime el contrato)'
+        $missing += 'the CI of this commit must be green (it exists and is not - the contract does not waive that)'
     }
 
     if ($missing.Count -eq 0) {
         return @{
             allowed = $true
             missing = @()
-            reason  = 'ordenado punta a punta, es codigo, revisado y probado sobre este commit'
+            reason  = 'ordered end to end, is code, reviewed and tested on this commit'
         }
     }
     return @{
         allowed = $false
         missing = @($missing)
-        reason  = "falta: $($missing -join '; ')"
+        reason  = "missing: $($missing -join '; ')"
     }
 }
 
@@ -220,11 +220,11 @@ function Get-CiEvidence {
 function Format-EndToEndVerdict {
     param([Parameter(Mandatory)][hashtable]$Verdict)
     if ($Verdict.allowed) {
-        return "PUNTA A PUNTA: permitido - $($Verdict.reason)."
+        return "END TO END: allowed - $($Verdict.reason)."
     }
-    $lines = @("PUNTA A PUNTA: no se cierra solo. Falta:")
+    $lines = @("END TO END: does not close on its own. Missing:")
     foreach ($m in @($Verdict.missing)) { $lines += "  - $m" }
-    $lines += "Deja el PR listo y con el gate en verde; el cierre lo hace una persona."
+    $lines += "Leave the PR ready with the gate green; a person does the closing."
     return ($lines -join "`n")
 }
 

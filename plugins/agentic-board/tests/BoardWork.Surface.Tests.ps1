@@ -249,7 +249,7 @@ Describe 'Register-HostSession (#710 P1)' {
             $rows = @(Read-SessionRegistryRaw)
         } finally { Pop-Location }
         $r.Ok | Should -BeFalse
-        $r.Message | Should -Match 'no tiene sesion registrada'
+        $r.Message | Should -Match 'has no recorded session'
         $rows.Count | Should -Be 0
     }
     It 'records the hostSessionId on an existing row and says which surface' {
@@ -287,7 +287,7 @@ Describe 'Register-HostSession (#710 P1)' {
             $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 7 })[0]
         } finally { Pop-Location }
         $r.Ok | Should -BeFalse
-        $r.Message | Should -Match "no se arranco con -Surface app"
+        $r.Message | Should -Match "was not started with -Surface app"
         "$($row.hostSessionId)" | Should -Be ''
         $row.sessionPid | Should -Be 4242
     }
@@ -959,7 +959,7 @@ Describe 'Register-HostSession refuses an id from an older run (review round 5)'
             Write-SessionRegistryEntry -IssueNum 98 -Branch 'issue-98-x' -Repo 'o/r' -Via 'app' -Surface 'app' -RunId 'run-NEW'
             $r = Register-HostSession -IssueNum 98 -HostSessionId 'id-from-old-wave' -RunId 'run-OLD'
             $r.Ok      | Should -BeFalse
-            $r.Message | Should -Match 'otra corrida'
+            $r.Message | Should -Match 'another run'
             $row = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 98 })[0]
             $row.hostSessionId | Should -BeNullOrEmpty -Because 'a refused registration must leave the row untouched'
         } finally { Pop-Location }
@@ -1064,7 +1064,7 @@ Describe '-Stop can clear a pending dispatch, and still refuses a registered one
             $out = pwsh -NoProfile -File $script:Script -Stop 71 -Force -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
             $rows = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 71 })
         } finally { Pop-Location }
-        $out  | Should -Match 'pendiente'
+        $out  | Should -Match 'pending row removed'
         $out  | Should -Not -Match 'PID'
         $rows.Count | Should -Be 0 -Because 'the pending row is the only thing there was to undo'
     }
@@ -1088,7 +1088,7 @@ Describe '-Stop can clear a pending dispatch, and still refuses a registered one
             $out = pwsh -NoProfile -File $script:Script -Stop 73 -Force -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 2>&1 | Out-String
             $rows = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 73 })
         } finally { Pop-Location }
-        $out | Should -Match 'detenla desde el host'
+        $out | Should -Match 'stop it from the host'
         $rows.Count | Should -Be 1 -Because 'a refused stop must not remove the row either'
     }
 }
@@ -1123,7 +1123,7 @@ Describe '-Stop on a pending row says what it did NOT undo (review round 8)' {
             $rows = @(Read-SessionRegistryRaw | Where-Object { [int]$_.issue -eq 74 })
         } finally { Pop-Location }
         $rows.Count | Should -Be 0
-        $out | Should -Match 'sigue En Progreso'
+        $out | Should -Match 'still In Progress'
         $out | Should -Match '-Unlock 74'
     }
 }

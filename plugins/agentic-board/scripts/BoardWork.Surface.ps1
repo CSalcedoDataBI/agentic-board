@@ -259,21 +259,21 @@ function Register-HostSession {
     if (-not $prev) {
         return [pscustomobject]@{
             Ok = $false
-            Message = "el issue #$IssueNum no tiene sesion registrada (arrancalo primero con -Parallel ... -Surface app): no invento una fila para anotar el hostSessionId."
+            Message = "issue #$IssueNum has no recorded session (start it first with -Parallel ... -Surface app): I will not invent a row to note the hostSessionId on."
         }
     }
     $surface = if ($prev.PSObject.Properties['surface']) { "$($prev.surface)" } else { '' }
     if ($surface -ne 'app') {
         return [pscustomobject]@{
             Ok = $false
-            Message = "la sesion del issue #$IssueNum no se arranco con -Surface app (surface actual: '$surface') - -RegisterSession solo aplica a esa surface."
+            Message = "the session of issue #$IssueNum was not started with -Surface app (current surface: '$surface') - -RegisterSession only applies to that surface."
         }
     }
     $rowRunId = if ($prev.PSObject.Properties['runId']) { "$($prev.runId)" } else { '' }
     if ($RunId -and $RunId -ne $rowRunId) {
         return [pscustomobject]@{
             Ok = $false
-            Message = "el issue #$IssueNum ya pertenece a otra corrida (la fila dice '$rowRunId', tu manifiesto dice '$RunId'): no anoto un id de sesion de una corrida anterior sobre la actual."
+            Message = "issue #$IssueNum already belongs to another run (the row says '$rowRunId', your manifest says '$RunId'): I will not record a session id from an earlier run over the current one."
         }
     }
     # -Via 'app' explicit (external review, round 1): Write-SessionRegistryEntry decides whether to
@@ -285,7 +285,7 @@ function Register-HostSession {
     Write-SessionRegistryEntry -IssueNum $IssueNum -HostSessionId $HostSessionId -Via 'app' -UpdateOnly
     return [pscustomobject]@{
         Ok = $true
-        Message = "hostSessionId '$HostSessionId' anotado para el issue #$IssueNum (surface $surface)."
+        Message = "hostSessionId '$HostSessionId' recorded for issue #$IssueNum (surface $surface)."
     }
     })
 }

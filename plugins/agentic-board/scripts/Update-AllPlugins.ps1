@@ -51,7 +51,7 @@ function Invoke-ClaudeCli {
         $found = @(Get-Command claude -CommandType Application -ErrorAction SilentlyContinue)
         $pick = $found | Where-Object { $_.Source -match '\.(exe|cmd|bat)$' } | Select-Object -First 1
         if (-not $pick) { $pick = $found | Select-Object -First 1 }
-        if (-not $pick) { return [pscustomobject]@{ ExitCode = -1; Output = 'no encuentro el programa claude en este equipo'; TimedOut = $false } }
+        if (-not $pick) { return [pscustomobject]@{ ExitCode = -1; Output = 'cannot find the claude program on this machine'; TimedOut = $false } }
         $Executable = $pick.Source
     }
     # A .cmd/.bat shim is parsed by cmd.exe, whose metacharacters (& | ^ % ...) .NET does not escape. Our
@@ -60,7 +60,7 @@ function Invoke-ClaudeCli {
     if ($Executable -match '\.(cmd|bat)$') {
         foreach ($a in $Arguments) {
             if ($a -notmatch '^[A-Za-z0-9._@:=/-]+$') {
-                return [pscustomobject]@{ ExitCode = -1; Output = "no ejecuto claude: un argumento tiene caracteres no permitidos ($a)"; TimedOut = $false }
+                return [pscustomobject]@{ ExitCode = -1; Output = "not running claude: an argument has characters that are not allowed ($a)"; TimedOut = $false }
             }
         }
     }
@@ -80,10 +80,10 @@ function Invoke-ClaudeCli {
         # The process is gone, but a grandchild it started may still hold the pipes open: wait for the
         # readers only briefly, and report what was read (nothing) rather than hang past the timeout.
         $drained = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($outTask, $errTask), 5000)
-        $text = if ($drained) { ("$($outTask.Result)`n$($errTask.Result)").Trim() } else { '(la salida no se pudo leer por completo)' }
+        $text = if ($drained) { ("$($outTask.Result)`n$($errTask.Result)").Trim() } else { '(the output could not be read completely)' }
         return [pscustomobject]@{ ExitCode = $proc.ExitCode; Output = $text; TimedOut = $false }
     } catch {
-        return [pscustomobject]@{ ExitCode = -1; Output = "no pude ejecutar claude: $($_.Exception.Message)"; TimedOut = $false }
+        return [pscustomobject]@{ ExitCode = -1; Output = "could not run claude: $($_.Exception.Message)"; TimedOut = $false }
     }
 }
 
@@ -157,12 +157,12 @@ function Select-Only([object[]]$Entries, [string[]]$Only) {
 
 # The last few lines of CLI output as a bounded reason, plain text.
 function Get-FailureReason($Run) {
-    if ($Run.TimedOut) { return 'se agoto el tiempo de espera' }
+    if ($Run.TimedOut) { return 'the wait timed out' }
     $lines = @((ConvertTo-PlainText "$($Run.Output)") -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Last 3)
-    $why = if ($lines.Count -gt 0) { $lines -join ' | ' } else { "codigo de salida $($Run.ExitCode)" }
+    $why = if ($lines.Count -gt 0) { $lines -join ' | ' } else { "exit code $($Run.ExitCode)" }
     if ($why.Length -gt 300) { $why = $why.Substring(0, 297) + '...' }
     if ("$($Run.Output)" -match '(?i)--yes|confirm') {
-        $why += ' (el mercado pide confirmar un comando; si confias en el, vuelve a correr aceptandolo)'
+        $why += ' (the marketplace asks to confirm a command; if you trust it, run again accepting it)'
     }
     return $why
 }
@@ -196,13 +196,13 @@ function Invoke-PluginUpdate {
     $fatal = { param($why) $result.Fatal = $why; $result.ExitCode = 1; return $result }
 
     $inst = Get-InstalledPluginEntries -ClaudeHome $ClaudeHome
-    if (-not $inst.Ok) { return (& $fatal "no pude leer que plugins tienes instalados ($($inst.Reason))") }
+    if (-not $inst.Ok) { return (& $fatal "could not read which plugins you have installed ($($inst.Reason))") }
     $mkt = Get-KnownMarketplaces -ClaudeHome $ClaudeHome
-    if (-not $mkt.Ok) { return (& $fatal "no pude leer los mercados registrados ($($mkt.Reason))") }
+    if (-not $mkt.Ok) { return (& $fatal "could not read the registered marketplaces ($($mkt.Reason))") }
 
     $targets = @(Select-Only $inst.Entries $Only)
     $filtered = @($Only | Where-Object { $_ }).Count -gt 0
-    if ($filtered -and $targets.Count -eq 0) { return (& $fatal "no hay ningun plugin instalado que coincida con: $($Only -join ', ')") }
+    if ($filtered -and $targets.Count -eq 0) { return (& $fatal "no installed plugin matches: $($Only -join ', ')") }
 
     $mkRows = [System.Collections.Generic.List[object]]::new()
     $failedMk = @{}
@@ -217,7 +217,7 @@ function Invoke-PluginUpdate {
             $mkRows.Add([pscustomobject]@{ Name = $m.Name; SourceKind = $m.SourceKind; Status = 'planned'; Warning = $false; Reason = '' })
             continue
         }
-        & $say "Refrescando el mercado '$($m.Name)'..."
+        & $say "Refreshing marketplace '$($m.Name)'..."
         $run = & $Runner $cliArgs
         if ($run.ExitCode -eq 0 -and -not $run.TimedOut) {
             $mkRows.Add([pscustomobject]@{ Name = $m.Name; SourceKind = $m.SourceKind; Status = 'refreshed'; Warning = $false; Reason = '' })
@@ -237,17 +237,17 @@ function Invoke-PluginUpdate {
         $old = Get-EntryFor $inst.Entries $t.Key
         $row = [pscustomobject]@{ Key = $t.Key; Plugin = $t.Plugin; Marketplace = $t.Marketplace; Status = ''; Old = $null; New = $null; Reason = ''; Excerpt = ''; Failure = $false }
         if (-not $old) {
-            $row.Status = 'skipped'; $row.Reason = "solo esta instalado para un proyecto ($($t.Scope)); actualizalo desde esa carpeta"
+            $row.Status = 'skipped'; $row.Reason = "it is only installed for a project ($($t.Scope)); update it from that folder"
             $rows.Add($row); continue
         }
         $row.Old = [pscustomobject]@{ Version = $old.Version; Sha = $old.Sha }
         if ($knownNames -notcontains $t.Marketplace) {
-            $row.Status = 'skipped'; $row.Reason = "el mercado '$($t.Marketplace)' ya no esta registrado"
+            $row.Status = 'skipped'; $row.Reason = "marketplace '$($t.Marketplace)' is no longer registered"
             $rows.Add($row); continue
         }
         if ($failedMk.ContainsKey($t.Marketplace)) {
             $row.Status = 'skipped'; $row.Failure = $true
-            $row.Reason = "no se pudo refrescar su mercado, asi que no se sabe si hay algo nuevo: $($failedMk[$t.Marketplace])"
+            $row.Reason = "its marketplace could not be refreshed, so there is no knowing whether anything is new: $($failedMk[$t.Marketplace])"
             $rows.Add($row); continue
         }
         $cliArgs = @('plugin', 'update', $t.Key)
@@ -256,7 +256,7 @@ function Invoke-PluginUpdate {
             $cmds.Add('claude ' + ($cliArgs -join ' '))
             $row.Status = 'planned'; $rows.Add($row); continue
         }
-        & $say "Actualizando '$($t.Key)'..."
+        & $say "Updating '$($t.Key)'..."
         $run = & $Runner $cliArgs
         if ($run.ExitCode -ne 0 -or $run.TimedOut) {
             $row.Status = 'failed'; $row.Failure = $true; $row.Reason = Get-FailureReason $run
@@ -267,7 +267,7 @@ function Invoke-PluginUpdate {
         if (-not $now) {
             # The CLI said yes but the installed list no longer (or cannot be shown to) contain it: not a success we can vouch for.
             $row.Status = 'failed'; $row.Failure = $true
-            $row.Reason = 'Claude dijo que termino, pero no puedo confirmar el resultado en la lista de plugins instalados'
+            $row.Reason = 'Claude said it finished, but I cannot confirm the result in the installed plugin list'
             $rows.Add($row); continue
         }
         $row.New = [pscustomobject]@{ Version = $now.Version; Sha = $now.Sha }
@@ -346,7 +346,7 @@ function Format-PluginUpdateReport {
     $add = { param($t, $c) $acc.Add([pscustomobject]@{ Text = $t; Color = $c }) }
 
     if ($Result.Fatal) {
-        & $add "No pude actualizar: $($Result.Fatal)." 'Red'
+        & $add "Could not update: $($Result.Fatal)." 'Red'
         return @($acc)
     }
     $by = { param($s) @($Result.Plugins | Where-Object { $_.Status -eq $s }) }
@@ -357,50 +357,50 @@ function Format-PluginUpdateReport {
     $mkFail = @($Result.Marketplaces | Where-Object { $_.Status -eq 'failed' })
 
     if ($Result.DryRun) {
-        & $add 'SIMULACION - no se cambio nada. Esto es lo que se haria:' 'Cyan'
+        & $add 'DRY RUN - nothing was changed. This is what would be done:' 'Cyan'
         foreach ($c in $Result.Commands) { & $add "  $c" 'Gray' }
-        if (@($Result.Commands).Count -eq 0) { & $add '  (no hay nada que hacer)' 'Gray' }
-        foreach ($p in $skipped) { & $add "  Se omitiria $($p.Key): $($p.Reason)" 'Yellow' }
+        if (@($Result.Commands).Count -eq 0) { & $add '  (nothing to do)' 'Gray' }
+        foreach ($p in $skipped) { & $add "  Would skip $($p.Key): $($p.Reason)" 'Yellow' }
     } else {
-        & $add 'Resumen de la actualizacion de plugins' 'Cyan'
+        & $add 'Plugin update summary' 'Cyan'
         $refreshed = @($Result.Marketplaces | Where-Object { $_.Status -eq 'refreshed' }).Count
         $warn = @($mkFail | Where-Object { $_.Warning }).Count
         $bad = $mkFail.Count - $warn
-        & $add "  Mercados: $refreshed refrescados, $warn con aviso, $bad con fallo" 'Gray'
-        & $add ("  Plugins:  {0} actualizados | {1} sin cambios | {2} con fallo | {3} omitidos" -f $updated.Count, $unchanged.Count, ($failed.Count + $blocked.Count), $skipped.Count) 'Gray'
+        & $add "  Marketplaces: $refreshed refreshed, $warn with a warning, $bad failed" 'Gray'
+        & $add ("  Plugins:  {0} updated | {1} unchanged | {2} failed | {3} skipped" -f $updated.Count, $unchanged.Count, ($failed.Count + $blocked.Count), $skipped.Count) 'Gray'
         & $add '' 'Gray'
 
         if ($updated.Count -gt 0) {
-            & $add 'Actualizados' 'Green'
+            & $add 'Updated' 'Green'
             foreach ($p in $updated) {
                 & $add ("  {0}: {1} -> {2}" -f $p.Key, (Format-ShortBuild $p.Old), (Format-ShortBuild $p.New)) 'Green'
                 if ($p.Excerpt) {
-                    & $add '      Que hay de nuevo:' 'Gray'
+                    & $add "      What's new:" 'Gray'
                     foreach ($l in ($p.Excerpt -split "`n")) { & $add "        $l" 'Gray' }
                 }
             }
             & $add '' 'Gray'
         }
         if ($failed.Count -gt 0 -or $blocked.Count -gt 0) {
-            & $add 'NO se pudieron actualizar (no dar por buenos)' 'Red'
+            & $add 'COULD NOT be updated (do not take them as good)' 'Red'
             foreach ($p in @($failed) + @($blocked)) { & $add ("  {0}: {1}" -f $p.Key, $p.Reason) 'Red' }
             & $add '' 'Gray'
         }
         if ($harmless.Count -gt 0) {
-            & $add 'Omitidos' 'Yellow'
+            & $add 'Skipped' 'Yellow'
             foreach ($p in $harmless) { & $add ("  {0}: {1}" -f $p.Key, $p.Reason) 'Yellow' }
             & $add '' 'Gray'
         }
         if ($unchanged.Count -gt 0) {
-            & $add ("Sin cambios (Claude no encontro nada mas nuevo): " + (($unchanged | ForEach-Object { $_.Plugin }) -join ', ')) 'Gray'
+            & $add ("Unchanged (Claude found nothing newer): " + (($unchanged | ForEach-Object { $_.Plugin }) -join ', ')) 'Gray'
             & $add '' 'Gray'
         }
         $warns = @($mkFail | Where-Object { $_.Warning })
         $hard = @($mkFail | Where-Object { -not $_.Warning })
         if ($warns.Count -gt 0 -or $hard.Count -gt 0) {
-            & $add 'Mercados con problemas' 'Yellow'
+            & $add 'Marketplaces with problems' 'Yellow'
             foreach ($m in $hard)  { & $add ("  {0}: {1}" -f $m.Name, $m.Reason) 'Red' }
-            foreach ($m in $warns) { & $add ("  {0} (carpeta local, solo aviso): {1}" -f $m.Name, $m.Reason) 'Yellow' }
+            foreach ($m in $warns) { & $add ("  {0} (local folder, warning only): {1}" -f $m.Name, $m.Reason) 'Yellow' }
             & $add '' 'Gray'
         }
     }
@@ -408,23 +408,23 @@ function Format-PluginUpdateReport {
     $s = $Result.Sessions
     if ($s -and $s.Available) {
         $none = $s.Live - $s.Stale - $s.NoData
-        $msg = "Sesiones abiertas: $($s.Live). $($s.Stale) siguen con una version vieja de algun plugin"
-        $msg += ", $none al dia, $($s.NoData) sin datos para comprobarlo"
-        if ($s.UnknownLiveness -gt 0) { $msg += " (y $($s.UnknownLiveness) mas que no pude confirmar que sigan abiertas)" }
-        & $add ($msg + '. Para ver cuales: /cleanup plugins sessions') $(if ($s.Stale -gt 0) { 'Yellow' } else { 'Gray' })
+        $msg = "Open sessions: $($s.Live). $($s.Stale) still on an old version of some plugin"
+        $msg += ", $none up to date, $($s.NoData) with no data to check"
+        if ($s.UnknownLiveness -gt 0) { $msg += " (and $($s.UnknownLiveness) more I could not confirm are still open)" }
+        & $add ($msg + '. To see which: /cleanup plugins sessions') $(if ($s.Stale -gt 0) { 'Yellow' } else { 'Gray' })
         if ($s.Stale -gt 0) {
-            & $add '  En cada una: escribe /reload-plugins (skills, comandos y hooks). Si el plugin trae un servidor MCP, abre una sesion nueva.' 'Gray'
+            & $add '  In each one: type /reload-plugins (skills, commands and hooks). If the plugin ships an MCP server, open a new session.' 'Gray'
         }
     } else {
-        & $add 'Sesiones abiertas: no pude comprobarlas. No asumas que estan al dia.' 'Yellow'
+        & $add 'Open sessions: could not check them. Do not assume they are up to date.' 'Yellow'
     }
 
     $c = $Result.Cleanup
     if ($c -and $c.Available) {
         if ($c.Ran) {
-            & $add ("Versiones viejas: se borraron {0}{1}." -f $c.Removed, $(if ($c.Failed -gt 0) { ", $($c.Failed) no se pudieron borrar" } else { '' })) $(if ($c.Failed -gt 0) { 'Red' } else { 'Gray' })
+            & $add ("Old versions: {0} deleted{1}." -f $c.Removed, $(if ($c.Failed -gt 0) { ", $($c.Failed) could not be deleted" } else { '' })) $(if ($c.Failed -gt 0) { 'Red' } else { 'Gray' })
         } elseif ($c.Candidates -gt 0) {
-            & $add ("Versiones viejas sin uso: {0} (unos {1}). No se borra nada solo: para limpiarlas usa /cleanup plugins clean (o repite esto con -Clean)." -f $c.Candidates, (Format-Megabytes $c.Bytes)) 'Gray'
+            & $add ("Unused old versions: {0} (about {1}). Nothing is deleted on its own: to clean them use /cleanup plugins clean (or repeat this with -Clean)." -f $c.Candidates, (Format-Megabytes $c.Bytes)) 'Gray'
         }
     }
     return @($acc)
