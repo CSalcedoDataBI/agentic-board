@@ -1,6 +1,61 @@
 ﻿# Changelog
 
 
+## [0.44.0] - 2026-09-29
+`/scan` goes from untracked work to a ready board in one command, `/skills` can create and improve a
+skill end to end, and the whole tool now speaks English: the agent translates for the user.
+### Added
+- **`/scan` in one command (#738, #731).** `Scan-Project.ps1` makes a plan and writes nothing to
+  GitHub. The user confirms it once, and `/scan apply` carries it out.
+  - **What the plan finds:**
+    - code debt markers;
+    - unchecked checklists and pending-section bullets;
+    - plan/spec documents.
+
+    A plan document, or any file with 12+ open items, is ONE plan item: its own checklist tracks
+    its steps. Skill, agent and template folders are skipped. A title found in several files is one
+    item that lists every place. On a real repo this turned 536 noisy rows into 16.
+  - **What each item gets:**
+    - a preset type label (`bug`, `feature`, `chore`, `docs`, `refactor`, `spike`);
+    - a proposed Priority **with its reason**;
+    - its dependencies ("blocked by #n");
+    - an order and a PR batch.
+  - **What apply does:**
+    - reuses or creates the board with the standard fields;
+    - applies the label preset;
+    - creates the issues with Priority, Status Blocked and Task Type Spike;
+    - adds a plan epic with native sub-issues and the PR batches;
+    - runs `fill --auto`.
+
+    The plan file records each issue as it is created, so running apply again never duplicates one.
+  - `Board-Fill` maps the new `spike` label to Task Type Spike.
+- **`/skills create` and `/skills improve` (#739).** A pipeline that chains the existing tools:
+  1. overlap with installed skills and public prior art;
+  2. a scope decision, with the reason;
+  3. `skill-creator`;
+  4. a `writing-skills` RED/GREEN pressure test;
+  5. a `skill-improver` loop that ends only when `Skill-Pipeline.ps1 -Verify` passes the audit gate
+     (no high or medium finding);
+  6. the trigger eval.
+
+  A skill name must be kebab-case, so a name can never point outside `skills/`.
+### Changed
+- **English-only tool surface (#751).** The conversation still follows the user's language.
+  - **Output and headings:**
+    - the 371 Spanish console messages in 32 scripts are translated, and the ratchet baseline is
+      now empty;
+    - errors, gh labels (`Could not <what>`) and prompts (`[y/n]`, still accepting `s`/`si`) are
+      English;
+    - the closing-summary headings are English ("What I found / What I did / What is left / What I
+      need from you") and the agent writes them in the user's language.
+  - **Menus:** the `/board`, `/skills`, `/expert` and `/tools` menus are English, and every command
+    menu tells the agent to show it translated.
+  - **Kept in Spanish on purpose:** the vocabulary that reads Spanish boards and Spanish input.
+  - **Status phrases other code reads were renamed on both sides:**
+    - `GATE SIN REVISAR` → `GATE UNREVIEWED`;
+    - `CI NO SE EVALUO` → `CI NOT EVALUATED`;
+    - PASSED / BLOCKED / UNKNOWN.
+
 ## [0.43.0] - 2026-09-29
 Machine housekeeping gets its own command, `/cleanup`, so `/board` is only about GitHub. It also
 fixes where the disk actually went.
