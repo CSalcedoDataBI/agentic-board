@@ -54,7 +54,7 @@ Describe 'Invoke-Gh -Json' {
 
     It 'THROWS on empty stdout - gh --json always emits at least [] or {}' {
         Mock Invoke-GhRaw { [pscustomobject]@{ Output = ''; ExitCode = 0; StdErr = '' } }
-        { Invoke-Gh -GhArgs @('project', 'view') -Json } | Should -Throw -ExpectedMessage '*sin salida*'
+        { Invoke-Gh -GhArgs @('project', 'view') -Json } | Should -Throw -ExpectedMessage '*with no output*'
     }
 
     It 'THROWS on a body that is not JSON, instead of returning $null' {
@@ -87,7 +87,7 @@ Describe 'Invoke-Gh -RawJson (validate as JSON, hand back the text)' {
 
     It 'still THROWS on an empty body (it implies -Json)' {
         Mock Invoke-GhRaw { [pscustomobject]@{ Output = ''; ExitCode = 0; StdErr = '' } }
-        { Invoke-Gh -GhArgs @('project', 'view') -RawJson } | Should -Throw -ExpectedMessage '*sin salida*'
+        { Invoke-Gh -GhArgs @('project', 'view') -RawJson } | Should -Throw -ExpectedMessage '*with no output*'
     }
 
     It 'still THROWS on a non-zero exit' {
