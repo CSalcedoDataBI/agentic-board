@@ -1059,7 +1059,7 @@ function Write-SessionRegistryEntry {
             surface       = $Surface
             hostSessionId = $HostSessionId
             runId         = $RunId
-            host          = $env:COMPUTERNAME
+            host          = ([Environment]::MachineName)
             # Seconds, not minutes (#568): this stamp is the start of every duration the tool can
             # ever compute about its own runs; minute granularity threw away the precision for free.
             started       = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
@@ -1796,7 +1796,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
 
     # -- Execute: claim fingerprint (multi-session diagnostics) -----------------
     $claimNote = if ($TakeOver) { "TAKEOVER" } else { "claim" }
-    $fingerprint = Format-ClaimFingerprint -Note $claimNote -Computer $env:COMPUTERNAME -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm') -Branch $branchName
+    $fingerprint = Format-ClaimFingerprint -Note $claimNote -Computer ([Environment]::MachineName) -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm') -Branch $branchName
     try {
         $null = Invoke-Gh -GhArgs @('issue','comment',"$IssueNum",'--repo',$repo,'--body',$fingerprint) `
                           -What "record the claim on #$IssueNum"
@@ -2847,7 +2847,7 @@ if ($Lock -gt 0 -or $Unlock -gt 0) {
     if (-not $targetOpt) {
         throw "Board #$ProjectNum has no Status option for '$targetName' (nor an equivalent legacy name). Apply the preset with /board field apply en."
     }
-    $fingerprint = Format-ClaimFingerprint -Note $note -Computer $env:COMPUTERNAME -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm')
+    $fingerprint = Format-ClaimFingerprint -Note $note -Computer ([Environment]::MachineName) -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm')
 
     $assignVerb = if ($locking) { "assign to $Owner" } else { "unassign $Owner" }
     if ($DryRun) {

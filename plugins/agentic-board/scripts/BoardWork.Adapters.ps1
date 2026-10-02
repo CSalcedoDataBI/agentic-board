@@ -37,12 +37,17 @@ function Get-CliAdapters {
                 $safeBrief  = $ctx.BriefingFile -replace "'", "''"
                 # Each step on its OWN line (a .ps1 file), so no ';' is ever needed - which is the
                 # whole point: ';' on wt's command line would split the tab (see the header note).
+                # The chosen credential is captured FIRST - the Windows user scope, else the process
+                # (#767: there is no user scope off Windows) - then every competing one is cleared,
+                # then it is set. One step per line; no value ever reaches the script text.
+                $getAuth    = '$abiosAuth=[Environment]::GetEnvironmentVariable(''{0}'',''User'')' -f $ctx.AuthVar
+                $getAuth2   = 'if (-not $abiosAuth) {{ $abiosAuth=[Environment]::GetEnvironmentVariable(''{0}'') }}' -f $ctx.AuthVar
                 $clearAuth  = 'Remove-Item Env:ANTHROPIC_API_KEY,Env:ANTHROPIC_AUTH_TOKEN,Env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue'
-                $setAuth    = '$env:{0}=[Environment]::GetEnvironmentVariable(''{0}'',''User'')' -f $ctx.AuthVar
+                $setAuth    = '$env:{0}=$abiosAuth' -f $ctx.AuthVar
                 $clean      = 'Remove-Item Env:CLAUDECODE,Env:CLAUDE_CODE_SESSION_ID,Env:CLAUDE_CODE_CHILD_SESSION,Env:CLAUDE_CODE_ENTRYPOINT -ErrorAction SilentlyContinue'
                 $bypass     = if ($ctx.AllowBypass) { ' --permission-mode bypassPermissions' } else { '' }
                 $run        = 'claude -p (Get-Content -Raw -LiteralPath ''{0}''){1} --no-session-persistence --verbose' -f $safeBrief, $bypass
-                ($clearAuth, $setAuth, $clean, $run) -join "`r`n"
+                ($getAuth, $getAuth2, $clearAuth, $setAuth, $clean, $run) -join "`r`n"
             }
         }
         [PSCustomObject]@{

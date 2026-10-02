@@ -26,7 +26,7 @@ BeforeDiscovery {
     # long before any BeforeAll runs. Resolving this in BeforeAll made the check skip on every
     # host, forever — a green suite that proved nothing.
     $script:WinPs = @(
-        Join-Path $env:SystemRoot 'System32' 'WindowsPowerShell' 'v1.0' 'powershell.exe'
+        $(if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32' 'WindowsPowerShell' 'v1.0' 'powershell.exe' })   # Windows only (#767)
         (Get-Command 'powershell.exe' -CommandType Application -ErrorAction SilentlyContinue |
             Select-Object -First 1).Source
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1

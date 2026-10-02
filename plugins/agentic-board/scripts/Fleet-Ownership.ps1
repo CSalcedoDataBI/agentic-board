@@ -218,7 +218,7 @@ if ($env:ABIOS_FLEETOWNERSHIP_DOTSOURCE) { return }
 
 # ------------------------------------------------------------------------ main entry
 $path    = Get-FleetOwnershipPath
-$machine = "$env:COMPUTERNAME"
+$machine = ([Environment]::MachineName)
 $alive   = { param($processId) [bool](Get-Process -Id $processId -ErrorAction SilentlyContinue) }
 
 # Prune dead-PID claims on every entry (a crashed session releases its paths).

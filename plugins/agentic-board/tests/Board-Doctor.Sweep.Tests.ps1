@@ -174,7 +174,7 @@ try {
 } catch {
     'RESULT ABORTED: ' + $_.Exception.Message.Split([char]10)[0]
 } finally {
-    $h.Close(); Set-Location $env:TEMP
+    $h.Close(); Set-Location ([System.IO.Path]::GetTempPath())
     git -C $repo worktree prune 2>&1 | Out-Null
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
