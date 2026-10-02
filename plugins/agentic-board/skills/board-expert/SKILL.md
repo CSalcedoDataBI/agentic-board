@@ -11,8 +11,9 @@ The engine behind `/agentic-board:expert`. It turns a tracked plan (an epic + su
 the enriched items: Research, Role seed, Deliverables, Test plan) into an autonomous run that
 adopts the required expert persona and executes it — freeing the user from real-time babysitting.
 
-This skill is **internal** (`user-invocable: false`): it is routed by the `expert` command, never
-typed with a slash.
+This is an internal engine file: `/expert` reads it with the Read tool; it is not reachable through
+the Skill tool (`disable-model-invocation: true`). What the launched session does phase by phase:
+`references/auto-loop.md`.
 
 ## Two verbs
 

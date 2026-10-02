@@ -1,6 +1,6 @@
 ---
 name: abios-feedback
-description: "Use when you notice a bug or improvement for the agentic-board tool itself, while working in any project. Files it as a sanitized issue on the tool's public repo, never in the current project. Triggers — \"mejora para la herramienta\", \"abios bug\", \"esto deberíamos arreglarlo en el plugin\", a guard block."
+description: "Use when a bug or improvement is found in the agentic-board plugin itself (its skills, scripts or commands) while working in any project. Files a sanitized, English issue on the tool's public repo, never in the current project. Not for bugs in the current project — use /board issue or /scan. Triggers — \"mejora para la herramienta\", \"abios bug\", \"esto deberíamos arreglarlo en el plugin\", \"this is an agentic-board bug\", a block from agentic-board's guard-no-private hook."
 user-invocable: false
 ---
 
@@ -60,7 +60,7 @@ ABIOS_EOF_BODY
 The same defect was filed three times in a row (#654, #658, #667) and once as a month-old duplicate
 (#661). Before creating anything, run the duplicate check on the **sanitized** title and body files:
 ```bash
-pwsh -NoProfile -File "<plugin-root>/scripts/Find-DuplicateIssue.ps1" -TitleFile "$work/title.txt" -BodyFile "$work/body.md"
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/Find-DuplicateIssue.ps1" -TitleFile "$work/title.txt" -BodyFile "$work/body.md"
 ```
 It searches the tool's open issues plus those closed in the last 30 days (a recently closed twin is a
 recurrence, not a new defect) and acts on its exit code:
@@ -86,7 +86,7 @@ This needs no local path and cannot hit the current project — the target is ex
 ## Step 3 — Implement the fix (only when you choose to), in the tool's clone
 Do this deliberately, not from the private project tree:
 ```bash
-cd "$env:ABIOS_HOME"   # set ABIOS_HOME once to your local agentic-board clone path
+cd "$ABIOS_HOME"   # set ABIOS_HOME once to your local agentic-board clone path
 # edit skills/scripts/references, then commit — the guard runs automatically
 ```
 If `ABIOS_HOME` is unset, ask the user for the clone path; do **not** guess or write into the cwd.
@@ -95,7 +95,7 @@ Also append a dated, sanitized note to `inbox/IMPROVEMENTS.md` in that clone (op
 ## Safety backstops (you do not rely on discipline alone)
 Two, because both of these rules have been broken by an agent who meant well:
 
-- **Private content** — a guard (`scripts/guard-no-private.ps1`, wired pre-commit + pre-push)
+- **Private content** — a guard in the tool's clone (`scripts/guard-no-private.ps1` at the repo root, not shipped with the plugin; wired pre-commit + pre-push)
   **blocks** any commit/push whose added lines contain a secret pattern or a term from the local
   `.abios/private-denylist.txt`. If it blocks you, it caught a leak — do not `--no-verify` unless you
   have confirmed a genuine false positive. Note it is inert in a fresh clone until

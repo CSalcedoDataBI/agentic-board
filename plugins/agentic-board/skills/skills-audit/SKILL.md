@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 Part of the **skills-ops** module. Reuses `gh-account` (token), the `abios-feedback`
 sanitize-then-file discipline, `projects-admin` (issue + board), and the
-`guard-no-private.ps1` backstop. See `references/filing.md` for the filing recipe.
+`guard-no-private.ps1` backstop (in the agentic-board clone, not shipped with the plugin). See `references/filing.md` for the filing recipe.
 
 ## Step 1 — Static audit (deterministic)
 
@@ -39,6 +39,8 @@ Findings carry a `filing` route (`file` = open an issue on the owner repo; `loca
 report only). This is `Resolve-SkillOwner` deciding where each finding belongs — the tool's
 board for agentic-board skills, the project's board for project skills, local-only for
 third-party/personal (never open issues in someone else's repo).
+
+Optional: run this static pass on every Stop — `references/stop-hook.md`.
 
 ## Step 2 — Runtime trigger-eval (on-demand, agentic)
 

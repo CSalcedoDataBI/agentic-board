@@ -1,6 +1,6 @@
 ---
 name: tmdl-review
-description: "Use when asked whether a Power BI or Fabric TMDL model change is safe to merge: diffs *.tmdl between a PR or two refs and classifies each change BREAKING, WARNING or INFO. Triggers — \"revisa el diff TMDL\", \"¿este cambio rompe el modelo?\", \"review the TMDL diff\"."
+description: "Use when asked whether a Power BI or Fabric TMDL model change is safe to merge: diffs *.tmdl between a PR or two refs and classifies each change BREAKING, WARNING or INFO. Not for writing or editing TMDL/DAX, or for best-practice (BPA) rule checks. Triggers — \"revisa el diff TMDL\", \"¿este cambio rompe el modelo?\", \"review the TMDL diff\", \"is this model change safe to merge\"."
 user-invocable: false
 ---
 
@@ -27,14 +27,14 @@ every schema change by severity.
 API, fetching base and head content by ref:
 
 ```powershell
-$env:GH_TOKEN = [Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL','User')
-.\scripts\Tmdl-DiffReview.ps1 -Repo <owner/name> -PR <n>
+$env:GH_TOKEN = (& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1").Token   # see gh-account
+& "${CLAUDE_PLUGIN_ROOT}/scripts/Tmdl-DiffReview.ps1" -Repo <owner/name> -PR <n>
 ```
 
 **Local mode** — diffs `*.tmdl` with git in the current working copy:
 
 ```powershell
-.\scripts\Tmdl-DiffReview.ps1 -Base main -Head HEAD
+& "${CLAUDE_PLUGIN_ROOT}/scripts/Tmdl-DiffReview.ps1" -Base main -Head HEAD
 ```
 
 ## Severity rules

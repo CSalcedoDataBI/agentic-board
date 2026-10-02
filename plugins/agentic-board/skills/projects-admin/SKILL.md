@@ -1,6 +1,6 @@
 ---
 name: projects-admin
-description: "Use to administer a GitHub Projects (v2) board or its issues: create or configure a board, set fields, add/move/bulk-edit items, fill gaps, or list pending issues and start one. Triggers — \"qué hay pendiente en el board\", \"mueve a Done\", \"add to board\", \"what's pending on the board\", /board."
+description: "Use to administer a GitHub Projects (v2) board or its issues: create or configure a board, set fields, add/move/bulk-edit items, fill gaps, or list pending issues and start one. Not for finding untracked TODOs in code (/scan) or cleaning local sessions/disk (/cleanup). Triggers — \"qué hay pendiente en el board\", \"mueve a Done\", \"add to board\", \"what's pending on the board\", /board."
 user-invocable: false
 ---
 
@@ -10,7 +10,7 @@ This skill covers the full lifecycle of a GitHub Projects v2 board and its items
 
 > **Diagrams in any artifact** (plan/epic/issue body, handoff, status update): never hand-draw
 > ASCII art — use the `diagram-authoring` skill (Mermaid by default, escalate to D2/Graphviz via
-> Kroki). See `skills/diagram-authoring/SKILL.md`.
+> Kroki). See the `diagram-authoring` skill.
 
 ---
 
@@ -116,7 +116,7 @@ follow it exactly:
 | Create an issue with a label | `references/issue-ops.md` | `gh issue create` |
 | Create / ensure a label exists | `references/issue-ops.md` | `gh label create --force` |
 | Add an existing issue/PR to the board | `references/issue-ops.md` | `gh project item-add` |
-| Create a native sub-issue (parent→child) | `references/issue-ops.md` | `github-business sub_issue_write` (MCP) |
+| Create a native sub-issue (parent→child) | `references/issue-ops.md` | `Board-Breakdown.ps1 -Parent <n> -Tasks ...` (native `addSubIssue`) |
 | Place a full GitHub URL link in issue body | `references/issue-ops.md` | inline in `--body` |
 | Move an item's Status field | `references/issue-ops.md` + `references/board-ops.md` | `gh project item-edit` (single-select set) |
 | Bulk move items to a status | `references/issue-ops.md` + `references/board-ops.md` | loop over `item-list` → `item-edit` |
@@ -130,7 +130,7 @@ follow it exactly:
 | Turn a plan into epic + sub-issues | `Board-Plan.ps1 -Title "plan: X" -Tasks ...` | ensures plan labels, creates epic, reuses Board-Breakdown (native sub-issues), Resolve-Board (no duplicates), registers all on the board; doc links must be full blob URLs on pushed refs |
 | **Audit a repo's GitHub Actions cost** (measured minutes + workflow cost rules, read-only) | `references/verbs-actions-cost.md` | **`Get-ActionsCostAudit.ps1`** (no fix mode; `-Local` audits the working tree) |
 | **Audit stale / unmerged / ghost branches and worktrees** | `references/verbs-doctor.md` | **`Board-Doctor.ps1`** (read-only; `-Fix` confirms per branch) |
-| **Verify the board is fully worked** (0 pending) — `/board complete` | `commands/board.md` | `Assert-BoardComplete.ps1 -ProjectNum <n> -Owner <o>` (exit 0 = PASS/clear, exit 1 lists pending; CI-friendly) |
+| **Verify the board is fully worked** (0 pending) — `/board complete` | `${CLAUDE_PLUGIN_ROOT}/commands/board.md` | `Assert-BoardComplete.ps1 -ProjectNum <n> -Owner <o>` (exit 0 = PASS/clear, exit 1 lists pending; CI-friendly) |
 | Release a **BI artifact** (model/report) — the definition of done — `/board bi-checklist` | `references/bi-release-checklist.md` | the M4.1 spec: what the gate enforces (BPA + TMDL-breaking), what stays external to Fabric (deploy/refresh), what a human confirms |
 
 ---
@@ -182,11 +182,9 @@ The same dry-run pattern applies to `gh project delete` and any bulk `item-edit`
 
 ---
 
-## Relation to plan-tracking
+## Plan → epic
 
-This skill does **NOT** reimplement the `plan-tracking` skill. `plan-tracking` handles the workflow of turning a written plan document into a tracked GitHub epic with child issues (plan→epic). The present skill is general board administration — field setup, item moves, issue CRUD, CI automation — and can be used independently of any plan.
-
-If you need to turn a plan into an epic, invoke the `plan-tracking` skill. If you need to move items on a board or configure project fields after that, use this skill.
+Turning a plan into an epic + sub-issues is `/board plan` (`references/verbs-plan.md`, `Board-Plan.ps1`).
 
 ---
 

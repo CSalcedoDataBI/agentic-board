@@ -1,6 +1,6 @@
 ---
 name: gh-account
-description: "Use before any agentic-board GitHub Projects/issues operation: resolves the account for the repo owner and injects its token as GH_TOKEN per call, without gh auth switch. Triggers — a board/issue op, a 403 on a board, INSUFFICIENT_SCOPES/read:project."
+description: "Use before any agentic-board GitHub Projects/issues operation: resolves the account for the repo owner and injects its token as GH_TOKEN per call, without gh auth switch. Not for general gh/git use outside agentic-board commands. Triggers — a /board, /scan or /expert GitHub call, a 403 on a board, INSUFFICIENT_SCOPES/read:project."
 user-invocable: false
 ---
 
@@ -57,7 +57,7 @@ Scripts that talk to GitHub resolve the identity themselves through `Get-GhToken
 
 - `INSUFFICIENT_SCOPES` / `read:project`: the token lacks `project`. A PAT: regenerate it with
   `project` + `repo`. The `gh` login: `gh auth refresh --scopes project`.
-- 403 on a board owned by another account: an account mismatch. Re-run with `--account <alias>`,
+- 403 on a board owned by another account: an account mismatch. Re-run the command with `--account <alias>` (or `Get-GhAccount.ps1 -Account <alias>`),
   or map that owner with `/board setup`.
 
 ## Cross-account git push & PR
