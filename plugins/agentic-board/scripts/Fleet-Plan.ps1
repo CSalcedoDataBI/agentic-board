@@ -11,12 +11,16 @@
     + prints the suggested -Parallel command per wave) - it never launches anything. Driving
     the fleet stays the human's call (or a future -Launch flag).
 
-    Routing (first available wins, else claude, else first CLI):
+    Routing (first available wins, else claude, else first CLI) comes from the adapter registry,
+    presets/adapters.json (#772): its ordered `routes` say which route an issue takes, and each
+    adapter's `routing` ranks the routes it suits. With the shipped registry:
       security/architecture label, size L/XL, or Spike -> claude
       Refactor                                         -> codex  -> claude
       Docs                                             -> antigravity -> copilot -> claude
       Chore / size S/XS                                -> copilot -> antigravity -> claude
       otherwise                                        -> claude
+    A user (~/.agentic-board/adapters.json) or project (.agentic-board/adapters.json) override
+    that adds a backend with a `routing` entry is routed here with no code change.
 
     Pure planner core (routing + waves) sits behind a dot-source guard
     ($env:ABIOS_FLEETPLAN_DOTSOURCE) for unit tests; only the board read + emit touch gh.
@@ -55,6 +59,8 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 # Field names (Type/Task Type/Tipo, Size/..., Priority/...) resolve through the shared vocabulary (#671).
 . (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
+# The adapter registry (#772): the routing table is DATA there, not a copy here. Functions only.
+. (Join-Path $PSScriptRoot 'BoardWork.Adapters.ps1')
 
 # ------------------------------------------------------------------ pure planner core
 function Split-CsvArg {
@@ -75,22 +81,11 @@ function Select-CliForIssue {
     param([object]$Issue, [string[]]$Clis)
     $avail = @(Split-CsvArg $Clis)
     if ($avail.Count -eq 0) { $avail = @('claude') }
-    $labels = @($Issue.labels | ForEach-Object { "$_".ToLower() })
-    $type   = "$($Issue.type)".ToLower()
-    $size   = "$($Issue.size)".ToUpper()
-
-    if (($labels -contains 'security') -or ($labels -contains 'architecture') -or $type -eq 'spike' -or ($size -in @('L','XL'))) {
-        $pref = @('claude')
-    } elseif ($type -eq 'refactor' -or ($labels -contains 'refactor')) {
-        $pref = @('codex','claude')
-    } elseif ($type -eq 'docs' -or ($labels -contains 'docs') -or ($labels -contains 'documentation')) {
-        # 'antigravity' (agy), not the retired 'gemini' CLI - see Get-CliAdapters (#615).
-        $pref = @('antigravity','copilot','claude')
-    } elseif ($type -eq 'chore' -or ($size -in @('S','XS'))) {
-        $pref = @('copilot','antigravity','claude')
-    } else {
-        $pref = @('claude')
-    }
+    # Which route the issue takes, then the adapters that rank that route, best first - both read
+    # from the registry (#772). A CLI the registry does not know (the retired 'gemini', #615) has no
+    # rank anywhere, so offering it never beats claude.
+    $route = Select-CliRoute -Issue $Issue
+    $pref  = @(Get-CliRoutePreference -Route $route)
     foreach ($p in $pref)      { if ($avail -contains $p) { return $p } }
     if ($avail -contains 'claude') { return 'claude' }
     return $avail[0]

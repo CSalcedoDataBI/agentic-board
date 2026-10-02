@@ -20,6 +20,10 @@ BeforeAll {
         }
     }
     $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    # Hermetic adapter registry (#772): never read this machine's ~/.agentic-board/adapters.json
+    # or the repo's .agentic-board/adapters.json - only the shipped preset.
+    $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
+    $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
@@ -53,6 +57,10 @@ BeforeAll {
             }
         }
     }
+}
+AfterAll {
+    $env:ABIOS_ADAPTERS_USER_FILE = $null
+    $env:ABIOS_ADAPTERS_REPO_FILE = $null
 }
 
 Describe 'Board-Work graphql reads fail closed (#314, part of #303)' {

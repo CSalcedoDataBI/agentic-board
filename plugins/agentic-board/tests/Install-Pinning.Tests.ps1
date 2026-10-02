@@ -5,9 +5,16 @@
 
 BeforeAll {
     $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    # Hermetic registry (#772): the shipped preset only, never this machine's overrides.
+    $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
+    $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . (Join-Path $script:Scripts 'Board-Work.ps1')
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
+}
+AfterAll {
+    $env:ABIOS_ADAPTERS_USER_FILE = $null
+    $env:ABIOS_ADAPTERS_REPO_FILE = $null
 }
 
 Describe 'CLI adapters install a pinned version or nothing' {

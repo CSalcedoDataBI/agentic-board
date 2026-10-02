@@ -13,6 +13,10 @@
 
 BeforeAll {
     $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    # Hermetic registry (#772): the roster comes from the shipped preset only, never this
+    # machine's ~/.agentic-board/adapters.json or the repo's .agentic-board/adapters.json.
+    $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
+    $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'
     . (Join-Path $script:ScriptDir 'Get-ReviewerRoster.ps1')
 
     $script:Bin = Join-Path ([System.IO.Path]::GetTempPath()) ('rr-bin-' + [guid]::NewGuid().ToString('N'))
@@ -51,6 +55,8 @@ BeforeAll {
     function script:Entry { param([string]$Name, [string]$Cmd) [pscustomobject]@{ Name = $Name; Command = $Cmd; ProbeArgs = @('x'); Cli = 'antigravity' } }
 }
 AfterAll {
+    $env:ABIOS_ADAPTERS_USER_FILE = $null
+    $env:ABIOS_ADAPTERS_REPO_FILE = $null
     $env:PATH = $script:OldPath
     Remove-Item -LiteralPath $script:Bin -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -296,34 +302,24 @@ Describe 'Board-ReviewGate is wired to the probe, and the verdict is untouched (
     }
 }
 
-Describe 'The roster agrees with the fleet adapters it copies (#537, review thread)' {
-    # Get-ReviewerRoster repeats the command + probe arguments that Board-Work's Get-CliAdapters uses
-    # for the same two CLIs. Board-Work.ps1 cannot be dot-sourced at runtime from the gate (it has a
-    # param block and is thousands of lines), so the two definitions are pinned EQUAL here instead:
-    # change either and this goes red, which is the only way a second copy stays honest.
-    BeforeAll {
-        $script:Fleet = @{}
-        $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
-        . (Join-Path $script:ScriptDir 'Board-Work.ps1')
-        $env:ABIOS_BOARDWORK_DOTSOURCE = ''
-        foreach ($a in (Get-CliAdapters)) {
-            # The probe is a scriptblock calling Invoke-CliProbe @('exe', 'arg', ...): read the literal
-            # argument array from its AST rather than running the CLI.
-            $call = $a.Probe.Ast.Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-CliProbe' }, $true)
-            if (-not $call) { continue }
-            $argv = @($call.CommandElements[1].FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true) | ForEach-Object { $_.Value })
-            $script:Fleet[$a.Name] = @{ Command = $a.Command; Argv = $argv }
+Describe 'The roster is derived from the adapter registry, not a copy (#772)' {
+    # Before #772 Get-ReviewerRoster repeated two adapters' command + probe arguments and a test read
+    # the fleet's Probe scriptblocks to hold the copy equal. The roster now IS the registry's
+    # reviewer adapters, so the copy - and the drift it could have - is gone.
+    It 'lists exactly the adapters marked reviewer, with their command and their probe argv minus the executable' {
+        $reviewers = @(Get-CliAdapters | Where-Object Reviewer)
+        $roster    = @(Get-ReviewerRoster)
+        ($roster.Name) | Should -Be @($reviewers.Name)
+        foreach ($r in $roster) {
+            $a = $reviewers | Where-Object Name -eq $r.Name
+            $r.Command | Should -Be $a.Command
+            $a.ProbeArgs[0] | Should -Be $r.Command -Because "$($r.Name): the probe runs the same executable"
+            @($r.ProbeArgs) | Should -Be @($a.ProbeArgs | Select-Object -Skip 1) -Because "$($r.Name): probe arguments"
         }
     }
-    It 'the fleet defines a probe for every roster reviewer (else there is nothing to compare against)' {
-        foreach ($r in (Get-ReviewerRoster)) { $script:Fleet.ContainsKey($r.Name) | Should -BeTrue -Because $r.Name }
-    }
-    It 'each roster entry has the same executable and the same probe arguments as its fleet adapter' {
-        foreach ($r in (Get-ReviewerRoster)) {
-            $f = $script:Fleet[$r.Name]
-            $f.Command | Should -Be $r.Command -Because "$($r.Name): executable"
-            $f.Argv[0] | Should -Be $r.Command -Because "$($r.Name): the probe runs the same executable"
-            (@($f.Argv | Select-Object -Skip 1)) | Should -Be @($r.ProbeArgs) -Because "$($r.Name): probe arguments"
-        }
+    It 'keeps the shipped probes: antigravity a one-token reply, codex an auth check with no stdin' {
+        $roster = @(Get-ReviewerRoster)
+        @(($roster | Where-Object Name -eq 'antigravity').ProbeArgs) | Should -Be @('-p', 'reply OK')
+        @(($roster | Where-Object Name -eq 'codex').ProbeArgs)       | Should -Be @('login', 'status')
     }
 }
