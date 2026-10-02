@@ -1,7 +1,8 @@
 ---
 name: cleanup-ops
-description: Engine behind /cleanup - machine housekeeping for Claude Code, kept apart from GitHub board work. Sweep every session of a repo (park unmerged work as draft PRs, archive resolved sessions), compress old session transcripts into an indexed archive and restore them, free disk from duplicate compaction copies and old plugin builds, and update every installed plugin. Plan first, act only on a confirmation. Routed by the cleanup command; never typed directly. Triggers — "/cleanup", "limpia las sesiones", "archiva las sesiones viejas", "libera espacio", "limpia el disco", "comprime los transcripts", "actualiza los plugins", "clean up my sessions", "free disk space".
+description: "Engine behind /cleanup: machine housekeeping — sessions, transcripts, disk, plugin updates. Plans first, acts on one confirmation. Triggers — \"limpia las sesiones\", \"libera espacio\", \"actualiza los plugins\", \"clean up my sessions\"."
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # cleanup-ops — machine housekeeping (sessions · transcripts · disk · plugins)

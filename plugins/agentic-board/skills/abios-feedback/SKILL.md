@@ -1,6 +1,6 @@
 ---
 name: abios-feedback
-description: Use when, while working in ANY project (especially a PRIVATE one), you notice a bug or improvement for the agentic-board tool itself. Captures it as a SANITIZED issue on the tool's OWN public repo/board — never touching the current project and never leaking private data. Triggers — "mejora para la herramienta", "esto es una mejora para agentic-board", "abios bug", "esto deberíamos arreglarlo en el plugin", a guard block, a recurring gh/board failure.
+description: "Use when you notice a bug or improvement for the agentic-board tool itself, while working in any project. Files it as a sanitized issue on the tool's public repo, never in the current project. Triggers — \"mejora para la herramienta\", \"abios bug\", \"esto deberíamos arreglarlo en el plugin\", a guard block."
 user-invocable: false
 ---
 

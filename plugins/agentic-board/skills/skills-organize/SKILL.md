@@ -1,7 +1,8 @@
 ---
 name: skills-organize
-description: Use to inventory and organize Agent Skills in a repo or monorepo — a read-only catalog + health report (description lint, near-duplicate detection, misplaced/orphaned skills) and a propose-then-confirm reorganize that moves scattered SKILL.md files into the canonical .claude/skills/<project>/<skill>/ layout with git mv (dry-run first, fully reversible) and writes a skills-index.json. Use when skills are scattered across a messy monorepo, when you want a catalog of what is installed, or before auditing skill quality. Triggers — "organiza mis skills", "cataloga las skills", "skills regadas/desordenadas", "skills health", "reorganiza el monorepo", "no mezclar skills", /skills organize.
+description: "Engine behind /skills organize: catalog and health report of the skills in a repo, and a dry-run-first reorganize into .claude/skills/<project>/<skill>/. Triggers — \"organiza mis skills\", \"cataloga las skills\"."
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # skills-organize — catalog, health, and repo layout for Agent Skills

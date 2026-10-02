@@ -1,7 +1,8 @@
 ---
 name: tools-catalog
-description: Use to browse, research and install the project's referenced external tools from one unified catalog that merges the knowledge registry (references) with the installable toolkit presets. Install one tool or all missing installables at once, kind-aware (skill-clone preserves LICENSE; a plugin surfaces its own install command, never cherry-picked). The discoverability surface at the intersection of knowledge-ops and skills-ops. Triggers — "/tools", "navega las herramientas referenciadas", "instala esta herramienta", "instálalas todas", "qué herramientas hay para instalar".
+description: "Engine behind /tools: browse the project's referenced external tools (knowledge registry plus toolkit presets) and install one or all missing. Triggers — \"instala esta herramienta\", \"qué herramientas hay para instalar\"."
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # tools-catalog — unified referenced-tools catalog (browse · research · install)
@@ -65,5 +66,5 @@ discipline (default CSalcedoDataBI) like the rest of the suite.
 
 ## Not this
 - Managing the references themselves (add / harvest / wiki) → the `knowledge-registry` skill.
-- Installing a whole profile toolkit without the catalog UI → the `skills-bootstrap` skill.
-- Auditing installed skills' health → `skills-organize` / `skills-audit`.
+- Installing a whole profile toolkit without the catalog UI → `/skills bootstrap`.
+- Auditing installed skills' health → `/skills organize` / `/skills audit`.

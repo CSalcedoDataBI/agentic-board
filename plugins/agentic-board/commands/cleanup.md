@@ -1,5 +1,5 @@
 ---
-description: Machine housekeeping for Claude Code, apart from GitHub board work — sweep a repo's sessions (park unmerged work as draft PRs, archive resolved sessions), compress old transcripts and restore them, free disk from duplicate copies and old plugin builds, and update every plugin. Verbs sessions/transcripts/disk/plugins. Plan first, act on one confirmation.
+description: Machine housekeeping for Claude Code, apart from board work — verbs sessions/transcripts/disk/plugins. Plans first, acts on one confirmation.
 ---
 You are running the agentic-board /cleanup command.
 
@@ -21,7 +21,12 @@ What do you want to clean up?
 Suggested order when the machine is full: sessions (each repo) → sessions -Scope orphans → transcripts → disk
 ```
 
-When they answer (number or name), invoke the **cleanup-ops** skill, then READ the verb's contract from
+**Engines are files, not skills (#763).** Once the verb is known — from `$ARGUMENTS` or the user's
+pick — your FIRST action is to open that verb's engine with the **Read** tool at the path given
+below, then follow it exactly. Run nothing before that Read. These engines are not reachable
+through the Skill tool.
+
+When they answer (number or name), read and follow the **cleanup-ops** engine at `${CLAUDE_PLUGIN_ROOT}/skills/cleanup-ops/SKILL.md`, then READ the verb's contract from
 its `references/` directory and follow it exactly. Do not improvise the recipe from this summary:
 
 - **sessions** — `references/verbs-sessions.md` (runs `scripts/Cleanup-Sessions.ps1`). Default scope is

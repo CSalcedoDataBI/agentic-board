@@ -1,7 +1,8 @@
 ---
 name: skills-bootstrap
-description: Use to install curated best-practice tools by PROFILE WITHOUT duplicating what is already installed — the `quality` profile (skill-creator, writing-skills, skill-improver, second-opinion) and the `bi` profile (Microsoft Fabric / Power BI ecosystem, e.g. microsoft/skills-for-fabric). Detects the gap against the live inventory, recommends only what is missing, and installs each from its source (clean skill-clone preserving LICENSE, or the plugin's own install command) — never re-installing what you already have. NOT for organizing or auditing existing skills — use skills-organize or skills-audit for that. Triggers — "instala las skills de buenas prácticas", "bootstrap skills", "instala el toolkit de BI/Fabric", "qué me falta del perfil bi", "setup skill toolkit", /skills bootstrap, /skills bootstrap bi.
+description: "Engine behind /skills bootstrap: install the missing tools of a profile (quality, or bi = Fabric/Power BI) without duplicating installed ones, keeping each LICENSE. Triggers — \"bootstrap skills\", \"instala el toolkit de BI\", \"qué me falta del perfil bi\"."
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # skills-bootstrap — curated toolkits by profile, no duplicates

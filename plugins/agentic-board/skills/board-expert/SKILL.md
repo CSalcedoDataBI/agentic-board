@@ -1,7 +1,8 @@
 ---
 name: board-expert
-description: Auto-expert engine for /agentic-board:expert — take a tracked plan and execute it autonomously through a specialized expert persona (research, build, test with recorded evidence, self-drive the board), stopping only at the irreversible line. Owns the config (build the contract) and auto (launch the autonomous run) recipes. Routed by the expert command; never typed directly. Triggers — "/expert", "/board expert", "auto-experto", "corre el experto autónomo", "ejecuta el plan solo".
+description: "Engine behind /expert: run a tracked plan autonomously as an expert persona (research, build, test with evidence), stopping at the irreversible line. Triggers — \"/expert\", \"auto-experto\", \"ejecuta el plan solo\"."
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # board-expert — the auto-expert engine
