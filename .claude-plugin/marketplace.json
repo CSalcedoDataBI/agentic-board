@@ -12,16 +12,6 @@
         "ref": "release"
       },
       "description": "Run coding agents off your real GitHub Projects board — a quota-aware, review-gated coordinator, not another local Kanban. Cross-account board & issue governance, parallel /board work sessions (one worktree + agent per issue), a multi-CLI fleet, session handoff (save/resume context), a skills-ops lifecycle module, a sanitized improvement-feedback flow, and a private-content guard."
-    },
-    {
-      "name": "agentic-bi-ops",
-      "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/CSalcedoDataBI/agentic-board",
-        "path": "plugins/agentic-board",
-        "ref": "release"
-      },
-      "description": "DEPRECATED alias — renamed to agentic-board. Points to the same plugin so existing `agentic-bi-ops` installs keep updating. Install the new name: agentic-board."
     }
   ]
 }

@@ -69,13 +69,13 @@ executes consistently — including the GitHub gotchas (single-select field IDs,
 
 Then enable **agentic-board** in your Claude Code plugins.
 
-> **Migrating from `agentic-bi-ops`?** The plugin was renamed to **`agentic-board`**
-> (the GitHub repo redirects automatically). Existing installs keep updating via a
-> deprecated `agentic-bi-ops` alias in the marketplace, but to move to the new name
-> refresh the marketplace and install the new id:
+> **Coming from `agentic-bi-ops`?** The plugin was renamed to **`agentic-board`** and the old
+> marketplace alias has been removed, so an `agentic-bi-ops` install no longer updates. Uninstall it
+> and install the new id:
 >
 > ```
-> /plugin marketplace update CSalcedoDataBI/agentic-board
+> /plugin marketplace update agentic-board
+> /plugin uninstall agentic-bi-ops@agentic-board
 > /plugin install agentic-board@agentic-board
 > ```
 
