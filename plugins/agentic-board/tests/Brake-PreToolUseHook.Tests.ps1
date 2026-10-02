@@ -287,4 +287,20 @@ Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767)' 
             $out | Should -Match 'BRAKE'
         } finally { Pop-Location }
     }
+    It 'WITH a marker but no pwsh on PATH it DENIES instead of failing open (#764)' {
+        # exec pwsh would exit 127 there, a non-blocking hook error that lets the tool call through.
+        $wt = Join-Path $TestDrive 'armed-no-pwsh'
+        $dir = Join-Path $wt '.agentic-board'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'brake-armed.json') -Encoding UTF8 -Value '{"issue":5,"irreversible":["merge"],"endToEnd":false}'
+        $shim = "$($script:PreCheck)".Replace('\', '/')
+        Push-Location $wt
+        try {
+            # Source the shim with an empty PATH: only shell builtins are reachable, so pwsh is not.
+            $out = (& sh -c "PATH=/nonexistent-764; export PATH; . '$shim'" 2>&1 | Out-String).Trim()
+            $LASTEXITCODE | Should -Be 0
+            $out | Should -Match '"permissionDecision":"deny"'
+            $out | Should -Match 'pwsh'
+        } finally { Pop-Location }
+    }
 }

@@ -74,7 +74,10 @@ try {
     . (Join-Path $PSScriptRoot 'Worktree-Ghosts.ps1')
     $env:ABIOS_WORKTREE_GHOSTS_DOTSOURCE = ''
 
-    $ghosts = @(Get-WorktreeGhosts -RepoRoot $cwd | Where-Object { $_.AutoRemovable })
+    # A session started in a subdirectory still sweeps the repo's own .claude/worktrees (#764).
+    $root = "$(& git -C $cwd rev-parse --show-toplevel 2>$null)".Trim()
+    if (-not $root) { $root = $cwd }
+    $ghosts = @(Get-WorktreeGhosts -RepoRoot $root | Where-Object { $_.AutoRemovable })
     if ($ghosts.Count -eq 0) { exit 0 }
 
     $removed = @()

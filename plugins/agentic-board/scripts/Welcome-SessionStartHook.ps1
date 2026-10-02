@@ -40,16 +40,15 @@ function Get-WelcomeBanner {
 '@
 }
 
-# Wrap the banner with a verbatim-print instruction for the assistant. Pure + testable.
-function Get-WelcomeContext {
+# The message the USER sees on first run (#764). It goes out as `systemMessage`, shown directly,
+# not as `additionalContext` telling the model to print it first: an instruction to override the
+# user's first request is what a reviewer reads as prompt injection. Pure + testable.
+function Get-WelcomeMessage {
     $banner = Get-WelcomeBanner
     @"
-The agentic-board plugin was just installed - this is its first run. Greet the user by
-printing the following welcome banner VERBATIM (inside a code block, unchanged) as the very
-first thing in your reply, then add one short line inviting them to type /board. Do not
-prepend commentary before the banner.
-
 $banner
+
+Type /board to start.
 "@
 }
 
@@ -90,9 +89,7 @@ try {
     $stamp = @{ welcomedAt = (Get-Date).ToString('s'); version = $version } | ConvertTo-Json -Compress
     Set-Content -LiteralPath $marker -Value $stamp -Encoding utf8
 
-    $ctx = Get-WelcomeContext
-    $out = @{ hookSpecificOutput = @{ hookEventName = 'SessionStart'; additionalContext = $ctx } } |
-        ConvertTo-Json -Compress
+    $out = @{ systemMessage = (Get-WelcomeMessage) } | ConvertTo-Json -Compress
     Write-Output $out
 }
 catch {

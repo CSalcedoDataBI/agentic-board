@@ -11,9 +11,15 @@
 # Git Bash on Windows (it replaced Brake-PreCheck.cmd, which only ran on Windows).
 #
 # FAIL DIRECTION: with no marker it exits 0 (allow) - an ordinary session must never be slowed or
-# blocked. With a marker, whatever the real hook decides is the answer, exit code included.
+# blocked. With a marker, whatever the real hook decides is the answer, exit code included - and
+# with a marker but no pwsh it DENIES (#764): exec failing would exit 127, which Claude Code treats
+# as a non-blocking error and lets the tool call through, so the armed run would fail open.
 for d in . .. ../.. ../../..; do
   if [ -f "$d/.agentic-board/brake-armed.json" ]; then
+    if ! command -v pwsh >/dev/null 2>&1; then
+      printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"BRAKE: this run is brake-armed but pwsh (PowerShell 7) is not on PATH, so the brake cannot decide. Refusing."}}'
+      exit 0
+    fi
     exec pwsh -NoProfile -File "$(dirname "$0")/Brake-PreToolUseHook.ps1"
   fi
 done
