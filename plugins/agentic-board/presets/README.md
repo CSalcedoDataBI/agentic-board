@@ -18,9 +18,18 @@ The same three tiers as the expert role catalog (`roles.json`):
 |------|--------------|-----------|------------|
 | `presets/adapters.json` | the plugin (upgrades replace it) | plugin repo | every user, every project |
 | `~/.agentic-board/adapters.json` | you | no - per machine/user | every one of your projects |
-| `.agentic-board/adapters.json` | you | yes - team knowledge | this project only |
+| `.agentic-board/adapters.json` | you | yes - team knowledge | this project only - `routing` and `reviewer` only |
 
-**Merge rule.** Tiers apply in that order. An override entry names an adapter; every field it
+**The project tier cannot change what runs on this machine.** `.agentic-board/adapters.json`
+arrives with a clone, and a clone must not get code execution: a new `command` or `probeArgs`
+would run a program on the next fleet probe, a `launch` would run one in a tab, and a wider
+`keepEnv` would hand your credentials to a launched agent. So the project tier may only set
+`routing` and `reviewer` on adapters that already exist after the preset and user tiers. A new
+adapter name, or any other field, in the project file is rejected with a warning naming it and
+ignored (the rest of the file still applies). To add a backend or change a command, use your user
+file (`~/.agentic-board/adapters.json`) - it is yours, so it keeps full power, still validated.
+
+**Merge rule.** Tiers apply in that order (the project tier within the limit above). An override entry names an adapter; every field it
 states **replaces that field wholesale** (a list or an object is replaced, not merged), fields it
 omits are inherited, and the later tier wins. A name no earlier tier knows **adds** an adapter, and
 then `name`, `command`, `kind`, `probeArgs`, `probeRules` and `launch` are required (the rest

@@ -139,10 +139,11 @@ Describe 'Override tiers: preset -> user -> repo, per field (#772)' {
     }
     It 'the repo tier wins over the user tier on the same field; other user fields survive' {
         $u = New-Override @(@{ name = 'codex'; keepEnv = @('USER_VAR'); routing = @{ refactor = 100; docs = 10 } })
-        $r = New-Override @(@{ name = 'codex'; keepEnv = @('REPO_VAR') })
+        $r = New-Override @(@{ name = 'codex'; routing = @{ chore = 5 }; reviewer = $false })
         $codex = Get-CliAdapters -UserPath $u -RepoPath $r | Where-Object Name -eq 'codex'
-        @($codex.KeepEnv) | Should -Be @('REPO_VAR')
-        $codex.Routing['docs'] | Should -Be 10
+        $codex.Routing.Keys | Should -Be @('chore')
+        $codex.Reviewer | Should -BeFalse
+        @($codex.KeepEnv) | Should -Be @('USER_VAR')
         $codex.Source | Should -Be 'repo'
     }
     It 'with no override files the result is the preset alone' {
@@ -154,6 +155,65 @@ Describe 'Override tiers: preset -> user -> repo, per field (#772)' {
             $env:ABIOS_ADAPTERS_USER_FILE = New-Override @(@{ name = 'copilot'; keepEnv = @('FROM_ENV') })
             @((Get-CliAdapters | Where-Object Name -eq 'copilot').KeepEnv) | Should -Be @('FROM_ENV')
         } finally { $env:ABIOS_ADAPTERS_USER_FILE = $old }
+    }
+}
+
+Describe 'The project tier cannot make this machine run anything (#772)' {
+    # .agentic-board/adapters.json comes with a clone: a third-party repo must not gain code
+    # execution (command / probe / launch) or widen keepEnv to leak credentials. It may only set
+    # routing and reviewer on adapters that already exist.
+    BeforeAll {
+        function script:LoadRepo([object[]]$Adapters, [string]$UserPath = $script:None) {
+            $p = New-Override $Adapters
+            $w = $null
+            $all = @(Get-CliAdapters -UserPath $UserPath -RepoPath $p -WarningVariable w -WarningAction SilentlyContinue)
+            [pscustomobject]@{ All = $all; Warnings = (@($w | ForEach-Object { "$_" }) -join "`n") }
+        }
+    }
+    It 'rejects a NEW adapter from the project tier' {
+        $r = LoadRepo @(New-AcmeAdapter)
+        $r.All.Name | Should -Not -Contain 'acme'
+        $r.Warnings | Should -Match "adds adapter 'acme' - rejected"
+    }
+    It 'rejects <field> from the project tier, ignores it and leaves the adapter unchanged' -TestCases @(
+        @{ field = 'command';   value = 'evil' }
+        @{ field = 'probeArgs'; value = @('codex', 'login', 'status', '--x') }
+        @{ field = 'keepEnv';   value = @('OPENAI_API_KEY', 'GITHUB_TOKEN_PERSONAL') }
+        @{ field = 'launch';    value = @{ args = @('exec', 'rm') } }
+        @{ field = 'bypassArgs'; value = '--yolo' }
+        @{ field = 'installArgs'; value = @('npm', 'i', '-g', 'evil@1.0.0') }
+        @{ field = 'probeRules'; value = @(@{ code = 'OK'; pattern = '.'; reason = 'anything' }) }
+    ) {
+        param($field, $value)
+        $before = Get-CliAdapters -UserPath $script:None -RepoPath $script:None | Where-Object Name -eq 'codex'
+        $r = LoadRepo @(@{ name = 'codex'; $field = $value; routing = @{ refactor = 7 } })
+        $codex = $r.All | Where-Object Name -eq 'codex'
+        $r.Warnings | Should -Match "sets '$field' - rejected"
+        $codex.Command | Should -Be $before.Command
+        @($codex.ProbeArgs) | Should -Be @($before.ProbeArgs)
+        @($codex.KeepEnv) | Should -Be @($before.KeepEnv)
+        @($codex.InstallArgs) | Should -Be @($before.InstallArgs)
+        $codex.BypassArgs | Should -Be $before.BypassArgs
+        (& $codex.BuildLaunch @{ BriefingFile = 'C:\b.txt' }) | Should -Be (& $before.BuildLaunch @{ BriefingFile = 'C:\b.txt' })
+        ($codex.ProbeRules.Code -join ',') | Should -Be ($before.ProbeRules.Code -join ',')
+        # The allowed field in the same entry still applies.
+        $codex.Routing['refactor'] | Should -Be 7
+    }
+    It 'applies routing and reviewer from the project tier' {
+        $r = LoadRepo @(@{ name = 'copilot'; routing = @{ refactor = 50 }; reviewer = $true })
+        $cop = $r.All | Where-Object Name -eq 'copilot'
+        $cop.Routing['refactor'] | Should -Be 50
+        $cop.Reviewer | Should -BeTrue
+        $r.Warnings | Should -BeNullOrEmpty
+    }
+    It 'may re-rank an adapter the USER tier added (it exists after preset + user)' {
+        $u = New-Override @(New-AcmeAdapter)
+        $r = LoadRepo @(@{ name = 'acme'; routing = @{ chore = 1 } }) -UserPath $u
+        ($r.All | Where-Object Name -eq 'acme').Routing.Keys | Should -Be @('chore')
+    }
+    It 'the user tier keeps full power: it can still add an adapter' {
+        $u = New-Override @(New-AcmeAdapter)
+        (Get-CliAdapters -UserPath $u -RepoPath $script:None).Name | Should -Contain 'acme'
     }
 }
 

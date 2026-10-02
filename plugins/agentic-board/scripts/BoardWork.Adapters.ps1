@@ -88,7 +88,8 @@ function Test-CliProbeExhausted([string]$Code) { @('QUOTA', 'RATE_LIMIT') -ccont
 #
 #   presets/adapters.json            factory, ships with the plugin (a broken one THROWS)
 #   ~/.agentic-board/adapters.json   this user, every project, not versioned
-#   .agentic-board/adapters.json     this project, versioned (team knowledge)
+#   .agentic-board/adapters.json     this project, versioned - routing / reviewer ONLY: it comes
+#                                    with a clone, and a clone must not get code execution
 #
 # Merge rule: an override entry names an adapter; every field it states replaces that field
 # wholesale (arrays and objects included), fields it omits are inherited, and the later tier wins.
@@ -121,6 +122,8 @@ $script:CliBuiltinLaunchers = @{ claude = 'Build-ClaudeLaunch' }
 # has no comments; it keeps the WHY next to the data).
 $script:CliAdapterFields = @('name', 'note', 'command', 'kind', 'isDefault', 'installArgs', 'installUrl',
     'probeArgs', 'probeRules', 'bypassArgs', 'requiresBypass', 'keepEnv', 'launch', 'routing', 'reviewer')
+# The only fields the REPO tier may set, on existing adapters (see Import-CliAdapterRegistry).
+$script:CliAdapterRepoFields = @('name', 'note', 'routing', 'reviewer')
 
 function Clear-CliAdapterCache { $script:CliAdapterCache = $null; $script:CliAdapterRepoPathCache = @{} }
 
@@ -340,10 +343,23 @@ function Import-CliAdapterRegistry {
                 continue
             }
             $name = [string]$o.name
+            # The repo tier travels with a CLONE: a third-party repository must not get code
+            # execution on this machine (a new command or probe argv runs on the next fleet probe)
+            # nor widen keepEnv to hand secrets to a launched agent. So it may only re-rank routing
+            # and toggle reviewer on adapters that already exist; the user tier (the machine
+            # owner's own file) keeps full power (#772).
+            if ($tier.Name -eq 'repo' -and -not $adapters.Contains($name)) {
+                Write-Warning "adapters: '$($tier.Path)' adds adapter '$name' - rejected: a project file may not add a CLI (it would run a program on this machine). Add it in your user file instead."
+                continue
+            }
             $candidate = if ($adapters.Contains($name)) { @{} + $adapters[$name] } else { New-CliAdapterSpecDefaults $name }
             foreach ($k in $o.Keys) {
                 if ($script:CliAdapterFields -cnotcontains $k) {
                     Write-Warning "adapters: '$($tier.Path)' adapter '$name' has unknown field '$k' - ignored."
+                    continue
+                }
+                if ($tier.Name -eq 'repo' -and $script:CliAdapterRepoFields -cnotcontains $k) {
+                    Write-Warning "adapters: '$($tier.Path)' adapter '$name' sets '$k' - rejected: a project file may only set routing and reviewer (a clone must not change what runs on this machine). Field ignored."
                     continue
                 }
                 $candidate[$k] = $o[$k]
