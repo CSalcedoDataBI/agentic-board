@@ -398,7 +398,7 @@ Notes:
     that is already closed is left alone. `-Sessions` says `READY TO CLOSE` or why not, per session.
 - **Compaction-survival (long single-session queues)**: when you work a queue of issues tied to an
   **epic** in ONE session, keep a durable run-ledger so the run survives auto-compaction. Three
-  touch-points (see [references/compact-survival.md](references/compact-survival.md)):
+  touch-points (see [compact-survival.md](compact-survival.md)):
   - When you begin the queue: `Board-RunLedger.ps1 -Start -Epic <n> [-Board <b>] [-Queue <n,...>]`
   - After each issue's PR merges: `Board-RunLedger.ps1 -Update -Epic <n> -Issue <i> -Note "<decision/gotcha>" -Next "<next step>"`
   - When the queue is done: `Board-RunLedger.ps1 -Close -Epic <n>`

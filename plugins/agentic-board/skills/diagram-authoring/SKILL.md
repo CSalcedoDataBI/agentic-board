@@ -1,6 +1,6 @@
 ---
 name: diagram-authoring
-description: "Use when a diagram goes into a markdown artifact this plugin writes (a /board plan, issue, handoff, KNOWLEDGE.md or README). Emits Mermaid, never ASCII art. Triggers — \"haz un diagrama del plan\", \"add a flowchart to the issue\"."
+description: "Use when a diagram goes into a markdown artifact this plugin writes (a /board plan, issue, handoff, KNOWLEDGE.md or README). Emits Mermaid, never ASCII art. Not for charts of data (Vega/Power BI visuals) or images outside these artifacts. Triggers — \"haz un diagrama del plan\", \"add a flowchart to the issue\"."
 user-invocable: false
 ---
 
@@ -53,8 +53,7 @@ available, fall back to a simpler Mermaid approximation — never ship ASCII art
 
 A diagram documents the **real system**. Do not invent nodes, edges, states, or actors to make a
 picture look complete. Every box and arrow must correspond to something that actually exists in
-the code, flow, or data being described — read the source first (same discipline as the global
-Vega field rules). If you are unsure a relationship exists, leave it out or ask.
+the code, flow, or data being described — read the source first. If you are unsure a relationship exists, leave it out or ask.
 
 ## Validation checklist (before saving)
 
@@ -82,6 +81,6 @@ flowchart TD
 - Artifact-producing skills (`projects-admin` for `/board plan` + handoff, `knowledge-registry`)
   carry a one-line pointer here so the rule fires without being duplicated — this file stays the
   only place the diagram guidance lives.
-- The **Diagrams** knowledge domain (`knowledge/registry.json`) catalogues the tools referenced
+- The **Diagrams** knowledge domain (the agentic-board repo's knowledge registry) catalogues the tools referenced
   above (Mermaid, D2, Graphviz, Kroki). Graphify is a separate knowledge-graph tool, catalogued
   but not a diagram authoring tool.

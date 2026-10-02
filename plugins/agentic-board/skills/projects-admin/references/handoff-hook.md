@@ -19,24 +19,28 @@ repo root). Next step: <...>. Run 'Board-Handoff.ps1 -Resume' to rehydrate the f
 ```
 
 It is **read-only and offline** (only reads the local `HANDOFF.md` mirror - never the network),
-skips `clear`/`compact` sources, never blocks, and never throws (a failing SessionStart hook
+acts only on `resume` (and on `compact`, which the plugin already registers), never blocks, and never throws (a failing SessionStart hook
 would disrupt startup, so it always exits 0). The durable board comment is fetched by
 `-Resume`, not by the hook.
 
 ## Enable it (settings.json SessionStart hook)
 
-Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
+The plugin already registers this script for `compact`. Showing the handoff on `resume` is opt-in:
+add the entry below to `.claude/settings.json` (project) or `~/.claude/settings.json` (global).
+`${CLAUDE_PLUGIN_ROOT}` is only set for hooks a plugin registers itself, so here use the absolute
+path of the installed plugin (`installPath` in `claude plugin list --json`). The matcher is
+`resume`, not `*`: with `*` the script would run twice on every compaction.
 
 ```json
 {
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "*",
+        "matcher": "resume",
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Handoff-SessionStartHook.ps1\""
+            "command": "pwsh -NoProfile -File \"<plugin path>/scripts/Handoff-SessionStartHook.ps1\""
           }
         ]
       }

@@ -1,6 +1,6 @@
 ---
 name: knowledge-registry
-description: "Use to add or list a project's knowledge references by domain (knowledge/registry.json and the generated KNOWLEDGE.md). Not MEMORY.md or HANDOFF.md. Triggers — \"guarda esta referencia\", \"agrega a knowledge\", \"/knowledge add|list|gen\"."
+description: "Use to add or list a project's knowledge references by domain (knowledge/registry.json and the generated KNOWLEDGE.md). Not MEMORY.md or HANDOFF.md. Triggers — \"guarda esta referencia\", \"agrega a knowledge\", \"/knowledge add|list|gen\", \"publica en la wiki\", \"/knowledge wiki\"."
 user-invocable: false
 ---
 
@@ -11,7 +11,7 @@ Capture and read the per-project knowledge references registry. The source of tr
 table grouped by domain.
 
 > **Diagrams in a note or wiki page**: never hand-draw ASCII art — use the `diagram-authoring`
-> skill (Mermaid by default). See `skills/diagram-authoring/SKILL.md`.
+> skill (Mermaid by default). See the `diagram-authoring` skill.
 
 **Allow-list repos (#298):** if the repo's pre-commit hook allow-lists code extensions and blocks
 `.json` (often on purpose — OAuth `credentials.json` is `.json`), initialise the registry as YAML with

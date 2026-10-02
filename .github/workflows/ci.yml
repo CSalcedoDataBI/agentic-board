@@ -1,6 +1,6 @@
 name: CI
 
-# Two blocking checks on every pull request:
+# Blocking checks on every pull request:
 #   * `test` — the Pester suite (a failure blocks the merge; Board-ReviewGate
 #     waits on it, and it can be marked "Required" in the branch ruleset, see #201).
 #   * `docs` — the docs-freshness gate (#203 + #406 + #493): check every derived
@@ -8,6 +8,9 @@ name: CI
 #     catalog and version, and the closing-summary block in each command file; also
 #     runs Publish-DocsWiki.ps1 -PagesOnly to verify that the wiki pages can still
 #     be generated from the current README + commands/ without error.
+#   * `validate` — `claude plugin validate --strict` on the marketplace, the plugin manifest,
+#     its skills and its commands (#764).
+#   (`test` also runs on ubuntu as `test-linux`, #767.)
 
 on:
   # Gate on the PR only. A push to main is always a merge of something these
@@ -98,6 +101,29 @@ jobs:
           path: testResults-linux.xml
           if-no-files-found: warn
           retention-days: 7
+
+  validate:
+    # Anthropic's own manifest/component validator (#764), the check the plugin directory runs.
+    # --strict fails on warnings too (unknown fields, missing metadata) that the runtime tolerates.
+    # The CLI version is pinned so a new release cannot change the gate under an unrelated PR.
+    name: Plugin validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: claude plugin validate --strict
+        run: |
+          npm i -g @anthropic-ai/claude-code@2.1.284
+          claude --version
+          claude plugin validate --strict .
+          claude plugin validate --strict plugins/agentic-board
+          claude plugin validate --strict plugins/agentic-board/skills
+          claude plugin validate --strict plugins/agentic-board/commands
 
   docs:
     name: Docs freshness

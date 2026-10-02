@@ -48,33 +48,22 @@ gh project item-add <num> --owner <owner> --url <issueUrl>
 
 ---
 
-## Native sub-issues via the GitHub MCP
+## Native sub-issues (`Board-Breakdown.ps1`)
 
-`gh` CLI has no stable sub-issue command. Use the `github-business` MCP tool `sub_issue_write` with `method: add` instead.
+`gh` has no stable sub-issue command. Use `Board-Breakdown.ps1`, which creates the children and links
+them with GraphQL `addSubIssue` (it refuses a CLOSED parent):
 
-### Get the child issue's REST ID (not its number)
+```powershell
+& "${CLAUDE_PLUGIN_ROOT}/scripts/Board-Breakdown.ps1" -Parent 10 -Tasks "first piece","second piece"
+```
 
-The MCP requires the child's REST numeric ID, which differs from the issue number:
+To link an issue that already exists, use the REST endpoint. It takes the child's REST `.id`
+(an integer that differs from the issue number), not its number:
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<child_issue_number> --jq .id
-# Returns an integer like 2987654321
+child_id=$(gh api repos/<owner>/<repo>/issues/<child_issue_number> --jq .id)
+gh api -X POST repos/<owner>/<repo>/issues/<parent_issue_number>/sub_issues -F sub_issue_id="$child_id"
 ```
-
-### Add the sub-issue via MCP
-
-```json
-{
-  "tool": "sub_issue_write",
-  "method": "add",
-  "owner": "<owner>",
-  "repo": "<repo>",
-  "issue_number": <parent_issue_number>,
-  "sub_issue_id": <child_rest_id>
-}
-```
-
-`issue_number` is the parent's issue number (e.g. 10); `sub_issue_id` is the child's REST `.id` integer retrieved above.
 
 ---
 
@@ -84,8 +73,8 @@ gh api repos/<owner>/<repo>/issues/<child_issue_number> --jq .id
 blockers. To WRITE them, use the script - never the raw endpoint:
 
 ```powershell
-& "<plugin-root>/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36,37,38          # 40 waits for 36, 37, 38
-& "<plugin-root>/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36 -DryRun         # resolve + validate, write nothing
+& "${CLAUDE_PLUGIN_ROOT}/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36,37,38          # 40 waits for 36, 37, 38
+& "${CLAUDE_PLUGIN_ROOT}/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36 -DryRun         # resolve + validate, write nothing
 ```
 
 Why not `gh api .../dependencies/blocked_by --input {"issue_id": N}`: `issue_id` is the issue's

@@ -16,7 +16,7 @@ Loaded on demand by /board (#573).
   - NOTE: which columns a VIEW displays is UI-only — if fields look "empty" on the board page,
     tell the user to click `+` at the right of the view header and enable Priority/Size/Type.
 
-Scans the board for missing values (assignees, Status) and fills them. In CI it runs `scripts/board-sync.sh`; in interactive sessions it runs the PowerShell sequence below.
+Scans the board for missing values (assignees, Status) and fills them. In the agentic-board repo's own CI it runs `scripts/board-sync.sh` (a repo file, not shipped with the plugin); in interactive sessions it runs the PowerShell sequence below.
 
 | Variant | Behavior |
 |---------|----------|
@@ -76,7 +76,7 @@ gh api graphql -f query='mutation(...) { updateProjectV2ItemFieldValue(...) { pr
 
 ### CI mode (GitHub Actions)
 
-The workflow `.github/workflows/board-sync.yml` runs `bash scripts/board-sync.sh` automatically on every issue or PR event. This is equivalent to `/board fill --auto` with no manual intervention.
+In the agentic-board repo itself, the workflow `.github/workflows/board-sync.yml` runs `bash scripts/board-sync.sh` automatically. Neither file ships with the plugin: in another repo, copy both from the agentic-board repo first. It runs on every issue or PR event. This is equivalent to `/board fill --auto` with no manual intervention.
 
 Triggers already configured:
 ```yaml

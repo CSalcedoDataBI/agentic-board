@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Welcome-SessionStartHook.ps1\""
+            "command": "command -v pwsh >/dev/null 2>&1 || exit 0; pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Welcome-SessionStartHook.ps1\""
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Handoff-SessionStartHook.ps1\""
+            "command": "command -v pwsh >/dev/null 2>&1 || exit 0; pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Handoff-SessionStartHook.ps1\""
           }
         ]
       },
@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Worktree-SessionStartHook.ps1\""
+            "command": "command -v pwsh >/dev/null 2>&1 || exit 0; pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Worktree-SessionStartHook.ps1\""
           }
         ]
       }
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Compact-PreCompactHook.ps1\""
+            "command": "command -v pwsh >/dev/null 2>&1 || exit 0; pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Compact-PreCompactHook.ps1\""
           }
         ]
       }

@@ -42,13 +42,16 @@ Describe 'Get-WelcomeBanner' {
     }
 }
 
-Describe 'Get-WelcomeContext' {
+Describe 'Get-WelcomeMessage' {
     It 'embeds the banner' {
-        Get-WelcomeContext | Should -Match 'Run coding agents off your real GitHub Projects board'
+        Get-WelcomeMessage | Should -Match 'Run coding agents off your real GitHub Projects board'
     }
-    It 'instructs the assistant to print it verbatim as the first output' {
-        $c = Get-WelcomeContext
-        $c | Should -Match 'VERBATIM'
-        $c | Should -Match 'first'
+    It 'points the user at /board' {
+        Get-WelcomeMessage | Should -Match 'Type /board'
+    }
+    It 'gives the model no instruction to override the first reply (#764)' {
+        $m = Get-WelcomeMessage
+        $m | Should -Not -Match 'VERBATIM'
+        $m | Should -Not -Match 'first thing in your reply'
     }
 }
