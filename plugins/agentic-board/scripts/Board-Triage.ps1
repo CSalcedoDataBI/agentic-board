@@ -17,27 +17,27 @@
 
     Modes:
       # 1. Batch view — the pending items and which triage fields are blank (the work-list):
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Pending
+      ./Board-Triage.ps1 -Number 13 -Owner your-login -Pending
 
       # 2. Write the evidence fields the agent inferred for ONE issue:
       #    Single-repo board: bare number is unambiguous
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 42 -Type Bug -Area scripts -Estimate 3
+      ./Board-Triage.ps1 -Number 13 -Owner your-login -Issue 42 -Type Bug -Area scripts -Estimate 3
       #    Multi-repo board: qualify with owner/repo#n or -Repo to avoid number collision (#506)
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Type Bug -Area scripts -Estimate 3
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 42 -Repo owner/repo -Type Bug -Area scripts -Estimate 3
+      ./Board-Triage.ps1 -Number 13 -Owner your-login -Issue 'owner/repo#42' -Type Bug -Area scripts -Estimate 3
+      ./Board-Triage.ps1 -Number 13 -Owner your-login -Issue 42 -Repo owner/repo -Type Bug -Area scripts -Estimate 3
 
       # 2b. Batch (#605): the board is read ONCE for the whole batch, however many issues it lists.
       #     Same values for every issue:
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issues 42,43,44 -Type Bug -Area scripts
+      ./Board-Triage.ps1 -Number 13 -Owner your-login -Issues 42,43,44 -Type Bug -Area scripts
       #     Per-issue values from a JSON array [{"issue":42,"type":"Bug","area":"scripts","estimate":3,
       #     "priority":"P2","rationale":"..."}, ...] (only "issue" is required):
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -BatchFile triage.json
+      ./Board-Triage.ps1 -Number 13 -Owner your-login -BatchFile triage.json
       #     Every entry is validated before the first write; a target that cannot be resolved is
       #     reported at the end (with the list to retry) instead of aborting the rest of the batch.
 
       # 3. Priority — proposal only (prints, writes nothing) unless -ConfirmPriority:
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Priority P1 -Rationale 'blocks the release'
-      ./Board-Triage.ps1 -Number 13 -Owner CSalcedoDataBI -Issue 'owner/repo#42' -Priority P1 -Rationale '...' -ConfirmPriority
+      ./Board-Triage.ps1 -Number 13 -Owner your-login -Issue 'owner/repo#42' -Priority P1 -Rationale 'blocks the release'
+      ./Board-Triage.ps1 -Number 13 -Owner your-login -Issue 'owner/repo#42' -Priority P1 -Rationale '...' -ConfirmPriority
 #>
 [CmdletBinding()]
 param(
@@ -45,7 +45,7 @@ param(
   # same alias in #297 and this one was missed (#511). Existing -Number callers are unaffected.
   [Alias('ProjectNum')]
   [int]   $Number     = 13,
-  [string]$Owner      = 'CSalcedoDataBI',
+  [string]$Owner      = "",
   # Accept bare number ("42") or qualified "owner/repo#42"; use -Repo to disambiguate bare numbers
   # on multi-repo boards (#506). Empty string = -Pending / batch-view mode.
   [string]$Issue      = '',
@@ -279,6 +279,9 @@ function Test-TriageEntry {
 
 # Dot-source guard: tests set $env:ABIOS_TRIAGE_DOTSOURCE to load the pure helpers only.
 if ($env:ABIOS_TRIAGE_DOTSOURCE) { return }
+# No -Owner: the account map's default owner, else the login gh is signed in as (#762).
+if (-not $Owner) { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $Owner = Get-AbiosDefaultOwner }
+if (-not $Owner) { throw "No board owner: pass -Owner, run 'gh auth login', or set a default with /board setup." }
 
 # ── Top-level error boundary (#485): any unhandled exception becomes a clean
 # one-line message on stdout so the caller always sees what failed — never a
@@ -307,9 +310,9 @@ $entryErrors = @($entries | ForEach-Object { Test-TriageEntry $_ } | Where-Objec
 if ($entryErrors.Count) { throw ("Batch rejected, nothing was written:`n  " + ($entryErrors -join "`n  ")) }
 
 if (-not $env:GH_TOKEN) {
-    $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
+    $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar')))
 }
-if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)." }
+if (-not $env:GH_TOKEN) { throw "No GitHub token: $TokenVar is unset, GH_TOKEN is empty and gh has no stored login. Run 'gh auth login', or map the account with /board setup." }
 
 # Resolve the target board from origin unless -Number was passed explicitly (#382) — never default to
 # the tool's own #13 from a foreign repo.

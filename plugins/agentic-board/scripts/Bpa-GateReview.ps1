@@ -90,7 +90,7 @@ function Exit-BpaSkip([string]$Why) {
 # 1. PR mode: only act when the PR touches a semantic model (*.tmdl). A read failure throws (#316).
 if ($PR -gt 0) {
     if (-not $Repo) { throw "-PR needs -Repo owner/name." }
-    if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
+    if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar'))) }
     $tmdlChanged = Invoke-Gh -GhArgs @('api',"repos/$Repo/pulls/$PR/files",'--paginate','--jq','.[] | select(.filename | endswith(".tmdl")) | .filename') `
                              -What "read the files of PR #$PR"
     if (-not $tmdlChanged) { Exit-BpaSkip "the PR touches no model (*.tmdl)" }

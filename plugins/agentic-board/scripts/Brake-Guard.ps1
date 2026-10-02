@@ -929,7 +929,7 @@ function Send-RunSignal {
         # silently never happened. If the user env has none either, still TRY - gh may carry
         # its own CLI auth, and a failed post just leaves the dedup marker unwritten.
         if (-not $env:GH_TOKEN) {
-            $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL', 'User')
+            $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $cfg = Get-AbiosAccountConfig; $v = if ($cfg.defaultOwner -and $cfg.owners.ContainsKey($cfg.defaultOwner)) { $cfg.owners[$cfg.defaultOwner] } else { 'GH_TOKEN' }; Get-AbiosTokenValue -VarName $v -AllowAmbient)   # the default owner's token from the account map (#762)
         }
         $body = New-SignalCommentBody -Kind $Kind -Action $Action -Issue ([int]$Marker.issue) `
                     -ElapsedMinutes $ElapsedMinutes -MaxMinutes $MaxMinutes

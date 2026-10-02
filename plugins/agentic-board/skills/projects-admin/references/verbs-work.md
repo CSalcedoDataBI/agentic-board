@@ -4,12 +4,10 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
 
 - **work** — the daily driver: show pending work and start an issue, via `scripts/Board-Work.ps1`.
   Conversational flow — steps 0 and 1 are QUESTIONS: ask, then WAIT for the answer before running:
-  0. **Account.** Check which PATs are configured (Windows USER registry):
-     `[Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL','User')` and the same for
-     `GITHUB_TOKEN_BUSINESS`. If BOTH exist, ask which account to use — `1. CSalcedoDataBI
-     (personal, default)` / `2. PAL-Devs (business)` — and for business pass
-     `-TokenVar GITHUB_TOKEN_BUSINESS -Owner PAL-Devs` to every Board-Work call. If only ONE
-     exists, use it silently — do not ask.
+  0. **Account.** Read the account map: `scripts/Set-AbiosAccounts.ps1 -Show`. If it maps MORE
+     than one owner, ask which to use (the default owner first) and pass that owner's
+     `-TokenVar <VAR> -Owner <login>` to every Board-Work call. With one owner, or no map (the
+     ambient `GH_TOKEN` / `gh auth token`), use it silently — do not ask.
   1. **Scope.** Detect the current repo: `git remote get-url origin` → `<owner/name>`. If the cwd
      is a clone of a GitHub repo, ask: "¿Boards de ESTE repo (<owner/name>) o TODOS los boards de
      la cuenta?" — a repo can have several linked boards.
@@ -143,8 +141,8 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      for the issue in this working copy (`-AllowBranchMismatch` overrides on purpose). When the
      work is done:
      a. Run `scripts/New-BoardPR.ps1 -Issue <issueNum>` — the cross-account push+PR step:
-        it resolves the RIGHT account from the repo OWNER (CSalcedoDataBI → personal PAT,
-        PAL-Devs → business PAT; `-TokenVar` forces one), verifies push permission, pushes
+        it resolves the RIGHT account from the repo OWNER through the account map
+        (`-TokenVar` forces one), verifies push permission, pushes
         the branch with a one-shot credential helper (the stored remote is never rewritten
         and the token never hits the command line or logs), and opens the PR with
         `Closes #<issueNum>` in the body — or, on re-run, just pushes new commits to the
@@ -273,7 +271,7 @@ and wait for; never assume the account or the scope:
 
 | Step | Command | What it does |
 |------|---------|--------------|
-| 0. Ask account | (registry check, no script) | If BOTH `GITHUB_TOKEN_PERSONAL` and `GITHUB_TOKEN_BUSINESS` exist in the Windows USER registry, ask which account (personal = default); only one → use it silently. Business → pass `-TokenVar GITHUB_TOKEN_BUSINESS -Owner PAL-Devs` everywhere |
+| 0. Ask account | `Set-AbiosAccounts.ps1 -Show` | More than one mapped owner → ask which (default first) and pass its `-TokenVar <VAR> -Owner <login>` everywhere; one owner or no map → use it silently |
 | 1. Ask scope | `git remote get-url origin` | Inside a GitHub repo clone, ask: boards of THIS repo or ALL boards of the account? Outside a repo, skip the question (= all) |
 | 2. Pick a board | `Board-Work.ps1 -ListBoards [-Repo <owner/name>]` | With `-Repo`: only boards LINKED to that repo (`repository.projectsV2`) — exactly one result skips this pick. Without: every board of the owner (backups excluded). Both show pending count (Backlog or no Status) + URL, most pending first |
 | 3. Pick an issue | `Board-Work.ps1 -ProjectNum <n>` | That board's pending items sorted by Priority; drafts flagged (convert via `/board fill` first) |

@@ -9,7 +9,7 @@
     live board: counts per Status plus the next pending items by Priority.
 
 .PARAMETER Owner
-    GitHub username that owns the project. Defaults to CSalcedoDataBI.
+    GitHub username that owns the project. Defaults to the account map's default owner, else the gh login.
 
 .PARAMETER ProjectNum
     GitHub Projects v2 number. Mandatory.
@@ -29,7 +29,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Owner = "CSalcedoDataBI",
+    [string]$Owner = "",
     [Parameter(Mandatory)][int]$ProjectNum,
     [ValidateSet("ON_TRACK","AT_RISK","OFF_TRACK","COMPLETE","INACTIVE")]
     [string]$Status = "ON_TRACK",
@@ -38,11 +38,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# No -Owner: the account map's default owner, else the login gh is signed in as (#762).
+if (-not $Owner) { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $Owner = Get-AbiosDefaultOwner }
+if (-not $Owner) { throw "No board owner: pass -Owner, run 'gh auth login', or set a default with /board setup." }
 
 if (-not $env:GH_TOKEN) {
-    $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
+    $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar')))
 }
-if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)." }
+if (-not $env:GH_TOKEN) { throw "No GitHub token: $TokenVar is unset, GH_TOKEN is empty and gh has no stored login. Run 'gh auth login', or map the account with /board setup." }
 
 # gh api graphql can return exit 0 with an errors[] body, and gh signals a plain failure only via
 # its exit code - either way an unchecked read here would post a status update off a misread board

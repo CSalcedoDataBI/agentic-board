@@ -25,7 +25,7 @@
     GitHub Projects v2 board number. Required to actually read the board.
 
 .PARAMETER Owner
-    Board owner. Default CSalcedoDataBI.
+    Board owner. Default: the account map's default owner, else the gh login.
 
 .PARAMETER Clis
     Available CLIs (comma-joined or array), e.g. "claude,codex". Default: claude only.
@@ -40,7 +40,7 @@
 [CmdletBinding()]
 param(
     [int]$ProjectNum = 0,
-    [string]$Owner = "CSalcedoDataBI",
+    [string]$Owner = "",
     [string]$Repo = "",
     [string[]]$Clis = @(),
     [switch]$Json,
@@ -277,9 +277,12 @@ function Show-Plan {
 
 # --- dot-source guard: stop here so unit tests get the pure core with no I/O -----
 if ($env:ABIOS_FLEETPLAN_DOTSOURCE) { return }
+# No -Owner: the account map's default owner, else the login gh is signed in as (#762).
+if (-not $Owner) { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $Owner = Get-AbiosDefaultOwner }
+if (-not $Owner) { throw "No board owner: pass -Owner, run 'gh auth login', or set a default with /board setup." }
 
 # ------------------------------------------------------------------------ main entry
-if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
+if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar'))) }
 if (-not $env:GH_TOKEN) { throw "$TokenVar is not set in the user environment (and GH_TOKEN is empty)." }
 if ($ProjectNum -le 0) { throw "Pass the board's -ProjectNum <n>." }
 

@@ -33,13 +33,13 @@ Load the tool account via `gh-account` and file to a CONSTANT target — never r
 current repo:
 
 ```powershell
-$env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL','User')
+$env:GH_TOKEN = (& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1").Token   # your default account
 gh label create skill-eval --color 5319E7 --description "Skill failure found by skills-audit" --force `
   --repo CSalcedoDataBI/agentic-board
 $url = gh issue create --repo CSalcedoDataBI/agentic-board --label skill-eval `
   --title "<skill>: <failure type> — <one line>" `
   --body  "<sanitized: public path, wrong behavior, generic repro, failure type>"
-gh project item-add 13 --owner CSalcedoDataBI --url $url
+gh project item-add 13 --owner CSalcedoDataBI --url $url   # maintainers only: needs write access to the tool's board
 ```
 
 For a project-owned skill, do the same against the project's repo/board (resolve it with

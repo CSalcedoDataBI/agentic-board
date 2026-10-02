@@ -1,0 +1,19 @@
+{
+  "defaultOwner": "CSalcedoDataBI",
+  "owners": {
+    "CSalcedoDataBI": "GITHUB_TOKEN_PERSONAL",
+    "PesanteAnalytics": "GITHUB_TOKEN_BUSINESS",
+    "PAL-Devs": "GITHUB_TOKEN_BUSINESS",
+    "Support1-PAL": "GITHUB_TOKEN_BUSINESS"
+  },
+  "accountIds": {
+    "73630372": "GITHUB_TOKEN_PERSONAL",
+    "248682413": "GITHUB_TOKEN_BUSINESS"
+  },
+  "aliases": {
+    "csalcedo": "CSalcedoDataBI",
+    "pesante": "PesanteAnalytics",
+    "pal-devs": "PesanteAnalytics"
+  },
+  "agentTokenVar": "GITHUB_TOKEN_AGENT"
+}

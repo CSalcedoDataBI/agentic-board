@@ -38,7 +38,7 @@ its `references/` directory and follow it exactly. Do not improvise the recipe f
   `Remove-OldPluginVersions.ps1`). No token.
 
 Only `sessions` talks to GitHub: for it, first apply the `gh-account` skill to set `$env:GH_TOKEN` for
-the right account (default CSalcedoDataBI; honor an explicit `--account pal-devs`). Never run
+the right account (your account map's default; honor an explicit `--account <alias>`). Never run
 `gh auth switch`.
 
 SAFETY (every verb): plan first; nothing is deleted, pushed or archived without the user's yes. A

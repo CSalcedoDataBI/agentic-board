@@ -15,8 +15,8 @@ project**, the opposite of `abios-feedback` (which targets the tool's own repo).
 ## Identity and target
 1. **Target = the CURRENT repo** (`gh repo view --json nameWithOwner -q .nameWithOwner`). Issues
    are created ONLY there.
-2. **Account = that repo's owner**, via [[gh-account]]: personal repo -> `GITHUB_TOKEN_PERSONAL`;
-   `PesanteAnalytics` repo -> `--account pal-devs` (`GITHUB_TOKEN_BUSINESS`). A 403 means switch.
+2. **Account = that repo's owner**, via [[gh-account]] and your account map (`/board setup`). A 403
+   means the owner maps to the wrong account: pass `--account <alias>` or map it.
 
 ## The one script: `scripts/Scan-Project.ps1`
 

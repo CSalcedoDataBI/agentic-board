@@ -30,7 +30,7 @@ Repo: https://github.com/<owner>/<repo>"
 gh project link <num> --owner <owner> --repo <owner>/<repo>
 ```
 
-Replace `<owner>` with the GitHub username or org (e.g. `CSalcedoDataBI`) and `<num>` with the
+Replace `<owner>` with the GitHub username or org (e.g. `your-login`) and `<num>` with the
 project number returned above. Verify it took:
 `gh project view <num> --owner <owner> --format json` → check `shortDescription` and `readme`.
 
@@ -174,14 +174,14 @@ and picks single-select vs text automatically:
 
 ```powershell
 # single-select by title-prefix map ("*" = fallback):
-& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner PAL-Devs -Field Categoria `
+& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Categoria `
   -PrefixMap '{"apps-":"apps","model-":"model","agent-":"agent","etl-":"etl","viz-":"viz","shared-":"shared","speckit-":"framework","*":"vendored"}'
 
 # text field by template ({title} -> the item's title):
-& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner PAL-Devs -Field Ruta -TextTemplate ".claude/skills/{title}/SKILL.md"
+& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Ruta -TextTemplate ".claude/skills/{title}/SKILL.md"
 
 # constant for all matching items:
-& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner PAL-Devs -Field Status -Value Done
+& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Status -Value Done
 ```
 
 `-Filter` (regex on the item title) defaults to the skill-name shape `^[a-z0-9]+(-[a-z0-9]+)*$`, so

@@ -35,7 +35,7 @@
       . (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 
     Usage:
-      $read = Get-BoardItems -Number 13 -Owner CSalcedoDataBI
+      $read = Get-BoardItems -Number 13 -Owner your-login
       $warn = Get-BoardTruncationWarning $read
       if ($warn) { Write-Host $warn -ForegroundColor Yellow }
       foreach ($i in $read.Items) { ... }

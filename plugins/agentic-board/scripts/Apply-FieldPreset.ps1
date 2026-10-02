@@ -43,13 +43,13 @@
     Requires $env:GH_TOKEN already set (via the gh-account skill).
     Usage:
       $env:GH_TOKEN = <token>
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -Lang en             # standardizes (default)
-      ./Apply-FieldPreset.ps1 -ProjectNum 13 -Owner CSalcedoDataBI -Preset en       # same: -ProjectNum=-Number, -Preset=-Lang
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -DryRun              # previews the plan
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -Yes                 # CI / already approved
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -MergeConflicts      # + resolves old duplicates
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -NoMigrate           # leaves the legacy options alone
-      ./Apply-FieldPreset.ps1 -Number 13 -Owner CSalcedoDataBI -PresetPath custom.json  #>
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner your-login -Lang en             # standardizes (default)
+      ./Apply-FieldPreset.ps1 -ProjectNum 13 -Owner your-login -Preset en       # same: -ProjectNum=-Number, -Preset=-Lang
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner your-login -DryRun              # previews the plan
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner your-login -Yes                 # CI / already approved
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner your-login -MergeConflicts      # + resolves old duplicates
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner your-login -NoMigrate           # leaves the legacy options alone
+      ./Apply-FieldPreset.ps1 -Number 13 -Owner your-login -PresetPath custom.json  #>
 [CmdletBinding()]
 param(
   # -ProjectNum is accepted as an alias so this script is invoked like the rest of the suite

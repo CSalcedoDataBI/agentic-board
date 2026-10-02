@@ -7,14 +7,14 @@
 
     Examples:
       # Text field by template ({title} -> the item's title):
-      ./Set-BoardField.ps1 -Number 6 -Owner PAL-Devs -Field Ruta -TextTemplate ".claude/skills/{title}/SKILL.md"
+      ./Set-BoardField.ps1 -Number 6 -Owner work-org -Field Ruta -TextTemplate ".claude/skills/{title}/SKILL.md"
 
       # Single-select by title-prefix map (JSON; "*" = default/fallback):
-      ./Set-BoardField.ps1 -Number 6 -Owner PAL-Devs -Field Categoria `
+      ./Set-BoardField.ps1 -Number 6 -Owner work-org -Field Categoria `
         -PrefixMap '{"apps-":"apps","model-":"model","agent-":"agent","etl-":"etl","viz-":"viz","shared-":"shared","speckit-":"framework","*":"vendored"}'
 
       # Constant single-select for every matching item:
-      ./Set-BoardField.ps1 -Number 6 -Owner PAL-Devs -Field Status -Value Done
+      ./Set-BoardField.ps1 -Number 6 -Owner work-org -Field Status -Value Done
 
     Notes / gotchas baked in:
       - NEVER name a helper after a PowerShell alias (`cat`=Get-Content, `gc`, `sl`, …) — it shadows

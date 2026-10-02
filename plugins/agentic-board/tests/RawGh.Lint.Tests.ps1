@@ -27,6 +27,7 @@ BeforeAll {
     # in #571). A file not listed here has ZERO tolerated raw calls.
     $script:Baseline = @{
         'Board-Work.ps1'            = 8
+        'Get-AbiosAccounts.ps1'     = 2   # gh auth token / gh api user: the bootstrap that finds the token Invoke-Gh then uses (#762)
         'Apply-FieldPreset.ps1'     = 4   # 6 -> 4: both field-create calls now go through Invoke-Gh (#649)
         'Board-Plan.ps1'            = 6
         'Board-ReviewGate.ps1'      = 5

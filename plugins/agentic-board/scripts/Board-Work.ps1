@@ -47,7 +47,7 @@
     the board URL always printed at the end.
 
 .PARAMETER Owner
-    GitHub username that owns the boards. Defaults to CSalcedoDataBI.
+    GitHub username that owns the boards. Defaults to the account map's default owner, else the gh login.
 
 .PARAMETER ListBoards
     Mode 1: list boards with pending counts (all of the owner, or only the
@@ -131,7 +131,7 @@
 
 .PARAMETER TokenVar
     Windows USER env var holding the PAT. Defaults to GITHUB_TOKEN_PERSONAL;
-    use GITHUB_TOKEN_BUSINESS for the PAL-Devs account.
+    use another account's variable (see /board setup).
 
 .EXAMPLE
     .\Board-Work.ps1 -ListBoards
@@ -148,7 +148,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Owner    = "CSalcedoDataBI",
+    [string]$Owner    = "",
     [switch]$ListBoards,
     [string]$Repo     = "",
     [int]   $ProjectNum = 0,
@@ -3511,9 +3511,9 @@ if ($PreferGroupedPRs) {
 # use for - otherwise a machine with no PAT configured could not set the preference at all.
 # -- Token (respect GH_TOKEN if gh-account already set it) ---------------------
 if (-not $env:GH_TOKEN) {
-    $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
+    $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar')))
 }
-if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)." }
+if (-not $env:GH_TOKEN) { throw "No GitHub token: $TokenVar is unset, GH_TOKEN is empty and gh has no stored login. Run 'gh auth login', or map the account with /board setup." }
 
 # -Base and -BaseCurrent contradict each other; silently honouring one would put the
 # branch on a base the caller did not ask for - the exact class of bug #294 was.
@@ -3554,6 +3554,12 @@ $groupQueue = @(Get-ParallelQueue $StartGroup)
 if ($groupQueue.Count -gt 0 -and ($Start -gt 0 -or $Parallel.Count -gt 0)) {
     throw "-StartGroup is mutually exclusive with -Start and -Parallel: they are three different ways to start issues."
 }
+
+# No -Owner: the account map's default owner, else the login gh is signed in as (#762). Resolved only
+# here, once a token exists and past the modes that never touch a board (-CloseCrossRepo works
+# from recorded PRs, the local-only modes above need no token at all).
+if (-not $Owner) { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $Owner = Get-AbiosDefaultOwner }
+if (-not $Owner) { throw "No board owner: pass -Owner, run 'gh auth login', or set a default with /board setup." }
 
 # =======================================================================
 # LOCK MODE: -Lock <n> / -Unlock <n>  -> in ONE step mark an issue owned-elsewhere

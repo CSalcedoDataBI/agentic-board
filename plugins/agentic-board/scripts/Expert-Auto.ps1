@@ -82,7 +82,7 @@ param(
     # nothing in the contract or a previous run turns them on.
     [switch]$TakeOver,
     [switch]$IgnoreBlocked,
-    # The board's owner account (#499). Board-Work defaults to CSalcedoDataBI, so a board on a
+    # The board's owner account (#499). Board-Work defaults to the map's default owner, so a board on a
     # second account died at board resolution AFTER the brief was written and the run announced,
     # and -TokenVar alone could not help: the token was right, the owner was wrong. Forwarded to
     # Board-Work only when given, so the default account keeps its old behaviour exactly.
@@ -997,7 +997,7 @@ if ($ProjectNum -gt 0) {
     # board's own url when we can - it is right for a user-owned AND an org-owned board (#499) -
     # and fall back to the user-board shape when the read fails: the link is a courtesy, not a
     # reason to fail a launch that already happened.
-    $boardOwner = if ($Owner) { $Owner } elseif ($repo) { ($repo -split '/')[0] } else { 'CSalcedoDataBI' }
+    $boardOwner = if ($Owner) { $Owner } elseif ($repo) { ($repo -split '/')[0] } else { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosDefaultOwner }
     $resolvedUrl = ''
     try {
         $pv = Invoke-Gh -GhArgs @('project', 'view', "$ProjectNum", '--owner', $boardOwner, '--format', 'json') -What "read board #$ProjectNum of $boardOwner" -Json

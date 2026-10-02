@@ -17,12 +17,16 @@
     gh is mocked at the executable seam. #>
 
 BeforeAll {
+    # The identity tests run against a FIXED account map, never the developer's own (#762).
+    $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
+    $env:ABIOS_ACCOUNTS_FILE = Join-Path $PSScriptRoot 'fixtures' 'accounts.identity.json'
     $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Post-BoardStatusUpdate.ps1' | Resolve-Path
     $script:PrevToken = $env:GH_TOKEN
     $env:GH_TOKEN = 'dummy'
 }
 AfterAll {
     $env:GH_TOKEN = $script:PrevToken
+    $env:ABIOS_ACCOUNTS_FILE = $script:SavedAccountsFile
 }
 
 Describe 'Post-BoardStatusUpdate fails closed (#315)' {

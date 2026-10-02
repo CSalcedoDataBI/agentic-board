@@ -50,7 +50,7 @@ pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Write-KnowledgeTable.ps1 -Root .
 ## Publish to the GitHub Wiki (`/knowledge wiki`)
 Publishes a Home index plus one page per domain to the repo's wiki (`<repo>.wiki.git`) —
 the layer that anchors the registry to GitHub. The account is resolved from the repo owner
-(CSalcedoDataBI → personal PAT, PAL-Devs → business PAT); the token travels only through a
+through your account map (`/board setup`); the token travels only through a
 one-shot credential helper, never the stored remote.
 ```
 pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Publish-KnowledgeWiki.ps1 -Root .
