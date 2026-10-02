@@ -1,9 +1,9 @@
 ---
-description: One command from untracked work to a ready board - scan the CURRENT repo (code TODOs, doc checklists, plans), propose priority, order, dependencies and PR batches, then on one confirmation create a standard board, labelled issues, a plan epic and fill every gap.
+description: Turn the current repo's untracked work (code TODOs, doc checklists, plans) into a ready board — issues, priorities, a plan epic — on one confirmation.
 ---
 You are running the agentic-board /scan command.
 
-Apply the `project-scan` skill. It targets the CURRENT repo (`gh repo view --json nameWithOwner`),
+Your FIRST action: open the `project-scan` engine with the **Read** tool (it is a file, not a Skill-tool skill) at `${CLAUDE_PLUGIN_ROOT}/skills/project-scan/SKILL.md`, and follow it. It targets the CURRENT repo (`gh repo view --json nameWithOwner`),
 never the tool's own repo (that is `abios-feedback`). Resolve the token for THAT repo's owner with
 the `gh-account` skill.
 

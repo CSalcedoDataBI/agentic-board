@@ -1,5 +1,5 @@
 ---
-description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/actions-cost. Defaults to the CSalcedoDataBI account.
+description: Run a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/actions-cost. No arguments shows the menu.
 ---
 You are running the agentic-board /board command.
 
@@ -111,7 +111,7 @@ improvise the recipe from this summary:
   `references/verbs-actions-cost.md`.
 
 **Machine housekeeping is not board work — it moved to `/cleanup` (a separate command).** For one
-release these old spellings still work: route them to the cleanup-ops skill, run the `/cleanup`
+release these old spellings still work: route them to the cleanup-ops engine (read `${CLAUDE_PLUGIN_ROOT}/skills/cleanup-ops/SKILL.md`), run the `/cleanup`
 equivalent, and tell the user the new command in one line:
 `/board plugins [sessions|clean]` → `/cleanup plugins [sessions|clean]`;
 `/board close-cycle --all [-Scope …]` → `/cleanup sessions [-Scope …]`.

@@ -1,6 +1,6 @@
 ---
 name: knowledge-registry
-description: Use to capture and read a project's knowledge references by domain — add a research MD, repo, doc folder, URL, NotebookLM notebook or video to knowledge/registry.json, regenerate the KNOWLEDGE.md table, or publish it to the repo's GitHub Wiki. Distinct from MEMORY.md (agent facts) and HANDOFF.md (task resume). Triggers — "guarda esta referencia", "agrega a knowledge", "registra este link/doc/repo", "muéstrame la tabla de conocimiento", "publica el knowledge al wiki", "/knowledge add", "/knowledge list", "/knowledge gen", "/knowledge wiki".
+description: "Use to add or list a project's knowledge references by domain (knowledge/registry.json and the generated KNOWLEDGE.md). Not MEMORY.md or HANDOFF.md. Triggers — \"guarda esta referencia\", \"agrega a knowledge\", \"/knowledge add|list|gen\"."
 user-invocable: false
 ---
 
@@ -22,7 +22,7 @@ unaffected.
 ## When NOT to use
 - Facts the agent should recall across sessions → that is `MEMORY.md` (auto-memory).
 - How to resume the current task → that is `/board handoff` / `HANDOFF.md`.
-- Harvesting references already scattered in the repo → use `knowledge-harvest`.
+- Harvesting references already scattered in the repo → use `/knowledge harvest`.
 
 ## Add a reference
 Run the engine (never hand-edit the registry file):

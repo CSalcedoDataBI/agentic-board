@@ -1,6 +1,6 @@
 ---
 name: diagram-authoring
-description: Use whenever a diagram goes into a plugin-produced markdown artifact — a /board plan or epic/issue body, a handoff, a status update, KNOWLEDGE.md, the README, or a blog entry. Emit diagram-as-code (Mermaid by default), NEVER hand-drawn ASCII art. Covers flowcharts, architecture, sequence, state, ER and gantt diagrams; escalate to D2/Graphviz (rendered via Kroki) only when a graph is too dense for Mermaid. Triggers — "draw a diagram", "add a flowchart/architecture/sequence/state diagram", "diagrama", "haz un diagrama", "visualiza este flujo", "add a diagram to the plan/issue/handoff/README".
+description: "Use when a diagram goes into a markdown artifact this plugin writes (a /board plan, issue, handoff, KNOWLEDGE.md or README). Emits Mermaid, never ASCII art. Triggers — \"haz un diagrama del plan\", \"add a flowchart to the issue\"."
 user-invocable: false
 ---
 

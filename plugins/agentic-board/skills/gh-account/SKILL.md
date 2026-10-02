@@ -1,6 +1,6 @@
 ---
 name: gh-account
-description: Use FIRST before any GitHub Projects/issues operation in the agentic-board suite. Resolves which account (default CSalcedoDataBI, override PAL-Devs) and reads its PAT from the Windows user registry, injecting GH_TOKEN per-invocation without touching `gh auth switch`. Triggers — any board/issue op, "cambia a CSalcedoDataBI", 403 on a PAL board, INSUFFICIENT_SCOPES/read:project.
+description: "Use before any agentic-board GitHub Projects/issues operation: resolves the account for the repo owner and injects its token as GH_TOKEN per call, without gh auth switch. Triggers — a board/issue op, a 403 on a board, INSUFFICIENT_SCOPES/read:project."
 user-invocable: false
 ---
 

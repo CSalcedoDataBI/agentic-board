@@ -1,7 +1,8 @@
 ---
 name: project-scan
-description: Use to scan the CURRENT project for latent, hard-to-track work — code TODO/FIXME, unchecked checklists and "pending/next steps" in docs, and plan/spec docs not yet tracked — then convert the chosen items into issues + a work plan on THIS project's board. Triggers — "escanea el proyecto", "convierte los pendientes en issues", "harvest backlog", "qué hay sin trackear", "arma el plan de trabajo", /scan.
+description: "Engine behind /scan: find untracked work in the current repo (TODO/FIXME, unchecked checklists, untracked plans) and turn the chosen items into issues and a board plan. Triggers — \"escanea el proyecto\", \"qué hay sin trackear\", \"convierte los pendientes en issues\"."
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # project-scan - from latent work to a ready board, in one command
