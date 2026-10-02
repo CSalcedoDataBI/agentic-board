@@ -258,6 +258,13 @@ param(
     # can ENFORCE it (#564): past this, only wrap-up commands (handoff, commit/push, report) pass.
     # 0 = no budget enforcement.
     [int]$BudgetMinutes    = 0,
+    # Explicit opt-in to launch sessions with each CLI's permission BYPASS flag (#761):
+    # claude --permission-mode bypassPermissions, codex --dangerously-bypass-approvals-and-sandbox,
+    # copilot --allow-all, agy --dangerously-skip-permissions. Default OFF: a launched session runs
+    # under the CLI's own permission mode and your settings' allow-list, so a headless session may
+    # stop on a tool it is not allowed to use. A CLI that cannot work unattended without the bypass
+    # (agy) is not picked by -Fleet unless this is passed. The PreToolUse brake still applies either way.
+    [switch]$AllowPermissionBypass,
     [string]$TokenVar      = "GITHUB_TOKEN_PERSONAL",
     # Only a plain env-var identifier - it gets interpolated into the spawned
     # -Command string, so reject anything that could inject (';', quotes, spaces).
@@ -2055,7 +2062,36 @@ function New-FleetSessionMarker([int]$IssueNum, [string]$RunId) {
 # launch-<issue>.ps1 and launching `pwsh -NoExit -File <script>` puts ZERO ';' on
 # wt's command line, so wt opens exactly one tab. The briefing is likewise passed by
 # file so no long/quoted text ever hits the command line.
-function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefingFile, [string]$windowName = "abios-parallel", [string]$claudeAuthVar = "ANTHROPIC_API_KEY", [string]$Cli = 'claude', [string]$fleetSession = '', [string]$logPath = '') {
+# Secret scrub for a launched session (#769). A spawned CLI used to inherit the launcher's whole
+# environment - every token, key and password the user had exported, including owner tokens the
+# session has no business holding. The launch script now drops every variable whose NAME carries
+# TOKEN, KEY, SECRET or PASSWORD, then puts back only an allowlist: the CLI's own model credential
+# ($Keep) and ONE GitHub identity, exposed as GH_TOKEN, read from $GhTokenVar BEFORE the scrub.
+#   - $GhTokenVar = 'GH_TOKEN'           -> unarmed run: the GH_TOKEN it inherited, unchanged.
+#   - $GhTokenVar = 'GITHUB_TOKEN_AGENT' -> brake-armed run: the agent identity, never the owner's.
+#   - $GhTokenVar = ''                   -> no GH_TOKEN: gh falls back to its own stored login.
+# Values are captured from the process first, then the Windows USER scope (null elsewhere), and
+# only NAMES ever reach the script text - never a value. Pure -> unit-testable.
+# STATED LIMIT: this removes what the session INHERITS. A process running as the same user can
+# still read the user's own stores (HKCU\Environment on Windows, a keyring, a dotfile).
+function Get-SecretScrubScript([string[]]$Keep = @(), [string]$GhTokenVar = 'GH_TOKEN') {
+    $names = @(@($Keep) + @($GhTokenVar) | Where-Object { $_ } | Select-Object -Unique)
+    foreach ($n in $names) {
+        if ($n -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { throw "Scrub allowlist entry '$n' is not a valid environment variable name." }
+    }
+    $list = ($names | ForEach-Object { "'$_'" }) -join ','
+    $lines = @(
+        ('$abiosKeep = @{{}}; foreach ($n in @({0})) {{ $v = [Environment]::GetEnvironmentVariable($n); if (-not $v) {{ $v = [Environment]::GetEnvironmentVariable($n, ''User'') }}; if ($v) {{ $abiosKeep[$n] = $v }} }}' -f $list)
+        'Get-ChildItem Env: | Where-Object { $_.Name -match ''TOKEN|KEY|SECRET|PASSWORD'' } | ForEach-Object { Remove-Item -LiteralPath (''Env:'' + $_.Name) -ErrorAction SilentlyContinue }'
+        # The identity variable comes back ONLY as GH_TOKEN, never under its own name as well.
+        ('foreach ($n in $abiosKeep.Keys) {{ if ($n -notin @(''GH_TOKEN'', ''{0}'')) {{ Set-Item -LiteralPath (''Env:'' + $n) -Value $abiosKeep[$n] }} }}' -f $GhTokenVar)
+    )
+    if ($GhTokenVar) { $lines += ('if ($abiosKeep[''{0}'']) {{ $env:GH_TOKEN = $abiosKeep[''{0}''] }}' -f $GhTokenVar) }
+    $lines += 'Remove-Variable abiosKeep, n, v -ErrorAction SilentlyContinue'
+    return ($lines -join "`r`n")
+}
+
+function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefingFile, [string]$windowName = "abios-parallel", [string]$claudeAuthVar = "ANTHROPIC_API_KEY", [string]$Cli = 'claude', [string]$fleetSession = '', [string]$logPath = '', [bool]$allowBypass = $false, [string]$ghTokenVar = 'GH_TOKEN') {
     $tabTitle  = "issue-$issueNum"
     # Defense-in-depth: this name is interpolated into the spawned launch script,
     # so it MUST be a bare env-var identifier - never let ';'/quotes/spaces through.
@@ -2065,8 +2101,10 @@ function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefi
     # The spawned session is UNATTENDED, so it must never block on an interactive
     # prompt. Headless -p is the only mode that clears ALL of them: it skips the
     # new-worktree trust dialog AND the one-time "Bypass Permissions mode" accept
-    # (both are interactive-only). --permission-mode bypassPermissions then keeps it
-    # from pausing on per-tool approvals, --no-session-persistence stops parallel
+    # (both are interactive-only). ONLY with -AllowPermissionBypass (#761),
+    # --permission-mode bypassPermissions keeps it from pausing on per-tool approvals;
+    # by default the session keeps the user's own permission mode and allow-list
+    # (headless -p denies, rather than asks for, a tool outside it). --no-session-persistence stops parallel
     # sessions colliding on session state, and --verbose streams progress into the
     # tab so it visibly works instead of looking frozen. (An interactive
     # --dangerously-skip-permissions launch still stops at the one-time bypass
@@ -2094,10 +2132,15 @@ function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefi
         TabTitle     = $tabTitle
         WindowName   = $windowName
         AuthVar      = $claudeAuthVar
+        AllowBypass  = $allowBypass
     }
     $adapter = Get-CliAdapters | Where-Object { $_.Name -eq $Cli } | Select-Object -First 1
     if (-not $adapter) { throw "Unknown CLI adapter '$Cli'." }
     $launchScript = & $adapter.BuildLaunch $ctx
+    # Scrub inherited secrets before the CLI starts (#769): the model credential this adapter
+    # authenticates with and one GitHub identity survive, nothing else matching the pattern does.
+    $keep = @($claudeAuthVar) + @($adapter.KeepEnv | Where-Object { $_ })
+    $launchScript = ((Get-SecretScrubScript -Keep $keep -GhTokenVar $ghTokenVar), $launchScript) -join "`r`n"
     # Stamp the reaper fingerprint FIRST (adapter-agnostic prefix), so it is in the
     # environment for the whole script and inherited by the CLI child + grandchild. The
     # marker is validated to a bare token so it can never break out of the '...' literal.
@@ -2177,6 +2220,8 @@ function Start-WorktreeSession {
     [switch]$EndToEnd,
         # Contract time budget in minutes, written into the brake marker for the hook to enforce (#564).
         [int]$SessionBudgetMinutes = 0,
+        # Explicit opt-in to the CLI's permission bypass flag (#761). Off by default.
+        [switch]$AllowPermissionBypass,
         [switch]$Preview
     )
     $abios = Get-AbiosDir
@@ -2184,7 +2229,11 @@ function Start-WorktreeSession {
     # Redirect this session's stream to logs/issue-<n>.log so the -Sessions dashboard can
     # tail it (Start-Transcript, wired inside the launch script).
     $logPath = Get-SessionLogPath $IssueNum
-    $plan  = Build-WorktreeLaunch $IssueNum $WorkPath $briefingFile "abios-parallel" $ClaudeAuthVar $Cli $FleetSession $logPath
+    # GitHub identity the session keeps after the secret scrub (#769): a brake-armed run gets the
+    # agent identity only (never the owner's token the main rule exempts); an unarmed run keeps
+    # the GH_TOKEN it inherited, as before.
+    $ghVar = if ($StopAtPR) { 'GITHUB_TOKEN_AGENT' } else { 'GH_TOKEN' }
+    $plan  = Build-WorktreeLaunch $IssueNum $WorkPath $briefingFile "abios-parallel" $ClaudeAuthVar $Cli $FleetSession $logPath ([bool]$AllowPermissionBypass) $ghVar
 
     if ($Preview) {
         Write-Host ("  [preview] #{0}: {1} {2}" -f $IssueNum, $plan.launcher, ($plan.args -join ' ')) -ForegroundColor Gray
@@ -2398,6 +2447,13 @@ function Get-CliAdapters {
             InstallCmd   = ''
             # claude is the host CLI running this very script -> always available.
             Probe        = { param($ctx) 'ok' }
+            # Permission bypass is an explicit opt-in (#761): appended only when the launch
+            # context carries AllowBypass (Board-Work -AllowPermissionBypass).
+            BypassArgs   = '--permission-mode bypassPermissions'
+            RequiresBypass = $false
+            # Credentials this CLI may read from the environment, kept by the secret scrub (#769).
+            # claude's own is the -ClaudeAuthVar, which Build-WorktreeLaunch always keeps.
+            KeepEnv      = @()
             # Build the per-worktree claude launch script. $ctx carries at least
             # BriefingFile + AuthVar. This is the SAME construction Build-WorktreeLaunch
             # used inline before the adapter refactor - kept byte-identical on purpose
@@ -2413,7 +2469,8 @@ function Get-CliAdapters {
                 $clearAuth  = 'Remove-Item Env:ANTHROPIC_API_KEY,Env:ANTHROPIC_AUTH_TOKEN,Env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue'
                 $setAuth    = '$env:{0}=[Environment]::GetEnvironmentVariable(''{0}'',''User'')' -f $ctx.AuthVar
                 $clean      = 'Remove-Item Env:CLAUDECODE,Env:CLAUDE_CODE_SESSION_ID,Env:CLAUDE_CODE_CHILD_SESSION,Env:CLAUDE_CODE_ENTRYPOINT -ErrorAction SilentlyContinue'
-                $run        = 'claude -p (Get-Content -Raw -LiteralPath ''{0}'') --permission-mode bypassPermissions --no-session-persistence --verbose' -f $safeBrief
+                $bypass     = if ($ctx.AllowBypass) { ' --permission-mode bypassPermissions' } else { '' }
+                $run        = 'claude -p (Get-Content -Raw -LiteralPath ''{0}''){1} --no-session-persistence --verbose' -f $safeBrief, $bypass
                 ($clearAuth, $setAuth, $clean, $run) -join "`r`n"
             }
         }
@@ -2429,13 +2486,15 @@ function Get-CliAdapters {
             # No npm package - Google ships an install script; the binary lands in
             # %LOCALAPPDATA%\agy\bin. See https://antigravity.google/docs/cli/install
             InstallCmd   = 'irm https://antigravity.google/cli/install.ps1 | iex'
-            # One-token probe carrying the SAME headless flag set as BuildLaunch below, so the
-            # probe's verdict transfers to the real launch and an auth/quota failure classifies
-            # correctly (see Get-CliProbeStatus). The flag makes no difference to THIS prompt -
-            # measured 10s without it and 8s with it, exit 0 and 'OK' both ways, because a
-            # one-token reply calls no tool - but parity is the point: a probe that exercises a
-            # different flag set than the launch can green-light a launch that then fails.
-            Probe        = { param($ctx) Invoke-CliProbe @('agy', '-p', 'reply OK', '--dangerously-skip-permissions') }
+            # One-token probe of auth/quota (see Get-CliProbeStatus). It carries NO permission
+            # bypass (#761): a one-token reply calls no tool, so the flag made no difference to
+            # it - measured 10s without it and 8s with it, exit 0 and 'OK' both ways.
+            Probe        = { param($ctx) Invoke-CliProbe @('agy', '-p', 'reply OK') }
+            BypassArgs   = '--dangerously-skip-permissions'
+            KeepEnv      = @()
+            # Without the bypass agy soft-denies its own file-read in headless mode and starts
+            # blind, so -Fleet only picks it when the human passed -AllowPermissionBypass.
+            RequiresBypass = $true
             BuildLaunch  = {
                 param($ctx)
                 # agy is told to READ the briefing rather than receiving its content as an
@@ -2446,7 +2505,8 @@ function Get-CliAdapters {
                 # --dangerously-skip-permissions is REQUIRED: without it agy soft-denies its
                 # own file-read tool call in headless mode and the session starts blind.
                 $b = $ctx.BriefingFile -replace "'", "''"
-                'agy -p ''Read the file {0} and follow its instructions to the letter.'' --dangerously-skip-permissions' -f $b
+                $bypass = if ($ctx.AllowBypass) { ' --dangerously-skip-permissions' } else { '' }
+                'agy -p ''Read the file {0} and follow its instructions to the letter.''{1}' -f $b, $bypass
             }
         }
         [PSCustomObject]@{
@@ -2463,6 +2523,9 @@ function Get-CliAdapters {
             # 'jules remote list' returns "Must specify what to list" with exit 0 (a
             # false ok) - '--session' scopes it to a well-formed listing instead.
             Probe        = { param($ctx) Invoke-CliProbe @('jules', 'remote', 'list', '--session') }
+            BypassArgs   = ''
+            RequiresBypass = $false
+            KeepEnv      = @()
             BuildLaunch  = {
                 param($ctx)
                 $b = $ctx.BriefingFile -replace "'", "''"
@@ -2478,13 +2541,17 @@ function Get-CliAdapters {
             # 'codex login status' is a lightweight auth check (no stdin read, ~2.6s)
             # vs. the old 'codex exec' probe which took ~19.5s and reads stdin.
             Probe        = { param($ctx) Invoke-CliProbe @('codex', 'login', 'status') }
+            BypassArgs   = '--dangerously-bypass-approvals-and-sandbox'
+            RequiresBypass = $false
+            KeepEnv      = @('OPENAI_API_KEY')
             BuildLaunch  = {
                 param($ctx)
                 # 'codex exec' reads stdin even with a prompt arg - in a wt tab (TTY
                 # stdin) that hangs waiting for input. Piping $null gives it immediate
                 # EOF so it proceeds using only the prompt argument.
                 $b = $ctx.BriefingFile -replace "'", "''"
-                '$null | codex exec (Get-Content -Raw -LiteralPath ''{0}'') --dangerously-bypass-approvals-and-sandbox' -f $b
+                $bypass = if ($ctx.AllowBypass) { ' --dangerously-bypass-approvals-and-sandbox' } else { '' }
+                '$null | codex exec (Get-Content -Raw -LiteralPath ''{0}''){1}' -f $b, $bypass
             }
         }
         [PSCustomObject]@{
@@ -2493,11 +2560,16 @@ function Get-CliAdapters {
             Kind         = 'repl'
             IsDefault    = $false
             InstallCmd   = 'npm i -g @github/copilot'
-            Probe        = { param($ctx) Invoke-CliProbe @('copilot', '-p', 'reply OK', '--allow-all') }
+            # Auth/quota probe without the bypass (#761): a one-token reply calls no tool.
+            Probe        = { param($ctx) Invoke-CliProbe @('copilot', '-p', 'reply OK') }
+            BypassArgs   = '--allow-all'
+            RequiresBypass = $false
+            KeepEnv      = @('COPILOT_GITHUB_TOKEN')
             BuildLaunch  = {
                 param($ctx)
                 $b = $ctx.BriefingFile -replace "'", "''"
-                'copilot -p (Get-Content -Raw -LiteralPath ''{0}'') --allow-all' -f $b
+                $bypass = if ($ctx.AllowBypass) { ' --allow-all' } else { '' }
+                'copilot -p (Get-Content -Raw -LiteralPath ''{0}''){1}' -f $b, $bypass
             }
         }
     )
@@ -2542,6 +2614,27 @@ function Test-CliAvailability {
     }
     $status = & $Adapter.Probe $null
     return [PSCustomObject]@{ Cli=$Adapter.Name; Status=$status; Detail='' }
+}
+
+# A CLI that cannot work unattended without its permission bypass (RequiresBypass) is
+# reported 'needs-bypass' unless the human opted in with -AllowPermissionBypass (#761), so
+# the picker never offers it and Resolve-LaunchCli degrades its issue to claude. Pure.
+function Resolve-BypassAvailability([object]$Adapter, [string]$Status, [bool]$AllowBypass) {
+    if ($Status -eq 'ok' -and $Adapter.RequiresBypass -and -not $AllowBypass) { return 'needs-bypass' }
+    return $Status
+}
+
+# One visible line stating the permission mode the launched sessions will run under (#761).
+# Returns the text so it can be asserted; prints it in red when the bypass is on.
+function Write-PermissionModeNotice([bool]$AllowBypass) {
+    if ($AllowBypass) {
+        $msg = "  WARNING: -AllowPermissionBypass - launched sessions run with each CLI's permission BYPASS flag: they can edit files and run commands without asking. Only the PreToolUse brake still applies."
+        Write-Host $msg -ForegroundColor Red
+    } else {
+        $msg = "  Permissions: each session uses its CLI's own permission mode and your allow-list (a headless session is denied, not asked, for anything outside it). Opt in to the bypass with -AllowPermissionBypass."
+        Write-Host $msg -ForegroundColor DarkGray
+    }
+    return $msg
 }
 
 # The v1 safety net: an unavailable chosen CLI silently degrades to claude (the
@@ -3407,7 +3500,7 @@ if ($Relaunch -gt 0) {
     $marker       = New-FleetSessionMarker $Relaunch (New-FleetRunId)
     $relaunchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
         -StopAtPRBound $PSBoundParameters.ContainsKey('StopAtPR') -StopAtPR ([bool]$StopAtPR)
-    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$relaunchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
+    $spawn = Start-WorktreeSession -IssueNum $Relaunch -Repo $sess.repo -Branch $sess.branch -WorkPath $sess.workPath -ClaudeAuthVar $authVar -Cli $cli -FleetSession $marker -StopAtPR:$relaunchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes -AllowPermissionBypass:$AllowPermissionBypass
     # Start-WorktreeSession returns $null on a failed/missing-worktree spawn. Registering
     # then would fall back to the coordinator PID and poison the registry - so only record a
     # session that actually launched.
@@ -4292,8 +4385,9 @@ if ($Parallel.Count -gt 0) {
             if ($res.Status -eq 'not-installed' -and -not $DryRun) {
                 if (Install-CliOnApproval $adapter) { $res = Test-CliAvailability -Adapter $adapter }
             }
-            $availability[$adapter.Name] = $res.Status
+            $availability[$adapter.Name] = Resolve-BypassAvailability $adapter $res.Status ([bool]$AllowPermissionBypass)
         }
+        Write-PermissionModeNotice ([bool]$AllowPermissionBypass) | Out-Null
 
         if ($DryRun) {
             # No prompt / install / spawn under -DryRun: just show the probe table and
@@ -4344,7 +4438,8 @@ if ($Parallel.Count -gt 0) {
                 $marker    = New-FleetSessionMarker $entry.issue $runId
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
                                                -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `
-                                               -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
+                                               -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes `
+                                               -AllowPermissionBypass:$AllowPermissionBypass
                 Register-LaunchedSession -Spawn $spawn -IssueNum $entry.issue -Cli $actualCli -FleetSession $marker
                 $actualCli
             }.GetNewClosure()
@@ -4365,6 +4460,7 @@ if ($Parallel.Count -gt 0) {
         if ($ClaudeAuthVar -eq 'CLAUDE_CODE_OAUTH_TOKEN') {
             Write-Host "  Auth: using CLAUDE_CODE_OAUTH_TOKEN (subscription)." -ForegroundColor DarkGray
         }
+        Write-PermissionModeNotice ([bool]$AllowPermissionBypass) | Out-Null
         if ($DryRun) {
             Write-Host "----- LAUNCH (preview, -DryRun launches nothing) -----" -ForegroundColor Cyan
             $runId = New-FleetRunId
@@ -4373,7 +4469,7 @@ if ($Parallel.Count -gt 0) {
                 # New-IssueWorktree / Get-IssueWorktreePath - the grouped-worktree layout).
                 $previewPath = Get-IssueWorktreePath $r.repo $r.issue (Split-Path (Get-Location) -Parent)
                 $marker = New-FleetSessionMarker $r.issue $runId
-                Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Preview | Out-Null
+                Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $previewPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -AllowPermissionBypass:$AllowPermissionBypass -Preview | Out-Null
             }
         } else {
             Write-Host "----- LAUNCHING CLAUDE SESSIONS -----" -ForegroundColor Cyan
@@ -4400,7 +4496,7 @@ if ($Parallel.Count -gt 0) {
             foreach ($r in $started) {
                 if ($r.workPath) {
                     $marker = New-FleetSessionMarker $r.issue $runId
-                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes
+                    $spawn = Start-WorktreeSession -IssueNum $r.issue -Repo $r.repo -Branch $r.branch -WorkPath $r.workPath -ClaudeAuthVar $ClaudeAuthVar -FleetSession $marker -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes -AllowPermissionBypass:$AllowPermissionBypass
                     $launched++
                     # Track the spawned session's own PID: the pwsh window's process, or for a wt
                     # tab (whose launcher forks and exits) the tab shell found by its launch script.

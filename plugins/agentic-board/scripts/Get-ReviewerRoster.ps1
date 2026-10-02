@@ -52,9 +52,9 @@ function Get-ReviewerRoster {
         [pscustomobject]@{
             Name      = 'antigravity'
             Command   = 'agy'
-            # Same headless flag set second-opinion reviews with: a probe that exercises a
-            # different flag set than the real run can green-light a run that then fails.
-            ProbeArgs = @('-p', 'reply OK', '--dangerously-skip-permissions')
+            # Auth/quota only, and the same probe /board work -Fleet uses. No permission bypass
+            # (#761): a one-token reply calls no tool, so the flag never changed its verdict.
+            ProbeArgs = @('-p', 'reply OK')
         }
         [pscustomobject]@{
             Name      = 'codex'

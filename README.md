@@ -31,8 +31,9 @@ the whole issue → branch → PR → gate → merge loop.
 - **A quota-aware multi-CLI fleet.** `/board work` can start several independent issues at once,
   each in its own git worktree, and optionally launch one agent session per issue — probing each
   CLI (Claude, Antigravity, Codex, Jules, Copilot) for quota and availability before handing it work.
-- **Review-gated by default.** Every issue finishes through a PR and a review gate (Copilot
-  review + CI checks + unresolved-thread checks) before it can merge. Good GitHub hygiene is
+- **Review-gated by default.** Every issue finishes through a PR and a review gate (a review on
+  the current head commit — the gate requests a GitHub Copilot review when the account has it —
+  plus CI checks and unresolved-thread checks) before it can merge. Good GitHub hygiene is
   driven by the flow, not left to willpower.
 
 > **See it run on itself → [SHOWCASE.md](SHOWCASE.md)** — the tool governs its own roadmap board;
@@ -40,8 +41,12 @@ the whole issue → branch → PR → gate → merge loop.
 >
 > Read the case study on running a real BI project's board with this tool → **[agentic-board: agentes de Claude Code en tu board de GitHub](https://csalcedodatabi.com/blog/agentic-board/)** (in Spanish)
 
-BI GitOps (PBIP/Fabric, TMDL diff review, semantic-model agents) is a **future module** on the
-same foundation — see the [roadmap](#module-roadmap).
+BI work rides on the same foundation: TMDL diff review and BI toolkit provisioning have shipped;
+the rest is on the [roadmap](#module-roadmap).
+
+> **What it runs, sends and fetches** — hooks, launched CLIs, permission defaults, network calls
+> and installs are listed, checked against the code, in the
+> [plugin README](plugins/agentic-board/README.md#what-this-plugin-runs-sends-and-fetches).
 
 ---
 
@@ -64,13 +69,13 @@ executes consistently — including the GitHub gotchas (single-select field IDs,
 
 Then enable **agentic-board** in your Claude Code plugins.
 
-> **Migrating from `agentic-bi-ops`?** The plugin was renamed to **`agentic-board`**
-> (the GitHub repo redirects automatically). Existing installs keep updating via a
-> deprecated `agentic-bi-ops` alias in the marketplace, but to move to the new name
-> refresh the marketplace and install the new id:
+> **Coming from `agentic-bi-ops`?** The plugin was renamed to **`agentic-board`** and the old
+> marketplace alias has been removed, so an `agentic-bi-ops` install no longer updates. Uninstall it
+> and install the new id:
 >
 > ```
-> /plugin marketplace update CSalcedoDataBI/agentic-board
+> /plugin marketplace update agentic-board
+> /plugin uninstall agentic-bi-ops@agentic-board
 > /plugin install agentic-board@agentic-board
 > ```
 
@@ -122,8 +127,9 @@ Two rules keep it discoverable, so nothing has to be memorized:
 - **One front door.** `/board` also points to the sibling commands, so the whole tool is reachable
   from a single entry point.
 
-The internal skills (account resolution, board admin, and the rest) are hidden from the `/` palette
-— the four commands above are the only entry points you type.
+The internal skills (account resolution, board admin, `tmdl-review`, and the rest) are hidden from
+the `/` palette — the commands in the table above are the only entry points you type; the internal
+skills run when you ask for their work in plain language.
 
 ---
 
@@ -189,8 +195,14 @@ For each issue the batch:
 
    They share a single `.git`, so N working directories edit in parallel without colliding.
 3. With `-Launch`, opens **one Windows Terminal tab per worktree** running an autonomous headless
-   `claude -p` session, each briefed to take its issue all the way through **PR → review gate →
-   merge**.
+   `claude -p` session, each briefed to take its issue through **PR → review gate**, stopping at
+   the reviewed PR unless you pass `-AllowMerge`.
+
+> **Permissions.** A launched session keeps its CLI's own permission mode and your allow-list, so
+> a headless session is denied any tool outside it. Pass `-AllowPermissionBypass` to launch with
+> the CLI's bypass flag instead (`--permission-mode bypassPermissions` for Claude); the launcher
+> prints a warning when you do. Each session also starts with inherited `*TOKEN*`, `*KEY*`,
+> `*SECRET*` and `*PASSWORD*` variables removed, except its model credential and one GitHub identity.
 
 Monitor the fleet with `plugins/agentic-board/scripts/Board-Work.ps1 -Sessions` (dead-PID entries
 are pruned automatically).
@@ -273,7 +285,7 @@ against the official guides ([Projects](https://docs.github.com/en/issues/planni
 | Branch per change, descriptive name | `work` creates `issue-<num>-<slug>` on start |
 | PR for every change, issue auto-closed | step 5 mandates a PR with `Closes #<num>` — never direct to main |
 | Right identity per repo | `New-BoardPR.ps1` resolves the account from the repo OWNER, pushes with a one-shot credential (remote never rewritten), opens/updates the PR |
-| Merge only after review | **review gate**: Copilot review request + CI checks + unresolved threads; exit 0 gates the merge; honest self-review fallback |
+| Merge only after review | **review gate**: a review on the current head (Copilot requested when available) + CI checks + unresolved threads; exit 0 gates the merge; honest self-review fallback |
 | Small, focused PRs | gate warns over 600 lines / 20 files and suggests a sub-issue split |
 | Delete branch after merge | merge flow uses `--delete-branch` |
 | Break down large issues | `Board-Breakdown.ps1` creates native sub-issues (progress column fills itself) |
@@ -329,7 +341,7 @@ Add your own public repos (or another developer's) as `skill-clone` entries in
 | Module | Description | Foundation |
 |---|---|---|
 | **M1** (current) | Cross-account GitHub Projects & issues governance | `gh-account` |
-| **M2** (shipped) | **TMDL diff review** — breaking schema-change detection wired into the review gate (the surviving slice of the old PBIP/Fabric git-ops idea) | `tmdl-review` |
+| **M2** (shipped) | **TMDL diff review** — breaking schema-change detection wired into the review gate (the surviving slice of the old PBIP/Fabric git-ops idea). An internal skill: ask for a TMDL diff review in plain language | `tmdl-review` |
 | **M3** (current) | **BI toolkit provisioning** — *reference / install / monitor* the Microsoft Fabric + Power BI tooling ecosystem by profile (`/skills bootstrap bi`, `/skills freshness`), rather than rebuild it. See [Toolkit provisioning](#toolkit-provisioning-skills-ops) | `skills-ops` |
 | **M4** (shipped) | BI release automation — a **release checklist spec for BI artifacts** (`references/bi-release-checklist.md`) and **changelog generation** from board Done issues (`/board changelog`) | `gh-account` |
 | **M5** | Knowledge-ops — per-project references registry by domain (`knowledge/registry.json` + generated `KNOWLEDGE.md`), `/knowledge add` + `harvest`; Phase 2 wiki publish + capture-in-handoff | `gh-account` |
