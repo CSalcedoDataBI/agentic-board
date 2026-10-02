@@ -57,6 +57,17 @@ Describe 'Add-RunEntry' {
         $s1.updated          | Should -BeExactly '2026-07-17T11:30:00Z'
         $s1.started          | Should -BeExactly '2026-07-17T10:00:00Z'   # preserved
     }
+    It 'carries the auto-checkpoint trail forward instead of dropping it (#771)' {
+        $s0 = New-RunState -Epic 348 -Board 13 -Repo 'o/r' -Queue 349 -When $script:T0
+        $s0 | Add-Member -NotePropertyName checkpoints -NotePropertyValue @([pscustomobject]@{ step = 'start'; issue = 349; detail = ''; at = 'x' })
+        $s1 = Add-RunEntry -State $s0 -Issue 349 -Note 'n' -When $script:T1
+        @($s1.checkpoints).Count | Should -Be 1
+        $s1.checkpoints[0].step | Should -BeExactly 'start'
+    }
+    It 'adds no checkpoint field to a state that never had one' {
+        $s = Add-RunEntry -State (New-RunState -Epic 1 -Board 0 -Repo 'o/r' -When $script:T0) -Issue 2 -When $script:T1
+        $s.PSObject.Properties['checkpoints'] | Should -BeNullOrEmpty
+    }
     It 'is a log, not a set - the same issue can appear twice' {
         $s = New-RunState -Epic 1 -Board 0 -Repo 'o/r' -When $script:T0
         $s = Add-RunEntry -State $s -Issue 5 -Note 'a' -When $script:T0
@@ -88,6 +99,15 @@ Describe 'Format-RunLedgerComment' {
     It 'omits the table when there are no entries yet' {
         $s = New-RunState -Epic 1 -Board 2 -Repo 'o/r' -When $script:T0
         Format-RunLedgerComment $s | Should -Not -Match '\| issue \| note \| next \|'
+    }
+    It 'shows the last checkpoint as ATTEMPTED, not done (#771)' {
+        $s = New-RunState -Epic 1 -Board 2 -Repo 'o/r' -When $script:T0
+        $s | Add-Member -NotePropertyName checkpoints -NotePropertyValue @(
+            [pscustomobject]@{ step = 'start'; issue = 5; detail = ''; at = 'a' },
+            [pscustomobject]@{ step = 'launch'; issue = 6; detail = ''; at = 'b' })
+        $body = Format-RunLedgerComment $s
+        $body | Should -Match 'Last checkpoint: `launch` on #6 at b'
+        $body | Should -Match 'attempted'
     }
     It 'reflects the closed status' {
         $s = New-RunState -Epic 1 -Board 2 -Repo 'o/r' -When $script:T0
