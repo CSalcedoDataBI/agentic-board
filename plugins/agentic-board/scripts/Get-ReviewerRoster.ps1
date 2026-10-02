@@ -19,17 +19,20 @@
 
     Two rules the probe keeps, because both were how a dead reviewer looked alive:
 
-      * Exit 0 is not a verdict. The classifier reads the OUTPUT first (auth / retired client /
-        quota / untrusted directory), and an exit-0 run that printed nothing is `no-output`, not
-        `ok`. A reviewer that produced no review is not evidence of a reviewer.
-      * Never guess. A probe that timed out, or a CLI that is not on PATH, is reported as exactly
-        that. Nothing here assumes a reviewer works because it exists.
+      * Exit 0 is not a verdict. The output is classified by the SAME per-CLI rules the fleet
+        uses (Resolve-CliProbeOutcome in BoardWork.Adapters.ps1, #770) into the closed set
+        OK | AUTH | RATE_LIMIT | QUOTA | CONTEXT_WINDOW | ERROR, and OK needs the CLI's expected
+        answer: an exit-0 run that printed nothing, or printed something unrecognised, is ERROR.
+        A reviewer that produced no review is not evidence of a reviewer.
+      * Never guess. A CLI that is not on PATH is NOT_INSTALLED; a probe that timed out is ERROR
+        and its Detail says so. Nothing here assumes a reviewer works because it exists.
 
     Cost, stated because the antigravity probe is a real one-token model call (~8-10 s): it runs
     ONLY on the unreviewed exit path of the gate, never on a normal pass, and all probes share one
     deadline (default 30 s).
 
-    Pure at load (functions only, no output, no gh): dot-source it.
+    Pure at load (functions only, no output, no gh): dot-source it. It dot-sources
+    BoardWork.Adapters.ps1 (functions only too) for the probe classifier.
       . (Join-Path $PSScriptRoot 'Get-ReviewerRoster.ps1')
 
     ROSTER SCOPE. Antigravity (`agy`) and Codex are the two external reviewers second-opinion
@@ -39,14 +42,21 @@
     one entry plus its probe once someone has measured it.
 #>
 
+# The probe classifier and its closed code set live with the fleet adapters (#770), so a
+# reviewer verdict here and a fleet verdict there cannot disagree about the same CLI output.
+. (Join-Path $PSScriptRoot 'BoardWork.Adapters.ps1')
+
 # The reviewers the gate can probe. Command = the executable that must be on PATH; ProbeArgs = the
 # cheapest invocation that exercises AUTH (not just `--version`, which passes for a logged-out
 # CLI). The probes match the ones /board work -Fleet already uses, so a verdict here and there
 # cannot disagree about the same CLI.
 #
-# This is a COPY of the command + probe arguments in Get-CliAdapters (BoardWork.Adapters.ps1, loaded by
-# Board-Work.ps1, which cannot be dot-sourced from here). It is kept honest by a test that reads the fleet's definition and fails
-# when the two differ - Get-ReviewerRoster.Tests.ps1, "The roster agrees with the fleet adapters".
+# This is a COPY of the command + probe arguments in Get-CliAdapters (BoardWork.Adapters.ps1): there
+# they live inside each adapter's Probe scriptblock, which runs the CLI through a background job,
+# while the gate needs the bare argv for its own deadline-bounded processes. It is kept honest by a
+# test that reads the fleet's definition and fails when the two differ -
+# Get-ReviewerRoster.Tests.ps1, "The roster agrees with the fleet adapters". The output of both is
+# classified by the same adapter rules (Name = the adapter name).
 function Get-ReviewerRoster {
     return @(
         [pscustomobject]@{
@@ -66,30 +76,12 @@ function Get-ReviewerRoster {
     )
 }
 
-# Classify one probe run into a single status word. Pure.
-#
-# Order matters and is the point of the function: the OUTPUT is read before the exit code, because
-# Gemini printed an auth error and exited 0. A generic "exit 0 => ok" shortcut is precisely the bug
-# this file exists to remove.
-#   unsupported  the vendor retired this client (IneligibleTierError / UNSUPPORTED_CLIENT)
-#   untrusted    refuses headless runs outside a trusted directory
-#   no-quota     rate limited / out of quota
-#   auth         not logged in
-#   error        non-zero exit, none of the above
-#   no-output    exit 0 but nothing came back - not evidence of a working reviewer
-#   ok           exit 0 and it answered
-function Get-ReviewerProbeStatus {
-    param([int]$ExitCode, [string]$Output)
-    $s = "$Output"
-    if ($s -match '(?i)IneligibleTier|UNSUPPORTED_CLIENT|no longer supported')          { return 'unsupported' }
-    if ($s -match '(?i)not running in a trusted directory|skip-trust|TRUST_WORKSPACE')  { return 'untrusted' }
-    # Phrases, not bare words: a healthy banner can say "Quota remaining: 500" or carry "401" inside
-    # an id, and that must not read as a dead reviewer (review round 1).
-    if ($s -match '(?i)rate.?limit|quota (exceeded|exhausted|reached|limit)|(exceeded|out of|no) (your )?(quota|credits)|resource.?exhausted|too many requests|\b(http|status|error|code)[ :=]*429\b') { return 'no-quota' }
-    if ($s -match '(?i)not logged in|logged out|login required|unauthori[sz]ed|unauthenticated|not authenticated|please (log ?in|sign ?in)|\b(http|status|error|code)[ :=]*401\b') { return 'auth' }
-    if ($ExitCode -ne 0)   { return 'error' }
-    if (-not $s.Trim())    { return 'no-output' }
-    return 'ok'
+# Classify one probe run of reviewer $Cli into { Code; Reason } with that CLI's own fleet rules
+# (#770). The OUTPUT is read before the exit code - Gemini printed an auth error and exited 0, and
+# a generic "exit 0 => alive" shortcut is precisely the bug this file exists to remove. Pure.
+function Get-ReviewerProbeOutcome {
+    param([string]$Cli, [int]$ExitCode, [string]$Output)
+    Resolve-CliProbeOutcome -Cli $Cli -ExitCode $ExitCode -Output $Output
 }
 
 # Quote one argument for a Windows command line (ProcessStartInfo.Arguments is a single string on
@@ -126,7 +118,9 @@ function Stop-ReviewerProcess {
 #
 # Returns one record per roster entry, in roster order:
 #   @{ Name; Command; Status; Detail }
-# where Status is a Get-ReviewerProbeStatus word, or `not-installed` / `timeout`.
+# where Status is a probe code (Get-CliProbeCodes) or NOT_INSTALLED, and Detail says why a
+# non-OK reviewer is not answering. A roster entry may name the adapter whose rules classify it
+# in `Cli`; it defaults to its Name.
 function Invoke-ReviewerProbes {
     param(
         [Parameter(Mandatory)]$Roster,
@@ -140,7 +134,7 @@ function Invoke-ReviewerProbes {
         $cmd = Get-Command $r.Command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $cmd) {
             $results[$r.Name] = [pscustomobject]@{ Name = $r.Name; Command = $r.Command
-                Status = 'not-installed'; Detail = "$($r.Command) is not on the PATH" }
+                Status = 'NOT_INSTALLED'; Detail = "$($r.Command) is not on the PATH" }
             continue
         }
         try {
@@ -158,7 +152,7 @@ function Invoke-ReviewerProbes {
             $procs[$r.Name] = @{ P = $p; Out = $p.StandardOutput.ReadToEndAsync(); Err = $p.StandardError.ReadToEndAsync() }
         } catch {
             $results[$r.Name] = [pscustomobject]@{ Name = $r.Name; Command = $r.Command
-                Status = 'error'; Detail = "could not launch it: $($_.Exception.Message)" }
+                Status = 'ERROR'; Detail = "could not launch it: $($_.Exception.Message)" }
         }
     }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
@@ -180,31 +174,35 @@ function Invoke-ReviewerProbes {
             # stderr first in the text: the auth error the issue quotes goes there, and the
             # classifier reads the whole thing.
             $text = "$($e.Err.Result)`n$($e.Out.Result)"
+            $cli  = if ($r.PSObject.Properties['Cli'] -and $r.Cli) { $r.Cli } else { $r.Name }
+            $o    = Get-ReviewerProbeOutcome -Cli $cli -ExitCode $e.P.ExitCode -Output $text
             $results[$r.Name] = [pscustomobject]@{ Name = $r.Name; Command = $r.Command
-                Status = (Get-ReviewerProbeStatus -ExitCode $e.P.ExitCode -Output $text); Detail = '' }
+                Status = $o.Code; Detail = $(if ($o.Code -ceq 'OK') { '' } else { $o.Reason }) }
         } else {
+            # A timeout is not a seventh probe code: it is ERROR, and the Detail says what happened.
             Stop-ReviewerProcess -Process $e.P
             $results[$r.Name] = [pscustomobject]@{ Name = $r.Name; Command = $r.Command
-                Status = 'timeout'; Detail = "did not answer within ${TimeoutSec}s" }
+                Status = 'ERROR'; Detail = "did not answer within ${TimeoutSec}s" }
         }
         $e.P.Dispose()
     }
     return @($Roster | ForEach-Object { $results[$_.Name] })
 }
 
-# Plain-language reason for a non-ok status. Pure.
+# Plain-language reason for a non-OK status. The probe's Detail is the precise reason (the
+# adapter rule that matched, the timeout, the missing PATH entry) and wins when present; the
+# code alone is the fallback. Pure.
 function Get-ReviewerStatusText {
-    param([string]$Status)
-    switch ($Status) {
-        'not-installed' { 'is not installed' }
-        'auth'          { 'is not authenticated' }
-        'unsupported'   { 'the provider retired this client (it can no longer authenticate)' }
-        'untrusted'     { 'refuses to run outside a trusted directory' }
-        'no-quota'      { 'out of quota (rate limit / quota)' }
-        'no-output'     { 'exited 0 but produced no output at all - that is not a live reviewer' }
-        'timeout'       { 'did not answer in time' }
-        'error'         { 'failed to run' }
-        default         { "status '$Status'" }
+    param([string]$Status, [string]$Detail)
+    if ($Detail) { return $Detail }
+    switch -CaseSensitive ($Status) {
+        'NOT_INSTALLED'  { 'is not installed' }
+        'AUTH'           { 'is not authenticated' }
+        'QUOTA'          { 'out of quota' }
+        'RATE_LIMIT'     { 'rate limited - retry later' }
+        'CONTEXT_WINDOW' { 'the prompt does not fit the model context window' }
+        'ERROR'          { 'failed to run' }
+        default          { "status '$Status'" }
     }
 }
 
@@ -225,19 +223,19 @@ function Get-UnreviewedWayOut {
         & $add '      Record it with -RecordReview -Reviewer <who> -Summary <what they found>.' 'DarkGray'
         return $lines.ToArray()
     }
-    $alive = @($Liveness | Where-Object { $_.Status -eq 'ok' })
-    $dead  = @($Liveness | Where-Object { $_.Status -ne 'ok' })
+    $alive = @($Liveness | Where-Object { $_.Status -ceq 'OK' })
+    $dead  = @($Liveness | Where-Object { $_.Status -cne 'OK' })
 
     if ($alive.Count -gt 0) {
         $names = ($alive | ForEach-Object { "$($_.Name) ($($_.Command))" }) -join ', '
         & $add "   1. Get a real review - external reviewer(s) answering right now: $names." 'Cyan'
         & $add '      Use the second-opinion skill with one of them and record it with' 'DarkGray'
         & $add '      -RecordReview -Reviewer <who> -Summary <what they found>.' 'DarkGray'
-        foreach ($d in $dead) { & $add ("      (not answering: {0} - {1})" -f $d.Name, (Get-ReviewerStatusText -Status $d.Status)) 'DarkGray' }
+        foreach ($d in $dead) { & $add ("      (not answering: {0} - {1})" -f $d.Name, (Get-ReviewerStatusText -Status $d.Status -Detail $d.Detail)) 'DarkGray' }
     } else {
         & $add '   1. Get a real review - but NO external reviewer answers right now, so' 'Cyan'
         & $add '      second-opinion cannot run and I do not recommend it:' 'Cyan'
-        foreach ($d in $dead) { & $add ("        - {0} ({1}): {2}" -f $d.Name, $d.Command, (Get-ReviewerStatusText -Status $d.Status)) 'DarkGray' }
+        foreach ($d in $dead) { & $add ("        - {0} ({1}): {2}" -f $d.Name, $d.Command, (Get-ReviewerStatusText -Status $d.Status -Detail $d.Detail)) 'DarkGray' }
         & $add '      Read the diff yourself and record it: -RecordReview -Reviewer <your name> -Summary <what you found>.' 'DarkGray'
     }
     return $lines.ToArray()

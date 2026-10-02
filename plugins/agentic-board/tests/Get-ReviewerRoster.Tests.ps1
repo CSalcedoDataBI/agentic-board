@@ -47,50 +47,61 @@ BeforeAll {
     New-StandInCli -Name 'rr-slow'   -Text 'OK' -SleepSec 8
     New-StandInCli -Name 'rr-slow2'  -Text 'OK' -SleepSec 8
 
-    function script:Entry { param([string]$Name, [string]$Cmd) [pscustomobject]@{ Name = $Name; Command = $Cmd; ProbeArgs = @('x') } }
+    # Stand-ins are classified with the antigravity adapter's rules (#770): OK = it replied OK.
+    function script:Entry { param([string]$Name, [string]$Cmd) [pscustomobject]@{ Name = $Name; Command = $Cmd; ProbeArgs = @('x'); Cli = 'antigravity' } }
 }
 AfterAll {
     $env:PATH = $script:OldPath
     Remove-Item -LiteralPath $script:Bin -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Describe 'Get-ReviewerProbeStatus - exit 0 is not a verdict (#537)' {
+Describe 'Get-ReviewerProbeOutcome - exit 0 is not a verdict (#537, #770)' {
+    BeforeAll {
+        function script:Agy { param([int]$Exit, [string]$Out) (Get-ReviewerProbeOutcome -Cli 'antigravity' -ExitCode $Exit -Output $Out).Code }
+    }
     It 'Gemini: an auth error printed on exit 0 is NOT a live reviewer' {
         # Verbatim shape from the issue. A caller that only read the exit code called this success.
         $txt = "IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals (reasonCode: UNSUPPORTED_CLIENT, tierId: free-tier)"
-        Get-ReviewerProbeStatus -ExitCode 0 -Output $txt | Should -Be 'unsupported'
+        $o = Get-ReviewerProbeOutcome -Cli 'antigravity' -ExitCode 0 -Output $txt
+        $o.Code   | Should -BeExactly 'AUTH'
+        $o.Reason | Should -Match 'retired'
     }
-    It 'Gemini: refusing an untrusted directory is not alive either, even on exit 0' {
-        Get-ReviewerProbeStatus -ExitCode 0 -Output 'Gemini CLI is not running in a trusted directory' | Should -Be 'untrusted'
+    It 'refusing an untrusted directory is not alive either, even on exit 0' {
+        $o = Get-ReviewerProbeOutcome -Cli 'antigravity' -ExitCode 0 -Output 'Gemini CLI is not running in a trusted directory'
+        $o.Code   | Should -BeExactly 'ERROR'
+        $o.Reason | Should -Match 'trusted directory'
     }
-    It 'exit 0 with an auth error in the text is auth, not ok' {
-        Get-ReviewerProbeStatus -ExitCode 0 -Output 'Not logged in. Run login first.' | Should -Be 'auth'
+    It 'exit 0 with an auth error in the text is AUTH, not OK' {
+        Agy 0 'Not logged in. Run login first.' | Should -BeExactly 'AUTH'
     }
-    It 'exit 0 with a quota error in the text is no-quota, not ok' {
-        Get-ReviewerProbeStatus -ExitCode 0 -Output 'Error 429: quota exceeded' | Should -Be 'no-quota'
+    It 'exit 0 with a quota error in the text is QUOTA, not OK' {
+        Agy 0 'Error 429: quota exceeded' | Should -BeExactly 'QUOTA'
     }
-    It 'exit 0 with NO output is no-output - a reviewer that produced nothing is not evidence of a reviewer' {
-        Get-ReviewerProbeStatus -ExitCode 0 -Output '' | Should -Be 'no-output'
-        Get-ReviewerProbeStatus -ExitCode 0 -Output "  `r`n " | Should -Be 'no-output'
+    It 'exit 0 with NO output is ERROR - a reviewer that produced nothing is not evidence of a reviewer' {
+        Agy 0 '' | Should -BeExactly 'ERROR'
+        (Get-ReviewerProbeOutcome -Cli 'antigravity' -ExitCode 0 -Output "  `r`n ").Reason | Should -Match 'printed nothing'
     }
-    It 'a non-zero exit with no known cause is a plain error' {
-        Get-ReviewerProbeStatus -ExitCode 2 -Output 'something exploded' | Should -Be 'error'
+    It 'a non-zero exit with no known cause is a plain ERROR' {
+        Agy 2 'something exploded' | Should -BeExactly 'ERROR'
     }
-    It 'exit 0 that answered is ok' {
-        Get-ReviewerProbeStatus -ExitCode 0 -Output 'OK' | Should -Be 'ok'
+    It 'exit 0 that answered is OK' {
+        Agy 0 'OK' | Should -BeExactly 'OK'
     }
-    It 'a healthy banner that merely mentions quota or carries 401/429 inside an id is still ok' {
-        Get-ReviewerProbeStatus -ExitCode 0 -Output 'Quota remaining: 500 requests' | Should -Be 'ok'
-        Get-ReviewerProbeStatus -ExitCode 0 -Output 'session a4012bc9429d ready' | Should -Be 'ok'
-        Get-ReviewerProbeStatus -ExitCode 0 -Output 'Logged in. Workspace 401 ready, 429 files indexed' | Should -Be 'ok'
+    It 'a healthy banner that merely mentions quota or carries 401/429 inside an id is still OK' {
+        Agy 0 "Quota remaining: 500 requests`nOK" | Should -BeExactly 'OK'
+        Agy 0 'session a4012bc9429d ready: OK' | Should -BeExactly 'OK'
+        Agy 0 'Logged in. Workspace 401 ready, 429 files indexed. OK' | Should -BeExactly 'OK'
     }
-    It 'real quota / auth statuses are still recognised' {
-        Get-ReviewerProbeStatus -ExitCode 1 -Output 'HTTP 429 Too Many Requests' | Should -Be 'no-quota'
-        Get-ReviewerProbeStatus -ExitCode 1 -Output 'RESOURCE_EXHAUSTED: quota exceeded' | Should -Be 'no-quota'
-        Get-ReviewerProbeStatus -ExitCode 1 -Output 'request failed: status 401' | Should -Be 'auth'
+    It 'exit 0 with output that is not the expected answer fails closed to ERROR (#770)' {
+        Agy 0 'Quota remaining: 500 requests' | Should -BeExactly 'ERROR'
     }
-    It "codex's logged-in banner is ok - the word 'authenticated' in a success line must not read as a failure" {
-        Get-ReviewerProbeStatus -ExitCode 0 -Output 'Logged in using ChatGPT (authenticated)' | Should -Be 'ok'
+    It 'real quota / rate-limit / auth statuses are still recognised' {
+        Agy 1 'HTTP 429 Too Many Requests' | Should -BeExactly 'RATE_LIMIT'
+        Agy 1 'RESOURCE_EXHAUSTED: quota exceeded' | Should -BeExactly 'QUOTA'
+        Agy 1 'request failed: status 401' | Should -BeExactly 'AUTH'
+    }
+    It "codex's logged-in banner is OK - the word 'authenticated' in a success line must not read as a failure" {
+        (Get-ReviewerProbeOutcome -Cli 'codex' -ExitCode 0 -Output 'Logged in using ChatGPT (authenticated)').Code | Should -BeExactly 'OK'
     }
 }
 
@@ -115,28 +126,37 @@ Describe 'ConvertTo-ReviewerArg - one roster argument stays one argument' {
 }
 
 Describe 'Invoke-ReviewerProbes - real processes against stand-in CLIs' {
-    It 'reports a working CLI as ok, a retired one as unsupported (exit 0!), and a silent one as no-output' {
+    It 'reports a working CLI as OK, a retired one as AUTH (exit 0!), and a silent one as ERROR' {
         $roster = @((Entry 'alive' 'rr-alive'), (Entry 'dead' 'rr-authdead'), (Entry 'silent' 'rr-silent'))
         $res = @(Invoke-ReviewerProbes -Roster $roster -TimeoutSec 60)
-        ($res | Where-Object Name -eq 'alive').Status  | Should -Be 'ok'
-        ($res | Where-Object Name -eq 'dead').Status   | Should -Be 'unsupported'
-        ($res | Where-Object Name -eq 'silent').Status | Should -Be 'no-output'
+        ($res | Where-Object Name -eq 'alive').Status  | Should -BeExactly 'OK'
+        ($res | Where-Object Name -eq 'dead').Status   | Should -BeExactly 'AUTH'
+        ($res | Where-Object Name -eq 'dead').Detail   | Should -Match 'retired'
+        ($res | Where-Object Name -eq 'silent').Status | Should -BeExactly 'ERROR'
+        ($res | Where-Object Name -eq 'silent').Detail | Should -Match 'printed nothing'
     }
-    It 'a crashing CLI is an error' {
-        (@(Invoke-ReviewerProbes -Roster @(Entry 'crash' 'rr-crash') -TimeoutSec 60))[0].Status | Should -Be 'error'
+    It 'a crashing CLI is ERROR' {
+        (@(Invoke-ReviewerProbes -Roster @(Entry 'crash' 'rr-crash') -TimeoutSec 60))[0].Status | Should -BeExactly 'ERROR'
     }
-    It 'a CLI that is not on PATH is not-installed, without running anything' {
+    It 'a CLI that is not on PATH is NOT_INSTALLED, without running anything' {
         $res = @(Invoke-ReviewerProbes -Roster @(Entry 'ghost' 'rr-does-not-exist-anywhere') -TimeoutSec 60)
-        $res[0].Status | Should -Be 'not-installed'
+        $res[0].Status | Should -BeExactly 'NOT_INSTALLED'
         $res[0].Detail | Should -Match 'PATH'
+    }
+    It 'every status is a probe code or NOT_INSTALLED - nothing free-form (#770)' {
+        $roster = @((Entry 'alive' 'rr-alive'), (Entry 'dead' 'rr-authdead'), (Entry 'ghost' 'rr-does-not-exist-anywhere'), (Entry 'crash' 'rr-crash'))
+        foreach ($r in @(Invoke-ReviewerProbes -Roster $roster -TimeoutSec 60)) {
+            Get-CliAvailabilityStates | Should -Contain $r.Status -Because $r.Name
+        }
     }
     It 'a CLI that outlives the shared deadline is reported as timeout, and does not hold the others up' {
         $roster = @((Entry 'slow' 'rr-slow'), (Entry 'alive' 'rr-alive'))
         $sw  = [System.Diagnostics.Stopwatch]::StartNew()
         $res = @(Invoke-ReviewerProbes -Roster $roster -TimeoutSec 3)
         $sw.Stop()
-        ($res | Where-Object Name -eq 'slow').Status  | Should -Be 'timeout'
-        ($res | Where-Object Name -eq 'alive').Status | Should -Be 'ok'
+        ($res | Where-Object Name -eq 'slow').Status  | Should -BeExactly 'ERROR'
+        ($res | Where-Object Name -eq 'slow').Detail  | Should -Match 'did not answer within'
+        ($res | Where-Object Name -eq 'alive').Status | Should -BeExactly 'OK'
         $sw.Elapsed.TotalSeconds | Should -BeLessThan 7 -Because 'the deadline is shared, not per reviewer'
     }
     It 'a timed-out CLI is KILLED with its children - the vendor process behind a shim does not keep running' {
@@ -155,7 +175,7 @@ Describe 'Invoke-ReviewerProbes - real processes against stand-in CLIs' {
             chmod +x $sh
         }
         $res = @(Invoke-ReviewerProbes -Roster @(Entry 'marker' 'rr-marker') -TimeoutSec 2)
-        $res[0].Status | Should -Be 'timeout'
+        $res[0].Detail | Should -Match 'did not answer within'
         Start-Sleep -Seconds 6
         Test-Path -LiteralPath $marker | Should -BeFalse -Because 'a probe left running past its deadline would finish its work behind the gate'
     }
@@ -173,14 +193,14 @@ Describe 'Invoke-ReviewerProbes - real processes against stand-in CLIs' {
         $sw  = [System.Diagnostics.Stopwatch]::StartNew()
         $res = @(Invoke-ReviewerProbes -Roster @(Entry 'orphan' 'rr-orphan') -TimeoutSec 2)
         $sw.Stop()
-        $res[0].Status | Should -Be 'timeout'
+        $res[0].Detail | Should -Match 'did not answer within'
         $sw.Elapsed.TotalSeconds | Should -BeLessThan 5
     }
     It 'the deadline is SHARED: two hung reviewers cost one timeout, not two' {
         $sw  = [System.Diagnostics.Stopwatch]::StartNew()
         $res = @(Invoke-ReviewerProbes -Roster @((Entry 'slowA' 'rr-slow'), (Entry 'slowB' 'rr-slow2')) -TimeoutSec 2)
         $sw.Stop()
-        @($res.Status | Sort-Object -Unique) | Should -Be @('timeout')
+        @($res.Detail | ForEach-Object { $_ -match 'did not answer within' } | Sort-Object -Unique) | Should -Be @($true)
         $sw.Elapsed.TotalSeconds | Should -BeLessThan 3.6 -Because 'a per-reviewer deadline would take ~4 s here'
     }
     It 'returns one record per roster entry, in roster order' {
@@ -191,40 +211,45 @@ Describe 'Invoke-ReviewerProbes - real processes against stand-in CLIs' {
 
 Describe 'Get-UnreviewedWayOut - the gate only recommends what is alive (#537)' {
     BeforeAll {
-        function script:Live { param([string]$N, [string]$C, [string]$S) [pscustomobject]@{ Name = $N; Command = $C; Status = $S; Detail = '' } }
+        function script:Live { param([string]$N, [string]$C, [string]$S, [string]$D = '') [pscustomobject]@{ Name = $N; Command = $C; Status = $S; Detail = $D } }
         function script:Text { param($Lines) (@($Lines | ForEach-Object { $_.Text }) -join "`n") }
     }
     It 'names the reviewers that answered, and points at second-opinion' {
-        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'ok'), (Live 'codex' 'codex' 'ok')))
+        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'OK'), (Live 'codex' 'codex' 'OK')))
         $t | Should -Match 'antigravity \(agy\)'
         $t | Should -Match 'codex \(codex\)'
         $t | Should -Match 'second-opinion'
         $t | Should -Match '-RecordReview'
     }
     It 'lists a dead reviewer as dead - it is never named as an option' {
-        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'auth'), (Live 'codex' 'codex' 'ok')))
+        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'AUTH'), (Live 'codex' 'codex' 'OK')))
         $t | Should -Match 'answering right now: codex \(codex\)'
         $t | Should -Match 'not answering: antigravity - is not authenticated'
         $t | Should -Not -Match 'answering right now:[^\n]*antigravity'
     }
     It 'when NOTHING answers, says so plainly and does not recommend second-opinion' {
-        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'unsupported'), (Live 'codex' 'codex' 'not-installed')))
+        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'AUTH' 'the provider retired this client'), (Live 'codex' 'codex' 'NOT_INSTALLED')))
         $t | Should -Match 'NO external reviewer answers'
         $t | Should -Match 'I do not recommend it'
         $t | Should -Not -Match 'works in principle'
         $t | Should -Not -Match 'Use the second-opinion skill'
     }
     It 'when nothing answers, gives the reason for EACH reviewer and a human way out' {
-        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'timeout'), (Live 'codex' 'codex' 'not-installed')))
-        $t | Should -Match 'antigravity \(agy\): did not answer in time'
+        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'ERROR' 'did not answer within 30s'), (Live 'codex' 'codex' 'NOT_INSTALLED')))
+        $t | Should -Match 'antigravity \(agy\): did not answer within 30s'
         $t | Should -Match 'codex \(codex\): is not installed'
         $t | Should -Match 'Read the diff yourself'
         $t | Should -Match '-RecordReview'
     }
     It 'an exit-0-but-silent reviewer is reported as not alive' {
-        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' 'no-output')))
+        $o = Get-ReviewerProbeOutcome -Cli 'antigravity' -ExitCode 0 -Output ''
+        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'antigravity' 'agy' $o.Code $o.Reason)))
         $t | Should -Match 'NO external reviewer answers'
-        $t | Should -Match 'not a live reviewer'
+        $t | Should -Match 'printed nothing'
+    }
+    It 'an old free-form ok is not OK - the reviewer is reported as not answering (#770)' {
+        $t = Text (Get-UnreviewedWayOut -Liveness @((Live 'codex' 'codex' 'ok')))
+        $t | Should -Match 'NO external reviewer answers'
     }
     It 'when the probe itself could not run, keeps the recommendation but labels it UNVERIFIED' {
         # Saying "nothing is alive" with no evidence would be the same defect turned around.
@@ -233,7 +258,7 @@ Describe 'Get-UnreviewedWayOut - the gate only recommends what is alive (#537)' 
         $t | Should -Not -MatchExactly 'NO external'
     }
     It 'every line carries text and a colour for the gate to print' {
-        $ls = @(Get-UnreviewedWayOut -Liveness @((Live 'codex' 'codex' 'ok')))
+        $ls = @(Get-UnreviewedWayOut -Liveness @((Live 'codex' 'codex' 'OK')))
         $ls.Count | Should -BeGreaterThan 0 -Because 'an empty result would make the loop below pass vacuously'
         foreach ($l in $ls) {
             $l.Text  | Should -Not -BeNullOrEmpty
