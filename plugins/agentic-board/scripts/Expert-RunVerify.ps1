@@ -192,7 +192,7 @@ if ($Issue -le 0 -or $PR -le 0) {
 }
 
 if (-not $env:GH_TOKEN) {
-    $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
+    $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar')))
 }
 
 # Resolve repo from git origin if not provided.

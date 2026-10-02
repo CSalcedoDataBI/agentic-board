@@ -1,7 +1,8 @@
 ---
 name: skills-create
-description: Use to create a new Agent Skill or improve an existing one end to end - check for overlap with installed skills and for public prior art, decide where it lives, write it with skill-creator, pressure-test it with writing-skills, loop skills-audit and skill-improver until the audit gate passes, then run the trigger eval. Routed by /skills create and /skills improve. Not for organizing, auditing only, or installing a toolkit (skills-organize, skills-audit, skills-bootstrap).
+description: "Engine behind /skills create and improve: build or raise a skill end to end (prior art, author, pressure test, audit gate, trigger eval). Triggers — \"crea una skill\", \"mejora esta skill\"."
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # skills-create - one pipeline for a new skill or a better one
@@ -30,7 +31,7 @@ writing, and a gate that says "done". `scripts/Skill-Pipeline.ps1` owns the dete
    it, it is not needed.
 5. **Audit/improve loop**: `Skill-Pipeline.ps1 -Verify -Name <name>`. While it exits non-zero, fix the
    blocking findings with the `skill-improver` skill and run it again. Low findings are advisory.
-6. **Trigger eval** with the `skills-audit` runtime eval (enabled vs disabled, 3 runs): it must fire
+6. **Trigger eval** with the `skills-audit` runtime eval (`${CLAUDE_PLUGIN_ROOT}/skills/skills-audit/SKILL.md`) (enabled vs disabled, 3 runs): it must fire
    on its own prompts and stay quiet on near-misses. A miss goes back to step 5 on the description.
 7. **Report**: where it lives, the RED/GREEN evidence, the audit result, the trigger-eval score.
 

@@ -71,7 +71,37 @@ Describe 'Command surface — internal skills are never dressed as /x' {
     It 'no command file presents internal skill /<Skill> as typeable' -ForEach $SkillCases {
         $needle = "/$Skill"
         foreach ($cmd in $script:CommandFiles) {
-            (Get-Content -LiteralPath $cmd.FullName -Raw) | Should -Not -BeLike "*$needle*" -Because "$($cmd.Name) must not offer $needle — it is an internal skill, invoked by the model, not typed"
+            # A command may OPEN an engine by its file path (#763) - `.../skills/<name>/SKILL.md` is a
+            # path, not a typed /<name>, so it is removed before looking for the typed form.
+            $text = (Get-Content -LiteralPath $cmd.FullName -Raw) -replace ("skills/" + [regex]::Escape($Skill) + "/SKILL\.md"), ''
+            $text | Should -Not -BeLike "*$needle*" -Because "$($cmd.Name) must not offer $needle — it is an internal skill, invoked by the model, not typed"
+        }
+    }
+}
+
+Describe 'Command surface - engines opened by path (#763)' {
+    # An engine with disable-model-invocation: true keeps its description out of every session's
+    # context, but the model can no longer reach it through the Skill tool. The command that owns it
+    # must therefore open it by path, and that path must exist - otherwise the verb silently breaks.
+    BeforeAll {
+        $script:PluginDir = Split-Path -Parent $PSScriptRoot
+        $script:Engines = @(Get-ChildItem -Path (Join-Path $script:PluginDir 'skills') -Directory | Where-Object {
+            $f = Join-Path $_.FullName 'SKILL.md'
+            (Test-Path $f) -and ((Get-Content -LiteralPath $f -TotalCount 12) -match '^disable-model-invocation:\s*true\s*$')
+        } | ForEach-Object Name)
+        $script:AllCommandText = (Get-ChildItem -Path (Join-Path $script:PluginDir 'commands') -Filter *.md | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
+    }
+    It 'at least one engine is excluded from model invocation' {
+        $script:Engines.Count | Should -BeGreaterThan 0
+    }
+    It 'every engine is opened by path from some command' {
+        foreach ($e in $script:Engines) {
+            $script:AllCommandText | Should -BeLike ('*${CLAUDE_PLUGIN_ROOT}/skills/' + $e + '/SKILL.md*') -Because "$e is not model-invocable, so a command must open it by path"
+        }
+    }
+    It 'every skill path a command opens exists' {
+        foreach ($m in [regex]::Matches($script:AllCommandText, '\$\{CLAUDE_PLUGIN_ROOT\}/skills/([a-z0-9-]+)/SKILL\.md')) {
+            Test-Path (Join-Path $script:PluginDir "skills/$($m.Groups[1].Value)/SKILL.md") | Should -BeTrue -Because $m.Value
         }
     }
 }

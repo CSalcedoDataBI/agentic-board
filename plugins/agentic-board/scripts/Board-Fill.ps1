@@ -28,7 +28,7 @@
 
 .PARAMETER Owner
     GitHub login that owns the project board (user OR organization).
-    Defaults to CSalcedoDataBI.
+    Defaults to the account map's default owner, else the gh login.
 
 .PARAMETER Repo
     owner/repo string. Issues are created here when converting drafts.
@@ -45,16 +45,16 @@
 .PARAMETER TokenVar
     Windows USER env var holding the PAT. Defaults to GITHUB_TOKEN_PERSONAL.
     A pre-set $env:GH_TOKEN is respected and NOT overwritten - so a business
-    board works with GITHUB_TOKEN_BUSINESS (same contract as Board-Work.ps1).
+    board works with that account's token variable (same contract as Board-Work.ps1).
 
 .EXAMPLE
-    .\Board-Fill.ps1 -Owner CSalcedoDataBI -Repo CSalcedoDataBI/csalcedodatabi.com -ProjectNum 1 -DryRun
-    .\Board-Fill.ps1 -Owner CSalcedoDataBI -Repo CSalcedoDataBI/csalcedodatabi.com -ProjectNum 1
-    .\Board-Fill.ps1 -Owner CSalcedoDataBI -Repo CSalcedoDataBI/csalcedodatabi.com -ProjectNum 1 -Auto
+    .\Board-Fill.ps1 -Owner your-login -Repo owner/repo -ProjectNum 1 -DryRun
+    .\Board-Fill.ps1 -Owner your-login -Repo owner/repo -ProjectNum 1
+    .\Board-Fill.ps1 -Owner your-login -Repo owner/repo -ProjectNum 1 -Auto
 #>
 [CmdletBinding()]
 param(
-    [string]$Owner      = "CSalcedoDataBI",
+    [string]$Owner      = "",
     [string]$Repo       = "",
     [int]   $ProjectNum = 13,
     [switch]$DryRun,
@@ -299,6 +299,9 @@ function Get-IssueRepo {
 }
 
 if ($env:ABIOS_BOARDFILL_DOTSOURCE) { return }
+# No -Owner: the account map's default owner, else the login gh is signed in as (#762).
+if (-not $Owner) { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $Owner = Get-AbiosDefaultOwner }
+if (-not $Owner) { throw "No board owner: pass -Owner, run 'gh auth login', or set a default with /board setup." }
 
 # ── Top-level error boundary (#485): any unhandled exception becomes a clean
 # one-line message on stdout so the caller always sees what failed — never a
@@ -310,11 +313,11 @@ trap {
 
 # ── 0. Token ──────────────────────────────────────────────────────────────────
 # Respect a pre-set $env:GH_TOKEN (a business board is reached by exporting
-# GITHUB_TOKEN_BUSINESS first) instead of clobbering it with the personal PAT.
+# a work account's variable first) instead of clobbering it with the default PAT.
 if (-not $env:GH_TOKEN) {
-    $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
+    $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar')))
 }
-if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)." }
+if (-not $env:GH_TOKEN) { throw "No GitHub token: $TokenVar is unset, GH_TOKEN is empty and gh has no stored login. Run 'gh auth login', or map the account with /board setup." }
 if (-not $Repo) { $Repo = "$Owner/agentic-board" }
 
 $mode = if ($DryRun) { "DRY-RUN" } elseif ($Auto) { "AUTO" } else { "INTERACTIVE" }

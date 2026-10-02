@@ -1,6 +1,6 @@
 ---
 name: abios-feedback
-description: Use when, while working in ANY project (especially a PRIVATE one), you notice a bug or improvement for the agentic-board tool itself. Captures it as a SANITIZED issue on the tool's OWN public repo/board — never touching the current project and never leaking private data. Triggers — "mejora para la herramienta", "esto es una mejora para agentic-board", "abios bug", "esto deberíamos arreglarlo en el plugin", a guard block, a recurring gh/board failure.
+description: "Use when you notice a bug or improvement for the agentic-board tool itself, while working in any project. Files it as a sanitized issue on the tool's public repo, never in the current project. Triggers — \"mejora para la herramienta\", \"abios bug\", \"esto deberíamos arreglarlo en el plugin\", a guard block."
 user-invocable: false
 ---
 
@@ -20,8 +20,9 @@ These are absolute:
 1. **Target is a CONSTANT, not the current repo.** Always operate on `CSalcedoDataBI/agentic-board`.
    **NEVER** resolve the target with `gh repo view` of the working directory — that would be the
    private project you are standing in. Pass `--repo CSalcedoDataBI/agentic-board` explicitly.
-2. **Identity is the personal account**, via [[gh-account]] (`GITHUB_TOKEN_PERSONAL`), **even if the
-   current project is a PAL-Devs repo**. The tool's repo is personal.
+2. **Identity is YOUR default account**, via [[gh-account]], **even if the current project belongs
+   to another account** (a work org, a client). The tool's repo is public: any GitHub account can
+   open an issue there, so never borrow a work identity for it.
 3. **Do NOT git add / commit / write files in the current project** for this. Capture goes to the
    tool's repo only (an issue), never the cwd repo tree.
 4. **Sanitize first** (next section). The guard in the tool's repo is the backstop, not the cwd.
@@ -73,10 +74,11 @@ recurrence, not a new defect) and acts on its exit code:
 
 ## Step 2 — Capture as a sanitized issue on the tool's own board (PRIMARY, path-independent)
 ```bash
-tok=$(powershell.exe -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL','User')" | tr -d '\r')
+tok=$(pwsh -NoProfile -Command '(& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1").Token')
 GH_TOKEN=$tok gh issue create --repo CSalcedoDataBI/agentic-board \
   --label tool-improvement --title "$(cat "$work/title.txt")" --body-file "$work/body.md"
-# add it to the tool's roadmap board (its own water):
+# Maintainers only: add it to the tool's roadmap board. Anyone else skips this line - it needs
+# write access to that board, and the issue alone is the report.
 GH_TOKEN=$tok gh project item-add 13 --owner CSalcedoDataBI --url "<issue url from above>"
 ```
 This needs no local path and cannot hit the current project — the target is explicit.

@@ -1,5 +1,5 @@
 ---
-description: "Auto-expert mode — take a tracked plan and execute it autonomously through a specialized expert persona (research, build, test with recorded evidence, self-drive the board), stopping only at the irreversible line. Three verbs: config (define the contract), auto (run it) and roles (browse the role catalog this project can extend, and explain why a plan matched)."
+description: Run a tracked plan autonomously as an expert persona, stopping at the irreversible line — verbs config/auto/roles.
 ---
 You are running the agentic-board /expert command (typed as `/agentic-board:expert`).
 
@@ -38,8 +38,8 @@ What do you want to do with the auto-expert?
                      missing. Fails closed: what cannot be read counts as absent.
 ```
 
-First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (default
-CSalcedoDataBI). Then apply the internal `board-expert` skill, which owns the full recipe.
+First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (your account
+map's default). Then open the internal `board-expert` engine with the **Read** tool (it is a file, not a Skill-tool skill) at `${CLAUDE_PLUGIN_ROOT}/skills/board-expert/SKILL.md`, and follow it - it owns the full recipe.
 
 ## config
 Run `scripts/Expert-Config.ps1 -PlanText "<plan/epic text>" -PlanGoal "<goal>"`. It detects the

@@ -1,13 +1,6 @@
 ---
 name: tmdl-review
-description: >
-  Review a TMDL semantic-model diff for breaking schema changes before merging a
-  PBIP change. Compares two versions of the *.tmdl files (a PR, or two git refs)
-  and classifies every change as BREAKING / WARNING / INFO. Use when the user
-  wants to know whether a Power BI / Fabric model change is safe to merge.
-  Triggers — "revisa el diff TMDL", "breaking changes del modelo", "compara el
-  modelo semántico", "¿este cambio rompe el modelo?", "review the TMDL diff",
-  "detect breaking schema changes".
+description: "Use when asked whether a Power BI or Fabric TMDL model change is safe to merge: diffs *.tmdl between a PR or two refs and classifies each change BREAKING, WARNING or INFO. Triggers — \"revisa el diff TMDL\", \"¿este cambio rompe el modelo?\", \"review the TMDL diff\"."
 user-invocable: false
 ---
 

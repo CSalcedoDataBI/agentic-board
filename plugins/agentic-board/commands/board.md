@@ -1,5 +1,5 @@
 ---
-description: Administer/automate a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/actions-cost. Defaults to the CSalcedoDataBI account.
+description: Run a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/actions-cost/setup. No arguments shows the menu.
 ---
 You are running the agentic-board /board command.
 
@@ -40,6 +40,7 @@ What do you want to do with the board?
 21. complete        → verify the board is fully worked (0 pending) — PASS/FAIL, useful for CI or wrap-up
 22. bi-checklist    → show the release checklist for BI artifacts (models/reports)
 23. actions-cost    → audit this repo's GitHub Actions cost (read-only): MEASURED minutes + cost rules over the workflows
+24. setup           → set up your accounts: default owner, which env var holds each account's token, the agent identity
 
 ── other commands (typed) ──────────────────────────────────────
 /scan       → scan THIS project for untracked work (TODOs, checklists, plans) → issues + plan
@@ -69,8 +70,9 @@ command that does not exist.
 
 When they answer with a board option (number or name), execute that sub-action.
 
-First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (default
-CSalcedoDataBI; honor an explicit `--account pal-devs` in the arguments). Never run `gh auth switch`.
+First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (the default
+owner of your account map; honor an explicit `--account <alias>` in the arguments). Never run
+`gh auth switch`. `setup` is the exception: it needs no token.
 
 Then apply the `projects-admin` skill and route the request to ONE sub-action. **The big verbs
 load their full contract on demand (#573)** — for each of these, READ the named reference file
@@ -111,7 +113,7 @@ improvise the recipe from this summary:
   `references/verbs-actions-cost.md`.
 
 **Machine housekeeping is not board work — it moved to `/cleanup` (a separate command).** For one
-release these old spellings still work: route them to the cleanup-ops skill, run the `/cleanup`
+release these old spellings still work: route them to the cleanup-ops engine (read `${CLAUDE_PLUGIN_ROOT}/skills/cleanup-ops/SKILL.md`), run the `/cleanup`
 equivalent, and tell the user the new command in one line:
 `/board plugins [sessions|clean]` → `/cleanup plugins [sessions|clean]`;
 `/board close-cycle --all [-Scope …]` → `/cleanup sessions [-Scope …]`.
@@ -138,6 +140,15 @@ The short verbs run directly:
   `scripts/Assert-BoardComplete.ps1 -ProjectNum <n> -Owner <o>`. "Pending" is the same definition
   `work` lists from. Exit 0 = PASS/clear; exit 1 lists the pending items. Fails closed on a gh
   error (an unreadable board never reads as "complete").
+- **setup** — write or show the user's account map (`~/.agentic-board/accounts.json`, #762) by
+  running `scripts/Set-AbiosAccounts.ps1`. Start with `-Show`. Then ASK, one at a time: the
+  default board owner (offer the login `gh api user --jq .login` returns); for each account they
+  use, the env var that holds its token (`-Map 'login=VAR'`; an env var NAME, never the token
+  itself — never ask for or echo a token); optional short aliases (`-Alias 'alias=login'`); and,
+  only if they run autonomous `/expert` sessions, the variable of a separate machine identity
+  (`-AgentTokenVar`). Preview with `-DryRun`, write on their confirmation, then `-Show` again.
+  With no map at all the plugin uses `GH_TOKEN`, then `gh auth token` — say so: a single-account
+  user can skip setup.
 - **bi-checklist** — show the release definition-of-done for a **BI artifact** by printing
   `references/bi-release-checklist.md` (M4.1). It is a checklist, not a runner: items are tagged
   **[tool]** / **[external]** / **[manual]**. Display the file; there is nothing to execute.

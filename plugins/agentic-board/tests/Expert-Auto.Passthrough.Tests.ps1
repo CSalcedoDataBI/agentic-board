@@ -9,6 +9,9 @@
     parameters it is handed. Mocking the function under test would prove nothing here. #>
 
 BeforeAll {
+    # The identity tests run against a FIXED account map, never the developer's own (#762).
+    $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
+    $env:ABIOS_ACCOUNTS_FILE = Join-Path $PSScriptRoot 'fixtures' 'accounts.identity.json'
     $script:ScriptsDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
     $script:Script     = Join-Path $script:ScriptsDir 'Expert-Auto.ps1'
     $env:ABIOS_EXPERTAUTO_DOTSOURCE = '1'
@@ -22,6 +25,7 @@ BeforeAll {
     }
     $script:SkillDir = Join-Path $PSScriptRoot '..' 'skills' 'board-expert' | Resolve-Path
 }
+AfterAll { $env:ABIOS_ACCOUNTS_FILE = $script:SavedAccountsFile }
 
 # ── #473: comments in the brief ─────────────────────────────────────────────────
 
@@ -440,7 +444,7 @@ exit 1
     It '#499: with no GH_TOKEN and -TokenVar named, the identity comes from THAT variable and a missing one is an error, not a fallback' {
         $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner someone-new -TokenVar MISSING_XYZ_VAR -Repo acme/widgets' -NoToken
         $r.Calls.Count | Should -Be 0
-        $r.Out | Should -Match 'MISSING_XYZ_VAR is not in the Windows USER environment'
+        $r.Out | Should -Match 'MISSING_XYZ_VAR is not set \(user or process environment\)'
     }
 
     It '#499: inside a brake-armed worktree the owner''s token variable is refused before any token is read' {
@@ -457,7 +461,7 @@ exit 1
         $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -TokenVar MISSING_XYZ_VAR -Repo acme/widgets' -NoToken
         $r.Calls.Count | Should -Be 1
         $r.Calls[0].TokenVar | Should -Be 'MISSING_XYZ_VAR'
-        $r.Out | Should -Not -Match 'is not in the Windows USER environment'
+        $r.Out | Should -Not -Match 'is not set \(user or process environment\)'
     }
 
     It '#499: real-looking account and repo names (dots, underscores, hyphens, single characters) are NOT refused' {

@@ -15,7 +15,7 @@
       . (Join-Path $PSScriptRoot 'CopilotAvailability.ps1')
 
     Marker shape ($HOME/.agentic-board/copilot-availability.json), a map keyed by owner:
-      { "CSalcedoDataBI": { "state":"unavailable", "until":"2026-07-27T15:00:00Z",
+      { "your-login": { "state":"unavailable", "until":"2026-07-27T15:00:00Z",
                             "reason":"...", "detectedAt":"2026-07-20T15:00:00Z" } }
 #>
 

@@ -89,6 +89,13 @@ what let a menu tell users to type `/abios-feedback`, a command that does not ex
   `user-invocable: false`. It is **hidden from the palette and never typed**; the model invokes it
   from its `description` when the work matches (account resolution, board admin, `abios-feedback`,
   `tmdl-review`, …). A user "runs" it by saying what they want in natural language, not `/<name>`.
+- **Engine** — an internal skill that ONLY a command reaches (`skills-*`, `cleanup-ops`,
+  `tools-catalog`, `project-scan`, `knowledge-harvest`, `board-expert`). It also carries
+  `disable-model-invocation: true`, so its description never loads into a session (#763: this cut
+  the always-on cost from ~2,810 to ~760 tokens). The model cannot reach it through the Skill tool,
+  so its command must open it **by path** as its first action:
+  `${CLAUDE_PLUGIN_ROOT}/skills/<name>/SKILL.md`. `CommandSurface.Tests.ps1` fails if an engine is
+  not opened by path from some command, or if a path a command opens does not exist.
 
 Rules for any new (or renamed) piece:
 

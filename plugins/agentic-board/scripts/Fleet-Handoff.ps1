@@ -36,7 +36,7 @@ param(
     [switch]$Context,
     [int]$Issue = 0,
     [int]$ProjectNum = 0,
-    [string]$Owner = "CSalcedoDataBI",
+    [string]$Owner = "",
     [string]$Repo = "",
     [string]$TokenVar = "GITHUB_TOKEN_PERSONAL"
 )
@@ -97,9 +97,12 @@ function Get-IssueBlockedBy {
 
 # --- dot-source guard: stop here so unit tests get the pure helpers with no I/O -----
 if ($env:ABIOS_FLEETHANDOFF_DOTSOURCE) { return }
+# No -Owner: the account map's default owner, else the login gh is signed in as (#762).
+if (-not $Owner) { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $Owner = Get-AbiosDefaultOwner }
+if (-not $Owner) { throw "No board owner: pass -Owner, run 'gh auth login', or set a default with /board setup." }
 
 # ------------------------------------------------------------------------ main entry
-if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
+if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar'))) }
 if ($Issue -le 0) { throw "Pass -Issue <n>." }
 if (-not $Repo) {
     $originUrl = git remote get-url origin 2>$null

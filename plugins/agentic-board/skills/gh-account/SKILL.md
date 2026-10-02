@@ -1,188 +1,78 @@
 ---
 name: gh-account
-description: Use FIRST before any GitHub Projects/issues operation in the agentic-board suite. Resolves which account (default CSalcedoDataBI, override PAL-Devs) and reads its PAT from the Windows user registry, injecting GH_TOKEN per-invocation without touching `gh auth switch`. Triggers — any board/issue op, "cambia a CSalcedoDataBI", 403 on a PAL board, INSUFFICIENT_SCOPES/read:project.
+description: "Use before any agentic-board GitHub Projects/issues operation: resolves the account for the repo owner and injects its token as GH_TOKEN per call, without gh auth switch. Triggers — a board/issue op, a 403 on a board, INSUFFICIENT_SCOPES/read:project."
 user-invocable: false
 ---
 
-# gh-account — Cross-Account GitHub Token Resolver
+# gh-account — which GitHub identity, and its token
 
-**Purpose:** Every operation in this suite that touches GitHub Projects or issues must begin here. This skill ensures the right PAT is loaded into `GH_TOKEN` for the duration of that single operation — without ever calling `gh auth switch`, which would corrupt the user's global `gh` CLI state.
+**Purpose:** every operation in this suite that touches GitHub Projects or issues starts here. It
+loads the right token into `GH_TOKEN` for that operation, without `gh auth switch` (which would
+change the user's global `gh` state).
 
----
+## The account map (#762)
 
-## Default account: CSalcedoDataBI — always
+Which env var holds which account's token is the **user's own map**,
+`~/.agentic-board/accounts.json`, written by `/board setup` (`scripts/Set-AbiosAccounts.ps1`).
+It stores env var NAMES, never tokens. With no map, every owner uses the ambient token: `GH_TOKEN`,
+then `gh auth token`. So a single-account user needs nothing beyond `gh auth login`.
 
-The default identity for all operations in this suite is **CSalcedoDataBI**, even when you are working inside a PAL-Devs-owned repository. The account only changes when the user explicitly says "use PAL-Devs" or you encounter a 403 on a PAL-owned board (see below).
-
----
+The default owner is the map's `defaultOwner`, else the login `gh` is signed in as.
 
 ## FIRST: are you inside a brake-armed run? (#550)
 
-Before anything else, check for `.agentic-board/brake-armed.json` in the current directory **or any
-directory above it**. If it is there, this is an autonomous run that has been braked, and the
-identity rule changes:
+Look for `.agentic-board/brake-armed.json` in the current directory **or any directory above it**.
+If it is there, this is a braked autonomous run, and the only valid identity is the agent's
+(the map's `agentTokenVar`, default `GITHUB_TOKEN_AGENT`). **If that variable is unset, STOP and
+say so — never fall back to the owner's token.** The owner's PAT authenticates *as the owner*,
+and a `main` rule that exempts admins lets it push straight to `main`; a separate machine identity
+without admin is refused there (measured: HTTP 422 "Changes must be made through a pull request")
+while it can still create ordinary branches. Falling back would hand the run the one capability
+the brake exists to remove.
+
+## Get the token (preferred)
 
 ```powershell
-$t = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_AGENT', 'User')
-if (-not $t) { throw 'Run frenado y GITHUB_TOKEN_AGENT no existe. NO uses el token del dueno.' }
-$env:GH_TOKEN = $t
-```
-
-**Do NOT fall back to `GITHUB_TOKEN_PERSONAL` if the agent token is missing. Stop and say so.**
-
-Why this matters more than it looks: `main` requires a pull request, but the rule **exempts the
-repository admin role** — and the owner's PAT authenticates *as the owner*, so GitHub lets it push
-to `main` directly. Weaker permissions on one of his tokens do not help; GitHub cannot tell "the
-human typed this" from "an agent used the human's token", because they are the same principal.
-Only a different identity gets a different answer. Measured, not assumed:
-
-| Action as `powerbiconcristobal-ui` | Result |
-|---|---|
-| write to `main` | `Repository rule violations found — Changes must be made through a pull request (422)` |
-| create an ordinary branch | 200 OK |
-
-So the agent identity is refused exactly where it should be and can still do its work. Falling back
-to the owner's PAT would hand the run the one capability the brake exists to remove, while every
-message on screen still said "brake armed".
-
-**Never** reach for `GITHUB_TOKEN_BUSINESS` here. On this repo it is read-only and looks harmless,
-but the token is not repo-scoped: it carries **admin on 17 business repositories**, client work
-included. It is the widest of the three identities, not the narrowest.
-
----
-
-## Canonical inline command (preferred — path-independent)
-
-This is what the agent should run at the start of any operation. It reads from the Windows USER registry, which is always current (unlike `$env:`, which reflects the value at login time and may be stale).
-
-**PowerShell (default — CSalcedoDataBI):**
-```powershell
-$t = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL', 'User')
-$env:GH_TOKEN = $t
-```
-
-**PowerShell (PAL-Devs override):**
-```powershell
-$t = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_BUSINESS', 'User')
-$env:GH_TOKEN = $t
-```
-
-`$env:GH_TOKEN` is read by `gh` automatically. Set it, run the `gh` command, and optionally clear it — never use `gh auth switch`.
-
-**Bash equivalent (when running from a POSIX context):**
-```bash
-tok=$(powershell.exe -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL','User')" | tr -d '\r')
-GH_TOKEN=$tok gh project list --owner CSalcedoDataBI --limit 5
-```
-
-For PAL-Devs, replace `GITHUB_TOKEN_PERSONAL` with `GITHUB_TOKEN_BUSINESS`.
-
----
-
-## Convenience wrapper (with scope verification)
-
-The helper script at `scripts/Get-GhAccount.ps1` (relative to the plugin root) wraps the inline command above and adds an automatic `project` scope check before returning the token object:
-
-```powershell
-$acct = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1" -Account csalcedo
-$env:GH_TOKEN = $acct.Token
-# Now safe to run gh project / gh issue commands
-```
-
-For the business account (`PesanteAnalytics`, formerly `PAL-Devs`; `-Account pal-devs` still works as an alias):
-```powershell
-$acct = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1" -Account pesante
+$acct = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1"                 # default owner
+$acct = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1" -Account work   # an alias or a login
 $env:GH_TOKEN = $acct.Token
 ```
 
-The script returns a `[pscustomobject]` with these fields:
+It resolves the login, reads its variable from the map (Windows user scope, then the process),
+falls back to `GH_TOKEN` / `gh auth token`, and checks the `project` scope. It returns
+`Account, User, Var, Token, Scopes`; never print `.Token`. It exits 1 with the fix when the token
+is missing or lacks `project`.
 
-| Field | Example |
-|-------|---------|
-| `Account` | `csalcedo` |
-| `User` | `CSalcedoDataBI` |
-| `Var` | `GITHUB_TOKEN_PERSONAL` |
-| `Token` | `ghp_…` (handle with care; never log) |
-| `Scopes` | `repo, project, read:org` |
-
-If the Windows USER env var is missing, or if the token lacks `project` scope, the script writes an error and exits 1.
-
----
+Scripts that talk to GitHub resolve the identity themselves through `Get-GhTokenForContext`
+(`scripts/Resolve-GhTokenVar.ps1`), which applies the same map and the brake rule.
 
 ## Hard rules
 
-- **Never run `gh auth switch`.** It changes the global `~/.config/gh/` state and will affect every subsequent `gh` call in the session, including operations unrelated to this suite.
-- **Set `GH_TOKEN` only for the operation's scope.** After the `gh` call completes, you may clear it with `Remove-Item Env:GH_TOKEN` if other code in the same session must not inherit it.
-- **Never print or log the raw token value.** The object `.Token` field exists only for assignment to `$env:GH_TOKEN`.
+- **Never run `gh auth switch`.**
+- **Never print or log a token.** Ask users for env var NAMES, never for token values.
+- Set `GH_TOKEN` for the operation; clear it with `Remove-Item Env:GH_TOKEN` when later code must
+  not inherit it.
 
----
+## Missing `project` scope / 403 on a board
 
-## Scope check
+- `INSUFFICIENT_SCOPES` / `read:project`: the token lacks `project`. A PAT: regenerate it with
+  `project` + `repo`. The `gh` login: `gh auth refresh --scopes project`.
+- 403 on a board owned by another account: an account mismatch. Re-run with `--account <alias>`,
+  or map that owner with `/board setup`.
 
-Before any board or Projects operation, confirm the token carries the `project` scope. The wrapper script does this automatically. If doing the inline command without the script, you can verify manually:
+## Cross-account git push & PR
 
-```powershell
-$hdr = curl.exe -s -I -H "Authorization: token $env:GH_TOKEN" https://api.github.com/user
-$hdr | Select-String 'x-oauth-scopes'
-# Expected: x-oauth-scopes: repo, project, ...
-```
-
-If `project` is absent, tell the user: "Your PAT for [account] lacks the `project` scope. Go to GitHub → Settings → Developer settings → Personal access tokens and regenerate it with `project` checked."
-
----
-
-## 403 on a PAL-owned board
-
-If you receive a 403 while using the personal account (`CSalcedoDataBI`) on a board owned by `PAL-Devs` or `PAL-Devs/` repositories, this is an account mismatch. Instruct the caller to re-run the operation with `--account pal-devs`, which loads `GITHUB_TOKEN_BUSINESS` instead:
-
-```powershell
-$t = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_BUSINESS', 'User')
-$env:GH_TOKEN = $t
-# Retry the gh command
-```
-
----
-
-## Cross-account git push & PR (work step 5a)
-
-`GH_TOKEN` covers `gh` API calls only — a `git push` authenticates through git's credential
-machinery, which is a separate path. **Never solve this by embedding a token in the stored
-remote URL** (it leaks into `git remote -v`, shell history, and every future clone of the
-config). Use `scripts/New-BoardPR.ps1` instead:
-
-```powershell
-& "<plugin-root>/scripts/New-BoardPR.ps1" -Issue <n>          # account auto-resolved from repo owner
-& "<plugin-root>/scripts/New-BoardPR.ps1" -Issue <n> -TokenVar GITHUB_TOKEN_BUSINESS   # force PAL-Devs
-```
-
-It resolves the account **from the repo owner** (CSalcedoDataBI → `GITHUB_TOKEN_PERSONAL`,
-PesanteAnalytics → `GITHUB_TOKEN_BUSINESS`; the old logins `PAL-Devs` and `Support1-PAL` stay as
-aliases), verifies the login has push permission, pushes through a
-one-shot credential helper (token only ever in an env var read inside git's shell), and opens
-the PR with `Closes #<n>` — or pushes to the already-open PR on re-run. Session `GH_TOKEN` is
-deliberately ignored there: the identity must match the repo owner, not whatever ran last.
-
----
+`GH_TOKEN` covers `gh` only; `git push` uses git's credential machinery. **Never embed a token in
+the remote URL** (it leaks into `git remote -v`, shell history and copies of the config). Use
+`scripts/New-BoardPR.ps1 -Issue <n>`: it resolves the account from the repo owner, checks push
+permission, pushes through a one-shot credential helper and opens the PR with `Closes #<n>`.
+`-TokenVar <VAR>` forces an identity outside a braked run.
 
 ## Renamed accounts and unmapped owners (#665)
 
-The owner→token map (`scripts/Resolve-GhTokenVar.ps1`) is keyed on the owner **login**, and a login
-can change: the business account has been `Support1-PAL`, then `PAL-Devs`, and is now
-`PesanteAnalytics` — one account, one PAT, because a PAT is bound to the account ID. So:
-
-- Old logins stay in the map as aliases (a clone made before a rename keeps the old owner in its
-  remote, and once the old name is released GitHub stops redirecting it).
-- A login the map does not know is checked by **account ID** (`gh api users/<login> --jq .id`,
-  public data). An ID that belongs to a known account resolves to that account's token and says the
-  account was renamed — add the new login to the map when you see it.
-- Otherwise the owner is **unmapped**: the personal token is used, with a warning that names the
-  owner and lists the logins the map knows. That warning is about the **map**, not about permissions:
-  if a push then fails with "NO tiene permiso", the token is usually fine and the login is stale.
-  Pass `-TokenVar` or add the login. An unmapped owner is never resolved to the business token, and
-  a brake-armed run ignores the owner entirely (it only ever gets the agent identity).
-
----
-
-## Verified status
-
-Verified 2026-06-26: both Windows USER env vars (`GITHUB_TOKEN_PERSONAL` for CSalcedoDataBI and `GITHUB_TOKEN_BUSINESS` for PAL-Devs) exist on this machine and carry the `project` scope.
+The map is keyed on the owner **login**, and logins get renamed. Keep old logins as extra `owners`
+entries, and add the numeric account ID (`gh api users/<login> --jq .id`, public) under
+`accountIds`: an unknown login whose ID is known resolves to that account and says it was renamed.
+An owner the map does not know uses the default owner's variable (else the ambient token), with a
+warning that names it — the warning is about the **map**, not about permissions. It is never
+resolved to another mapped, possibly wider, account.

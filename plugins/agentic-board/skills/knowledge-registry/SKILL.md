@@ -1,6 +1,6 @@
 ---
 name: knowledge-registry
-description: Use to capture and read a project's knowledge references by domain — add a research MD, repo, doc folder, URL, NotebookLM notebook or video to knowledge/registry.json, regenerate the KNOWLEDGE.md table, or publish it to the repo's GitHub Wiki. Distinct from MEMORY.md (agent facts) and HANDOFF.md (task resume). Triggers — "guarda esta referencia", "agrega a knowledge", "registra este link/doc/repo", "muéstrame la tabla de conocimiento", "publica el knowledge al wiki", "/knowledge add", "/knowledge list", "/knowledge gen", "/knowledge wiki".
+description: "Use to add or list a project's knowledge references by domain (knowledge/registry.json and the generated KNOWLEDGE.md). Not MEMORY.md or HANDOFF.md. Triggers — \"guarda esta referencia\", \"agrega a knowledge\", \"/knowledge add|list|gen\"."
 user-invocable: false
 ---
 
@@ -22,7 +22,7 @@ unaffected.
 ## When NOT to use
 - Facts the agent should recall across sessions → that is `MEMORY.md` (auto-memory).
 - How to resume the current task → that is `/board handoff` / `HANDOFF.md`.
-- Harvesting references already scattered in the repo → use `knowledge-harvest`.
+- Harvesting references already scattered in the repo → use `/knowledge harvest`.
 
 ## Add a reference
 Run the engine (never hand-edit the registry file):
@@ -50,7 +50,7 @@ pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Write-KnowledgeTable.ps1 -Root .
 ## Publish to the GitHub Wiki (`/knowledge wiki`)
 Publishes a Home index plus one page per domain to the repo's wiki (`<repo>.wiki.git`) —
 the layer that anchors the registry to GitHub. The account is resolved from the repo owner
-(CSalcedoDataBI → personal PAT, PAL-Devs → business PAT); the token travels only through a
+through your account map (`/board setup`); the token travels only through a
 one-shot credential helper, never the stored remote.
 ```
 pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Publish-KnowledgeWiki.ps1 -Root .

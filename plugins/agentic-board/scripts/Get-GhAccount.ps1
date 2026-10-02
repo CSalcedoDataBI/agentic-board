@@ -1,33 +1,44 @@
-﻿<#  Get-GhAccount.ps1 — resolve GitHub account + token for agentic-board.
-    Default account: CSalcedoDataBI. Override: -Account pesante (alias pal-devs, kept: the business
-    account was renamed PAL-Devs -> PesanteAnalytics on 2026-08-14, same account, same PAT).
-    Reads the PAT from the Windows USER registry (not $env:, which can be stale).
-    Verifies the 'project' scope. Emits an object with .Token to set $env:GH_TOKEN.  #>
+﻿<#  Get-GhAccount.ps1 - resolve the GitHub account + token for agentic-board.
+    -Account takes an alias from your account map (~/.agentic-board/accounts.json, written by
+    `/board setup`) or a login. Omitted, it is the map's defaultOwner, else the login `gh` is signed
+    in as. The token comes from that account's env var in the map (Windows user scope, then the
+    process), else the ambient GH_TOKEN / `gh auth token` (#762). Verifies the 'project' scope.
+    Emits an object with .Token to set $env:GH_TOKEN.  #>
 [CmdletBinding()]
-param([ValidateSet('csalcedo','pesante','pal-devs')][string]$Account = 'csalcedo')
+param([string]$Account = '')
 
-# The CLI ALIAS -> user map is this script's own business. The user -> TOKEN VARIABLE map is not:
-# it lived here, in Board-Merge, in New-BoardPR and in Publish-DocsWiki, four copies of one rule
-# (#550). It comes from Resolve-GhTokenVar now.
+# The alias -> login and login -> token-variable maps live in one place, Resolve-GhTokenVar, which
+# reads them from the user's account map (#550, #665, #762).
 $prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
 $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
 $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
 
-# The alias -> login map lives in Resolve-GhTokenVar now too (#665): this was a second copy of it,
-# documented as "kept in one place", and it is the copy a rename left stale.
-$user  = Get-AccountForAlias -Alias $Account
-if (-not $user) { Write-Error "Unknown account alias '$Account'. Valid: $((Get-KnownAccountAliases) -join ', ')."; exit 1 }
+$user = ''
+if ($Account) {
+    $user = Get-AccountForAlias -Alias $Account
+    if (-not $user) {
+        if ($Account -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$') { Write-Error "'$Account' is neither an alias in your account map nor a GitHub login."; exit 1 }
+        $user = $Account
+    }
+} else {
+    $user = Get-AbiosDefaultOwner
+    if (-not $user) { Write-Error "No default account: run 'gh auth login', or /board setup to write ~/.agentic-board/accounts.json."; exit 1 }
+}
 $sel   = @{ User = $user; Var = (Get-OwnerTokenVar -Owner $user) }
-$token = [System.Environment]::GetEnvironmentVariable($sel.Var, 'User')
+$token = Get-GhTokenValue -VarName $sel.Var
 if ([string]::IsNullOrWhiteSpace($token)) {
-  Write-Error "Token var '$($sel.Var)' not found in Windows USER env for '$($sel.User)'. Create a PAT with 'project'+'repo' scopes and set it."
+  Write-Error "No token for '$($sel.User)': '$($sel.Var)' is unset and gh has no stored login. Create a PAT with 'project'+'repo' scopes (or run 'gh auth login --scopes project') and map it with /board setup."
   exit 1
 }
-$hdr    = curl.exe -s -I -H "Authorization: token $token" https://api.github.com/user
-$scopes = (($hdr | Select-String -Pattern '^x-oauth-scopes:' ) -replace '(?i)^x-oauth-scopes:\s*','').Trim()
+# Invoke-WebRequest, not curl.exe, so the scope check runs on every platform (#767).
+$scopes = ''
+try {
+    $resp   = Invoke-WebRequest -Uri 'https://api.github.com/user' -Method Head -Headers @{ Authorization = "token $token" } -ErrorAction Stop
+    $scopes = "$(@($resp.Headers['X-OAuth-Scopes'])[0])".Trim()
+} catch { $scopes = '' }
 if ($scopes -notmatch '\bproject\b') {
-  Write-Error "Token for '$($sel.User)' lacks 'project' scope (has: $scopes). Regenerate the PAT with 'project'."
+  Write-Error "Token for '$($sel.User)' lacks 'project' scope (has: $scopes). Regenerate the PAT with 'project', or run 'gh auth refresh --scopes project'."
   exit 1
 }
 [pscustomobject]@{ Account=$Account; User=$sel.User; Var=$sel.Var; Token=$token; Scopes=$scopes }

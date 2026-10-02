@@ -1,7 +1,8 @@
 ---
 name: project-scan
-description: Use to scan the CURRENT project for latent, hard-to-track work — code TODO/FIXME, unchecked checklists and "pending/next steps" in docs, and plan/spec docs not yet tracked — then convert the chosen items into issues + a work plan on THIS project's board. Triggers — "escanea el proyecto", "convierte los pendientes en issues", "harvest backlog", "qué hay sin trackear", "arma el plan de trabajo", /scan.
+description: "Engine behind /scan: find untracked work in the current repo (TODO/FIXME, unchecked checklists, untracked plans) and turn the chosen items into issues and a board plan. Triggers — \"escanea el proyecto\", \"qué hay sin trackear\", \"convierte los pendientes en issues\"."
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # project-scan - from latent work to a ready board, in one command
@@ -14,8 +15,8 @@ project**, the opposite of `abios-feedback` (which targets the tool's own repo).
 ## Identity and target
 1. **Target = the CURRENT repo** (`gh repo view --json nameWithOwner -q .nameWithOwner`). Issues
    are created ONLY there.
-2. **Account = that repo's owner**, via [[gh-account]]: personal repo -> `GITHUB_TOKEN_PERSONAL`;
-   `PesanteAnalytics` repo -> `--account pal-devs` (`GITHUB_TOKEN_BUSINESS`). A 403 means switch.
+2. **Account = that repo's owner**, via [[gh-account]] and your account map (`/board setup`). A 403
+   means the owner maps to the wrong account: pass `--account <alias>` or map it.
 
 ## The one script: `scripts/Scan-Project.ps1`
 

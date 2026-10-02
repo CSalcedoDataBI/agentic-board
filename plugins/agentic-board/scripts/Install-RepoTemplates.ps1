@@ -98,7 +98,7 @@ foreach ($c in $copies) {
 # Labels referenced by the forms MUST exist or GitHub ignores them silently
 if (-not $SkipLabels -and $Repo) {
     if (-not $env:GH_TOKEN) {
-        $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
+        $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar')))
     }
     Write-Host ""
     Write-Host "  Making sure the forms' labels exist..." -ForegroundColor Cyan

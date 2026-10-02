@@ -1,5 +1,5 @@
 ---
-description: Browse, research and install the project's referenced external tools from one unified catalog — it merges the knowledge registry (references) with the installable toolkit presets. Install one tool or all missing at once, kind-aware (skill-clone preserves LICENSE; a plugin surfaces its own install command, never cherry-picked).
+description: The project's referenced external tools in one catalog — verbs browse/research/install/install --all (a skill-clone keeps its LICENSE).
 ---
 You are running the agentic-board /tools command.
 
@@ -19,7 +19,12 @@ What do you want to do with the referenced tools?
                        confirmation); plugin entries are listed separately (shown, never installed blindly)
 ```
 
-When they answer (number or name), invoke the **tools-catalog** skill and follow it. It composes the
+**Engines are files, not skills (#763).** Once the verb is known — from `$ARGUMENTS` or the user's
+pick — your FIRST action is to open that verb's engine with the **Read** tool at the path given
+below, then follow it exactly. Run nothing before that Read. These engines are not reachable
+through the Skill tool.
+
+When they answer (number or name), read and follow the **tools-catalog** engine at `${CLAUDE_PLUGIN_ROOT}/skills/tools-catalog/SKILL.md`. It composes the
 catalog from two sources — the knowledge registry (`knowledge/registry.json`, the *references*) and
 the installable toolkit presets (`presets/toolkits/*.json`, the *installers*) — reusing
 `Get-SkillGaps.ps1` so nothing already installed is offered again.
@@ -35,7 +40,7 @@ the installable toolkit presets (`presets/toolkits/*.json`, the *installers*) �
   a single confirmation; plugin-kind entries are listed separately, surfaced not cherry-picked.
 
 Identity: browse and research are read-only and need no token; an install that clones or files
-follows the same account discipline as the rest of the suite (`gh-account`, default CSalcedoDataBI).
+follows the same account discipline as the rest of the suite (`gh-account`, your account map's default).
 
 This catalog is the intersection of the knowledge-ops (references) and skills-ops (installers)
 modules — use the knowledge and skills commands to manage each source directly.

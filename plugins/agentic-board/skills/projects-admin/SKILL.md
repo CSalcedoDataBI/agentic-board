@@ -1,6 +1,6 @@
 ---
 name: projects-admin
-description: Use to administer or automate a GitHub Projects (v2) board or its issues — create/configure a project, set Status/Priority/Target fields, add/move/bulk-edit items, link a board to a repo, install CI auto-add, run /board fill to detect and fix gaps, or /board work to see pending issues across boards and start one. Always resolves identity via gh-account (default CSalcedoDataBI). Triggers — "administra el board", "mueve a Done", "crea el project", "add to board", "bulk close", "automatiza el board", "llena el board", "qué hay pendiente", "pendientes", "qué hay en proceso", "what's pending", "what's in progress", "qué issue trabajo", "empecemos un issue", /board.
+description: "Use to administer a GitHub Projects (v2) board or its issues: create or configure a board, set fields, add/move/bulk-edit items, fill gaps, or list pending issues and start one. Triggers — \"qué hay pendiente en el board\", \"mueve a Done\", \"add to board\", \"what's pending on the board\", /board."
 user-invocable: false
 ---
 
@@ -16,12 +16,11 @@ This skill covers the full lifecycle of a GitHub Projects v2 board and its items
 
 ## Step 0 — Identity (always first)
 
-**Before every operation in this skill, apply the `gh-account` skill** to load `GH_TOKEN` for the correct account. The default account is **CSalcedoDataBI**; switch to PAL-Devs only when the user explicitly says so or when you receive a 403 on a PAL-owned board.
+**Before every operation in this skill, apply the `gh-account` skill** to load `GH_TOKEN` for the correct account: your account map's default owner (`/board setup`), or another account when the user names it or a board returns 403.
 
 ```powershell
-# Default — CSalcedoDataBI
-$t = [System.Environment]::GetEnvironmentVariable('GITHUB_TOKEN_PERSONAL', 'User')
-$env:GH_TOKEN = $t
+$env:GH_TOKEN = (& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1").Token              # default
+$env:GH_TOKEN = (& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1" -Account work).Token # another
 ```
 
 Every `gh project` and `gh issue` command below assumes `$env:GH_TOKEN` is already set for the correct account. Never run `gh auth switch` — it mutates global `gh` state.

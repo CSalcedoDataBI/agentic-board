@@ -7,7 +7,7 @@ description: Manage the project knowledge references registry by domain (add/har
 Route the request to the right knowledge-ops skill.
 
 - `add <url|path> [domain] [note]` → invoke **knowledge-registry** (Add-KnowledgeRef).
-- `harvest` → invoke **knowledge-harvest** (scan repo → pick → add).
+- `harvest` → FIRST open **knowledge-harvest** with the **Read** tool (a file, not a Skill-tool skill) at `${CLAUDE_PLUGIN_ROOT}/skills/knowledge-harvest/SKILL.md` (scan repo → pick → add).
 - `list [domain]` → invoke **knowledge-registry** (Get-KnowledgeInventory) and print the table.
 - `gen` → invoke **knowledge-registry** (Write-KnowledgeTable).
 - `wiki` → invoke **knowledge-registry** (Publish-KnowledgeWiki) to publish the registry to the repo's GitHub Wiki. **Deprecated** — delegates to `/docs wiki` (Publish-DocsWiki.ps1), which is now the single publisher for all wiki content (product docs + knowledge registry in one push).
