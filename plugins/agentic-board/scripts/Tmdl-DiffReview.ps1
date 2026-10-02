@@ -53,7 +53,7 @@
     Windows USER env var holding the PAT (PR mode). Default GITHUB_TOKEN_PERSONAL.
 
 .EXAMPLE
-    .\Tmdl-DiffReview.ps1 -Repo CSalcedoDataBI/pbip-repo -PR 42
+    .\Tmdl-DiffReview.ps1 -Repo owner/pbip-repo -PR 42
     .\Tmdl-DiffReview.ps1 -Base main -Head HEAD
     .\Tmdl-DiffReview.ps1 -Base main -Head HEAD -FailOnBreaking
 #>
@@ -365,7 +365,7 @@ else {
 
 # Resolve repo + token for PR mode.
 if ($mode -eq "pr") {
-    if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
+    if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar'))) }
     if (-not $env:GH_TOKEN) { Write-Error "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)."; exit 2 }
     if (-not $Repo) {
         $originUrl = git remote get-url origin 2>$null

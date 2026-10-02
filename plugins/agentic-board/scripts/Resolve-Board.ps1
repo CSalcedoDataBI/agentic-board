@@ -1,7 +1,7 @@
 ﻿<#  Resolve-Board.ps1 - find-or-reuse the board for a repo; create only if none exists.
     Prevents the "new duplicate board every time" bug. Returns the project NUMBER on stdout.
     Requires $env:GH_TOKEN (via gh-account).
-    Usage: $num = & ./Resolve-Board.ps1 -Owner CSalcedoDataBI -Repo CSalcedoDataBI/agentic-board
+    Usage: $num = & ./Resolve-Board.ps1 -Owner your-login -Repo CSalcedoDataBI/agentic-board
 
     HOW THE BOARD IS FOUND (#498, #666). GitHub records which boards are linked to a repository
     (repository.projectsV2) - the same link Board-Work -ListBoards reads - so that is the lookup, not

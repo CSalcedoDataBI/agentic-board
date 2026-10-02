@@ -161,8 +161,8 @@ $actions = @($Start, $Update, $Close) | Where-Object { $_ }
 if ($actions.Count -ne 1) { throw "Pass exactly one action: -Start, -Update, or -Close." }
 if ($Epic -le 0) { throw "Pass -Epic <n> (the epic issue that owns this run's queue)." }
 
-if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User") }
-if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)." }
+if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar'))) }
+if (-not $env:GH_TOKEN) { throw "No GitHub token: $TokenVar is unset, GH_TOKEN is empty and gh has no stored login. Run 'gh auth login', or map the account with /board setup." }
 
 # -- Resolve repo --------------------------------------------------------------
 if (-not $Repo) {

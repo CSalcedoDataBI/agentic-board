@@ -62,7 +62,7 @@ always surfaced (their install command printed) for the user to run, never insta
 
 ## Identity
 `browse` and `research` need no token. An install that clones or files follows the `gh-account`
-discipline (default CSalcedoDataBI) like the rest of the suite.
+discipline (your account map's default) like the rest of the suite.
 
 ## Not this
 - Managing the references themselves (add / harvest / wiki) → the `knowledge-registry` skill.

@@ -40,7 +40,7 @@ the installable toolkit presets (`presets/toolkits/*.json`, the *installers*) â€
   a single confirmation; plugin-kind entries are listed separately, surfaced not cherry-picked.
 
 Identity: browse and research are read-only and need no token; an install that clones or files
-follows the same account discipline as the rest of the suite (`gh-account`, default CSalcedoDataBI).
+follows the same account discipline as the rest of the suite (`gh-account`, your account map's default).
 
 This catalog is the intersection of the knowledge-ops (references) and skills-ops (installers)
 modules â€” use the knowledge and skills commands to manage each source directly.

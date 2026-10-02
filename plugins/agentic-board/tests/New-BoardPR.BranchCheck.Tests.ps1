@@ -7,7 +7,7 @@
 
     The end-to-end cases run the real script through `pwsh -File` in a throw-away git repo. They
     pass a -TokenVar that does not exist, so a run that gets PAST the branch check stops on the
-    identity step ("is not in the Windows USER environment") - proof that the check let it through - without
+    identity step ("is not set \(user or process environment\)") - proof that the check let it through - without
     ever touching GitHub. #>
 
 BeforeAll {
@@ -184,7 +184,7 @@ Describe 'the working-copy comparison survives 8.3 short-name spellings (Windows
             $out = & pwsh -NoProfile -File $script:Script -Issue 5 -Repo 'o/r' -TokenVar 'ABIOS_TEST_NO_SUCH_VAR' 2>&1 | Out-String
         } finally { Pop-Location }
         $out | Should -Match 'was registered on branch ''issue-5-x'''
-        $out | Should -Not -Match 'is not in the Windows USER environment'
+        $out | Should -Not -Match 'is not set \(user or process environment\)'
     }
 }
 
@@ -243,7 +243,7 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         Set-Registry @(New-Entry 5 'issue-5-x' $script:Repo)
         $r = Invoke-Pr
         $r.Out | Should -Not -Match 'was registered on branch'
-        $r.Out | Should -Match 'is not in the Windows USER environment'     # it reached the identity step
+        $r.Out | Should -Match 'is not set \(user or process environment\)'     # it reached the identity step
     }
     It 'REFUSES when another session switched the folder to a different branch' {
         Set-Head 'other-branch'
@@ -252,21 +252,21 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         $r.Code | Should -Be 1
         $r.Out  | Should -Match 'was registered on branch ''issue-5-x'''
         $r.Out  | Should -Match 'other-branch'
-        $r.Out  | Should -Not -Match 'is not in the Windows USER environment'   # stopped BEFORE the identity work
+        $r.Out  | Should -Not -Match 'is not set \(user or process environment\)'   # stopped BEFORE the identity work
     }
     It '-AllowBranchMismatch warns and goes on' {
         Set-Head 'other-branch'
         Set-Registry @(New-Entry 5 'issue-5-x' $script:Repo)
         $r = Invoke-Pr @('-AllowBranchMismatch')
         $r.Out | Should -Match 'WARNING'
-        $r.Out | Should -Match 'is not in the Windows USER environment'
+        $r.Out | Should -Match 'is not set \(user or process environment\)'
     }
     It 'an explicit -Branch equal to the registered one is fine even with HEAD elsewhere' {
         Set-Head 'other-branch'
         Set-Registry @(New-Entry 5 'issue-5-x' $script:Repo)
         $r = Invoke-Pr @('-Branch', 'issue-5-x')
         $r.Out | Should -Not -Match 'was registered on branch'
-        $r.Out | Should -Match 'is not in the Windows USER environment'
+        $r.Out | Should -Match 'is not set \(user or process environment\)'
     }
     It 'an explicit -Branch that is NOT the registered one is refused too' {
         Set-Head 'issue-5-x'
@@ -282,7 +282,7 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         Set-Registry @($stale)
         $r = Invoke-Pr
         $r.Out | Should -Not -Match 'was registered on branch'
-        $r.Out | Should -Match 'is not in the Windows USER environment'
+        $r.Out | Should -Match 'is not set \(user or process environment\)'
     }
     It 'a row with a garbage sessionPid next to a real one does not take the run down: the real row still refuses' {
         Set-Head 'other-branch'
@@ -297,6 +297,6 @@ Describe 'New-BoardPR.ps1 end to end: the registered-branch check (#547)' {
         Set-Head 'other-branch'
         Remove-Item (Join-Path $script:Repo '.agentic-board') -Recurse -Force -ErrorAction SilentlyContinue
         $r = Invoke-Pr
-        $r.Out | Should -Match 'is not in the Windows USER environment'
+        $r.Out | Should -Match 'is not set \(user or process environment\)'
     }
 }

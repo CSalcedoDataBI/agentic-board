@@ -175,10 +175,10 @@ Describe 'the /board menu shows the setting (#681)' {
     It 'tells the model to show the menu translated into the user''s language' {
         $script:Board | Should -Match "Show this menu translated into the user's language"
     }
-    # 23 since `plugins` moved to /cleanup (machine housekeeping is not board work). The point of the
+    # 24 since `setup` was added (#762); 23 when `plugins` moved to /cleanup (machine housekeeping is not board work). The point of the
     # count is unchanged: an indented sub-line (like the PreferGroupedPRs one) is never an extra option.
-    It 'the menu keeps its 23 numbered entries (the sub-lines are not extra options)' {
-        @([regex]::Matches($script:Menu, '(?m)^\d+\. ')).Count | Should -Be 23
+    It 'the menu keeps its 24 numbered entries (the sub-lines are not extra options)' {
+        @([regex]::Matches($script:Menu, '(?m)^\d+\. ')).Count | Should -Be 24
     }
     It 'the work reference documents show and the three values in one place' {
         $ref = Get-Content -LiteralPath (Join-Path $script:Plugin 'skills' 'projects-admin' 'references' 'verbs-work.md') -Raw

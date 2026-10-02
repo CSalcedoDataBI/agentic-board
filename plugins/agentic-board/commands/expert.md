@@ -38,8 +38,8 @@ What do you want to do with the auto-expert?
                      missing. Fails closed: what cannot be read counts as absent.
 ```
 
-First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (default
-CSalcedoDataBI). Then open the internal `board-expert` engine with the **Read** tool (it is a file, not a Skill-tool skill) at `${CLAUDE_PLUGIN_ROOT}/skills/board-expert/SKILL.md`, and follow it - it owns the full recipe.
+First apply the `gh-account` skill to set `$env:GH_TOKEN` for the right account (your account
+map's default). Then open the internal `board-expert` engine with the **Read** tool (it is a file, not a Skill-tool skill) at `${CLAUDE_PLUGIN_ROOT}/skills/board-expert/SKILL.md`, and follow it - it owns the full recipe.
 
 ## config
 Run `scripts/Expert-Config.ps1 -PlanText "<plan/epic text>" -PlanGoal "<goal>"`. It detects the

@@ -8,11 +8,15 @@
     in the brake (#440), the review gate (#510) and the evidence blocks (#479).  #>
 
 BeforeAll {
+    # The identity tests run against a FIXED account map, never the developer's own (#762).
+    $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
+    $env:ABIOS_ACCOUNTS_FILE = Join-Path $PSScriptRoot 'fixtures' 'accounts.identity.json'
     $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Resolve-GhTokenVar.ps1' | Resolve-Path
     $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_TOKENVAR_DOTSOURCE = $null
 }
+AfterAll { $env:ABIOS_ACCOUNTS_FILE = $script:SavedAccountsFile }
 
 Describe 'Resolve-GhTokenVar — an ordinary session is untouched' {
     It 'uses the owner identity when no brake is armed' {

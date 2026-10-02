@@ -38,7 +38,7 @@
     CHANGELOG (just under the "# Changelog" header), ready to commit.
 
 .PARAMETER Owner
-    GitHub user that owns the board. Default CSalcedoDataBI.
+    GitHub user that owns the board. Default: the account map's default owner, else the gh login.
 
 .PARAMETER ProjectNum
     Projects v2 number. Default 13.
@@ -73,7 +73,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Owner         = "CSalcedoDataBI",
+    [string]$Owner         = "",
     [int]   $ProjectNum    = 13,
     [string]$Repo          = "",
     [string]$Version       = "",
@@ -312,6 +312,9 @@ function Get-ItemTypeName {
 # Dot-source guard: with $env:ABIOS_CHANGELOG_DOTSOURCE set, return after defining the pure
 # helpers WITHOUT reading gh/the board — lets the tests exercise Update-ChangelogText directly.
 if ($env:ABIOS_CHANGELOG_DOTSOURCE) { return }
+# No -Owner: the account map's default owner, else the login gh is signed in as (#762).
+if (-not $Owner) { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $Owner = Get-AbiosDefaultOwner }
+if (-not $Owner) { throw "No board owner: pass -Owner, run 'gh auth login', or set a default with /board setup." }
 
 # The single resolver for owner/name from this clone's origin (#281). Do NOT inline the regex
 # again: the copy-pasted version ate any dot in the repo name (midominio.com -> midominio).
@@ -323,9 +326,9 @@ if ($env:ABIOS_CHANGELOG_DOTSOURCE) { return }
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 
 if (-not $env:GH_TOKEN) {
-    $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
+    $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar')))
 }
-if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)." }
+if (-not $env:GH_TOKEN) { throw "No GitHub token: $TokenVar is unset, GH_TOKEN is empty and gh has no stored login. Run 'gh auth login', or map the account with /board setup." }
 
 # ── Resolve repo (filter issues to it) ────────────────────────────────────────
 if (-not $Repo) {

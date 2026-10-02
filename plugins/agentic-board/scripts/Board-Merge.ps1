@@ -11,8 +11,8 @@
     fails. This helper closes that gap:
 
       1. Resolves owner/name from origin (embedded creds ignored) unless -Repo.
-      2. Resolves the account FROM THE REPO OWNER (CSalcedoDataBI -> personal,
-         PAL-Devs -> business; -TokenVar overrides), like New-BoardPR.ps1, and
+      2. Resolves the account FROM THE REPO OWNER through your account map
+         (/board setup; -TokenVar overrides), like New-BoardPR.ps1, and
          checks whether that identity is a repo admin (bypass candidate).
       3. Tries a normal `gh pr merge`. If it succeeds, done.
       4. If it fails BECAUSE the branch policy blocks it AND the identity is a
@@ -45,7 +45,7 @@
 
 .EXAMPLE
     .\Board-Merge.ps1 -PR 113
-    .\Board-Merge.ps1 -PR 42 -Repo PAL-Devs/fabric-reports -Method merge
+    .\Board-Merge.ps1 -PR 42 -Repo work-org/reports -Method merge
     .\Board-Merge.ps1 -PR 113 -DryRun
 #>
 [CmdletBinding()]

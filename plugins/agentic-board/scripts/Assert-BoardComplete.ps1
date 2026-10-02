@@ -13,13 +13,13 @@
     queue is empty, or in CI to assert a milestone board reached zero-pending.
 
     Usage:
-      ./Assert-BoardComplete.ps1 -ProjectNum 13 -Owner CSalcedoDataBI
+      ./Assert-BoardComplete.ps1 -ProjectNum 13 -Owner your-login
       ./Assert-BoardComplete.ps1 -ProjectNum 13 -Json
 #>
 [CmdletBinding()]
 param(
     [int]   $ProjectNum = 13,
-    [string]$Owner      = 'CSalcedoDataBI',
+    [string]$Owner      = "",
     [string]$TokenVar   = 'GITHUB_TOKEN_PERSONAL',
     [switch]$Json
 )
@@ -58,14 +58,17 @@ function Get-BoardCompletion {
 
 # Dot-source guard: tests set $env:ABIOS_BOARDCOMPLETE_DOTSOURCE to load the pure helpers only.
 if ($env:ABIOS_BOARDCOMPLETE_DOTSOURCE) { return }
+# No -Owner: the account map's default owner, else the login gh is signed in as (#762).
+if (-not $Owner) { . (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); $Owner = Get-AbiosDefaultOwner }
+if (-not $Owner) { throw "No board owner: pass -Owner, run 'gh auth login', or set a default with /board setup." }
 
 # ── Side-effecting from here ──────────────────────────────────────────────────
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 # Board reads that report their own truncation (#484).
 . (Join-Path $PSScriptRoot 'Get-BoardItems.ps1')
 
-if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User') }
-if (-not $env:GH_TOKEN) { throw "$TokenVar not set in Windows USER environment (and GH_TOKEN empty)." }
+if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar'))) }
+if (-not $env:GH_TOKEN) { throw "No GitHub token: $TokenVar is unset, GH_TOKEN is empty and gh has no stored login. Run 'gh auth login', or map the account with /board setup." }
 
 # Fail closed: a gh error must THROW, never read as an empty board that falsely reports "complete".
 $read     = Get-BoardItems -Number $ProjectNum -Owner $Owner `

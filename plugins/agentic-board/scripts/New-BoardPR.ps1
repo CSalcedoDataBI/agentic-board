@@ -7,9 +7,9 @@
 
       1. Derives owner/name from the origin remote (credentials in the URL are
          ignored, never reused) unless -Repo is given.
-      2. Resolves the account FROM THE REPO OWNER: CSalcedoDataBI ->
-         GITHUB_TOKEN_PERSONAL, PAL-Devs -> GITHUB_TOKEN_BUSINESS. An unmapped
-         owner falls back to the personal PAT with a warning; -TokenVar overrides.
+      2. Resolves the account FROM THE REPO OWNER through your account map
+         (/board setup). An unmapped owner falls back to the default owner's
+         token, else the ambient one, with a warning; -TokenVar overrides.
          GH_TOKEN already set in the session is deliberately IGNORED here - the
          identity must match the repo owner, not whatever ran last.
       3. Verifies the token's login has push permission on the repo (no silent
@@ -74,7 +74,7 @@
 
 .EXAMPLE
     .\New-BoardPR.ps1 -Issue 13
-    .\New-BoardPR.ps1 -Issue 42 -Repo PAL-Devs/fabric-reports -Draft
+    .\New-BoardPR.ps1 -Issue 42 -Repo work-org/reports -Draft
     .\New-BoardPR.ps1 -Issue 13 -DryRun
     .\New-BoardPR.ps1 -Issue 631,632 -Title "Group small sequential sub-issues into one PR"
 #>

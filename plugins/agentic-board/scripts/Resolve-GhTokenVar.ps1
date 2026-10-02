@@ -3,12 +3,12 @@
     Decide WHICH GitHub identity applies here (#550, part of #541).
 
 .DESCRIPTION
-    There are three tokens in the Windows USER environment and they are not interchangeable:
-
-      GITHUB_TOKEN_PERSONAL  CSalcedoDataBI          admin on the personal repos
-      GITHUB_TOKEN_BUSINESS  PesanteAnalytics        20 repos, ADMIN on 17 - never for an agent
-                             (was PAL-Devs, was Support1-PAL: one account, renamed twice)
-      GITHUB_TOKEN_AGENT     powerbiconcristobal-ui  machine account: write, no admin, one repo
+    A user may hold several GitHub identities, and they are not interchangeable: an owner account
+    that is admin on its repositories, perhaps a work account with wider reach, and optionally a
+    machine account for autonomous runs (write, no admin). WHICH env var holds which identity is the
+    user's own map, ~/.agentic-board/accounts.json, written by `/board setup` and read through
+    Get-AbiosAccounts.ps1 (#762). Nothing account-specific ships in this file. With no map, every
+    owner resolves to the ambient token (GH_TOKEN, then `gh auth token`).
 
     WHY THIS FILE EXISTS. The autonomy brake could never be complete as a text classifier: it
     decides what a shell command WILL DO by looking at its characters, and the space of harmless
@@ -21,7 +21,7 @@
     this" from "an agent used the human's token", because they are the same principal. Only a
     DIFFERENT identity gets a different answer. Measured, not argued:
 
-        PATCH .../git/refs/heads/main  as powerbiconcristobal-ui
+        PATCH .../git/refs/heads/main  as the machine account
         -> Repository rule violations found. Changes must be made through a pull request. (422)
         POST  .../git/refs (ordinary branch)  as the same identity
         -> 200 OK
@@ -30,7 +30,7 @@
     the account default. Pure (no filesystem writes, no network) behind a dot-source guard.
 
     STATED LIMIT, because this repo keeps paying for overclaiming: this decides which variable the
-    TOOLING reads. A run that ignores it and reads GITHUB_TOKEN_PERSONAL from the registry itself is
+    TOOLING reads. A run that ignores it and reads the owner's token variable itself is
     not stopped - the token is ambient in the user environment and cannot be taken away from a
     process running as that user. What this removes is the default capability, not the possibility.
     The controls for the deliberate case are #517 and the review gate.
@@ -45,39 +45,29 @@ $ErrorActionPreference = "Stop"
 
 # ── Pure core ───────────────────────────────────────────────────────────────────
 
-$script:AgentTokenVar = 'GITHUB_TOKEN_AGENT'
-
-# Owner -> its variable. Same mapping the merge path already uses; kept in one place so the two
-# cannot drift apart.
-#
-# A login is not an identity: GitHub accounts get renamed, and this key is the only thing that
-# tied a repository to its token (#665). The business account has been Support1-PAL, then
-# PAL-Devs, and since 2026-08-14 PesanteAnalytics - the SAME account and the SAME PAT throughout,
-# because a PAT is bound to the account ID. Old logins stay listed as aliases: a clone made
-# before a rename still has the old owner in its remote, and once the old name is released
-# GitHub no longer redirects it (measured 2026-09-18: users/PAL-Devs is 404).
-$script:OwnerTokenVar = @{
-    'CSalcedoDataBI'  = 'GITHUB_TOKEN_PERSONAL'
-    'PesanteAnalytics' = 'GITHUB_TOKEN_BUSINESS'
-    'PAL-Devs'        = 'GITHUB_TOKEN_BUSINESS'
-    'Support1-PAL'    = 'GITHUB_TOKEN_BUSINESS'
+# The user's account map (#762): owner login -> token variable, account ID -> token variable (the
+# rename-proof key: a login can change, the numeric ID cannot), CLI alias -> login, and the agent
+# identity's variable. Loaded from ~/.agentic-board/accounts.json; empty when the user has none.
+. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1')
+function Import-AbiosAccountMaps {
+    param([object]$Config = (Get-AbiosAccountConfig))
+    $script:AbiosAccountConfig = $Config
+    $script:AgentTokenVar      = $Config.agentTokenVar
+    $script:OwnerTokenVar      = $Config.owners
+    $script:AccountIdTokenVar  = $Config.accountIds
+    $script:AccountAlias       = $Config.aliases
+    $script:DefaultOwner       = $Config.defaultOwner
 }
+Import-AbiosAccountMaps
 
-# The rename-proof key: the numeric account ID. It survives every rename, so a login this file has
-# never heard of (the NEXT rename) can still be matched to its token by asking GitHub who owns it.
-# IDs are public (`gh api users/<login> --jq .id`). Only ever consulted for a login that is NOT in
-# the map above, and it can only choose between the two owner variables - never the agent's.
-$script:AccountIdTokenVar = @{
-    '73630372'  = 'GITHUB_TOKEN_PERSONAL'   # CSalcedoDataBI
-    '248682413' = 'GITHUB_TOKEN_BUSINESS'   # PesanteAnalytics (ex PAL-Devs, ex Support1-PAL)
-}
-
-# CLI alias (Get-GhAccount -Account) -> the account's CURRENT login. Lived as a second copy in
-# Get-GhAccount.ps1, documented as "kept in one place so the two cannot drift apart" (#665).
-$script:AccountAlias = @{
-    'csalcedo' = 'CSalcedoDataBI'
-    'pesante'  = 'PesanteAnalytics'
-    'pal-devs' = 'PesanteAnalytics'   # historical alias, kept so existing invocations keep working
+# The variable an owner the map does not know falls back to: the default owner's own variable when
+# the map names one, else GH_TOKEN - the ambient token, which Get-GhTokenValue reads as GH_TOKEN
+# and then `gh auth token`. Never another mapped (possibly wider) identity.
+function Get-FallbackTokenVar {
+    if ($script:DefaultOwner -and $script:OwnerTokenVar.ContainsKey($script:DefaultOwner)) {
+        return $script:OwnerTokenVar[$script:DefaultOwner]
+    }
+    return 'GH_TOKEN'
 }
 
 <#
@@ -111,7 +101,7 @@ function Resolve-GhTokenVar {
     param(
         [bool]$IsArmed = $false,
         [bool]$AgentTokenPresent = $false,
-        [string]$Owner = 'CSalcedoDataBI',
+        [string]$Owner = '',
         [scriptblock]$IdLookup
     )
     if (-not $IsArmed) {
@@ -200,9 +190,16 @@ function Get-OwnerAccountId {
 #>
 function Resolve-OwnerTokenVar {
     param(
-        [string]$Owner = 'CSalcedoDataBI',
+        [string]$Owner = '',
         [scriptblock]$IdLookup
     )
+    if (-not $Owner) { $Owner = $script:DefaultOwner }
+    if ($script:OwnerTokenVar.Count -eq 0 -and $script:AccountIdTokenVar.Count -eq 0) {
+        # No account map at all: the ordinary single-account setup. Not a warning - it is the
+        # default for anyone who never ran /board setup.
+        return @{ var = 'GH_TOKEN'; mapped = $true; how = 'ambient'
+                  reason = "no account map ($((Get-AbiosAccountsPath))) - using the ambient token (GH_TOKEN, then gh auth token)" }
+    }
     if ($Owner -and $script:OwnerTokenVar.ContainsKey($Owner)) {
         $v = $script:OwnerTokenVar[$Owner]
         return @{ var = $v; mapped = $true; how = 'login'
@@ -218,21 +215,22 @@ function Resolve-OwnerTokenVar {
             return @{ var = $v; mapped = $true; how = 'account-id'
                       reason = "owner '$Owner' is not in the map by login, but its account ID " +
                                "($id) belongs to a known account ($v): it was renamed. Add the " +
-                               "new login to `$OwnerTokenVar in Resolve-GhTokenVar.ps1." }
+                               "new login with /board setup." }
         }
         $note = if ($id) { " Its account ID ($id) does not belong to any known account either." }
                 else     { ' Could not look up its account ID on GitHub.' }
     }
-    return @{ var = 'GITHUB_TOKEN_PERSONAL'; mapped = $false; how = 'unmapped'
+    $fb = Get-FallbackTokenVar
+    return @{ var = $fb; mapped = $false; how = 'unmapped'
               reason = "owner '$Owner' is not mapped to any known account ($known).$note " +
-                       "GITHUB_TOKEN_PERSONAL is used by default. This is a problem of the " +
+                       "$fb is used by default. This is a problem of the " +
                        "owner->token MAP, not of permissions: if that account was renamed, add its login " +
-                       "in Resolve-GhTokenVar.ps1 or pass -TokenVar." }
+                       "with /board setup or pass -TokenVar." }
 }
 
 function Get-OwnerTokenVar {
     param(
-        [string]$Owner = 'CSalcedoDataBI',
+        [string]$Owner = '',
         # Default: ask GitHub for the account ID of a login the map does not know (a renamed
         # account). Tests pass a fake.
         [scriptblock]$IdLookup = { param($o) Get-OwnerAccountId -Owner $o }
@@ -242,7 +240,7 @@ function Get-OwnerTokenVar {
     return $r.var
 }
 
-# The CLI alias (csalcedo / pesante / pal-devs) -> current login. '' when the alias is unknown.
+# A CLI alias from the user's map -> current login. '' when the alias is unknown.
 function Get-AccountForAlias {
     param([Parameter(Mandatory)][string]$Alias)
     $v = $script:AccountAlias[$Alias]
@@ -283,7 +281,7 @@ function Test-InBrakedRun {
 function Get-GhTokenForContext {
     param(
         [string]$StartDir = (Get-Location).Path,
-        [string]$Owner = 'CSalcedoDataBI',
+        [string]$Owner = '',
         # A caller's explicit -TokenVar. Passed IN rather than handled by the caller, so the armed
         # check cannot be skipped by taking a different branch - which is exactly how the first cut
         # of this leaked (review round 2).
@@ -299,8 +297,10 @@ function Get-GhTokenForContext {
                "the capability the brake removes.")
     }
     if ($ExplicitVar) {
-        $v = Get-GhTokenValue -VarName $ExplicitVar
-        if (-not $v) { throw "$ExplicitVar is not in the Windows USER environment." }
+        # An explicit -TokenVar is a demand for THAT identity: a missing one is an error, never a
+        # silent fallback to the ambient token (#499).
+        $v = Get-GhTokenValue -VarName $ExplicitVar -NoAmbient
+        if (-not $v) { throw "$ExplicitVar is not set (user or process environment); an explicit -TokenVar never falls back to another token." }
         return @{ token = $v; var = $ExplicitVar; armed = $armed; reason = "explicit override ($ExplicitVar)" }
     }
     $agentPresent = [bool](Get-GhTokenValue -VarName $script:AgentTokenVar)
@@ -310,16 +310,23 @@ function Get-GhTokenForContext {
     # is told so before it reaches a push error that would read as "no permission" (#665).
     if (-not $d.mapped) { Write-Warning $d.reason }
     $val = Get-GhTokenValue -VarName $d.var
-    if (-not $val) { throw "$($d.var) is not in the Windows USER environment." }
+    if (-not $val) {
+        if ($d.var -eq 'GH_TOKEN') { throw "No GitHub token: GH_TOKEN is unset and 'gh auth token' returned nothing. Run 'gh auth login', or map the account with /board setup." }
+        throw "$($d.var) is not set (user or process environment). Set it, or change the map with /board setup."
+    }
     return @{ token = $val; var = $d.var; armed = $armed; mapped = $d.mapped; reason = $d.reason }
 }
 
 # Read the variable's value. Kept separate from the DECISION so the decision stays pure - and so a
 # token value never has to pass through the tested surface.
+# The agent identity never falls back to the ambient token: a braked run with no agent token must
+# stop, not continue as the owner (#550). Every other variable may (#762: cross-platform, and no
+# registry required).
 function Get-GhTokenValue {
-    param([Parameter(Mandatory)][string]$VarName)
+    param([Parameter(Mandatory)][string]$VarName, [switch]$NoAmbient)
     if (-not $VarName) { return '' }
-    return [System.Environment]::GetEnvironmentVariable($VarName, 'User')
+    $ambient = (-not $NoAmbient) -and ($VarName -ne $script:AgentTokenVar)
+    return (Get-AbiosTokenValue -VarName $VarName -AllowAmbient:$ambient)
 }
 
 # Dot-source guard: tests set $env:ABIOS_TOKENVAR_DOTSOURCE to load the pure core only.

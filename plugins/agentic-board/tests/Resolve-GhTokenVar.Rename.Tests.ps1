@@ -13,12 +13,16 @@
          permissions problem - and never resolved to the wider BUSINESS token.  #>
 
 BeforeAll {
+    # The identity tests run against a FIXED account map, never the developer's own (#762).
+    $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
+    $env:ABIOS_ACCOUNTS_FILE = Join-Path $PSScriptRoot 'fixtures' 'accounts.identity.json'
     $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
     $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
     . (Join-Path $script:ScriptDir 'Resolve-GhTokenVar.ps1')
     . (Join-Path $script:ScriptDir 'Invoke-Gh.ps1')
     $env:ABIOS_TOKENVAR_DOTSOURCE = $null
 }
+AfterAll { $env:ABIOS_ACCOUNTS_FILE = $script:SavedAccountsFile }
 
 Describe 'the business account under every name it has had (#665)' {
     It 'maps the CURRENT login, PesanteAnalytics, to the business token' {
@@ -236,12 +240,11 @@ Describe 'one copy of the alias map, not two (#665)' {
         $src | Should -Match 'Get-AccountForAlias'
         $src | Should -Not -Match "'pal-devs'\s*=\s*'"
     }
-    It "Get-GhAccount's -Account ValidateSet offers exactly the aliases the resolver knows" {
+    It "Get-GhAccount's -Account carries no fixed list of aliases - they come from the user's map (#762)" {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $script:ScriptDir 'Get-GhAccount.ps1'), [ref]$null, [ref]$null)
         $param = $ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'Account' }
-        $vs = $param.Attributes | Where-Object { $_.TypeName.Name -eq 'ValidateSet' }
-        $offered = @($vs.PositionalArguments | ForEach-Object { $_.Value })
-        ($offered | Sort-Object) | Should -Be ((Get-KnownAccountAliases) | Sort-Object)
+        @($param.Attributes | Where-Object { $_.TypeName.Name -eq 'ValidateSet' }) | Should -BeNullOrEmpty
+        (Get-KnownAccountAliases | Sort-Object) | Should -Be @('csalcedo', 'pal-devs', 'pesante')
     }
 }
