@@ -35,3 +35,6 @@ testResults.xml
 # Antigravity CLI (agy) drops this per-repo working dir wherever it runs — including a fleet
 # worktree. Never ours to commit (#615).
 .antigravitycli/
+
+# claude plugin eval run output (local reports and traces)
+plugins/agentic-board/evals/results/
