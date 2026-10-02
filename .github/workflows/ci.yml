@@ -61,6 +61,44 @@ jobs:
           if-no-files-found: warn
           retention-days: 7   # default is 90; a test log is only useful while the PR is open
 
+  test-linux:
+    # The same suite on Linux (#767): the scripts are PowerShell 7, which runs here too, and this
+    # job is what keeps them from drifting back to Windows-only calls. Public repo: no minute cost.
+    name: Pester (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester 5
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5.0
+          (Get-Module Pester).Version.ToString()
+
+      - name: Run Pester suite
+        shell: pwsh
+        run: |
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path              = 'plugins/agentic-board/tests'
+          $cfg.Run.Throw             = $true
+          $cfg.Output.Verbosity      = 'Normal'
+          $cfg.TestResult.Enabled    = $true
+          $cfg.TestResult.OutputPath = 'testResults-linux.xml'
+          $cfg.TestResult.OutputFormat = 'NUnitXml'
+          Invoke-Pester -Configuration $cfg
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-results-linux
+          path: testResults-linux.xml
+          if-no-files-found: warn
+          retention-days: 7
+
   docs:
     name: Docs freshness
     runs-on: ubuntu-latest   # all-LF checkout, no autocrlf: a clean byte-for-byte diff
