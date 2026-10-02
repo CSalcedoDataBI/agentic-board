@@ -241,21 +241,22 @@ Describe 'Budget-only marker - a contract that does not brake on merge still get
     }
 }
 
-Describe 'Brake-PreCheck.cmd - the cheap gate in front of the hook (#572)' {
+Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767)' {
     BeforeAll {
-        $script:PreCheck = Join-Path $PSScriptRoot '..' 'scripts' 'Brake-PreCheck.cmd' | Resolve-Path
+        $script:PreCheck = Join-Path $PSScriptRoot '..' 'scripts' 'Brake-PreCheck.sh' | Resolve-Path
         $script:HooksJson = Get-Content (Join-Path $PSScriptRoot '..' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json
     }
 
-    It 'hooks.json routes PreToolUse through the cmd shim, not straight into pwsh' {
+    It 'hooks.json routes PreToolUse through the sh shim, not straight into pwsh' {
         $cmd = $script:HooksJson.hooks.PreToolUse[0].hooks[0].command
-        $cmd | Should -Match 'cmd /d /c'
-        $cmd | Should -Match 'Brake-PreCheck\.cmd'
+        $cmd | Should -Match '^sh '
+        $cmd | Should -Match 'Brake-PreCheck\.sh'
         $cmd | Should -Not -Match 'Brake-PreToolUseHook\.ps1'
     }
     It 'the shim walks the working dir plus three ancestors' {
         $body = Get-Content $script:PreCheck -Raw
-        ([regex]::Matches($body, [regex]::Escape('brake-armed.json'))).Count | Should -Be 4
+        $body | Should -Match ([regex]::Escape('for d in . .. ../.. ../../..; do'))
+        $body | Should -Match ([regex]::Escape('$d/.agentic-board/brake-armed.json'))
         $body | Should -Match 'Brake-PreToolUseHook\.ps1'
     }
     It 'without a marker it exits 0 fast and NEVER starts pwsh' {
@@ -264,7 +265,7 @@ Describe 'Brake-PreCheck.cmd - the cheap gate in front of the hook (#572)' {
         Push-Location $wt
         try {
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
-            $out = cmd /d /c "`"$($script:PreCheck)`"" 2>&1
+            $out = & sh "$($script:PreCheck)" 2>&1
             $sw.Stop()
             $LASTEXITCODE | Should -Be 0
             # Generous bound: the point is "no pwsh spawn" (~1300ms), not a benchmark.
@@ -281,7 +282,7 @@ Describe 'Brake-PreCheck.cmd - the cheap gate in front of the hook (#572)' {
         Set-Content -LiteralPath $payloadFile -Encoding UTF8 -Value $payload
         Push-Location $wt
         try {
-            $out = (cmd /d /c "type `"$payloadFile`" | `"$($script:PreCheck)`"" 2>&1 | Out-String).Trim()
+            $out = (Get-Content -LiteralPath $payloadFile -Raw | & sh "$($script:PreCheck)" 2>&1 | Out-String).Trim()
             $out | Should -Match '"permissionDecision":"deny"'
             $out | Should -Match 'BRAKE'
         } finally { Pop-Location }

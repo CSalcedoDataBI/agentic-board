@@ -1,10 +1,10 @@
 ﻿#Requires -Modules Pester
-<#  PluginStale-NoticePreCheck.cmd - the cheap gate in front of the stale-plugin notice (epic #711, #714).
+<#  PluginStale-NoticePreCheck.sh - the cheap gate in front of the stale-plugin notice (epic #711, #714).
 
-    The hook runs before EVERY prompt of EVERY session and a pwsh start alone costs about 2 s, so a cmd shim
-    (the Brake-PreCheck.cmd idea, #572) answers the common case. These tests drive the REAL .cmd over real
+    The hook runs before EVERY prompt of EVERY session and a pwsh start alone costs about 2 s, so a sh shim
+    (the Brake-PreCheck idea, #572) answers the common case. These tests drive the REAL .sh over real
     stdin with fabricated ~/.claude and state folders. "pwsh was not started" is proved, not assumed: for
-    most cases a fake pwsh.cmd is put first on PATH and records its arguments, so a run either left a line
+    most cases a fake pwsh script is put first on PATH and records its arguments, so a run either left a line
     in its log or it did not. The end-to-end cases use the real pwsh and the real hook.
 
     The shim may only skip work when the stamp provably matches the last conclusive check of the same
@@ -12,7 +12,7 @@
 
 BeforeAll {
     $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
-    $script:Shim = Join-Path $script:Scripts 'PluginStale-NoticePreCheck.cmd'
+    $script:Shim = Join-Path $script:Scripts 'PluginStale-NoticePreCheck.sh'
     $script:Hook = Join-Path $script:Scripts 'PluginStale-NoticeHook.ps1'
     . (Join-Path $script:Scripts 'PluginState.ps1')
     $env:ABIOS_PLUGINNOTICE_DOTSOURCE = '1'
@@ -32,22 +32,25 @@ BeforeAll {
         $bin = Join-Path $root 'bin'
         New-Item -ItemType Directory -Force -Path $bin | Out-Null
         $log = Join-Path $root 'pwsh-ran.txt'
-        [System.IO.File]::WriteAllText((Join-Path $bin 'pwsh.cmd'), "@echo off`r`necho %* >> `"$log`"`r`nexit /b 0`r`n")
+        # A recording pwsh for sh: Git Bash on Windows and sh elsewhere both find an extensionless script.
+        $fake = Join-Path $bin 'pwsh'
+        [System.IO.File]::WriteAllText($fake, "#!/bin/sh`necho `"`$@`" >> '$($log -replace '\\', '/')'`nexit 0`n")
+        if (-not $IsWindows) { & chmod +x $fake }
         [void](Add-FakeBuild $fx -Marketplace 'm' -Plugin 'p' -Version '1.0')
         [void](Add-FakeBuild $fx -Marketplace 'm' -Plugin 'p' -Version '2.0' -Installed)
         return @{ Root = $root; Fx = $fx; Home = $home_; Bin = $bin; Log = $log
                   StampDir = (Join-Path $home_ '.agentic-board' 'plugin-check'); StateDir = (Join-Path $home_ '.agentic-board') }
     }
 
-    # Run the real shim. -FakePwsh puts the recording pwsh.cmd first on PATH. Returns ExitCode/Stdout/Stderr/Ms/Ran.
+    # Run the real shim through sh. -FakePwsh puts the recording pwsh first on PATH. Returns ExitCode/Stdout/Stderr/Ms/Ran.
     function script:Invoke-Shim {
         param($World, [string]$Stdin, [switch]$FakePwsh)
         if (Test-Path -LiteralPath $World.Log) { Remove-Item -LiteralPath $World.Log -Force }
-        $psi = [System.Diagnostics.ProcessStartInfo]::new('cmd.exe')
-        $psi.Arguments = '/d /c ""' + $script:Shim + '""'
+        $psi = [System.Diagnostics.ProcessStartInfo]::new('sh')
+        $psi.ArgumentList.Add($script:Shim)
         $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
         $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
-        if ($FakePwsh) { $psi.Environment['PATH'] = "$($World.Bin);" + $env:PATH }
+        if ($FakePwsh) { $psi.Environment['PATH'] = $World.Bin + [System.IO.Path]::PathSeparator + $env:PATH }
         $psi.Environment['USERPROFILE'] = $World.Home; $psi.Environment['HOME'] = $World.Home
         $psi.Environment['CLAUDE_CONFIG_DIR'] = $World.Fx.Root
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -74,29 +77,27 @@ BeforeAll {
 
 Describe 'hooks.json routes UserPromptSubmit through the shim' {
     BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
-    It 'calls the .cmd shim through cmd, not pwsh directly, and keeps the 10 s timeout' {
+    It 'calls the .sh shim through sh, not pwsh directly, and keeps the 10 s timeout' {
         $h = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks })[0]
-        $h.command | Should -Match 'cmd /d /c'
-        $h.command | Should -Match 'PluginStale-NoticePreCheck\.cmd'
+        $h.command | Should -Match '^sh '
+        $h.command | Should -Match 'PluginStale-NoticePreCheck\.sh'
         $h.command | Should -Not -Match 'PluginStale-NoticeHook\.ps1'
         [int]$h.timeout | Should -BeLessOrEqual 10
         [int]$h.timeout | Should -BeGreaterThan 0
     }
-    It 'the shim file has CRLF line endings (cmd.exe can mis-parse labels in LF-only files; .gitattributes keeps it so)' {
+    It 'the shim file has LF-only line endings (sh reads a CR as part of the command; .gitattributes keeps it so)' {
         $bytes = [System.IO.File]::ReadAllBytes($script:Shim)
-        $lf = @(0..($bytes.Length - 1) | Where-Object { $bytes[$_] -eq 10 })
-        $bareLf = @($lf | Where-Object { $_ -eq 0 -or $bytes[$_ - 1] -ne 13 })
-        $lf.Count | Should -BeGreaterThan 20
-        $bareLf.Count | Should -Be 0
+        @($bytes | Where-Object { $_ -eq 13 }).Count | Should -Be 0
+        @($bytes | Where-Object { $_ -eq 10 }).Count | Should -BeGreaterThan 20
     }
     It 'the shim names the hook it starts, and passes the id, never the payload' {
         $body = Get-Content $script:Shim -Raw
         $body | Should -Match 'PluginStale-NoticeHook\.ps1'
-        $body | Should -Match '-SessionId !ID!'
+        $body | Should -Match '-SessionId "\$id"'
     }
 }
 
-Describe 'the shim takes only a validated session id from the first line' -Skip:(-not $IsWindows) {
+Describe 'the shim takes only a validated session id from the first line' {
     It 'a hostile prompt full of shell metacharacters is never executed and never reaches pwsh: only the -SessionId argument does' {
         $w = New-ShimWorld
         $prompt = 'a & echo pwned > "' + $w.Root + '\pwned.txt" | b < c > d ^ e %PATH% !VAR! "q" ''s'' ) ('
@@ -166,7 +167,7 @@ Describe 'the shim takes only a validated session id from the first line' -Skip:
     }
 }
 
-Describe 'the stamp decides whether pwsh runs' -Skip:(-not $IsWindows) {
+Describe 'the stamp decides whether pwsh runs' {
     It 'no stamp yet: pwsh runs' {
         $w = New-ShimWorld
         (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
@@ -246,7 +247,7 @@ Describe 'the stamp decides whether pwsh runs' -Skip:(-not $IsWindows) {
     }
 }
 
-Describe 'end to end: real shim, real hook, real pwsh' -Skip:(-not $IsWindows) {
+Describe 'end to end: real shim, real hook, real pwsh' {
     BeforeAll {
         # A stale session: it loaded p 1.0, 2.0 is installed. Ids are UUID-shaped, as the shim requires.
         function script:New-E2E {

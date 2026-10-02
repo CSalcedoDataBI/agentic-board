@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cmd /d /c \"${CLAUDE_PLUGIN_ROOT}/scripts/Brake-PreCheck.cmd\""
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/Brake-PreCheck.sh\""
           }
         ]
       }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cmd /d /c \"${CLAUDE_PLUGIN_ROOT}/scripts/PluginStale-NoticePreCheck.cmd\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/PluginStale-NoticePreCheck.sh\"",
             "timeout": 10
           }
         ]

@@ -101,19 +101,20 @@ installed build it shows **once per (session, plugin, new build)**, in plain lan
 timeout and its own time budget, swallows its own errors, and always exits 0. State: `plugin-notices.json`
 under the shared state directory (`Get-AbiosStateDir -Root $HOME`).
 
-**Cost, and the cmd shim.** The hook runs before every prompt of every session and a `pwsh` start alone is
-about 2 s on the maintainer's machine, so hooks.json calls `scripts/PluginStale-NoticePreCheck.cmd` (the
-same idea as `Brake-PreCheck.cmd`, #572), which answers the common case in about 0.15-0.35 s:
+**Cost, and the sh shim.** The hook runs before every prompt of every session and a `pwsh` start alone is
+about 2 s on the maintainer's machine, so hooks.json calls `scripts/PluginStale-NoticePreCheck.sh` (the
+same idea as `Brake-PreCheck.sh`, #572). It is POSIX `sh`, so it runs wherever Claude Code runs hooks:
+`sh -c` on macOS/Linux and Git Bash on Windows (#767).
 
-1. It reads **only the first payload line** with `set /p` and takes the session id from it. The payload
-   holds the user's prompt (`& | < > ^ % !` and quotes), so it is never echoed, never put on a command line,
-   and only ever touched through delayed expansion, whose results cmd does not re-parse.
+1. It reads **only the first payload line** with `read -r` and takes the session id from it. The payload
+   holds the user's prompt (shell metacharacters and quotes), so it is never evaluated and never put on a
+   command line: it is only matched with `case` patterns and parameter expansion.
 2. It accepts the id only if it is exactly 36 characters of hex digits and dashes (a UUID). Anything else
    exits 0 silently (the notice is advisory, so silence is the safe direction here, unlike the brake). A
    passing id cannot hold a path separator, so it cannot name anything outside the stamp folder.
-3. It compares the installed list (`installed_plugins.json`) byte for byte (`fc /b`) with that session's
+3. It compares the installed list (`installed_plugins.json`) byte for byte (`cmp -s`) with that session's
    stamp, `<home>\.agentic-board\plugin-check\<id>\installed_plugins.json`: the list as the last
-   **conclusive** check READ it. Identical -> exit 0 without starting `pwsh`. Different, missing, or `fc`
+   **conclusive** check READ it. Identical -> exit 0 without starting `pwsh`. Different, missing, or `cmp`
    reporting an error -> `pwsh` runs the real hook with `-SessionId <id>` (no stdin is read) and its stdout
    (the `systemMessage` JSON) reaches Claude Code unchanged.
 
@@ -122,8 +123,8 @@ conclusive check for that same session. The hook writes the stamp only **after**
 session is in the registry, its markers exist, the installed list is readable) and after the notice, if any,
 was recorded; an inconclusive check (first prompt racing ahead of the session record or marker) is never
 remembered, so the next prompt reaches the hook again. Stamps of sessions that left the registry are
-removed on the next conclusive check. `.gitattributes` pins `*.cmd` to CRLF because cmd.exe can mis-parse
-labels in LF-only files.
+removed on the next conclusive check. `.gitattributes` pins `*.sh` to LF because sh reads a CR as part of
+the command.
 
 Inside the hook the same idea remains for what the shim lets through: the installed list's stamp is kept in
 `plugin-notices.json` and re-checked at most every 30 minutes after a conclusive check, 5 after an

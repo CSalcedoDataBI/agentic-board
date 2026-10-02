@@ -58,6 +58,7 @@ Describe 'Resolve-LockPathForm canonicalizes the lock name (external review roun
         Set-Content -LiteralPath $file -Value '[]'
         # Build an 8.3 short form of the SAME directory the way %TEMP%-derived paths do in the wild
         # (this repo's own comments document Windows actually doing this - CRISTO~1 for Cristobal).
+        if (-not $IsWindows) { Set-ItResult -Skipped -Because '8.3 short names are a Windows filesystem feature'; return }
         $fsObj = New-Object -ComObject Scripting.FileSystemObject
         $shortDir = $fsObj.GetFolder($long).ShortPath
         if ($shortDir -and $shortDir -ne $long) {
@@ -92,8 +93,10 @@ for ($i = 0; $i -lt $Count; $i++) {
 '@ | Set-Content -LiteralPath $writerPath -Encoding UTF8
 
         $countEach = 25
-        $p1 = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $writerPath, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '1', '-Count', "$countEach") -PassThru -WindowStyle Hidden
-        $p2 = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $writerPath, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '5000', '-Count', "$countEach") -PassThru -WindowStyle Hidden
+        $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+        $p1 = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $writerPath, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '1', '-Count', "$countEach") -PassThru @abiosHidden
+        $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+        $p2 = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $writerPath, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '5000', '-Count', "$countEach") -PassThru @abiosHidden
         $p1.WaitForExit(90000) | Out-Null
         $p2.WaitForExit(90000) | Out-Null
         $p1.HasExited | Should -BeTrue -Because 'writer process 1 must finish within the timeout'
@@ -487,7 +490,8 @@ Invoke-WithSessionRegistryLock -Path $p -Body {
         Push-Location $repo
         try {
             $p = Get-SessionRegistryPath
-            $holder = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -PassThru -ArgumentList @(
+            $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+            $holder = Start-Process -FilePath 'pwsh' @abiosHidden -PassThru -ArgumentList @(
                 '-NoProfile', '-File', $holderPath, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-Flag', $flag)
             $sw = [Diagnostics.Stopwatch]::StartNew()
             while (-not (Test-Path -LiteralPath $flag) -and $sw.Elapsed.TotalSeconds -lt 30) { Start-Sleep -Milliseconds 50 }
@@ -624,7 +628,8 @@ if ($line -match 'graphql') {
         $env:GH_TOKEN = 'fake-token'
         try {
             Push-Location $script:RepoJ
-            Start-Process -FilePath 'pwsh' -WindowStyle Hidden -Wait -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
+            $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+            Start-Process -FilePath 'pwsh' @abiosHidden -Wait -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
                 -ArgumentList @('-NoProfile', '-File', "$script:Script", '-Parallel', '900', '-Surface', 'app', '-Json', '-DryRun', '-ProjectNum', '13', '-Owner', 'o')
             Pop-Location
         } finally { $env:PATH = $savedPath; $env:GH_TOKEN = $savedTok }
@@ -738,7 +743,8 @@ if ($line -match '^pr list') { Write-Output '[]'; exit 0 }
         $env:PATH = "$fake$([IO.Path]::PathSeparator)$savedPath"; $env:GH_TOKEN = 'fake-token'
         try {
             Push-Location $repo
-            $p = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
+            $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+            $p = Start-Process -FilePath 'pwsh' @abiosHidden -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
                 -ArgumentList @('-NoProfile', '-File', "$script:Script", '-Parallel', '901', '-Surface', 'app', '-Json', '-DryRun', '-ProjectNum', '13', '-Owner', 'o')
             Pop-Location
         } finally { $env:PATH = $savedPath; $env:GH_TOKEN = $savedTok }
@@ -883,8 +889,10 @@ for ($i = 0; $i -lt $Count; $i++) {
             }
             @(Read-SessionRegistryRaw).Count | Should -Be $seedCount -Because 'precondition: the seed rows exist'
 
-            $p1 = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-File', $prWriter,   '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '1',    '-Count', "$seedCount")
-            $p2 = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-File', $sessWriter, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '6000', '-Count', "$seedCount")
+            $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+            $p1 = Start-Process -FilePath 'pwsh' @abiosHidden -PassThru -ArgumentList @('-NoProfile', '-File', $prWriter,   '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '1',    '-Count', "$seedCount")
+            $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+            $p2 = Start-Process -FilePath 'pwsh' @abiosHidden -PassThru -ArgumentList @('-NoProfile', '-File', $sessWriter, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-StartIssue', '6000', '-Count', "$seedCount")
             $p1.WaitForExit(120000) | Out-Null
             $p2.WaitForExit(120000) | Out-Null
             $p1.HasExited | Should -BeTrue
@@ -927,7 +935,8 @@ for ($i = 0; $i -lt $Rounds; $i++) {
             }
             @(Read-SessionRegistryRaw).Count | Should -Be $seed -Because 'precondition: the seed rows are there before the race'
 
-            $p = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -PassThru -ArgumentList @(
+            $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+            $p = Start-Process -FilePath 'pwsh' @abiosHidden -PassThru -ArgumentList @(
                 '-NoProfile', '-File', $writer, '-RepoPath', $repo, '-ScriptPath', "$script:Script", '-Rounds', '120')
 
             $reads = 0; $short = 0
@@ -1004,7 +1013,8 @@ Describe 'An early failure in -Surface app -Json never lands on stdout (review r
         $env:GH_TOKEN = ''
         try {
             Push-Location $repo
-            $p = Start-Process -FilePath 'pwsh' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
+            $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+            $p = Start-Process -FilePath 'pwsh' @abiosHidden -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
                 -ArgumentList @('-NoProfile', '-File', "$script:Script", '-Parallel', '902', '-Surface', 'app', '-Json',
                                 '-ProjectNum', '13', '-Owner', 'o', '-TokenVar', 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST')
             Pop-Location

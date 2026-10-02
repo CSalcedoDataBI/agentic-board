@@ -52,7 +52,7 @@ function Get-LatestUpstreamSha([string]$Repo, [string]$Path) {
 
 $rows = [System.Collections.Generic.List[object]]::new()
 if (Test-Path $SkillsDir) {
-    foreach ($provFile in Get-ChildItem -Path $SkillsDir -Recurse -Filter '.abios-provenance.json' -ErrorAction SilentlyContinue) {
+    foreach ($provFile in Get-ChildItem -Path $SkillsDir -Recurse -Force -Filter '.abios-provenance.json' -ErrorAction SilentlyContinue) {
         $p = $null
         try { $p = Get-Content -LiteralPath $provFile.FullName -Raw | ConvertFrom-Json } catch { continue }
         if (-not $p.repo) { continue }

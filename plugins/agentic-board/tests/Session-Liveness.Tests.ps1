@@ -24,7 +24,8 @@ BeforeAll {
         param([int]$Issue, [string]$Dir)
         $file = Join-Path $Dir "launch-$Issue.ps1"
         'Start-Sleep -Seconds 300' | Set-Content -LiteralPath $file
-        Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $file) -PassThru -WindowStyle Hidden
+        $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+        Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $file) -PassThru @abiosHidden
     }
     $script:Shells = @()
 }

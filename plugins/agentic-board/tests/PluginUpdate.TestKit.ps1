@@ -90,8 +90,8 @@ function Add-FakeMarker {
     [System.IO.File]::WriteAllText((Join-Path $iu "$ProcId"), $body)
     # Creating .in_use touches its parent: backdate both so the cleanup grace period does not apply.
     $old = (Get-Date).AddHours(-48)
-    (Get-Item -LiteralPath $iu).LastWriteTime = $old
-    (Get-Item -LiteralPath (Split-Path $iu -Parent)).LastWriteTime = $old
+    (Get-Item -LiteralPath $iu -Force).LastWriteTime = $old
+    (Get-Item -LiteralPath (Split-Path $iu -Parent) -Force).LastWriteTime = $old
 }
 
 function Add-FakeSession {

@@ -281,9 +281,10 @@ function Publish-StallSignals {
             Set-Content -LiteralPath $bodyFile -Encoding UTF8 -Value $body
             $exit = 1
             try {
+                $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
                 $proc = Start-Process -FilePath 'gh' -ArgumentList @(
                             'issue','comment',"$($s.issue)",'--repo',"$($s.repo)",'--body-file',$bodyFile
-                        ) -WindowStyle Hidden -PassThru -RedirectStandardOutput ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-stall-out-" + [guid]::NewGuid().ToString('N'))) `
+                        ) @abiosHidden -PassThru -RedirectStandardOutput ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-stall-out-" + [guid]::NewGuid().ToString('N'))) `
                           -RedirectStandardError  ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "abios-stall-err-" + [guid]::NewGuid().ToString('N')))
                 if ($proc.WaitForExit(15000)) { $exit = $proc.ExitCode } else { try { $proc.Kill() } catch { } }
             } finally {
