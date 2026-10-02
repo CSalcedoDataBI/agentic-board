@@ -72,6 +72,7 @@ function Install-One($t, [bool]$dry) {
     $iargs = @{ Repo=$t.repo; Path=$t.path; Name=$t.name }
     if ($t.owner)   { $iargs.Owner   = $t.owner }
     if ($t.license) { $iargs.License = $t.license }
+    if ($t.ref)     { $iargs.Ref     = $t.ref }      # the pinned commit (#765)
     if ($Dest)      { $iargs.Dest    = $Dest }
     if ($Force)     { $iargs.Force   = $true }
     $res = & $InstallSkillWith @iargs

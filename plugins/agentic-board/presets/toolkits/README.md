@@ -27,14 +27,15 @@ Every catalog is a JSON array of entries with these keys (all required):
 | `license` | string | SPDX id or short label — copied next to the installed skill (mandatory for CC BY-SA). |
 | `homepage` | string | URL to the tool's home. |
 | `profiles` | string[] | One or more task bundles this tool belongs to (min 1). |
+| `ref` | string | *(skill-clone)* The full 40-character commit SHA to install. Required: a skill is never cloned from a moving branch tip. |
 | `install` | string \| null | Exact install command for `plugin` kind; `null` for `skill-clone` (installed via `Install-SkillFromRepo.ps1`). |
 | `purpose` | string | One line — what it does. |
 
 ### `kind`
 
 - **`skill-clone`** — a skill folder inside a repo. Installed by `Install-SkillFromRepo.ps1`
-  (shallow clone → copy the `path` folder into `~/.claude/skills/<name>` → copy the source
-  `LICENSE`). `path` is required; `install` is `null`. This is how the user's own public repos
+  (fetch the pinned `ref` commit → copy the `path` folder into `~/.claude/skills/<name>` → copy the source
+  `LICENSE`). `path` and `ref` are required; `install` is `null`. This is how the user's own public repos
   and other developers' skill folders are added.
 - **`plugin`** — a whole Claude Code plugin/marketplace (has a `.claude-plugin/marketplace.json`).
   Not folder-cloned: the installer **emits the exact `install` command** for the user to run

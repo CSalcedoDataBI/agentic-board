@@ -24,6 +24,9 @@ param(
     [string]$Owner = "",
     [string]$License = "",
     [string]$Dest,
+    # The exact commit to install (#765). The catalog pins one for every skill-clone; without it the
+    # branch tip is cloned and the script says so, because then nobody reviewed what was installed.
+    [string]$Ref,
     [switch]$Force
 )
 
@@ -40,10 +43,21 @@ if ((Test-Path $target) -and -not $Force) {
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("skillclone-" + [guid]::NewGuid().ToString('N'))
 try {
-    Write-Host "  Cloning $Repo (depth 1)..." -ForegroundColor Cyan
-    git clone --depth 1 "https://github.com/$Repo.git" $tmp 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "git clone failed for $Repo" }
+    if ($Ref) {
+        if ($Ref -notmatch '^[0-9a-f]{40}$') { throw "-Ref must be a full 40-character commit SHA, got '$Ref'." }
+        Write-Host "  Fetching $Repo at $($Ref.Substring(0,12)) (depth 1)..." -ForegroundColor Cyan
+        git init -q $tmp 2>&1 | Out-Null
+        git -C $tmp fetch -q --depth 1 "https://github.com/$Repo.git" $Ref 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "git fetch of $Ref failed for $Repo" }
+        git -C $tmp checkout -q FETCH_HEAD 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "git checkout of $Ref failed for $Repo" }
+    } else {
+        Write-Host "  Cloning $Repo at its branch tip (depth 1) - no -Ref, so this commit is unpinned." -ForegroundColor DarkYellow
+        git clone --depth 1 "https://github.com/$Repo.git" $tmp 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "git clone failed for $Repo" }
+    }
     $sha = (git -C $tmp rev-parse HEAD 2>$null)
+    if ($Ref -and $sha -ne $Ref) { throw "Fetched $sha, expected $Ref." }
 
     $src = Join-Path $tmp $Path
     if (-not (Test-Path $src)) { throw "Skill path '$Path' not found in $Repo." }
