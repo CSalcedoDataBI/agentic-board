@@ -646,8 +646,13 @@ Describe 'Build-WorktreeLaunch' {
         Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { $null }
         $p = Build-WorktreeLaunch 12 'C:\wt' 'C:\brief.txt'
         $p.launchScript | Should -Match 'claude -p '                          # headless: skips trust + bypass-accept prompts
-        $p.launchScript | Should -Match '--permission-mode bypassPermissions' # no per-tool approval stalls
         $p.launchScript | Should -Match '--no-session-persistence'            # parallel sessions don't collide
+    }
+    It 'keeps the user permission mode by default; bypass only on explicit opt-in (#761)' {
+        Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { $null }
+        (Build-WorktreeLaunch 12 'C:\wt' 'C:\brief.txt').launchScript | Should -Not -Match 'bypassPermissions'
+        $p = Build-WorktreeLaunch 12 'C:\wt' 'C:\brief.txt' 'abios-parallel' 'ANTHROPIC_API_KEY' 'claude' '' '' $true
+        $p.launchScript | Should -Match '--permission-mode bypassPermissions'
     }
     It 'injects the child auth credential by env-var NAME (secret never on the command line)' {
         Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { $null }
@@ -685,16 +690,58 @@ Describe 'Build-WorktreeLaunch' {
     }
 }
 
+Describe 'Secret scrub of a launched session (#769)' {
+    It 'keeps only names in the script text, never a value' {
+        $s = Get-SecretScrubScript -Keep @('ANTHROPIC_API_KEY') -GhTokenVar 'GITHUB_TOKEN_AGENT'
+        $s | Should -Match "'ANTHROPIC_API_KEY','GITHUB_TOKEN_AGENT'"
+        $s | Should -Match 'TOKEN\|KEY\|SECRET\|PASSWORD'
+    }
+    It 'rejects an allowlist entry that could inject into the launch script' {
+        { Get-SecretScrubScript -Keep @("X'); rm -rf /; #") } | Should -Throw
+        { Get-SecretScrubScript -GhTokenVar 'A B' } | Should -Throw
+    }
+    It 'every launch carries the scrub before the CLI runs' {
+        Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { $null }
+        foreach ($cli in @(Get-CliAdapters | ForEach-Object Name)) {
+            $s = (Build-WorktreeLaunch 12 'C:\wt' 'C:\brief.txt' 'abios-parallel' 'ANTHROPIC_API_KEY' $cli).launchScript
+            $s.IndexOf('$abiosKeep') | Should -Be 0 -Because $cli
+        }
+    }
+    It 'really drops inherited secrets and restores only the allowlist (child pwsh)' {
+        $script = (Get-SecretScrubScript -Keep @('ABIOS_T_MODEL_KEY') -GhTokenVar 'ABIOS_T_AGENT_TOKEN') + "`r`n" +
+                  '[pscustomobject]@{ biz = $env:ABIOS_T_BUSINESS_TOKEN; pw = $env:ABIOS_T_DB_PASSWORD; model = $env:ABIOS_T_MODEL_KEY; gh = $env:GH_TOKEN; agent = $env:ABIOS_T_AGENT_TOKEN; other = $env:ABIOS_T_PLAIN } | ConvertTo-Json -Compress'
+        $f = Join-Path $TestDrive 'scrub.ps1'
+        Set-Content -LiteralPath $f -Value $script -Encoding UTF8
+        $saved = @{}
+        $vars = @{ ABIOS_T_BUSINESS_TOKEN = 'biz'; ABIOS_T_DB_PASSWORD = 'pw'; ABIOS_T_MODEL_KEY = 'model'; ABIOS_T_AGENT_TOKEN = 'agent'; GH_TOKEN = 'owner'; ABIOS_T_PLAIN = 'plain' }
+        foreach ($k in $vars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $vars[$k]) }
+        try {
+            $r = (& pwsh -NoProfile -File $f) | ConvertFrom-Json
+        } finally {
+            foreach ($k in $vars.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+        }
+        $r.biz   | Should -BeNullOrEmpty    # an unrelated token is gone
+        $r.pw    | Should -BeNullOrEmpty    # so is a password
+        $r.model | Should -Be 'model'       # the model credential survives
+        $r.gh    | Should -Be 'agent'       # GH_TOKEN is the chosen identity, not the inherited owner token
+        $r.agent | Should -BeNullOrEmpty    # ...exposed only as GH_TOKEN
+        $r.other | Should -Be 'plain'       # non-secret variables are untouched
+    }
+}
+
 Describe 'Build-WorktreeLaunch adapter parity' {
     # GOLDEN fixture captured from the pre-refactor Build-WorktreeLaunch for a claude
     # launch of issue 42 (brief C:\b\briefing-42.txt). The adapter-driven refactor MUST
     # keep the claude launchScript + args byte-identical to these constants.
     BeforeAll {
+        # The secret scrub (#769) is prepended to every launch; the claude lines after it are the
+        # pre-refactor golden, still byte-identical.
         $script:GoldenLaunchScript = @(
+            (Get-SecretScrubScript -Keep @('ANTHROPIC_API_KEY') -GhTokenVar 'GH_TOKEN')
             "Remove-Item Env:ANTHROPIC_API_KEY,Env:ANTHROPIC_AUTH_TOKEN,Env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue"
             "`$env:ANTHROPIC_API_KEY=[Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY','User')"
             "Remove-Item Env:CLAUDECODE,Env:CLAUDE_CODE_SESSION_ID,Env:CLAUDE_CODE_CHILD_SESSION,Env:CLAUDE_CODE_ENTRYPOINT -ErrorAction SilentlyContinue"
-            "claude -p (Get-Content -Raw -LiteralPath 'C:\b\briefing-42.txt') --permission-mode bypassPermissions --no-session-persistence --verbose"
+            "claude -p (Get-Content -Raw -LiteralPath 'C:\b\briefing-42.txt') --no-session-persistence --verbose"
         ) -join "`r`n"
         $script:GoldenWtArgs = @('-w', 'abios-parallel', 'new-tab', '--title', 'issue-42',
                                  '--startingDirectory', 'C:\wt\issue-42', 'pwsh', '-NoExit', '-File', 'C:\b\launch-42.ps1')
@@ -1558,28 +1605,47 @@ Describe 'non-claude adapters' {
         # embedded quotes when passing an argument to a native .exe (#615).
         $s | Should -Match ([regex]::Escape('C:\b\brief.txt'))
         $s | Should -Not -Match 'Get-Content'
-        # Without this flag agy soft-denies its own file read in headless mode.
-        $s | Should -Match '--dangerously-skip-permissions'
+        # The bypass is opt-in (#761): absent by default, present with AllowBypass.
+        $s | Should -Not -Match '--dangerously-skip-permissions'
+        $ctx.AllowBypass = $true
+        (& ((Get-CliAdapters | Where-Object Name -eq 'antigravity').BuildLaunch) $ctx) | Should -Match '--dangerously-skip-permissions'
     }
     It 'no adapter invokes the retired gemini CLI (#615)' {
         foreach ($a in (Get-CliAdapters)) {
             (& $a.BuildLaunch @{ BriefingFile = 'C:\b\brief.txt' }) | Should -Not -Match '\bgemini\b'
         }
     }
-    It 'codex BuildLaunch uses exec + --dangerously-bypass-approvals-and-sandbox with an stdin EOF guard' {
+    It 'codex BuildLaunch uses exec with an stdin EOF guard; the sandbox bypass only on opt-in (#761)' {
         $ctx = @{ BriefingFile = 'C:\b\brief.txt' }
         $s = & ((Get-CliAdapters | Where-Object Name -eq 'codex').BuildLaunch) $ctx
-        $s | Should -Match '\$null \|.*codex exec .*--dangerously-bypass-approvals-and-sandbox'
+        $s | Should -Match '\$null \|.*codex exec '
         $s | Should -Match 'Get-Content'
+        $s | Should -Not -Match '--dangerously-bypass-approvals-and-sandbox'
+        $ctx.AllowBypass = $true
+        (& ((Get-CliAdapters | Where-Object Name -eq 'codex').BuildLaunch) $ctx) | Should -Match 'codex exec .*--dangerously-bypass-approvals-and-sandbox'
     }
-    It 'antigravity Probe carries the same headless flags as its own BuildLaunch (#615)' {
-        # A probe that exercises a different flag set than the launch can green-light a launch
-        # that then fails. Pin the parity: both must carry --dangerously-skip-permissions.
-        $a = Get-CliAdapters | Where-Object Name -eq 'antigravity'
-        $probe = $a.Probe.ToString()
-        $probe | Should -Match "'agy'"
-        $probe | Should -Match '--dangerously-skip-permissions'
-        (& $a.BuildLaunch @{ BriefingFile = 'C:\b\brief.txt' }) | Should -Match '--dangerously-skip-permissions'
+    It 'no probe carries a permission bypass flag (#761) - a one-token reply calls no tool' {
+        foreach ($a in (Get-CliAdapters)) {
+            $a.Probe.ToString() | Should -Not -Match 'dangerously|--allow-all|bypassPermissions' -Because $a.Name
+        }
+    }
+    It 'antigravity is the only adapter that cannot run unattended without the bypass (#761)' {
+        @(Get-CliAdapters | Where-Object RequiresBypass | ForEach-Object Name) | Should -Be @('antigravity')
+    }
+    It 'Resolve-BypassAvailability hides a bypass-only CLI unless the human opted in (#761)' {
+        $agy = Get-CliAdapters | Where-Object Name -eq 'antigravity'
+        $cop = Get-CliAdapters | Where-Object Name -eq 'copilot'
+        Resolve-BypassAvailability $agy 'ok' $false | Should -Be 'needs-bypass'
+        Resolve-BypassAvailability $agy 'ok' $true  | Should -Be 'ok'
+        Resolve-BypassAvailability $agy 'auth' $false | Should -Be 'auth'
+        Resolve-BypassAvailability $cop 'ok' $false | Should -Be 'ok'
+        # ...and the fallback then routes its issue to claude.
+        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity = 'needs-bypass' } | Should -Be 'claude'
+    }
+    It 'Write-PermissionModeNotice warns loudly only when the bypass is on (#761)' {
+        Mock Write-Host {}
+        Write-PermissionModeNotice $true  | Should -Match 'WARNING: -AllowPermissionBypass'
+        Write-PermissionModeNotice $false | Should -Match 'own permission mode'
     }
     It 'codex Probe uses login status (not exec, which hangs on stdin)' {
         ((Get-CliAdapters | Where-Object Name -eq 'codex').Probe).ToString() | Should -Match 'login.*status'
@@ -1587,8 +1653,12 @@ Describe 'non-claude adapters' {
     It 'jules Probe scopes to remote list --session' {
         ((Get-CliAdapters | Where-Object Name -eq 'jules').Probe).ToString() | Should -Match 'remote.*list.*session'
     }
-    It 'copilot BuildLaunch uses -p + --allow-all' {
+    It 'copilot BuildLaunch uses -p; --allow-all only on opt-in (#761)' {
         $ctx = @{ BriefingFile = 'C:\b\brief.txt' }
+        $s = & ((Get-CliAdapters | Where-Object Name -eq 'copilot').BuildLaunch) $ctx
+        $s | Should -Match 'copilot -p '
+        $s | Should -Not -Match '--allow-all'
+        $ctx.AllowBypass = $true
         (& ((Get-CliAdapters | Where-Object Name -eq 'copilot').BuildLaunch) $ctx) | Should -Match 'copilot -p .* --allow-all'
     }
     It 'jules BuildLaunch dispatches jules new' {

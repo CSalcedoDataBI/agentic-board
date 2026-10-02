@@ -26,7 +26,8 @@ BeforeAll {
     # The frozen baseline (2026-08-04, AST counts, after migrating Board-Work's worst offenders
     # in #571). A file not listed here has ZERO tolerated raw calls.
     $script:Baseline = @{
-        'Board-Work.ps1'            = 8
+        'Board-Work.ps1'            = 7
+        'BoardWork.Launch.ps1'      = 1   # moved from Board-Work.ps1 by the #759 split, same call
         'Get-AbiosAccounts.ps1'     = 2   # gh auth token / gh api user: the bootstrap that finds the token Invoke-Gh then uses (#762)
         'Apply-FieldPreset.ps1'     = 4   # 6 -> 4: both field-create calls now go through Invoke-Gh (#649)
         'Board-Plan.ps1'            = 6

@@ -36,7 +36,7 @@
     all            - every repo a session lives in, plus -Root folders. The machine-wide sweep.
 
 .PARAMETER Root
-    With -Scope all: also sweep every git repo directly under this folder (e.g. D:\MIS-REPO).
+    With -Scope all: also sweep every git repo directly under this folder (e.g. C:\src).
 
 .PARAMETER HostSessionsFile
     JSON array of host-app sessions ({ sessionId, title, cwd, isRunning, lastActivityAt, pinned,
@@ -60,7 +60,7 @@
     .\Cleanup-Sessions.ps1 -HostSessionsFile s.json               # plan for THIS repo
     .\Cleanup-Sessions.ps1 -HostSessionsFile s.json -Force -Json  # run it for this repo
     .\Cleanup-Sessions.ps1 -Scope orphans -HostSessionsFile s.json  # sessions no repo owns
-    .\Cleanup-Sessions.ps1 -Scope all -Root D:\MIS-REPO -HostSessionsFile s.json -Json
+    .\Cleanup-Sessions.ps1 -Scope all -Root C:\src -HostSessionsFile s.json -Json
 #>
 [CmdletBinding()]
 param(

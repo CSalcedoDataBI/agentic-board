@@ -44,17 +44,17 @@
 # CLI). The probes match the ones /board work -Fleet already uses, so a verdict here and there
 # cannot disagree about the same CLI.
 #
-# This is a COPY of the command + probe arguments in Board-Work.ps1's Get-CliAdapters (that file cannot
-# be dot-sourced from here). It is kept honest by a test that reads the fleet's definition and fails
+# This is a COPY of the command + probe arguments in Get-CliAdapters (BoardWork.Adapters.ps1, loaded by
+# Board-Work.ps1, which cannot be dot-sourced from here). It is kept honest by a test that reads the fleet's definition and fails
 # when the two differ - Get-ReviewerRoster.Tests.ps1, "The roster agrees with the fleet adapters".
 function Get-ReviewerRoster {
     return @(
         [pscustomobject]@{
             Name      = 'antigravity'
             Command   = 'agy'
-            # Same headless flag set second-opinion reviews with: a probe that exercises a
-            # different flag set than the real run can green-light a run that then fails.
-            ProbeArgs = @('-p', 'reply OK', '--dangerously-skip-permissions')
+            # Auth/quota only, and the same probe /board work -Fleet uses. No permission bypass
+            # (#761): a one-token reply calls no tool, so the flag never changed its verdict.
+            ProbeArgs = @('-p', 'reply OK')
         }
         [pscustomobject]@{
             Name      = 'codex'
