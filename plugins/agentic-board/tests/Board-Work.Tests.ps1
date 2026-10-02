@@ -1079,48 +1079,36 @@ Describe 'Get-CliAdapters' {
     }
 }
 
-Describe 'Get-CliProbeStatus' {
-    It 'returns ok on exit 0' {
-        Get-CliProbeStatus -ExitCode 0 -Stderr "" | Should -Be 'ok'
-    }
-    It 'returns no-quota on a rate-limit/quota message' {
-        Get-CliProbeStatus -ExitCode 1 -Stderr "Error: 429 rate limit exceeded" | Should -Be 'no-quota'
-        Get-CliProbeStatus -ExitCode 1 -Stderr "quota exceeded for this project" | Should -Be 'no-quota'
-    }
-    It 'returns auth on a 401/authentication message' {
-        Get-CliProbeStatus -ExitCode 1 -Stderr "401 Unauthorized: please login" | Should -Be 'auth'
-    }
-    It 'returns error on any other non-zero exit' {
-        Get-CliProbeStatus -ExitCode 1 -Stderr "some unexpected failure" | Should -Be 'error'
-    }
-    It 'catches quota error even on exit 0' {
-        Get-CliProbeStatus -ExitCode 0 -Stderr "quota exceeded" | Should -Be 'no-quota'
-    }
-    It 'catches auth error even on exit 0' {
-        Get-CliProbeStatus -ExitCode 0 -Stderr "not logged in" | Should -Be 'auth'
-    }
-}
-
+# The per-adapter classification itself is pinned in CliProbeCodes.Tests.ps1 (#770).
 Describe 'Invoke-CliProbe timeout' {
-    It 'returns error when the command exceeds the timeout' {
-        Invoke-CliProbe @('pwsh', '-NoProfile', '-Command', 'Start-Sleep 5') -TimeoutSec 1 | Should -Be 'error'
+    It 'returns ERROR when the command exceeds the timeout' {
+        Invoke-CliProbe @('pwsh', '-NoProfile', '-Command', 'Start-Sleep 5') -TimeoutSec 1 -Cli 'codex' | Should -BeExactly 'ERROR'
     }
-    It 'classifies a fast command' {
-        Invoke-CliProbe @('pwsh', '-NoProfile', '-Command', 'exit 0') | Should -Be 'ok'
+    It "classifies a fast command with the named adapter's rules" {
+        Invoke-CliProbe @('pwsh', '-NoProfile', '-Command', "'Logged in using ChatGPT'") -Cli 'codex' | Should -BeExactly 'OK'
+    }
+    It 'an exit-0 run that prints nothing is ERROR, not OK (#770)' {
+        Invoke-CliProbe @('pwsh', '-NoProfile', '-Command', 'exit 0') -Cli 'codex' | Should -BeExactly 'ERROR'
     }
 }
 
 Describe 'Test-CliAvailability' {
-    It 'reports not-installed when the command is absent' {
+    It 'reports NOT_INSTALLED when the command is absent' {
         Mock Get-Command { $null } -ParameterFilter { $Name -eq 'codex' }
-        $r = Test-CliAvailability -Adapter ([PSCustomObject]@{ Name='codex'; Command='codex'; Probe={ param($ctx) 'ok' } })
-        $r.Status | Should -Be 'not-installed'
+        $r = Test-CliAvailability -Adapter ([PSCustomObject]@{ Name='codex'; Command='codex'; Probe={ param($ctx) 'OK' } })
+        $r.Status | Should -BeExactly 'NOT_INSTALLED'
     }
-    It 'runs the probe when installed and returns its status' {
+    It 'runs the probe when installed and returns its code' {
         Mock Get-Command { [PSCustomObject]@{ Source='C:\x\agy.exe' } } -ParameterFilter { $Name -eq 'antigravity' }
-        $r = Test-CliAvailability -Adapter ([PSCustomObject]@{ Name='antigravity'; Command='antigravity'; Probe={ param($ctx) 'no-quota' } })
-        $r.Status | Should -Be 'no-quota'
+        $r = Test-CliAvailability -Adapter ([PSCustomObject]@{ Name='antigravity'; Command='antigravity'; Probe={ param($ctx) 'QUOTA' } })
+        $r.Status | Should -BeExactly 'QUOTA'
         $r.Cli    | Should -Be 'antigravity'
+    }
+    It 'pins a probe answer outside the closed set to ERROR - an old free-form ok is not OK (#770)' {
+        Mock Get-Command { [PSCustomObject]@{ Source='C:\x\codex.exe' } } -ParameterFilter { $Name -eq 'codex' }
+        foreach ($old in 'ok', 'no-quota', 'auth', '') {
+            (Test-CliAvailability -Adapter ([PSCustomObject]@{ Name='codex'; Command='codex'; Probe=[scriptblock]::Create("'$old'") })).Status | Should -BeExactly 'ERROR' -Because "'$old'"
+        }
     }
     It 'looks the real antigravity adapter up by its COMMAND (agy), not its Name (#615)' {
         # Every earlier adapter had Name -eq Command, so nothing pinned the distinction.
@@ -1133,45 +1121,50 @@ Describe 'Test-CliAvailability' {
         $script:probedName = $null
         Mock Get-Command -MockWith { $script:probedName = $Name; [PSCustomObject]@{ Source='C:\x\agy.exe' } }
         $r = Test-CliAvailability -Adapter ([PSCustomObject]@{
-            Name = $adapter.Name; Command = $adapter.Command; Probe = { param($ctx) 'ok' } })
+            Name = $adapter.Name; Command = $adapter.Command; Probe = { param($ctx) 'OK' } })
         $script:probedName | Should -Be 'agy'
         $r.Cli    | Should -Be 'antigravity'
-        $r.Status | Should -Be 'ok'
+        $r.Status | Should -BeExactly 'OK'
     }
 }
 
 Describe 'Resolve-LaunchCli' {
     It 'returns the chosen CLI when it is available' {
-        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity='ok'; claude='ok' } | Should -Be 'antigravity'
+        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity='OK'; claude='OK' } | Should -Be 'antigravity'
     }
     It 'falls back to claude when the chosen CLI is unavailable' {
-        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity='no-quota'; claude='ok' } | Should -Be 'claude'
+        foreach ($code in 'QUOTA', 'RATE_LIMIT', 'AUTH', 'CONTEXT_WINDOW', 'ERROR', 'NOT_INSTALLED', 'NEEDS_BYPASS') {
+            Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity=$code; claude='OK' } | Should -Be 'claude' -Because $code
+        }
+    }
+    It 'an old lower-case ok is not OK (#770)' {
+        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity='ok'; claude='OK' } | Should -Be 'claude'
     }
     It 'falls back to claude when the chosen CLI is missing from the map' {
-        Resolve-LaunchCli -Chosen 'codex' -Availability @{ claude='ok' } | Should -Be 'claude'
+        Resolve-LaunchCli -Chosen 'codex' -Availability @{ claude='OK' } | Should -Be 'claude'
     }
 }
 
 Describe 'Resolve-IssueCliMap' {
     It 'keeps a valid available choice' {
-        $map = Resolve-IssueCliMap -Issues @(12,14) -Choices @{ 12='antigravity'; 14='claude' } -Availability @{ antigravity='ok'; claude='ok' }
+        $map = Resolve-IssueCliMap -Issues @(12,14) -Choices @{ 12='antigravity'; 14='claude' } -Availability @{ antigravity='OK'; claude='OK' }
         $map[12] | Should -Be 'antigravity'
         $map[14] | Should -Be 'claude'
     }
     It 'coerces an unavailable choice to claude' {
-        $map = Resolve-IssueCliMap -Issues @(12) -Choices @{ 12='codex' } -Availability @{ claude='ok' }
+        $map = Resolve-IssueCliMap -Issues @(12) -Choices @{ 12='codex' } -Availability @{ claude='OK' }
         $map[12] | Should -Be 'claude'
     }
     It 'defaults an unspecified issue to claude' {
-        $map = Resolve-IssueCliMap -Issues @(99) -Choices @{} -Availability @{ claude='ok' }
+        $map = Resolve-IssueCliMap -Issues @(99) -Choices @{} -Availability @{ claude='OK' }
         $map[99] | Should -Be 'claude'
     }
 }
 Describe 'Show-CliAvailability' {
     It 'renders one line per CLI with its status' {
-        $out = Show-CliAvailability -Availability @{ claude='ok'; antigravity='no-quota' } | Out-String
+        $out = Show-CliAvailability -Availability @{ claude='OK'; antigravity='QUOTA' } | Out-String
         $out | Should -Match 'claude'
-        $out | Should -Match 'no-quota'
+        $out | Should -MatchExactly 'QUOTA'
     }
 }
 
@@ -1303,7 +1296,7 @@ Describe 'Invoke-FleetDispatch (governor loop)' {
         # ceiling = min(floor(100/2)=50, cores-2=2) = 2 -> waves of 2, 2, 1
         ($r | Group-Object wave | ForEach-Object Count) | Should -Be @(2,2,1)
     }
-    It 'reroutes a known no-quota CLI to the claude fallback (runtime backoff)' {
+    It 'reroutes a CLI that probed QUOTA or RATE_LIMIT to the claude fallback (runtime backoff)' {
         $r = Invoke-FleetDispatch -Queue @([pscustomobject]@{ issue=9; cli='antigravity' }) `
                -NoQuotaClis @{ antigravity = $true } -LaunchSession { param($item, $cli) $cli } `
                -GetCapacity  { [pscustomobject]@{ FreeRamGB=100; Cores=16 } } `
@@ -1691,12 +1684,12 @@ Describe 'non-claude adapters' {
     It 'Resolve-BypassAvailability hides a bypass-only CLI unless the human opted in (#761)' {
         $agy = Get-CliAdapters | Where-Object Name -eq 'antigravity'
         $cop = Get-CliAdapters | Where-Object Name -eq 'copilot'
-        Resolve-BypassAvailability $agy 'ok' $false | Should -Be 'needs-bypass'
-        Resolve-BypassAvailability $agy 'ok' $true  | Should -Be 'ok'
-        Resolve-BypassAvailability $agy 'auth' $false | Should -Be 'auth'
-        Resolve-BypassAvailability $cop 'ok' $false | Should -Be 'ok'
+        Resolve-BypassAvailability $agy 'OK' $false | Should -BeExactly 'NEEDS_BYPASS'
+        Resolve-BypassAvailability $agy 'OK' $true  | Should -BeExactly 'OK'
+        Resolve-BypassAvailability $agy 'AUTH' $false | Should -BeExactly 'AUTH'
+        Resolve-BypassAvailability $cop 'OK' $false | Should -BeExactly 'OK'
         # ...and the fallback then routes its issue to claude.
-        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity = 'needs-bypass' } | Should -Be 'claude'
+        Resolve-LaunchCli -Chosen 'antigravity' -Availability @{ antigravity = 'NEEDS_BYPASS' } | Should -Be 'claude'
     }
     It 'Write-PermissionModeNotice warns loudly only when the bypass is on (#761)' {
         Mock Write-Host {}
@@ -1721,8 +1714,8 @@ Describe 'non-claude adapters' {
         $ctx = @{ BriefingFile = 'C:\b\brief.txt' }
         (& ((Get-CliAdapters | Where-Object Name -eq 'jules').BuildLaunch) $ctx) | Should -Match 'jules new'
     }
-    It 'claude probe returns ok (host CLI always available)' {
-        (& (Get-CliAdapters | Where-Object Name -eq 'claude').Probe $null) | Should -Be 'ok'
+    It 'claude probe returns OK (host CLI always available)' {
+        (& (Get-CliAdapters | Where-Object Name -eq 'claude').Probe $null) | Should -BeExactly 'OK'
     }
     It 'briefing path with a single quote is escaped in a non-claude adapter' {
         $ctx = @{ BriefingFile = "C:\Users\O'Brien\b.txt" }

@@ -3550,12 +3550,12 @@ if ($Parallel.Count -gt 0) {
     if ($Fleet) {
         Write-Host ""
         Write-Host "----- FLEET (one CLI per issue, fallback claude) -----" -ForegroundColor Cyan
-        # Availability across every adapter. A not-installed CLI is offered for install
+        # Availability across every adapter. A NOT_INSTALLED CLI is offered for install
         # (only in a real run); if still unavailable it just stays that way (fallback).
         $availability = @{}
         foreach ($adapter in Get-CliAdapters) {
             $res = Test-CliAvailability -Adapter $adapter
-            if ($res.Status -eq 'not-installed' -and -not $DryRun) {
+            if ($res.Status -ceq 'NOT_INSTALLED' -and -not $DryRun) {
                 if (Install-CliOnApproval $adapter) { $res = Test-CliAvailability -Adapter $adapter }
             }
             $availability[$adapter.Name] = Resolve-BypassAvailability $adapter $res.Status ([bool]$AllowPermissionBypass)
@@ -3598,12 +3598,12 @@ if ($Parallel.Count -gt 0) {
             $fleetPlan = @(Build-FleetPlan -Started $started -CliMap $map | Where-Object { $_.workPath })
             # One runId ties every session of this dispatch together for the reaper.
             $runId = New-FleetRunId
-            # Seed the runtime backoff: a CLI that already probed out of quota is skipped for
-            # the rest of the run (its issue still launches, on the claude fallback).
+            # Seed the runtime backoff: a CLI that already probed QUOTA or RATE_LIMIT (#770) is
+            # skipped for the rest of the run (its issue still launches, on the claude fallback).
             $noQuota = @{}
-            foreach ($k in @($availability.Keys)) { if ($availability[$k] -eq 'no-quota') { $noQuota[$k] = $true } }
+            foreach ($k in @($availability.Keys)) { if (Test-CliProbeExhausted $availability[$k]) { $noQuota[$k] = $true } }
             # The spawn+register step, wrapped as the governor's launch hook. The governor
-            # already applied no-quota backoff; Resolve-LaunchCli re-checks availability at
+            # already applied the quota backoff; Resolve-LaunchCli re-checks availability at
             # spawn time (defense in depth) so an unavailable CLI never actually launches.
             $launchHook = {
                 param($entry, $cli)
