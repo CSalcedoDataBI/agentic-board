@@ -6,6 +6,10 @@
 
 BeforeAll {
     $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Fleet-Plan.ps1' | Resolve-Path
+    # Hermetic registry (#772): routing comes from the shipped preset only, never this machine's
+    # ~/.agentic-board/adapters.json or the repo's .agentic-board/adapters.json.
+    $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
+    $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'
     $env:ABIOS_FLEETPLAN_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_FLEETPLAN_DOTSOURCE = ''
@@ -15,6 +19,10 @@ BeforeAll {
         [pscustomobject]@{ number = $Number; title = $Title; labels = $Labels; size = $Size; type = $Type; blockedBy = $BlockedBy }
     }
     $all = @('claude','codex','antigravity','copilot')
+}
+AfterAll {
+    $env:ABIOS_ADAPTERS_USER_FILE = $null
+    $env:ABIOS_ADAPTERS_REPO_FILE = $null
 }
 
 Describe 'Get-PendingBoardIssues fails closed on the board read (#316, part of #303)' {

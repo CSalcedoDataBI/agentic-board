@@ -13,7 +13,7 @@
 
     This file holds the answer to "who is alive?", in these pieces:
 
-      Get-ReviewerRoster       the reviewers the gate knows how to probe (data, not code)
+      Get-ReviewerRoster       the reviewers the gate knows how to probe (registry data, #772)
       Invoke-ReviewerProbes    installed? authenticated? - bounded, parallel, one deadline
       Get-UnreviewedWayOut     the lines the gate prints, built ONLY from what answered
 
@@ -46,32 +46,25 @@
 # reviewer verdict here and a fleet verdict there cannot disagree about the same CLI output.
 . (Join-Path $PSScriptRoot 'BoardWork.Adapters.ps1')
 
-# The reviewers the gate can probe. Command = the executable that must be on PATH; ProbeArgs = the
-# cheapest invocation that exercises AUTH (not just `--version`, which passes for a logged-out
-# CLI). The probes match the ones /board work -Fleet already uses, so a verdict here and there
-# cannot disagree about the same CLI.
+# The reviewers the gate can probe: every registry adapter marked `"reviewer": true` in
+# presets/adapters.json (or a user / project override, #772). Command = the executable that must be
+# on PATH; ProbeArgs = the adapter's own probe argv minus the executable - the cheapest invocation
+# that exercises AUTH (not just `--version`, which passes for a logged-out CLI).
 #
-# This is a COPY of the command + probe arguments in Get-CliAdapters (BoardWork.Adapters.ps1): there
-# they live inside each adapter's Probe scriptblock, which runs the CLI through a background job,
-# while the gate needs the bare argv for its own deadline-bounded processes. It is kept honest by a
-# test that reads the fleet's definition and fails when the two differ -
-# Get-ReviewerRoster.Tests.ps1, "The roster agrees with the fleet adapters". The output of both is
-# classified by the same adapter rules (Name = the adapter name).
+# Before #772 this was a hand-kept COPY of two adapters' command + probe arguments, held equal to
+# the fleet's by a test. Derived from the one registry, the two cannot drift, and a reviewer added
+# by an override JSON entry is probed here with no code change. The gate still runs the bare argv
+# through its own deadline-bounded processes (Invoke-ReviewerProbes), not the adapter's Probe
+# scriptblock (a background job). The output is classified by the same adapter rules (Name = the
+# adapter name).
 function Get-ReviewerRoster {
     return @(
-        [pscustomobject]@{
-            Name      = 'antigravity'
-            Command   = 'agy'
-            # Auth/quota only, and the same probe /board work -Fleet uses. No permission bypass
-            # (#761): a one-token reply calls no tool, so the flag never changed its verdict.
-            ProbeArgs = @('-p', 'reply OK')
-        }
-        [pscustomobject]@{
-            Name      = 'codex'
-            Command   = 'codex'
-            # An auth check that reads no stdin and calls no model (~2.6 s); `codex exec` as a
-            # probe took ~19 s and blocks on stdin.
-            ProbeArgs = @('login', 'status')
+        foreach ($a in @(Get-CliAdapters | Where-Object { $_.Reviewer -and $_.ProbeArgs })) {
+            [pscustomobject]@{
+                Name      = $a.Name
+                Command   = $a.Command
+                ProbeArgs = @($a.ProbeArgs | Select-Object -Skip 1)
+            }
         }
     )
 }

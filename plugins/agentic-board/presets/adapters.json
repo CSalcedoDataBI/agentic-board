@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "name": "heavy",
+      "note": "Security / architecture work, spikes and large items need the strongest reasoning.",
+      "labels": ["security", "architecture"],
+      "types": ["spike"],
+      "sizes": ["L", "XL"]
+    },
+    { "name": "refactor", "labels": ["refactor"], "types": ["refactor"] },
+    { "name": "docs", "labels": ["docs", "documentation"], "types": ["docs"] },
+    { "name": "chore", "types": ["chore"], "sizes": ["S", "XS"] },
+    { "name": "default", "note": "No criteria: matches every issue no earlier route took." }
+  ],
+  "commonProbeRules": [
+    {
+      "code": "CONTEXT_WINDOW",
+      "pattern": "(?i)context (window|length) (exceeded|is full)|maximum context length|prompt is too long|exceeds? the context window",
+      "reason": "the prompt does not fit the model context window"
+    },
+    {
+      "code": "QUOTA",
+      "note": "Before RATE_LIMIT: '429: quota exceeded' is the long wait, not the short one.",
+      "pattern": "(?i)quota (exceeded|exhausted|reached|limit)|(exceeded|out of|no) (your )?(quota|credits)|insufficient[_ ]quota|resource.?exhausted",
+      "reason": "out of quota"
+    },
+    {
+      "code": "RATE_LIMIT",
+      "pattern": "(?i)rate.?limit(ed)?\\b|too many requests|\\b(http|status|error|code)[ :=]*429\\b",
+      "reason": "rate limited - retry later"
+    },
+    {
+      "code": "AUTH",
+      "pattern": "(?i)not logged in|logged out|login required|unauthori[sz]ed|unauthenticated|not authenticated|please (log ?in|sign ?in)|\\b(http|status|error|code)[ :=]*40[13]\\b",
+      "reason": "not authenticated"
+    }
+  ],
+  "adapters": [
+    {
+      "name": "claude",
+      "note": "The host CLI running these scripts: always available, so probeArgs is null (no probe runs). Its rules still classify the messages a launched claude session dies with. Its launch is code (BoardWork.Adapters.ps1), not a template: it sets up the auth variable first.",
+      "command": "claude",
+      "kind": "repl",
+      "isDefault": true,
+      "installArgs": null,
+      "installUrl": null,
+      "probeArgs": null,
+      "probeRules": [
+        { "code": "QUOTA", "pattern": "(?i)usage limit reached|credit balance is too low|out of extra usage", "reason": "Claude usage limit reached" },
+        { "code": "RATE_LIMIT", "pattern": "(?i)rate_limit_error", "reason": "rate limited - retry later" },
+        { "code": "AUTH", "pattern": "(?i)invalid api key|please run /login|authentication_error|oauth token (has )?expired", "reason": "not logged in (run /login or set the auth variable)" },
+        { "code": "CONTEXT_WINDOW", "pattern": "(?i)prompt is too long", "reason": "the prompt does not fit the model context window" },
+        { "include": "common" },
+        { "code": "OK", "pattern": "(?i)\\bOK\\b", "reason": "answered" }
+      ],
+      "bypassArgs": "--permission-mode bypassPermissions",
+      "requiresBypass": false,
+      "keepEnv": [],
+      "routing": { "heavy": 100, "refactor": 200, "docs": 300, "chore": 300, "default": 100 },
+      "reviewer": false
+    },
+    {
+      "name": "antigravity",
+      "note": "Replaces the retired 'gemini' adapter (#615). No npm package: Google ships an install script, which cannot be pinned (#765), so the user gets the page. Without the bypass agy soft-denies its own file-read headless, hence requiresBypass. It is told to READ the briefing: PowerShell drops embedded quotes when passing an argument to a native .exe.",
+      "command": "agy",
+      "kind": "repl",
+      "isDefault": false,
+      "installArgs": null,
+      "installUrl": "https://antigravity.google/docs/cli/install",
+      "probeArgs": ["agy", "-p", "reply OK"],
+      "probeRules": [
+        { "code": "AUTH", "note": "Google's retired-client answer arrives on exit 0 (#537, #615).", "pattern": "(?i)IneligibleTier|UNSUPPORTED_CLIENT|no longer supported", "reason": "the provider retired this client (it can no longer authenticate)" },
+        { "code": "ERROR", "pattern": "(?i)not running in a trusted directory|skip-trust|TRUST_WORKSPACE", "reason": "refuses to run outside a trusted directory" },
+        { "include": "common" },
+        { "code": "OK", "pattern": "(?i)\\bOK\\b", "reason": "answered" }
+      ],
+      "bypassArgs": "--dangerously-skip-permissions",
+      "requiresBypass": true,
+      "keepEnv": [],
+      "launch": { "args": ["-p", "Read the file {briefingFile} and follow its instructions to the letter."] },
+      "routing": { "docs": 100, "chore": 200 },
+      "reviewer": true
+    },
+    {
+      "name": "jules",
+      "note": "ASYNC cloud agent: 'jules new' dispatches a session on the REMOTE repo, not this worktree (phase-1 limitation). 'jules remote list' alone says 'Must specify what to list' on exit 0, so the probe scopes it with --session.",
+      "command": "jules",
+      "kind": "async",
+      "isDefault": false,
+      "installArgs": ["npm", "i", "-g", "@google/jules@0.1.42"],
+      "installUrl": null,
+      "probeArgs": ["jules", "remote", "list", "--session"],
+      "probeRules": [
+        { "code": "AUTH", "pattern": "(?i)jules login|not signed in|sign in to jules", "reason": "not logged in (run jules login)" },
+        { "code": "OK", "note": "The session table header, BEFORE the shared phrases: a session titled 'fix the rate limit' must not read as a rate limit.", "pattern": "(?m)^\\s*ID\\s+Description\\s+Repo\\s+Last active\\s+Status\\b", "reason": "listed its sessions" },
+        { "include": "common" }
+      ],
+      "bypassArgs": "",
+      "requiresBypass": false,
+      "keepEnv": [],
+      "launch": { "args": ["new", "{briefingContent}"] },
+      "routing": {},
+      "reviewer": false
+    },
+    {
+      "name": "codex",
+      "note": "'codex login status' is a light auth check (~2.6 s, no stdin). 'codex exec' reads stdin even with a prompt argument, so the launch pipes $null into it (stdinNull).",
+      "command": "codex",
+      "kind": "repl",
+      "isDefault": false,
+      "installArgs": ["npm", "i", "-g", "@openai/codex@0.160.0"],
+      "installUrl": null,
+      "probeArgs": ["codex", "login", "status"],
+      "probeRules": [
+        { "code": "AUTH", "note": "First, so the OK rule's 'Logged in' is never read inside 'Not logged in'.", "pattern": "(?im)^\\s*not logged in|codex login", "reason": "not logged in (run codex login)" },
+        { "include": "common" },
+        { "code": "OK", "pattern": "(?im)^\\s*logged in\\b", "reason": "logged in" }
+      ],
+      "bypassArgs": "--dangerously-bypass-approvals-and-sandbox",
+      "requiresBypass": false,
+      "keepEnv": ["OPENAI_API_KEY"],
+      "launch": { "args": ["exec", "{briefingContent}"], "stdinNull": true },
+      "routing": { "refactor": 100 },
+      "reviewer": true
+    },
+    {
+      "name": "copilot",
+      "note": "The healthy footer says 'Total usage est: 1 Premium request', so 'premium request' alone is not a quota signal - only running out of them is.",
+      "command": "copilot",
+      "kind": "repl",
+      "isDefault": false,
+      "installArgs": ["npm", "i", "-g", "@github/copilot@1.0.91"],
+      "installUrl": null,
+      "probeArgs": ["copilot", "-p", "reply OK"],
+      "probeRules": [
+        { "code": "QUOTA", "pattern": "(?i)(exceeded|reached|used up|out of|no remaining)\\W+(\\w+\\W+){0,6}premium requests?|\\b402\\b", "reason": "out of Copilot premium requests" },
+        { "code": "AUTH", "pattern": "(?i)no authentication information found|use /login|copilot login", "reason": "not logged in to Copilot" },
+        { "include": "common" },
+        { "code": "OK", "pattern": "(?i)\\bOK\\b", "reason": "answered" }
+      ],
+      "bypassArgs": "--allow-all",
+      "requiresBypass": false,
+      "keepEnv": ["COPILOT_GITHUB_TOKEN"],
+      "launch": { "args": ["-p", "{briefingContent}"] },
+      "routing": { "docs": 200, "chore": 100 },
+      "reviewer": false
+    }
+  ]
+}

@@ -14,6 +14,9 @@
 
 BeforeAll {
     $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    # Hermetic registry (#772): the shipped preset only, never this machine's overrides.
+    $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
+    $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'
     . (Join-Path $script:ScriptDir 'BoardWork.Adapters.ps1')
     function script:Code { param([string]$Cli, [int]$Exit, [string]$Out) ConvertTo-CliProbeCode -Cli $Cli -ExitCode $Exit -Output $Out }
 
@@ -23,6 +26,10 @@ BeforeAll {
         ' 11111111111111111111    fix the rate limit in the importer                            owner/repo              2 days ago              Completed      '
         ' 22222222222222222222    quota report page                                             owner/repo              5 days ago              Awaiting User F'
     ) -join "`n"
+}
+AfterAll {
+    $env:ABIOS_ADAPTERS_USER_FILE = $null
+    $env:ABIOS_ADAPTERS_REPO_FILE = $null
 }
 
 Describe 'The closed set (#770)' {
