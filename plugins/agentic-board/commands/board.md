@@ -94,7 +94,8 @@ improvise the recipe from this summary:
 - **changelog** — generate the Keep-a-Changelog block from Done issues (dedup on `(#n)`
   citations; review before `-Write`). Full contract: `references/verbs-changelog.md`.
 - **handoff** — save/resume curated cross-session context (`[abios-handoff]` comment + local
-  file; refusal rules when no issue is linked). Full contract: `references/verbs-handoff.md`.
+  file; refusal rules when no issue is linked), or `-Recover` a session that ended without saving
+  from its local transcript (same machine only). Full contract: `references/verbs-handoff.md`.
 - **doctor** — audit local branches/worktrees against git reality (never `git branch --merged`
   here: this repo squash-merges). Full contract: `references/verbs-doctor.md`.
 - **close-cycle** — classify the CURRENT branch and route it (commit/PR/gate/merge/teardown);

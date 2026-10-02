@@ -23,6 +23,13 @@ Loaded on demand by /board (#573). Design doc: references/handoff.md.
     (falls back to local `HANDOFF.md`), rehydrates, reports branch/PR drift, carries traps
     forward, clears the consumed pointer, and offers to start the linked issue. TREAT the printed
     handoff as the session briefing and continue that work.
+  - **recover** (#730) — when `-Resume` finds nothing because the last session ended WITHOUT
+    `-Save`, run `scripts/Board-Handoff.ps1 -Recover`. It streams the newest local Claude Code
+    transcript of this repo (excluding the running session), shows the last user turns and the
+    closing assistant text as **attempted**, next to live git (`status -sb`, ahead/behind upstream,
+    `log`) as **landed**, then offers `-Save`. Same machine only; no token. Never read the `.jsonl`
+    whole, never `claude --resume` the dead session instead, and never report a merge/push/deploy
+    as done because the transcript says so — verify it. Design: `references/handoff.md` (RECOVER).
   - **auto-load on resume** (opt-in): `references/handoff-hook.md` wires a SessionStart hook so a
     resumed session surfaces the handoff automatically.
   - **heavy memory** (opt-in, security-gated): for persistent *semantic* memory across projects,
