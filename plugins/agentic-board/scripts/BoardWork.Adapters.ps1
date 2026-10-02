@@ -15,7 +15,7 @@ function Get-CliAdapters {
             Command      = 'claude'
             Kind         = 'repl'
             IsDefault    = $true
-            InstallCmd   = ''
+            InstallArgs  = $null
             # claude is the host CLI running this very script -> always available.
             Probe        = { param($ctx) 'ok' }
             # Permission bypass is an explicit opt-in (#761): appended only when the launch
@@ -60,8 +60,10 @@ function Get-CliAdapters {
             Kind         = 'repl'
             IsDefault    = $false
             # No npm package - Google ships an install script; the binary lands in
-            # %LOCALAPPDATA%\agy\bin. See https://antigravity.google/docs/cli/install
-            InstallCmd   = 'irm https://antigravity.google/cli/install.ps1 | iex'
+            # %LOCALAPPDATA%\agy\bin. A remote script piped into iex cannot be pinned or reviewed
+            # (#765), so the tool never runs it: it points the user at the install page instead.
+            InstallArgs  = $null
+            InstallUrl   = 'https://antigravity.google/docs/cli/install'
             # One-token probe of auth/quota (see Get-CliProbeStatus). It carries NO permission
             # bypass (#761): a one-token reply calls no tool, so the flag made no difference to
             # it - measured 10s without it and 8s with it, exit 0 and 'OK' both ways.
@@ -90,7 +92,7 @@ function Get-CliAdapters {
             Command      = 'jules'
             Kind         = 'async'
             IsDefault    = $false
-            InstallCmd   = 'npm i -g @google/jules'
+            InstallArgs  = @('npm', 'i', '-g', '@google/jules@0.1.42')   # pinned (#765)
             # jules is an ASYNC cloud agent: 'jules new' dispatches a session that operates
             # on the REMOTE repo, not this local worktree/branch. Phase-1 limitation: this
             # dispatch is best-effort - there is no local worktree/PR integration yet (the
@@ -113,7 +115,7 @@ function Get-CliAdapters {
             Command      = 'codex'
             Kind         = 'repl'
             IsDefault    = $false
-            InstallCmd   = 'npm i -g @openai/codex'
+            InstallArgs  = @('npm', 'i', '-g', '@openai/codex@0.160.0')  # pinned (#765)
             # 'codex login status' is a lightweight auth check (no stdin read, ~2.6s)
             # vs. the old 'codex exec' probe which took ~19.5s and reads stdin.
             Probe        = { param($ctx) Invoke-CliProbe @('codex', 'login', 'status') }
@@ -135,7 +137,7 @@ function Get-CliAdapters {
             Command      = 'copilot'
             Kind         = 'repl'
             IsDefault    = $false
-            InstallCmd   = 'npm i -g @github/copilot'
+            InstallArgs  = @('npm', 'i', '-g', '@github/copilot@1.0.91')  # pinned (#765)
             # Auth/quota probe without the bypass (#761): a one-token reply calls no tool.
             Probe        = { param($ctx) Invoke-CliProbe @('copilot', '-p', 'reply OK') }
             BypassArgs   = '--allow-all'
@@ -244,12 +246,26 @@ function Show-CliAvailability([hashtable]$Availability) {
     }
 }
 
+# The install command as text, for display. Pure.
+function Get-CliInstallText([object]$Adapter) {
+    if ($Adapter.InstallArgs) { return (@($Adapter.InstallArgs) -join ' ') }
+    if ($Adapter.InstallUrl)  { return "see $($Adapter.InstallUrl)" }
+    return ''
+}
+
 # Install a not-installed CLI after explicit user approval, then re-probe. Impure.
+# Runs a PINNED argv (#765), never a string through Invoke-Expression; a CLI with no pinnable
+# package (InstallArgs = $null) is never installed by the tool - the user gets the page instead.
 function Install-CliOnApproval([object]$Adapter) {
-    Write-Host ("  {0} is not installed. Command: {1}" -f $Adapter.Name, $Adapter.InstallCmd) -ForegroundColor Yellow
+    if (-not $Adapter.InstallArgs) {
+        Write-Host ("  {0} is not installed. Install it yourself: {1}" -f $Adapter.Name, $Adapter.InstallUrl) -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host ("  {0} is not installed. Command: {1}" -f $Adapter.Name, (Get-CliInstallText $Adapter)) -ForegroundColor Yellow
     $ans = Read-Host "  Install now? (y/N)"
     if ($ans -notmatch '^[sSyY]') { Write-Host "  Skipped." -ForegroundColor DarkGray; return $false }
-    Invoke-Expression $Adapter.InstallCmd
+    $argv = @($Adapter.InstallArgs)
+    & $argv[0] @($argv | Select-Object -Skip 1)
     return ($LASTEXITCODE -eq 0)
 }
 

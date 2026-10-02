@@ -59,8 +59,9 @@ without arguments.
   only the CLI's model credential and one GitHub identity as `GH_TOKEN`. Limit: a process running as
   you can still read your own stores (the Windows user environment, a keyring, a dotfile).
 - Installs software **only after a y/N prompt**: when `-Fleet` finds a CLI missing it offers
-  `npm i -g @openai/codex`, `npm i -g @github/copilot`, `npm i -g @google/jules`, or Antigravity's
-  install script (`irm https://antigravity.google/cli/install.ps1 | iex`).
+  `npm i -g @openai/codex@0.160.0`, `npm i -g @github/copilot@1.0.91` or `npm i -g @google/jules@0.1.42`
+  (pinned versions). Antigravity ships only a remote install script, so it is never run for you: you
+  get the install page instead.
 - `/cleanup plugins` runs `claude plugin marketplace update` and `claude plugin update` for your
   installed plugins.
 
