@@ -318,6 +318,21 @@ function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefi
     # The launch script lives next to the briefing (same dir the caller chose).
     $launchScriptFile = Join-Path (Split-Path -Parent $briefingFile) "launch-$issueNum.ps1"
     $safeScriptPath   = $launchScriptFile   # a plain path arg (its own arg element -> Start-Process quotes it)
+    # Windows Terminal is Windows-only; elsewhere the session runs as a background pwsh whose output
+    # goes to files next to the launch script (#767) - -NoExit would wait on a terminal that is not there.
+    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+        return [PSCustomObject]@{
+            launcher         = "pwsh"
+            args             = @('-NoProfile', '-File', $safeScriptPath)
+            briefingFile     = $briefingFile
+            launchScriptFile = $launchScriptFile
+            launchScript     = $launchScript
+            fleetSession     = $fleetSession
+            usesWt           = $false
+            detached         = $true
+            consoleLog       = ([System.IO.Path]::ChangeExtension($launchScriptFile, '.console.log'))
+        }
+    }
     if (Get-Command wt -ErrorAction SilentlyContinue) {
         return [PSCustomObject]@{
             launcher         = "wt"
@@ -413,7 +428,7 @@ function Start-WorktreeSession {
         $irrClean = @($Irreversible | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
         $budgetOnly = (-not [bool]$StopAtPR) -and ($SessionBudgetMinutes -gt 0) -and ($irrClean.Count -eq 0)
         $state = Set-BrakeArmedState -WorkPath $WorkPath -Armed $armIntent -Issue $IssueNum `
-                    -Irreversible $Irreversible -Branch $Branch -HostName $env:COMPUTERNAME -ArmedAt $armedAt `
+                    -Irreversible $Irreversible -Branch $Branch -HostName ([Environment]::MachineName) -ArmedAt $armedAt `
                     -EndToEnd ([bool]$EndToEnd) -BudgetMinutes $SessionBudgetMinutes -Repo $Repo -BudgetOnly $budgetOnly
         if ($state -eq 'armed') {
             Write-Host ("  OK  #{0}: brake ARMED (a real control, not just an instruction) -> {1}" -f $IssueNum, (Get-BrakeMarkerPath -WorkPath $WorkPath)) -ForegroundColor Green
@@ -449,9 +464,14 @@ function Start-WorktreeSession {
     $proc = $null
     $launchedAt = Get-Date   # lets the caller tell THIS launch's wt tab shell from an older one (#557)
     try {
+        $detached = [bool]($plan.PSObject.Properties['detached'] -and $plan.detached)
         if ($plan.usesWt) { $proc = Start-Process $plan.launcher -ArgumentList $plan.args -PassThru }
+        elseif ($detached) {
+            $proc = Start-Process $plan.launcher -ArgumentList $plan.args -WorkingDirectory $WorkPath -PassThru `
+                        -RedirectStandardOutput $plan.consoleLog -RedirectStandardError "$($plan.consoleLog).err"
+        }
         else              { $proc = Start-Process $plan.launcher -ArgumentList $plan.args -WorkingDirectory $WorkPath -PassThru }
-        $how = if ($plan.usesWt) { "WT tab 'issue-$IssueNum'" } else { "pwsh window" }
+        $how = if ($plan.usesWt) { "WT tab 'issue-$IssueNum'" } elseif ($detached) { "background pwsh, output in $($plan.consoleLog)" } else { "pwsh window" }
         Write-Host ("  OK  #{0}: Claude session launched ({1}) in {2}" -f $IssueNum, $how, $WorkPath) -ForegroundColor Green
     } catch {
         Write-Host "  FAIL #${IssueNum}: could not launch the session: $_" -ForegroundColor Red

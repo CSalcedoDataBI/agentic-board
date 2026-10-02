@@ -260,7 +260,7 @@ if ($env:ABIOS_FLEETFINDINGS_DOTSOURCE) { return }
 if ($Add) {
     if ($Issue -le 0) { throw "-Add needs -Issue <n>." }
     $now     = Get-Date -Format 'yyyy-MM-dd HH:mm'
-    $machine = "$env:COMPUTERNAME"
+    $machine = ([Environment]::MachineName)
     $finding = New-FleetFinding -Issue $Issue -Repo $Repo -Branch $Branch -Files $Files `
                    -Decisions $Decisions -Gotchas $Gotchas -Labels $Labels -Pr $Pr `
                    -Status $Status -HostName $machine -Now $now

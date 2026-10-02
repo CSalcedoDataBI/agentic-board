@@ -658,7 +658,7 @@ if (-not $env:GH_TOKEN -and $Owner) {
     # 'project' scope, so the check falls through to the registry PAT exactly as before.
     $ghStatus         = try { (Invoke-Gh -GhArgs @('auth', 'status') -What 'read the scopes of the ambient gh login') | Out-String } catch { "$_" }
     $ambientOk        = Test-GhScope -Scope 'project' -StatusText $ghStatus
-    $registryToken    = [System.Environment]::GetEnvironmentVariable($TokenVar, "User")
+    $registryToken    = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar)
     if ($ambientOk) {
         Write-Host "  Token: ambient gh login has 'project' scope — leaving GH_TOKEN unset." -ForegroundColor DarkGray
     } elseif ($registryToken) {

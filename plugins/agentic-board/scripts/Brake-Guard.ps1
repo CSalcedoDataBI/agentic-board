@@ -943,7 +943,8 @@ function Send-RunSignal {
         $bodyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-signal-" + [guid]::NewGuid().ToString('N') + ".md")
         Set-Content -LiteralPath $bodyFile -Encoding UTF8 -Value $body
         $childCmd = "try { gh issue comment $([int]$Marker.issue) --repo '$($Marker.repo)' --body-file '$bodyFile' *> `$null } finally { Remove-Item -LiteralPath '$bodyFile' -Force -ErrorAction SilentlyContinue }"
-        Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-Command',$childCmd) -WindowStyle Hidden | Out-Null
+        $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+        Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-Command',$childCmd) @abiosHidden | Out-Null
     } catch { }
 }
 

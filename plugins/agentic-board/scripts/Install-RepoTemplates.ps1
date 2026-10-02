@@ -73,11 +73,11 @@ if ($Repo) { Write-Host "    Repo GitHub: $Repo" -ForegroundColor Cyan }
 Write-Host ""
 
 $copies = @(
-    @{ From = "ISSUE_TEMPLATE\bug.yml";     To = ".github\ISSUE_TEMPLATE\bug.yml" }
-    @{ From = "ISSUE_TEMPLATE\feature.yml"; To = ".github\ISSUE_TEMPLATE\feature.yml" }
-    @{ From = "ISSUE_TEMPLATE\task.yml";    To = ".github\ISSUE_TEMPLATE\task.yml" }
-    @{ From = "ISSUE_TEMPLATE\config.yml";  To = ".github\ISSUE_TEMPLATE\config.yml" }
-    @{ From = "PULL_REQUEST_TEMPLATE.md";   To = ".github\PULL_REQUEST_TEMPLATE.md" }
+    @{ From = "ISSUE_TEMPLATE/bug.yml";     To = ".github/ISSUE_TEMPLATE/bug.yml" }
+    @{ From = "ISSUE_TEMPLATE/feature.yml"; To = ".github/ISSUE_TEMPLATE/feature.yml" }
+    @{ From = "ISSUE_TEMPLATE/task.yml";    To = ".github/ISSUE_TEMPLATE/task.yml" }
+    @{ From = "ISSUE_TEMPLATE/config.yml";  To = ".github/ISSUE_TEMPLATE/config.yml" }
+    @{ From = "PULL_REQUEST_TEMPLATE.md";   To = ".github/PULL_REQUEST_TEMPLATE.md" }
 )
 
 $installed = 0; $skipped = 0

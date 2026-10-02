@@ -257,7 +257,15 @@ finally {
 $home_ = Get-ClaudeHomeDir $ClaudeHome
 $projectsDir = Join-Path $home_ 'projects'
 if (-not $ArchiveDir) { $ArchiveDir = Join-Path $home_ 'transcript-archive' }
-if (-not $AppSessionsDir) { $AppSessionsDir = Join-Path $env:APPDATA 'Claude\claude-code-sessions' }
+if (-not $AppSessionsDir) {
+    # The desktop app's per-session records (#767): %APPDATA% on Windows, Application Support on
+    # macOS, XDG config on Linux. Forward slashes: Join-Path accepts them everywhere.
+    $appBase = if ($env:APPDATA) { $env:APPDATA }
+               elseif ($IsMacOS) { Join-Path $HOME 'Library/Application Support' }
+               elseif ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME }
+               else { Join-Path $HOME '.config' }
+    $AppSessionsDir = Join-Path $appBase 'Claude/claude-code-sessions'
+}
 $indexPath = Join-Path $ArchiveDir 'index.jsonl'
 $now = (Get-Date).ToUniversalTime()
 

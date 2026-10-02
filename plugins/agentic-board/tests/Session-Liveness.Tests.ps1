@@ -24,7 +24,8 @@ BeforeAll {
         param([int]$Issue, [string]$Dir)
         $file = Join-Path $Dir "launch-$Issue.ps1"
         'Start-Sleep -Seconds 300' | Set-Content -LiteralPath $file
-        Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $file) -PassThru -WindowStyle Hidden
+        $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
+        Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $file) -PassThru @abiosHidden
     }
     $script:Shells = @()
 }
@@ -254,7 +255,7 @@ Describe 'Write-SessionRegistryEntry never records the launcher''s parent for a 
     It 'an in-place session (no via, no PID) still records the host parent PID' {
         $tmp = Join-Path $TestDrive 'w3.json'
         Mock Get-SessionRegistryPath { $tmp }
-        $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
+        $parent = Get-AbiosParentPid
         Write-SessionRegistryEntry -IssueNum 6 -Branch 'issue-6-x' -WorkPath 'C:\wt\6'
         [int](@(Get-Content $tmp -Raw | ConvertFrom-Json)[0].sessionPid) | Should -Be $parent
     }

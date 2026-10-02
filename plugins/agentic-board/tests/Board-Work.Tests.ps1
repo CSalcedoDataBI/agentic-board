@@ -9,6 +9,16 @@
     and the dry-run plan of Invoke-IssueStart, all with zero network access. #>
 
 BeforeAll {
+    # Many cases below feed Windows-shaped paths (C:\wt, D:\Repos) to pure path builders. Off Windows
+    # there is no C: drive, so map C: and D: to scratch folders: the builders then run unchanged (#767).
+    if (-not $IsWindows) {
+        foreach ($d in 'C', 'D') {
+            if (-not (Get-PSDrive -Name $d -ErrorAction SilentlyContinue)) {
+                $root = New-Item -ItemType Directory -Force -Path (Join-Path ([System.IO.Path]::GetTempPath()) "abios-drive-$d-$PID")
+                New-PSDrive -Name $d -PSProvider FileSystem -Root $root.FullName -Scope Global | Out-Null
+            }
+        }
+    }
     $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
@@ -167,11 +177,11 @@ Describe 'Get-IssueSlugBranch (branch naming)' {
 }
 
 Describe 'Get-IssueWorktreePath (grouped worktree layout)' {
-    It 'groups worktrees under <repo>--worktrees/issue-<n> (not scattered siblings)' {
+    It 'groups worktrees under <repo>--worktrees/issue-<n> (not scattered siblings)' -Skip:(-not $IsWindows) {   # exact Windows path text
         Get-IssueWorktreePath 'owner/agentic-board' 129 'C:\Repos' |
             Should -Be 'C:\Repos\agentic-board--worktrees\issue-129'
     }
-    It 'uses only the repo name, dropping the owner' {
+    It 'uses only the repo name, dropping the owner' -Skip:(-not $IsWindows) {   # exact Windows path text
         Get-IssueWorktreePath 'CSalcedoDataBI/my-repo' 7 'D:\work' |
             Should -Be 'D:\work\my-repo--worktrees\issue-7'
     }
@@ -354,7 +364,7 @@ Describe 'New-IssueWorkspace picks the base itself (the #294 wiring)' {
             via          = ''
             cli          = 'claude'
             fleetSession = ''
-            host         = $env:COMPUTERNAME
+            host         = ([Environment]::MachineName)
             started      = '2026-01-01 00:00'
         }
         @($fakeEntry) | ConvertTo-Json -Depth 4 -AsArray |
@@ -602,7 +612,7 @@ Describe 'Resolve-LaunchBrake — all fleet sessions brake on merge by default (
 }
 
 Describe 'Build-WorktreeLaunch' {
-    It 'builds a Windows Terminal tab command when wt is present' {
+    It 'builds a Windows Terminal tab command when wt is present' -Skip:(-not $IsWindows) {
         Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { [pscustomobject]@{ Name = 'wt' } }
         $p = Build-WorktreeLaunch 12 'C:\wt' 'C:\brief.txt'
         $p.launcher | Should -Be 'wt'
@@ -611,14 +621,14 @@ Describe 'Build-WorktreeLaunch' {
         $p.args     | Should -Contain '--startingDirectory'
         $p.args     | Should -Contain 'C:\wt'
     }
-    It 'launches via a -File script, never an inline -Command (so wt cannot split the tab)' {
+    It 'launches via a -File script, never an inline -Command (so wt cannot split the tab)' -Skip:(-not $IsWindows) {
         Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { [pscustomobject]@{ Name = 'wt' } }
         $p = Build-WorktreeLaunch 12 'C:\wt' 'C:\brief.txt'
         $p.args | Should -Contain '-File'
         $p.args | Should -Not -Contain '-Command'
         $p.args | Should -Contain $p.launchScriptFile
     }
-    It 'REGRESSION: puts no semicolon on the wt command line (a ; there splits one tab into many)' {
+    It 'REGRESSION: puts no semicolon on the wt command line (a ; there splits one tab into many)' -Skip:(-not $IsWindows) {
         Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { [pscustomobject]@{ Name = 'wt' } }
         $p = Build-WorktreeLaunch 12 'C:\wt' 'C:\brief.txt'
         ($p.args -join ' ') | Should -Not -Match ';'
@@ -629,7 +639,7 @@ Describe 'Build-WorktreeLaunch' {
         # launchScriptFile sits in the briefing's directory, keyed by issue number
         $p.launchScriptFile | Should -Match 'launch-12\.ps1$'
     }
-    It 'falls back to a pwsh window when wt is absent' {
+    It 'falls back to a pwsh window when wt is absent' -Skip:(-not $IsWindows) {
         Mock Get-Command -ParameterFilter { $Name -eq 'wt' } -MockWith { $null }
         $p = Build-WorktreeLaunch 12 'C:\wt' 'C:\brief.txt'
         $p.launcher | Should -Be 'pwsh'
@@ -729,7 +739,26 @@ Describe 'Secret scrub of a launched session (#769)' {
     }
 }
 
-Describe 'Build-WorktreeLaunch adapter parity' {
+Describe 'Build-WorktreeLaunch off Windows (#767)' -Skip:($IsWindows) {
+    It 'runs the session as a background pwsh -File, never -NoExit, with its output in a console log' {
+        $brief = Join-Path $TestDrive 'abios' 'briefing-12.txt'
+        $p = Build-WorktreeLaunch 12 $TestDrive $brief
+        $p.launcher   | Should -Be 'pwsh'
+        $p.usesWt     | Should -BeFalse
+        $p.detached   | Should -BeTrue
+        $p.args       | Should -Contain '-File'
+        $p.args       | Should -Not -Contain '-NoExit'
+        $p.consoleLog | Should -Match 'launch-12\.console\.log$'
+    }
+    It 'keeps the secret scrub and the opt-in bypass exactly as on Windows' {
+        $brief = Join-Path $TestDrive 'abios' 'briefing-13.txt'
+        $p = Build-WorktreeLaunch 13 $TestDrive $brief
+        $p.launchScript.IndexOf('$abiosKeep') | Should -Be 0
+        $p.launchScript | Should -Not -Match 'bypassPermissions'
+    }
+}
+
+Describe 'Build-WorktreeLaunch adapter parity' -Skip:(-not $IsWindows) {
     # GOLDEN fixture captured from the pre-refactor Build-WorktreeLaunch for a claude
     # launch of issue 42 (brief C:\b\briefing-42.txt). The adapter-driven refactor MUST
     # keep the claude launchScript + args byte-identical to these constants.
@@ -738,8 +767,10 @@ Describe 'Build-WorktreeLaunch adapter parity' {
         # pre-refactor golden, still byte-identical.
         $script:GoldenLaunchScript = @(
             (Get-SecretScrubScript -Keep @('ANTHROPIC_API_KEY') -GhTokenVar 'GH_TOKEN')
+            "`$abiosAuth=[Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY','User')"
+            "if (-not `$abiosAuth) { `$abiosAuth=[Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY') }"
             "Remove-Item Env:ANTHROPIC_API_KEY,Env:ANTHROPIC_AUTH_TOKEN,Env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue"
-            "`$env:ANTHROPIC_API_KEY=[Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY','User')"
+            "`$env:ANTHROPIC_API_KEY=`$abiosAuth"
             "Remove-Item Env:CLAUDECODE,Env:CLAUDE_CODE_SESSION_ID,Env:CLAUDE_CODE_CHILD_SESSION,Env:CLAUDE_CODE_ENTRYPOINT -ErrorAction SilentlyContinue"
             "claude -p (Get-Content -Raw -LiteralPath 'C:\b\briefing-42.txt') --no-session-persistence --verbose"
         ) -join "`r`n"
@@ -1451,7 +1482,7 @@ Describe 'Find-FleetOrphansCore (escaped, cross-checked by PID AND issue)' {
     }
 }
 
-Describe 'Find-FleetOrphans (the CIM filter must cover every launchable CLI)' {
+Describe 'Find-FleetOrphans (the CIM filter must cover every launchable CLI)' -Skip:(-not $IsWindows) {
     BeforeEach { Mock Read-SessionRegistry -MockWith { @() } }
     It 'queries agy.exe as well as pwsh/node - Antigravity is a Go binary, not node (#615)' {
         # Without agy.exe in the filter the sweep cannot SEE an escaped Antigravity session,
@@ -1513,7 +1544,32 @@ Describe 'Invoke-FleetReap (guard-safe orphan/fleet kill)' {
     }
 }
 
-Describe 'Get-MachineCapacity (live wrapper wiring)' {
+Describe 'Unix capacity probes (#767) - pure parsers' {
+    It 'reads MemAvailable and MemTotal from /proc/meminfo, MemFree only when MemAvailable is absent' {
+        $m = ConvertFrom-ProcMeminfo "MemTotal:       16384000 kB`nMemFree:         1000000 kB`nMemAvailable:    8192000 kB`n"
+        $m.TotalKB | Should -Be 16384000
+        $m.FreeKB  | Should -Be 8192000
+        (ConvertFrom-ProcMeminfo "MemTotal: 100 kB`nMemFree: 40 kB`n").FreeKB | Should -Be 40
+        (ConvertFrom-ProcMeminfo '').TotalKB | Should -Be 0
+    }
+    It 'turns a load average into a percentage of the cores, capped at 100' {
+        ConvertTo-LoadPercent 2 8  | Should -Be 25
+        ConvertTo-LoadPercent 16 8 | Should -Be 100
+        ConvertTo-LoadPercent 1 0  | Should -Be 100
+    }
+}
+
+Describe 'Get-AbiosProcessList (#767) - one shape on every platform' {
+    It 'returns this very process with its parent and command line' {
+        $me = @(Get-AbiosProcessList -Id $PID) | Select-Object -First 1
+        $me.ProcessId | Should -Be $PID
+        $me.ParentProcessId | Should -BeGreaterThan 0
+        "$($me.CommandLine)" | Should -Match 'pwsh'
+        Get-AbiosParentPid | Should -Be $me.ParentProcessId
+    }
+}
+
+Describe 'Get-MachineCapacity (live wrapper wiring)' -Skip:(-not $IsWindows) {
     It 'wires the CIM readings into the pure core' {
         Mock Get-CimInstance -ParameterFilter { $ClassName -eq 'Win32_Processor' } -MockWith {
             @([pscustomobject]@{ LoadPercentage = 10 }, [pscustomobject]@{ LoadPercentage = 30 })
@@ -1590,7 +1646,7 @@ Describe 'Format-SessionMetric (dashboard cell)' {
 }
 
 Describe 'Get-SessionLogPath (fleet log convention)' {
-    It 'points at logs/issue-<n>.log under the state dir' {
+    It 'points at logs/issue-<n>.log under the state dir' -Skip:(-not $IsWindows) {   # exact Windows path text
         Mock Get-AbiosDir -MockWith { 'C:\repo\.agentic-board' }
         Get-SessionLogPath 42 | Should -Be 'C:\repo\.agentic-board\logs\issue-42.log'
     }
@@ -1847,7 +1903,7 @@ Describe 'Resolve-GitPathForm (make our path comparable to git''s, #291)' {
     It 'returns a non-existent path unchanged instead of throwing' {
         # We cannot expand what is not there - and need not: git cannot hold a LIVE worktree at a
         # path that does not exist, so the raw fallback cannot hide one.
-        $gone = Join-Path $env:TEMP 'definitely-not-here-291'
+        $gone = Join-Path ([System.IO.Path]::GetTempPath()) 'definitely-not-here-291'
         (Resolve-GitPathForm $gone) | Should -Be $gone
     }
     It 'returns empty for an empty path rather than throwing' {
@@ -1934,7 +1990,7 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
         Pop-Location
     }
 
-    It 'finishes the teardown in ONE pass when git released the worktree but the folder lingers' {
+    It 'finishes the teardown in ONE pass when git released the worktree but the folder lingers' -Skip:(-not $IsWindows) {   # needs Windows file locking
         # THE BUG: `remove --force` de-registers the worktree AND fails to delete the directory.
         # Test-Path saw the folder and reported "still present" about something git had let go,
         # so the branch and the registry entry were kept.
@@ -1951,7 +2007,7 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
         Should -Invoke Remove-SessionRegistryEntry -Times 1 -Exactly
     }
 
-    It 'the OLD Test-Path retry could never converge - the second pass is not a working tree' {
+    It 'the OLD Test-Path retry could never converge - the second pass is not a working tree' -Skip:(-not $IsWindows) {   # needs Windows file locking
         # Why this mattered more here than in the doctor: workPath comes from the REGISTRY, so a
         # retry re-runs the removal on a path git already forgot. Pin git's real behaviour, which
         # is the whole reason "retry next run" was never going to clean this up.

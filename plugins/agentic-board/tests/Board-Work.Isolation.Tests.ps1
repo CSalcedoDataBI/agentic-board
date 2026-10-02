@@ -8,6 +8,11 @@
     same fixture style as the #294 wiring tests, and assert on what git ends up looking like. #>
 
 BeforeAll {
+    # The briefing cases pass Windows-shaped paths; off Windows map C: to a scratch folder (#767).
+    if (-not $IsWindows -and -not (Get-PSDrive -Name C -ErrorAction SilentlyContinue)) {
+        $root = New-Item -ItemType Directory -Force -Path (Join-Path ([System.IO.Path]::GetTempPath()) "abios-drive-C-$PID")
+        New-PSDrive -Name C -PSProvider FileSystem -Root $root.FullName -Scope Global | Out-Null
+    }
     $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
@@ -32,7 +37,8 @@ Describe 'New-IssueWorkspace isolates a clean feature branch that carries work (
         $origin        = Join-Path (Join-Path $root 'o') 'r'
         New-Item -ItemType Directory -Path $origin -Force | Out-Null
         git init -q --bare -b main $origin
-        $url = ([uri]$origin).AbsoluteUri     # file:///C:/... on Windows, file:///tmp/... elsewhere
+        # file:///C:/... on Windows; a plain path elsewhere, which every git clones (#767).
+        $url = if ($IsWindows) { ([uri]$origin).AbsoluteUri } else { $origin }
 
         $seed = Join-Path $root 'seed'
         git clone -q $url $seed 2>&1 | Out-Null

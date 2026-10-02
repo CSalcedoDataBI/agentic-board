@@ -17,7 +17,7 @@
     definition, running.
 
     COST: this runs before every prompt, and a pwsh start alone is about 2 s on the maintainer's machine.
-    So hooks.json calls PluginStale-NoticePreCheck.cmd (same idea as Brake-PreCheck.cmd, #572), which
+    So hooks.json calls PluginStale-NoticePreCheck.sh (same idea as Brake-PreCheck.sh, #572, #767), which
     reads only the session id from the first payload line and skips this script altogether while the
     installed list is unchanged since that session's last CONCLUSIVE check. This script writes the
     per-session stamp the shim reads (Write-ShimStamp: the installed list as this check read it) - only after a conclusive check, so an
@@ -126,7 +126,7 @@ function Write-NoticeState {
 # stamp file, which also means an id can never carry a path separator into a file name.
 function Test-ShimSessionId([string]$Id) { return ($Id -match '^[0-9A-Fa-f-]{8,64}$') }
 
-# The stamp the .cmd shim compares (see its header): plugin-check\<id>\installed_plugins.json, the bytes of
+# The stamp the sh shim compares (see its header): plugin-check\<id>\installed_plugins.json, the bytes of
 # Claude's installed list exactly as this check READ them at its start ($Installed comes from Get-InstalledInfo,
 # taken before anything is analysed). If the list is rewritten during the check the stamp is the OLD content,
 # so the shim sees a difference and runs the hook again - never the other way round. Written only after a

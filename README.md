@@ -208,7 +208,8 @@ Monitor the fleet with `plugins/agentic-board/scripts/Board-Work.ps1 -Sessions` 
 are pruned automatically).
 Use `-DryRun` to preview without mutating or spawning. After a PR merges, clean its worktree with
 `git worktree remove`. Only parallelize issues that don't depend on each other. Tabs require
-Windows Terminal (`wt`); without it, each session opens in a standalone `pwsh` window.
+Windows Terminal (`wt`); without it, each session opens in a standalone `pwsh` window. On macOS and
+Linux each session runs as a background `pwsh`, with its output in `launch-<n>.console.log`.
 
 ---
 

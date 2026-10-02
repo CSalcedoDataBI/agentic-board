@@ -6,9 +6,11 @@
 # Live pid->parentPid map from CIM. Thin (one reading) -> mocked in tests. PIDs are cast
 # to [long] (they are unsigned 32-bit) so a value above [int]::MaxValue cannot throw during
 # map construction and silently drop entries from the guard.
+. (Join-Path $PSScriptRoot 'Get-AbiosProcess.ps1')   # the process table on every platform (#767)
+
 function Get-ProcessParentMap {
     $map = @{}
-    foreach ($p in @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)) {
+    foreach ($p in @(Get-AbiosProcessList)) {
         $map[[long]$p.ProcessId] = [long]$p.ParentProcessId
     }
     return $map
@@ -138,9 +140,7 @@ function Find-FleetOrphansCore([object[]]$Processes, [int[]]$LivePids, [int[]]$L
 # artifact, so an interactive agy the human is using is never a candidate.
 # Thin -> the pure core is Find-FleetOrphansCore, cross-checking BOTH live PIDs and live issues.
 function Find-FleetOrphans {
-    $filter = "Name='pwsh.exe' OR Name='node.exe' OR Name='agy.exe'"
-    $procs = @(Get-CimInstance -ClassName Win32_Process -Filter $filter -ErrorAction SilentlyContinue |
-               Select-Object ProcessId, CommandLine)
+    $procs = @(Get-AbiosProcessList -Names 'pwsh', 'node', 'agy' | Select-Object ProcessId, CommandLine)
     $live       = @(Read-SessionRegistry)
     $livePids   = @($live | ForEach-Object { [int]$_.sessionPid })
     $liveIssues = @($live | ForEach-Object { [int]$_.issue })
@@ -160,11 +160,10 @@ function Find-WtTabShellCore {
 }
 
 # Live: find the pwsh tab shell for a specific wt-launched issue by its launch script name.
-# Thin wrapper around Get-CimInstance so callers can mock this instead of Get-CimInstance.
+# Thin wrapper around Get-AbiosProcessList so callers can mock this instead of the process table.
 # Returns the {ProcessId, CommandLine} object or $null when not found.
 function Find-WtTabShell([int]$IssueNum) {
-    $procs = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pwsh.exe'" `
-               -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
+    $procs = @(Get-AbiosProcessList -Names 'pwsh' | Select-Object ProcessId, CommandLine)
     return Find-WtTabShellCore -Processes $procs -IssueNum $IssueNum
 }
 

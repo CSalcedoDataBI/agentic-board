@@ -16,13 +16,14 @@ Full guide, screenshots and roadmap: <https://github.com/CSalcedoDataBI/agentic-
 
 ## Requirements
 
-- [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (`pwsh`), `git`, and the [`gh` CLI](https://cli.github.com/), authenticated.
-- A GitHub token with the `repo` and `project` scopes (classic PAT). The plugin reads it from an
-  environment variable (default `GITHUB_TOKEN_PERSONAL`), never from the repository.
-- **Platform:** developed and tested on Windows. The scripts are PowerShell 7, but token lookup,
-  the terminal-tab launcher and two hooks still use Windows-only calls (`cmd`), and one of those
-  two is the `PreToolUse` brake, so on macOS/Linux that brake does not run. Cross-platform support
-  is tracked in [#767](https://github.com/CSalcedoDataBI/agentic-board/issues/767).
+- [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (`pwsh`), `git`, and the [`gh` CLI](https://cli.github.com/).
+- A GitHub token with the `repo` and `project` scopes. With one account, `gh auth login` and
+  `gh auth refresh --scopes project` are enough: the plugin falls back to `GH_TOKEN`, then
+  `gh auth token`. With several accounts, `/board setup` writes `~/.agentic-board/accounts.json`,
+  which maps each account to the environment variable holding its token (names only, never values).
+- **Platform:** Windows, macOS and Linux. The test suite runs on Windows and on Ubuntu in CI.
+  Windows Terminal tabs are Windows-only: elsewhere a launched session runs as a background
+  `pwsh` and its output goes to `launch-<n>.console.log`.
 
 ## Use
 
@@ -36,7 +37,8 @@ without arguments.
 **Runs on your machine**
 
 - PowerShell scripts from this plugin's `scripts/` folder, plus `gh` and `git`.
-- Hooks registered automatically when the plugin is enabled:
+- Hooks registered automatically when the plugin is enabled (the two cheap prechecks are POSIX
+  `sh` scripts, run by Claude Code with Git Bash on Windows and `sh` elsewhere):
   - `SessionStart`: a one-time welcome banner, a handoff notice after a compaction, and a sweep that
     removes *empty* orphan folders under the current repo's `.claude/worktrees/`.
   - `PreToolUse` (Bash, PowerShell, Edit, Write, NotebookEdit, MultiEdit): refuses merge, deploy,

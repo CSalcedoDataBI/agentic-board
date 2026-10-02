@@ -330,7 +330,7 @@ Describe 'hooks.json wiring' {
     BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
     It 'registers the notice on UserPromptSubmit (the only event that fires after an update, in a session that is already open)' {
         $cmds = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks } | ForEach-Object { $_.command })
-        ($cmds -join ' ') | Should -Match 'PluginStale-NoticePreCheck\.cmd'
+        ($cmds -join ' ') | Should -Match 'PluginStale-NoticePreCheck\.sh'
     }
     It 'gives the hook a timeout of at most 10 seconds' {
         $h = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks } | Where-Object { $_.command -match 'PluginStale-Notice' })[0]

@@ -276,6 +276,7 @@ $ErrorActionPreference = "Stop"
 
 # The single resolver for the internal state dir (new name + migration + fallback).
 . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
+. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1')   # account map + portable env/token reads (#762, #767)
 # The canonical/legacy option vocabulary (issue #278): lets this script understand a
 # board born from GitHub's default template ('Todo') as well as a canonical one.
 . (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
@@ -861,7 +862,7 @@ function Get-SessionLivePid {
                 # that shell lives. Its command line tells them apart. An unreadable command line
                 # is "cannot tell" and trusts the PID, as everywhere else in this function.
                 $cmd = $null
-                try { $cmd = (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$stored" -ErrorAction Stop).CommandLine } catch { }
+                try { $cmd = (@(Get-AbiosProcessList -Id $stored) | Select-Object -First 1).CommandLine } catch { }
                 if (-not $cmd) { return $stored }
                 $self = [pscustomobject]@{ ProcessId = $stored; CommandLine = $cmd }
                 if (Find-WtTabShellCore -Processes @($self) -IssueNum ([int]$Session.issue)) { return $stored }
@@ -900,8 +901,7 @@ function Resolve-WtSessionPid {
         [int]$MaxAttempts = 20,
         [int]$PollMs = 500,
         [scriptblock]$ListProcesses = {
-            @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pwsh.exe'" -ErrorAction SilentlyContinue |
-                Select-Object ProcessId, CommandLine, CreationDate)
+            @(Get-AbiosProcessList -Names 'pwsh' | Select-Object ProcessId, CommandLine, CreationDate)
         },
         [scriptblock]$Sleep = { param($ms) Start-Sleep -Milliseconds $ms }
     )
@@ -972,7 +972,7 @@ function Write-SessionRegistryEntry {
     # Get-SessionLivePid resolves a wt entry by its tab shell, and an app entry by hostSessionId.
     $trackPid = $SessionPid
     if ($trackPid -le 0 -and $Via -ne 'wt' -and $Via -ne 'app') {
-        try { $trackPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+        $trackPid = Get-AbiosParentPid
     }
     if (-not $trackPid -and $Via -ne 'wt' -and $Via -ne 'app') { return }
     if (-not $trackPid) { $trackPid = 0 }
@@ -1060,7 +1060,7 @@ function Write-SessionRegistryEntry {
             surface       = $Surface
             hostSessionId = $HostSessionId
             runId         = $RunId
-            host          = $env:COMPUTERNAME
+            host          = ([Environment]::MachineName)
             # Seconds, not minutes (#568): this stamp is the start of every duration the tool can
             # ever compute about its own runs; minute granularity threw away the precision for free.
             started       = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
@@ -1110,7 +1110,7 @@ function Show-BranchDrift {
     try {
         $curBr = git branch --show-current 2>$null
         $trackPid = 0
-        try { $trackPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+        $trackPid = Get-AbiosParentPid
         if (-not $trackPid) { return }
         $warn = Get-BranchDriftWarning -Sessions (Read-SessionRegistry) -SessionPid $trackPid `
                                        -CurrentBranch $curBr -CurrentPath (Get-Location).Path
@@ -1626,7 +1626,7 @@ function New-IssueWorkspace {
     # master is no defence — a foreign session can switch branches mid-work and corrupt the
     # next commit. Read-SessionRegistry returns only live (process exists) entries.
     $myPid = 0
-    try { $myPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+    $myPid = Get-AbiosParentPid
     $cwd   = (Get-Location).Path.TrimEnd('\', '/')
     $conflictEntry = $null
     if ($myPid) {
@@ -1797,7 +1797,7 @@ mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
 
     # -- Execute: claim fingerprint (multi-session diagnostics) -----------------
     $claimNote = if ($TakeOver) { "TAKEOVER" } else { "claim" }
-    $fingerprint = Format-ClaimFingerprint -Note $claimNote -Computer $env:COMPUTERNAME -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm') -Branch $branchName
+    $fingerprint = Format-ClaimFingerprint -Note $claimNote -Computer ([Environment]::MachineName) -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm') -Branch $branchName
     try {
         $null = Invoke-Gh -GhArgs @('issue','comment',"$IssueNum",'--repo',$repo,'--body',$fingerprint) `
                           -What "record the claim on #$IssueNum"
@@ -2415,8 +2415,9 @@ function Invoke-SessionWatch {
                 $sup = Join-Path $PSScriptRoot 'Fleet-Supervisor.ps1'
                 $outF = Join-Path ([System.IO.Path]::GetTempPath()) ("abios-sup-" + [guid]::NewGuid().ToString('N') + ".txt")
                 $errF = "$outF.err"
+                $abiosHidden = if ($IsWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # -WindowStyle is Windows-only (#767)
                 $p = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-File',$sup,'-Check','-Post','-ProjectNum',"$ProjectNum") `
-                        -WindowStyle Hidden -PassThru -RedirectStandardOutput $outF -RedirectStandardError $errF
+                        @abiosHidden -PassThru -RedirectStandardOutput $outF -RedirectStandardError $errF
                 if (-not $p.WaitForExit(120000)) {
                     try { $p.Kill() } catch { }
                     Write-Host "  WARN supervisor: did not finish in 120s - it was cut off (best-effort signal)." -ForegroundColor DarkYellow
@@ -2575,8 +2576,7 @@ trap {
 if ($Reap -or $KillAll) {
     $killLive = [bool]$KillAll
     if ($KillAll) {
-        $filter = "Name='pwsh.exe' OR Name='node.exe'"
-        $procs  = @(Get-CimInstance -ClassName Win32_Process -Filter $filter -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
+        $procs  = @(Get-AbiosProcessList -Names 'pwsh', 'node' | Select-Object ProcessId, CommandLine)
         $candidates = @($procs | Where-Object { (Get-FleetIssueFromCommandLine $_.CommandLine) -gt 0 })
         $label = "the WHOLE fleet (-KillAll)"
     } else {
@@ -2662,7 +2662,7 @@ if ($Relaunch -gt 0) {
         Write-Host ("  Relaunch #{0} ABORTED: could not stop PID {1}: {2}" -f $Relaunch, $stopRes.Pid, $stopRes.Reason) -ForegroundColor Red
         exit 1
     }
-    $oauthPresent = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN','User')
+    $oauthPresent = [bool](Get-AbiosEnvValue -VarName 'CLAUDE_CODE_OAUTH_TOKEN')
     $authVar      = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
     $marker       = New-FleetSessionMarker $Relaunch (New-FleetRunId)
     $relaunchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
@@ -2848,7 +2848,7 @@ if ($Lock -gt 0 -or $Unlock -gt 0) {
     if (-not $targetOpt) {
         throw "Board #$ProjectNum has no Status option for '$targetName' (nor an equivalent legacy name). Apply the preset with /board field apply en."
     }
-    $fingerprint = Format-ClaimFingerprint -Note $note -Computer $env:COMPUTERNAME -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm')
+    $fingerprint = Format-ClaimFingerprint -Note $note -Computer ([Environment]::MachineName) -ProcessId $PID -Date (Get-Date -Format 'yyyy-MM-dd HH:mm')
 
     $assignVerb = if ($locking) { "assign to $Owner" } else { "unassign $Owner" }
     if ($DryRun) {
@@ -3575,12 +3575,12 @@ if ($Parallel.Count -gt 0) {
         } else {
             # Auth preflight: a claude fallback session is headless, so it needs an explicit
             # user-env credential (the Desktop host's OAuth is not shared with children).
-            $oauthPresent  = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN', 'User')
+            $oauthPresent  = [bool](Get-AbiosEnvValue -VarName 'CLAUDE_CODE_OAUTH_TOKEN')
             $ClaudeAuthVar = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
             if ($ClaudeAuthVar -eq 'CLAUDE_CODE_OAUTH_TOKEN') {
                 Write-Host "  Auth: using CLAUDE_CODE_OAUTH_TOKEN (subscription)." -ForegroundColor DarkGray
             }
-            $claudeAuth = [System.Environment]::GetEnvironmentVariable($ClaudeAuthVar, "User")
+            $claudeAuth = Get-AbiosEnvValue -VarName $ClaudeAuthVar
             if (-not $claudeAuth) {
                 Write-Host ""
                 Write-Host ("  AUTH REQUIRED - headless sessions need '{0}' in your user environment variables." -f $ClaudeAuthVar) -ForegroundColor Red
@@ -3628,7 +3628,7 @@ if ($Parallel.Count -gt 0) {
         Write-Host ""
         # Auto-prefer the subscription OAuth token when the caller did not pick an
         # auth var explicitly (see Resolve-ClaudeAuthVar).
-        $oauthPresent  = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN', 'User')
+        $oauthPresent  = [bool](Get-AbiosEnvValue -VarName 'CLAUDE_CODE_OAUTH_TOKEN')
         $ClaudeAuthVar = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
         if ($ClaudeAuthVar -eq 'CLAUDE_CODE_OAUTH_TOKEN') {
             Write-Host "  Auth: using CLAUDE_CODE_OAUTH_TOKEN (subscription)." -ForegroundColor DarkGray
@@ -3649,7 +3649,7 @@ if ($Parallel.Count -gt 0) {
             # Preflight: unattended headless sessions need an explicit credential in
             # the Windows USER env (the Desktop host's OAuth is not shared with child
             # processes). Without it every tab would 401 silently - warn and don't spawn.
-            $claudeAuth = [System.Environment]::GetEnvironmentVariable($ClaudeAuthVar, "User")
+            $claudeAuth = Get-AbiosEnvValue -VarName $ClaudeAuthVar
             if (-not $claudeAuth) {
                 Write-Host ""
                 Write-Host ("  AUTH REQUIRED - headless sessions need '{0}' in your user environment variables." -f $ClaudeAuthVar) -ForegroundColor Red

@@ -277,10 +277,10 @@ Describe 'Publish-DocsWiki — uninitialized wiki error' {
             elseif ($args[0] -eq 'api') { Write-Output '{"has_wiki":true,"permissions":{"push":true},"name":"test"}' }
             $global:LASTEXITCODE = 0
         }
-        [System.Environment]::SetEnvironmentVariable('ABIOS_TEST_DOCS_TOKEN', 'fake-unit-test-token', 'User')
+        [System.Environment]::SetEnvironmentVariable('ABIOS_TEST_DOCS_TOKEN', 'fake-unit-test-token')   # process scope: every platform, no registry write (#767)
     }
     AfterAll {
-        [System.Environment]::SetEnvironmentVariable('ABIOS_TEST_DOCS_TOKEN', $null, 'User')
+        [System.Environment]::SetEnvironmentVariable('ABIOS_TEST_DOCS_TOKEN', $null)   # process scope: every platform, no registry write (#767)
         Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
         Remove-Item 'Function:git' -ErrorAction SilentlyContinue
         Remove-Item 'Function:gh'  -ErrorAction SilentlyContinue

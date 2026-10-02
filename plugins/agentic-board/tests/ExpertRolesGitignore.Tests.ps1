@@ -189,10 +189,10 @@ Describe 'when .gitignore cannot be written (#470)' {
         # through anyway (running as root).
         function New-ReadOnlyGitignoreRepo {
             $r = New-Repo @('.agentic-board/')
-            (Get-Item -LiteralPath "$r/.gitignore").IsReadOnly = $true
+            (Get-Item -LiteralPath "$r/.gitignore" -Force).IsReadOnly = $true
             $writable = $true
             try { [System.IO.File]::WriteAllText("$r/.gitignore", 'probe') } catch { $writable = $false }
-            if ($writable) { (Get-Item -LiteralPath "$r/.gitignore").IsReadOnly = $false; [System.IO.File]::WriteAllText("$r/.gitignore", ".agentic-board/`n"); (Get-Item -LiteralPath "$r/.gitignore").IsReadOnly = $true }
+            if ($writable) { (Get-Item -LiteralPath "$r/.gitignore").IsReadOnly = $false; [System.IO.File]::WriteAllText("$r/.gitignore", ".agentic-board/`n"); (Get-Item -LiteralPath "$r/.gitignore" -Force).IsReadOnly = $true }
             [pscustomobject]@{ Repo = $r; Enforced = (-not $writable) }
         }
     }

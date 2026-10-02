@@ -163,8 +163,9 @@ $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
 . (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
 $env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
 if (-not $TokenVar) { $TokenVar = Get-OwnerTokenVar -Owner $owner }
-$token = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
-if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar is not set in the Windows USER environment." }
+# An explicit -TokenVar never falls back to the ambient token; the owner's mapped variable may (#762, #767).
+$token = Get-GhTokenValue -VarName $TokenVar -NoAmbient:($PSBoundParameters.ContainsKey('TokenVar'))
+if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar is not set (user or process environment)." }
 # On purpose: identity must match the repo owner, not whatever ran last.
 $env:GH_TOKEN = $token
 

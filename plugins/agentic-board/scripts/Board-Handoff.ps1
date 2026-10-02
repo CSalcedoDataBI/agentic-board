@@ -642,7 +642,7 @@ $fm = [ordered]@{
     pr       = $(if ($pr) { $pr } else { "null" })
     board    = $(if ($ProjectNum -gt 0) { $ProjectNum } else { "null" })
     saved    = Get-HandoffStamp $now
-    host     = $env:COMPUTERNAME
+    host     = ([Environment]::MachineName)
     verified = Get-HandoffVerifiedRatio $allTagged
 }
 $frontmatter = ConvertTo-HandoffFrontmatter $fm

@@ -224,10 +224,10 @@ $ownerVarMap = @{}
 foreach ($o in (Get-KnownOwners)) { $ownerVarMap[$o] = (Get-OwnerTokenVar -Owner $o) }
 if (-not $TokenVar) {
     if ($ownerVarMap.ContainsKey($owner)) { $TokenVar = $ownerVarMap[$owner] }
-    else { $TokenVar = 'GITHUB_TOKEN_PERSONAL'; Write-Host "WARNING: owner '$owner' is not mapped — using the personal account (-TokenVar to override)." -ForegroundColor Yellow }
+    else { $TokenVar = Get-OwnerTokenVar -Owner $owner }   # unmapped: the map's fallback, with its own warning (#762)
 }
-$token = [System.Environment]::GetEnvironmentVariable($TokenVar, 'User')
-if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar is not in the Windows USER environment." }
+$token = Get-GhTokenValue -VarName $TokenVar -NoAmbient:($PSBoundParameters.ContainsKey('TokenVar'))
+if ([string]::IsNullOrWhiteSpace($token)) { throw "$TokenVar is not set (user or process environment)." }
 $env:GH_TOKEN = $token
 
 # Confirm identity + that the wiki is enabled on the repo.

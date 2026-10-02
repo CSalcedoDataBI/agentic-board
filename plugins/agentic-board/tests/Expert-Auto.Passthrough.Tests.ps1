@@ -438,7 +438,7 @@ exit 1
     It '#499: with no GH_TOKEN, an -Owner the map does not know is REFUSED unless -TokenVar names its variable' {
         $r = script:Invoke-Auto '-Issue 8 -ProjectNum 13 -Owner someone-new -Repo acme/widgets' -NoToken
         $r.Calls.Count | Should -Be 0
-        $r.Out | Should -Match "owner 'someone-new' is not in the owner->token map .* no -TokenVar was given"
+        $r.Out | Should -Match "(?s)owner 'someone-new' is not in the owner->token map .* no -TokenVar was given"
     }
 
     It '#499: with no GH_TOKEN and -TokenVar named, the identity comes from THAT variable and a missing one is an error, not a fallback' {

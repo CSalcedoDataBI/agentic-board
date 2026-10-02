@@ -218,7 +218,7 @@ if ($env:ABIOS_FLEETOWNERSHIP_DOTSOURCE) { return }
 
 # ------------------------------------------------------------------------ main entry
 $path    = Get-FleetOwnershipPath
-$machine = "$env:COMPUTERNAME"
+$machine = ([Environment]::MachineName)
 $alive   = { param($processId) [bool](Get-Process -Id $processId -ErrorAction SilentlyContinue) }
 
 # Prune dead-PID claims on every entry (a crashed session releases its paths).
@@ -248,7 +248,7 @@ if ($Release) {
 # NOTE: not named $claim - PowerShell vars are case-insensitive, so $claim would alias
 # the [switch]$Claim parameter and fail to hold a PSCustomObject (type-constrained).
 $trackPid = 0
-try { $trackPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+. (Join-Path $PSScriptRoot 'Get-AbiosProcess.ps1'); $trackPid = Get-AbiosParentPid
 $prospect  = New-Ownership -Issue $Issue -Branch $Branch -Paths $Paths -SessionPid $trackPid -HostName $machine -Now (Get-Date -Format 'yyyy-MM-dd HH:mm')
 $conflicts = @(Find-OwnershipConflicts $live $prospect)
 
