@@ -82,6 +82,9 @@ param(
     # nothing in the contract or a previous run turns them on.
     [switch]$TakeOver,
     [switch]$IgnoreBlocked,
+    # Forwarded to Board-Work (#761): launch the session with the CLI's permission bypass.
+    # Off by default, like every other override here - only the human turns it on, per run.
+    [switch]$AllowPermissionBypass,
     # The board's owner account (#499). Board-Work defaults to CSalcedoDataBI, so a board on a
     # second account died at board resolution AFTER the brief was written and the run announced,
     # and -TokenVar alone could not help: the token was right, the owner was wrong. Forwarded to
@@ -908,7 +911,8 @@ query($o:String!,$r:String!,$n:Int!){
                  $(if ($Owner) { " -Owner $(& $sq $Owner)" } else { '' }) +
                  $(if ($repoGiven) { " -Repo $(& $sq $repoGiven)" } else { '' }) +
                  $(if ($TakeOver) { ' -TakeOver' } else { '' }) +
-                 $(if ($IgnoreBlocked) { ' -IgnoreBlocked' } else { '' })
+                 $(if ($IgnoreBlocked) { ' -IgnoreBlocked' } else { '' }) +
+                 $(if ($AllowPermissionBypass) { ' -AllowPermissionBypass' } else { '' })
         if ($DryRun) {
             Write-Host ("  [DryRun] #{0}: brief -> {1}" -f $s.number, $briefPath) -ForegroundColor DarkYellow
             Write-Host ("           would run: pwsh -NoProfile -Command {0}" -f $bwCmd) -ForegroundColor DarkGray
@@ -967,7 +971,8 @@ $launchArgs = "-ProjectNum $ProjectNum -Parallel $Issue -Launch" + $(if ($stopAt
     $(if ($Owner) { " -Owner $Owner -TokenVar $TokenVar" } else { "" }) +
     $(if ($repoGiven) { " -Repo $repoGiven" } else { "" }) +
     $(if ($TakeOver) { " -TakeOver" } else { "" }) +
-    $(if ($IgnoreBlocked) { " -IgnoreBlocked" } else { "" })
+    $(if ($IgnoreBlocked) { " -IgnoreBlocked" } else { "" }) +
+    $(if ($AllowPermissionBypass) { " -AllowPermissionBypass" } else { "" })
 if ($DryRun) {
     Write-Host "  [DryRun] would launch a dedicated session in a worktree off origin/main and monitor it." -ForegroundColor DarkYellow
     Write-Host "  Launch:  /board work $launchArgs" -ForegroundColor DarkGray
@@ -985,6 +990,7 @@ if ($DryRun) {
     if ($repoGiven)     { $bwArgs.Repo = $repoGiven }
     if ($TakeOver)      { $bwArgs.TakeOver = $true }
     if ($IgnoreBlocked) { $bwArgs.IgnoreBlocked = $true }
+    if ($AllowPermissionBypass) { $bwArgs.AllowPermissionBypass = $true }
     & (Join-Path $PSScriptRoot 'Board-Work.ps1') @bwArgs
     Write-Host ""
     Write-Host "  The launched session is briefed by $briefPath — it will research, build, test with" -ForegroundColor DarkGray
