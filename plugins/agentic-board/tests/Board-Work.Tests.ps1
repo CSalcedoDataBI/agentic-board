@@ -177,11 +177,11 @@ Describe 'Get-IssueSlugBranch (branch naming)' {
 }
 
 Describe 'Get-IssueWorktreePath (grouped worktree layout)' {
-    It 'groups worktrees under <repo>--worktrees/issue-<n> (not scattered siblings)' {
+    It 'groups worktrees under <repo>--worktrees/issue-<n> (not scattered siblings)' -Skip:(-not $IsWindows) {   # exact Windows path text
         Get-IssueWorktreePath 'owner/agentic-board' 129 'C:\Repos' |
             Should -Be 'C:\Repos\agentic-board--worktrees\issue-129'
     }
-    It 'uses only the repo name, dropping the owner' {
+    It 'uses only the repo name, dropping the owner' -Skip:(-not $IsWindows) {   # exact Windows path text
         Get-IssueWorktreePath 'CSalcedoDataBI/my-repo' 7 'D:\work' |
             Should -Be 'D:\work\my-repo--worktrees\issue-7'
     }
@@ -1646,7 +1646,7 @@ Describe 'Format-SessionMetric (dashboard cell)' {
 }
 
 Describe 'Get-SessionLogPath (fleet log convention)' {
-    It 'points at logs/issue-<n>.log under the state dir' {
+    It 'points at logs/issue-<n>.log under the state dir' -Skip:(-not $IsWindows) {   # exact Windows path text
         Mock Get-AbiosDir -MockWith { 'C:\repo\.agentic-board' }
         Get-SessionLogPath 42 | Should -Be 'C:\repo\.agentic-board\logs\issue-42.log'
     }
@@ -1990,7 +1990,7 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
         Pop-Location
     }
 
-    It 'finishes the teardown in ONE pass when git released the worktree but the folder lingers' {
+    It 'finishes the teardown in ONE pass when git released the worktree but the folder lingers' -Skip:(-not $IsWindows) {   # needs Windows file locking
         # THE BUG: `remove --force` de-registers the worktree AND fails to delete the directory.
         # Test-Path saw the folder and reported "still present" about something git had let go,
         # so the branch and the registry entry were kept.
@@ -2007,7 +2007,7 @@ Describe 'Invoke-SessionCleanup asks git, not the disk (#289)' {
         Should -Invoke Remove-SessionRegistryEntry -Times 1 -Exactly
     }
 
-    It 'the OLD Test-Path retry could never converge - the second pass is not a working tree' {
+    It 'the OLD Test-Path retry could never converge - the second pass is not a working tree' -Skip:(-not $IsWindows) {   # needs Windows file locking
         # Why this mattered more here than in the doctor: workPath comes from the REGISTRY, so a
         # retry re-runs the removal on a path git already forgot. Pin git's real behaviour, which
         # is the whole reason "retry next run" was never going to clean this up.

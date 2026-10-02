@@ -276,6 +276,7 @@ $ErrorActionPreference = "Stop"
 
 # The single resolver for the internal state dir (new name + migration + fallback).
 . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
+. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1')   # account map + portable env/token reads (#762, #767)
 # The canonical/legacy option vocabulary (issue #278): lets this script understand a
 # board born from GitHub's default template ('Todo') as well as a canonical one.
 . (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
@@ -2661,7 +2662,7 @@ if ($Relaunch -gt 0) {
         Write-Host ("  Relaunch #{0} ABORTED: could not stop PID {1}: {2}" -f $Relaunch, $stopRes.Pid, $stopRes.Reason) -ForegroundColor Red
         exit 1
     }
-    $oauthPresent = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN','User')
+    $oauthPresent = [bool](Get-AbiosEnvValue -VarName 'CLAUDE_CODE_OAUTH_TOKEN')
     $authVar      = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
     $marker       = New-FleetSessionMarker $Relaunch (New-FleetRunId)
     $relaunchBrake = Resolve-LaunchBrake -AllowMerge ([bool]$AllowMerge) `
@@ -3574,12 +3575,12 @@ if ($Parallel.Count -gt 0) {
         } else {
             # Auth preflight: a claude fallback session is headless, so it needs an explicit
             # user-env credential (the Desktop host's OAuth is not shared with children).
-            $oauthPresent  = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN', 'User')
+            $oauthPresent  = [bool](Get-AbiosEnvValue -VarName 'CLAUDE_CODE_OAUTH_TOKEN')
             $ClaudeAuthVar = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
             if ($ClaudeAuthVar -eq 'CLAUDE_CODE_OAUTH_TOKEN') {
                 Write-Host "  Auth: using CLAUDE_CODE_OAUTH_TOKEN (subscription)." -ForegroundColor DarkGray
             }
-            $claudeAuth = [System.Environment]::GetEnvironmentVariable($ClaudeAuthVar, "User")
+            $claudeAuth = Get-AbiosEnvValue -VarName $ClaudeAuthVar
             if (-not $claudeAuth) {
                 Write-Host ""
                 Write-Host ("  AUTH REQUIRED - headless sessions need '{0}' in your user environment variables." -f $ClaudeAuthVar) -ForegroundColor Red
@@ -3627,7 +3628,7 @@ if ($Parallel.Count -gt 0) {
         Write-Host ""
         # Auto-prefer the subscription OAuth token when the caller did not pick an
         # auth var explicitly (see Resolve-ClaudeAuthVar).
-        $oauthPresent  = [bool][System.Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN', 'User')
+        $oauthPresent  = [bool](Get-AbiosEnvValue -VarName 'CLAUDE_CODE_OAUTH_TOKEN')
         $ClaudeAuthVar = Resolve-ClaudeAuthVar $PSBoundParameters.ContainsKey('ClaudeAuthVar') $ClaudeAuthVar $oauthPresent
         if ($ClaudeAuthVar -eq 'CLAUDE_CODE_OAUTH_TOKEN') {
             Write-Host "  Auth: using CLAUDE_CODE_OAUTH_TOKEN (subscription)." -ForegroundColor DarkGray
@@ -3648,7 +3649,7 @@ if ($Parallel.Count -gt 0) {
             # Preflight: unattended headless sessions need an explicit credential in
             # the Windows USER env (the Desktop host's OAuth is not shared with child
             # processes). Without it every tab would 401 silently - warn and don't spawn.
-            $claudeAuth = [System.Environment]::GetEnvironmentVariable($ClaudeAuthVar, "User")
+            $claudeAuth = Get-AbiosEnvValue -VarName $ClaudeAuthVar
             if (-not $claudeAuth) {
                 Write-Host ""
                 Write-Host ("  AUTH REQUIRED - headless sessions need '{0}' in your user environment variables." -f $ClaudeAuthVar) -ForegroundColor Red

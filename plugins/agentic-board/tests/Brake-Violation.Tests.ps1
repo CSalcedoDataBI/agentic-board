@@ -148,7 +148,12 @@ Describe 'the supervisor attributes a PR to THIS session, not to the branch name
         $json = Join-Path $bin 'prs.json'
         @(@{ number = 100; state = 'MERGED'; headRefOid = ('a' * 40); createdAt = (Get-Date).AddDays(-3).ToUniversalTime().ToString('o'); mergedBy = @{ login = 'old' }; mergedAt = (Get-Date).AddDays(-3).ToUniversalTime().ToString('o') }) |
             ConvertTo-Json -Depth 5 -AsArray | Set-Content $json
-        "@type ""$json""" | Set-Content (Join-Path $bin 'gh.cmd') -Encoding ASCII
+        if ($IsWindows) { "@type ""$json""" | Set-Content (Join-Path $bin 'gh.cmd') -Encoding ASCII }
+        else {
+            # The same stand-in for sh (#767): print the canned JSON whatever gh is asked.
+            [System.IO.File]::WriteAllText((Join-Path $bin 'gh'), "#!/bin/sh`ncat '$json'`n")
+            & chmod +x (Join-Path $bin 'gh')
+        }
         $state = Join-Path $TestDrive 'fakestate'; New-Item -ItemType Directory -Path $state | Out-Null
         $wt = Join-Path $TestDrive 'fakewt'; New-Item -ItemType Directory -Path $wt | Out-Null
         Set-BrakeArmedState -WorkPath $wt -Armed $true -Issue 5 -Irreversible @('merge') -ArmedAt '2026-09-18 10:00:00' | Out-Null
@@ -156,7 +161,7 @@ Describe 'the supervisor attributes a PR to THIS session, not to the branch name
             ConvertTo-Json -Depth 4 -AsArray | Set-Content (Join-Path $state 'sessions.json')
         $regFile = Join-Path $state 'sessions.json'
         Mock Get-SessionsFile -MockWith ([scriptblock]::Create("'$regFile'"))   # only WHERE the registry is; Resolve-LiveSessions runs for real
-        $oldPath = $env:PATH; $env:PATH = "$bin;$oldPath"
+        $oldPath = $env:PATH; $env:PATH = $bin + [System.IO.Path]::PathSeparator + $oldPath
         try { $rows = @(Resolve-LiveSessions) } finally { $env:PATH = $oldPath }
         $rows.Count | Should -Be 1
         $rows[0].prKnown | Should -BeTrue          # gh answered

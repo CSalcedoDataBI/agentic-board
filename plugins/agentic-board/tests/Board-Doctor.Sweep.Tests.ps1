@@ -143,10 +143,10 @@ Describe 'Remove-BranchAndWorktree never aborts the sweep (#548)' {
 Describe 'the same sweep under a REAL Windows PowerShell 5.1 host (#548)' {
     BeforeAll {
         $script:WinPs = @(
-            Join-Path $env:SystemRoot 'System32' 'WindowsPowerShell' 'v1.0' 'powershell.exe'
+            $(if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32' 'WindowsPowerShell' 'v1.0' 'powershell.exe' })   # Windows only (#767)
         ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
     }
-    It 'does not abort when the first worktree cannot be removed' -Skip:(-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32' 'WindowsPowerShell' 'v1.0' 'powershell.exe'))) {
+    It 'does not abort when the first worktree cannot be removed' -Skip:(-not $env:SystemRoot -or -not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32' 'WindowsPowerShell' 'v1.0' 'powershell.exe'))) {
         $harness = Join-Path $TestDrive 'harness51.ps1'
         @'
 param([string]$Doctor)

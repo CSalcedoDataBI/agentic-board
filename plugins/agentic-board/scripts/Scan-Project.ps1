@@ -464,7 +464,7 @@ if (-not $Root) { $Root = (git rev-parse --show-toplevel 2>$null) }
 if (-not $Root) { throw 'Not inside a git repository: /scan works on the current repo.' }
 $Root = (Resolve-Path $Root).Path
 if (-not $env:GH_TOKEN) {
-    $t = [Environment]::GetEnvironmentVariable($TokenVar, 'User')
+    $t = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar')))
     if ($t) { $env:GH_TOKEN = $t }
 }
 if (-not $Repo) {
