@@ -1451,7 +1451,7 @@ Describe 'Find-FleetOrphansCore (escaped, cross-checked by PID AND issue)' {
     }
 }
 
-Describe 'Find-FleetOrphans (the CIM filter must cover every launchable CLI)' {
+Describe 'Find-FleetOrphans (the CIM filter must cover every launchable CLI)' -Skip:(-not $IsWindows) {
     BeforeEach { Mock Read-SessionRegistry -MockWith { @() } }
     It 'queries agy.exe as well as pwsh/node - Antigravity is a Go binary, not node (#615)' {
         # Without agy.exe in the filter the sweep cannot SEE an escaped Antigravity session,
@@ -1513,7 +1513,32 @@ Describe 'Invoke-FleetReap (guard-safe orphan/fleet kill)' {
     }
 }
 
-Describe 'Get-MachineCapacity (live wrapper wiring)' {
+Describe 'Unix capacity probes (#767) - pure parsers' {
+    It 'reads MemAvailable and MemTotal from /proc/meminfo, MemFree only when MemAvailable is absent' {
+        $m = ConvertFrom-ProcMeminfo "MemTotal:       16384000 kB`nMemFree:         1000000 kB`nMemAvailable:    8192000 kB`n"
+        $m.TotalKB | Should -Be 16384000
+        $m.FreeKB  | Should -Be 8192000
+        (ConvertFrom-ProcMeminfo "MemTotal: 100 kB`nMemFree: 40 kB`n").FreeKB | Should -Be 40
+        (ConvertFrom-ProcMeminfo '').TotalKB | Should -Be 0
+    }
+    It 'turns a load average into a percentage of the cores, capped at 100' {
+        ConvertTo-LoadPercent 2 8  | Should -Be 25
+        ConvertTo-LoadPercent 16 8 | Should -Be 100
+        ConvertTo-LoadPercent 1 0  | Should -Be 100
+    }
+}
+
+Describe 'Get-AbiosProcessList (#767) - one shape on every platform' {
+    It 'returns this very process with its parent and command line' {
+        $me = @(Get-AbiosProcessList -Id $PID) | Select-Object -First 1
+        $me.ProcessId | Should -Be $PID
+        $me.ParentProcessId | Should -BeGreaterThan 0
+        "$($me.CommandLine)" | Should -Match 'pwsh'
+        Get-AbiosParentPid | Should -Be $me.ParentProcessId
+    }
+}
+
+Describe 'Get-MachineCapacity (live wrapper wiring)' -Skip:(-not $IsWindows) {
     It 'wires the CIM readings into the pure core' {
         Mock Get-CimInstance -ParameterFilter { $ClassName -eq 'Win32_Processor' } -MockWith {
             @([pscustomobject]@{ LoadPercentage = 10 }, [pscustomobject]@{ LoadPercentage = 30 })

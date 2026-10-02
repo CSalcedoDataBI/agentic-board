@@ -861,7 +861,7 @@ function Get-SessionLivePid {
                 # that shell lives. Its command line tells them apart. An unreadable command line
                 # is "cannot tell" and trusts the PID, as everywhere else in this function.
                 $cmd = $null
-                try { $cmd = (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$stored" -ErrorAction Stop).CommandLine } catch { }
+                try { $cmd = (@(Get-AbiosProcessList -Id $stored) | Select-Object -First 1).CommandLine } catch { }
                 if (-not $cmd) { return $stored }
                 $self = [pscustomobject]@{ ProcessId = $stored; CommandLine = $cmd }
                 if (Find-WtTabShellCore -Processes @($self) -IssueNum ([int]$Session.issue)) { return $stored }
@@ -900,8 +900,7 @@ function Resolve-WtSessionPid {
         [int]$MaxAttempts = 20,
         [int]$PollMs = 500,
         [scriptblock]$ListProcesses = {
-            @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pwsh.exe'" -ErrorAction SilentlyContinue |
-                Select-Object ProcessId, CommandLine, CreationDate)
+            @(Get-AbiosProcessList -Names 'pwsh' | Select-Object ProcessId, CommandLine, CreationDate)
         },
         [scriptblock]$Sleep = { param($ms) Start-Sleep -Milliseconds $ms }
     )
@@ -972,7 +971,7 @@ function Write-SessionRegistryEntry {
     # Get-SessionLivePid resolves a wt entry by its tab shell, and an app entry by hostSessionId.
     $trackPid = $SessionPid
     if ($trackPid -le 0 -and $Via -ne 'wt' -and $Via -ne 'app') {
-        try { $trackPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+        $trackPid = Get-AbiosParentPid
     }
     if (-not $trackPid -and $Via -ne 'wt' -and $Via -ne 'app') { return }
     if (-not $trackPid) { $trackPid = 0 }
@@ -1110,7 +1109,7 @@ function Show-BranchDrift {
     try {
         $curBr = git branch --show-current 2>$null
         $trackPid = 0
-        try { $trackPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+        $trackPid = Get-AbiosParentPid
         if (-not $trackPid) { return }
         $warn = Get-BranchDriftWarning -Sessions (Read-SessionRegistry) -SessionPid $trackPid `
                                        -CurrentBranch $curBr -CurrentPath (Get-Location).Path
@@ -1626,7 +1625,7 @@ function New-IssueWorkspace {
     # master is no defence — a foreign session can switch branches mid-work and corrupt the
     # next commit. Read-SessionRegistry returns only live (process exists) entries.
     $myPid = 0
-    try { $myPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+    $myPid = Get-AbiosParentPid
     $cwd   = (Get-Location).Path.TrimEnd('\', '/')
     $conflictEntry = $null
     if ($myPid) {
@@ -2576,8 +2575,7 @@ trap {
 if ($Reap -or $KillAll) {
     $killLive = [bool]$KillAll
     if ($KillAll) {
-        $filter = "Name='pwsh.exe' OR Name='node.exe'"
-        $procs  = @(Get-CimInstance -ClassName Win32_Process -Filter $filter -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
+        $procs  = @(Get-AbiosProcessList -Names 'pwsh', 'node' | Select-Object ProcessId, CommandLine)
         $candidates = @($procs | Where-Object { (Get-FleetIssueFromCommandLine $_.CommandLine) -gt 0 })
         $label = "the WHOLE fleet (-KillAll)"
     } else {

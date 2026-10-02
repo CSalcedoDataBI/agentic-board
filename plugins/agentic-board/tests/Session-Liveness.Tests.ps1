@@ -255,7 +255,7 @@ Describe 'Write-SessionRegistryEntry never records the launcher''s parent for a 
     It 'an in-place session (no via, no PID) still records the host parent PID' {
         $tmp = Join-Path $TestDrive 'w3.json'
         Mock Get-SessionRegistryPath { $tmp }
-        $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
+        $parent = Get-AbiosParentPid
         Write-SessionRegistryEntry -IssueNum 6 -Branch 'issue-6-x' -WorkPath 'C:\wt\6'
         [int](@(Get-Content $tmp -Raw | ConvertFrom-Json)[0].sessionPid) | Should -Be $parent
     }

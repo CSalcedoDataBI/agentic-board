@@ -34,12 +34,62 @@ function Get-MachineCapacityCore([object[]]$CpuLoads, [double]$FreePhysicalKB, [
 # but is injectable so the governor can cap/override and tests stay deterministic.
 function Get-MachineCapacity {
     param([int]$LogicalCores = [Environment]::ProcessorCount)
-    $procs = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue)
-    $loads = @($procs | ForEach-Object { $_.LoadPercentage })
-    $os    = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-    $free  = if ($os) { [double]$os.FreePhysicalMemory }     else { 0 }
-    $total = if ($os) { [double]$os.TotalVisibleMemorySize } else { 0 }
-    Get-MachineCapacityCore $loads $free $total $LogicalCores
+    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+        $procs = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue)
+        $loads = @($procs | ForEach-Object { $_.LoadPercentage })
+        $os    = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+        $free  = if ($os) { [double]$os.FreePhysicalMemory }     else { 0 }
+        $total = if ($os) { [double]$os.TotalVisibleMemorySize } else { 0 }
+        return (Get-MachineCapacityCore $loads $free $total $LogicalCores)
+    }
+    # Linux / macOS (#767): no CIM. The probes below are best-effort; anything unreadable is 0,
+    # which the governor already treats as "unknown" (it still launches at least one session).
+    $r = Get-UnixCapacityReading -LogicalCores $LogicalCores
+    Get-MachineCapacityCore @($r.CpuPercent) $r.FreeKB $r.TotalKB $LogicalCores
+}
+
+# /proc/meminfo text -> @{ FreeKB; TotalKB }. MemAvailable is what the kernel says a new process
+# can use; MemFree alone ignores reclaimable cache. PURE -> unit-testable.
+function ConvertFrom-ProcMeminfo([string]$Text) {
+    $get = { param($k) if ($Text -match "(?m)^$k\:\s+(\d+)\s*kB") { [double]$Matches[1] } else { 0 } }
+    $avail = & $get 'MemAvailable'
+    if (-not $avail) { $avail = & $get 'MemFree' }
+    return @{ FreeKB = $avail; TotalKB = (& $get 'MemTotal') }
+}
+
+# A 1-minute load average -> a CPU percentage comparable to Win32_Processor.LoadPercentage
+# (load / cores, capped at 100). PURE.
+function ConvertTo-LoadPercent([double]$Load1, [int]$Cores) {
+    if ($Cores -lt 1) { $Cores = 1 }
+    return [int][math]::Min(100, [math]::Round(($Load1 / $Cores) * 100, 0))
+}
+
+# Live readings on Linux (/proc) and macOS (sysctl, vm_stat). Impure; every probe is optional.
+function Get-UnixCapacityReading([int]$LogicalCores) {
+    $out = @{ CpuPercent = 0; FreeKB = 0; TotalKB = 0 }
+    if (Test-Path -LiteralPath '/proc/meminfo') {
+        $m = ConvertFrom-ProcMeminfo (Get-Content -LiteralPath '/proc/meminfo' -Raw -ErrorAction SilentlyContinue)
+        $out.FreeKB = $m.FreeKB; $out.TotalKB = $m.TotalKB
+        $la = "$(Get-Content -LiteralPath '/proc/loadavg' -Raw -ErrorAction SilentlyContinue)".Trim() -split '\s+'
+        if ($la[0] -as [double]) { $out.CpuPercent = ConvertTo-LoadPercent ([double]$la[0]) $LogicalCores }
+        return $out
+    }
+    if (Get-Command sysctl -ErrorAction SilentlyContinue) {
+        try {
+            $total = [double]("$(& sysctl -n hw.memsize 2>$null)".Trim())
+            $out.TotalKB = $total / 1KB
+            $vm = "$(& vm_stat 2>$null | Out-String)"
+            $page = if ($vm -match 'page size of (\d+) bytes') { [double]$Matches[1] } else { 4096 }
+            $pages = 0
+            foreach ($k in 'Pages free', 'Pages inactive', 'Pages speculative') {
+                if ($vm -match "$k\:\s+(\d+)") { $pages += [double]$Matches[1] }
+            }
+            $out.FreeKB = ($pages * $page) / 1KB
+            $la = "$(& sysctl -n vm.loadavg 2>$null)".Trim('{', '}', ' ') -split '\s+'
+            if ($la[0] -as [double]) { $out.CpuPercent = ConvertTo-LoadPercent ([double]$la[0]) $LogicalCores }
+        } catch { }
+    }
+    return $out
 }
 
 # How many sessions to launch in the next wave. PURE -> unit-testable. The concurrency
