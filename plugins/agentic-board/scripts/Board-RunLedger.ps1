@@ -104,7 +104,7 @@ function Add-RunEntry {
         at    = Get-RunLedgerStamp $When
     }
     $entries = @($State.entries) + $entry
-    return [pscustomobject]@{
+    $out = [pscustomobject]@{
         epic    = $State.epic
         board   = $State.board
         repo    = $State.repo
@@ -114,6 +114,13 @@ function Add-RunEntry {
         queue   = @($State.queue)
         entries = @($entries)
     }
+    # Carry the auto-checkpoint trail forward (#771): RunLedgerCheckpoint.ps1 appends it before
+    # every side-effecting step, and an -Update that dropped it would erase the record of what the
+    # run last attempted - the one thing a session that died without -Save leaves behind (#730).
+    if ($State.PSObject.Properties['checkpoints']) {
+        $out | Add-Member -NotePropertyName checkpoints -NotePropertyValue @($State.checkpoints | Where-Object { $_ })
+    }
+    return $out
 }
 
 # Render the durable epic comment body from a run-state. Pure. Carries the hidden
@@ -139,6 +146,15 @@ function Format-RunLedgerComment {
             $next = if ($e.next) { $e.next } else { '—' }
             $lines += "| #$($e.issue) | $note | $next |"
         }
+        $lines += ""
+    }
+    # The last auto-checkpoint (#771): the step the run was about to take when it last wrote the
+    # ledger, so a reader of the durable comment sees where an abrupt stop happened. "Attempted",
+    # never "done": the board and git say what landed.
+    if ($State.PSObject.Properties['checkpoints'] -and @($State.checkpoints | Where-Object { $_ }).Count) {
+        $last = @($State.checkpoints | Where-Object { $_ })[-1]
+        $on   = if ([int]$last.issue -gt 0) { " on #$($last.issue)" } else { '' }
+        $lines += "_Last checkpoint: ``$($last.step)``$on at $($last.at) (attempted - the board and git say what landed)._"
         $lines += ""
     }
     $lines += "_Updated $($State.updated)._"

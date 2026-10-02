@@ -138,6 +138,48 @@ re-verifies `[V]` items are still true (branch exists, PR still open) and flags 
   notices it contradicted itself or re-explored settled ground, it may proactively offer
   `/board handoff save`, then stop for confirmation — never auto-saves.
 
+## RECOVER — a session that never saved (#730)
+
+`save` and `resume` only work if `-Save` ran. A session that ends abruptly (crash, closed
+terminal, quota cut, a killed fleet window) leaves **no** `[abios-handoff]` comment and **no**
+`HANDOFF.md`, so `-Resume` has nothing and says so (its error now points here). But Claude Code
+already wrote the transcript, on this machine, at
+`~/.claude/projects/<slug>/<session-id>.jsonl` (`<slug>` = the repo path with every
+non-alphanumeric character — `\`, `/`, `:` included — replaced by `-`).
+
+`scripts/Board-Handoff.ps1 -Recover`:
+
+1. Finds the **most recent transcript for this repo's slug**, excluding the running session
+   (`-ExcludeSessionId`, default `$env:CLAUDE_CODE_SESSION_ID`; without an id, inside Claude Code,
+   the newest file is skipped only if it is being written right now). `-ProjectsRoot` overrides
+   `~/.claude/projects`.
+2. **Streams** it line by line and keeps only bounded queues: the last ~20 human turns (each cut
+   to ~200 chars) and the last ~45 non-empty lines of assistant prose. Tool results
+   (`toolUseResult`), meta entries and any text starting with `<` (`<system-reminder>`,
+   `<task-notification>`, ...) are dropped. Memory stays flat whatever the size of the file.
+3. Prints that **ATTEMPTED** block next to a **LANDED** block read live from git: `git status -sb`,
+   `HEAD` vs its upstream (ahead/behind, or "nothing pushed"), and `git log`. It says explicitly
+   that the transcript is what was attempted and git/forge say what landed.
+4. Ends by offering to write the missing handoff with `-Save`.
+
+No token, no `gh`, writes nothing. **Same machine only**: a transcript never leaves the machine
+that ran the session, so on another machine `-Recover` finds nothing and says so — fall back to
+git and the board there. For a ledger-tracked `/board work` run, also read the last
+**auto-checkpoint** in `.agentic-board/active-run.json` (#771, see
+[compact-survival.md](compact-survival.md)): it names the step the run was about to take.
+
+### Anti-patterns
+
+- **Reading the `.jsonl` whole** (`Get-Content -Raw`, `cat`, opening it in the editor, pasting it
+  into the chat). Transcripts run to hundreds of MB and carry the whole context window — global
+  instructions included. `-Recover` streams and extracts; do not "just look at the file".
+- **Resuming the old session instead** (`claude --resume <id>`). That reloads the full, stale
+  context window — including whatever made it fail — into a new run. Recover the thread, then work
+  from a fresh session and a handoff.
+- **Trusting the transcript for landed work.** "PR merged", "pushed", "deployed" in the closing
+  text are claims of a session that died, possibly before the command completed. Report them as
+  done only after `gh pr view`, `git log origin/<branch>`, `gh run list` confirm it.
+
 ## Capture-in-handoff (knowledge anti-rot)
 
 The knowledge registry (M5) rots if it depends on the user remembering to feed it. So `save`

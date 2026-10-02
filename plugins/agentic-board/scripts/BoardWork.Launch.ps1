@@ -408,6 +408,16 @@ function Start-WorktreeSession {
         Write-Host "  WARN #${IssueNum}: worktree '$WorkPath' does not exist - no session launched." -ForegroundColor DarkYellow
         return $null
     }
+    # Checkpoint the run ledger BEFORE anything is armed or spawned (#771). A launched session can
+    # end without ever saving a handoff; the checkpoint is what tells the next session it was
+    # started. When a run is active and the checkpoint cannot be written, do not launch - same
+    # refusal shape as the brake below (FAIL + $null), so the batch carries on to the next issue.
+    try {
+        $null = Write-RunLedgerCheckpoint -Step 'launch' -Issue $IssueNum -Detail $Branch
+    } catch {
+        Write-Host "  FAIL #${IssueNum}: $($_.Exception.Message) The session is not launched." -ForegroundColor Red
+        return $null
+    }
     # ARM THE BRAKE (#516). The briefing below still ASKS the session to stop at a reviewed PR;
     # this marker is what makes the refusal mechanical. The PreToolUse hook
     # (Brake-PreToolUseHook.ps1) finds it by walking up from the session's cwd and denies the

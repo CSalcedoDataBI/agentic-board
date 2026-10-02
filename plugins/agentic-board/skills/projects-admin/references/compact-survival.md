@@ -77,6 +77,35 @@ Keep entries lightweight — a decision, a gotcha, the next step — not a trans
 comment upsert is **fail-closed** (a failed read of existing comments skips the post rather
 than risk a duplicate, per #316); a gh failure never corrupts the local marker.
 
+## Auto-checkpoint before every side effect (#771)
+
+The three touch-points above are manual: a session that dies between them (and without a
+`/board handoff -Save`) left no record of what it was doing (#730). So, while a run is
+**active**, every side-effecting step of `Board-Work.ps1` first appends a checkpoint
+(`{step, issue, detail, at}`) to `active-run.json` via `scripts/RunLedgerCheckpoint.ps1`:
+
+| Step | Where |
+| --- | --- |
+| `start` | `Invoke-IssueStart`, before the Status move (covers `-Start`, `-StartGroup`, `-Parallel`, `-Fleet`) |
+| `launch` | `Start-WorktreeSession`, before the brake is armed and the session spawned |
+| `to-review` | `-ToReview`, before the move to In Review |
+| `lock` / `unlock` | `-Lock` / `-Unlock`, before the claim comment |
+| `close-cross-repo` | `-CloseCrossRepo -Force`, before the close |
+
+- **Fail closed.** When a run is active and the checkpoint cannot be written (unreadable
+  marker, read-only or locked file, disk full), the step **does not run**: a single `-Start`
+  stops with the error, a `-Parallel` batch records it as that issue's skip, a launch prints
+  `FAIL` and spawns nothing. The ledger never lags the run.
+- **No-op otherwise.** No marker, or a `closed` run: nothing is read beyond a `Test-Path`,
+  nothing is created, nothing changes. Ordinary sessions behave exactly as before.
+- **Local and bounded.** Atomic write (temp file + rename), last 50 checkpoints kept, no `gh`
+  call — the durable epic comment is still upserted by `-Update`, which carries the trail forward
+  and shows the last checkpoint as *attempted* (the board and git say what landed).
+- A dry run never checkpoints (it changes nothing).
+
+To rebuild a session that died without saving, see `Board-Handoff.ps1 -Recover`
+([handoff.md](handoff.md), RECOVER).
+
 ## Enable / disable
 
 The `compact` re-injection and the PreCompact marker ship enabled in the plugin

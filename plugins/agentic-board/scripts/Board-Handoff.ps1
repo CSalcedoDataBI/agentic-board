@@ -24,7 +24,7 @@
     pure helpers for Pester WITHOUT the token check or any gh/git side effect.
 
 .PARAMETER Save
-    The action switch (this script currently implements save; resume is #140).
+    Snapshot the session (one of three actions: -Save, -Resume, -Recover).
 
 .PARAMETER NextStep
     The single concrete next step. Should be [V]/[?]-tagged by the caller.
@@ -81,6 +81,20 @@
     Any section missing from the file is left as its inline default.
     When supplied, the corresponding inline params are ignored.
 
+.PARAMETER Recover
+    Reconstruct what a session that ended WITHOUT -Save was doing (#730). Reads the most recent
+    Claude Code transcript of this repo (~/.claude/projects/<slug>/<session-id>.jsonl), excluding
+    the running session, line by line - never the whole file - and prints the last user turns and
+    the closing assistant text next to the LIVE git state. The transcript says what was attempted;
+    git and the forge say what landed. Same machine only (the transcript never leaves it). Needs no
+    token and writes nothing; it ends by offering -Save.
+
+.PARAMETER ProjectsRoot
+    With -Recover: the Claude Code projects folder. Default ~/.claude/projects.
+
+.PARAMETER ExcludeSessionId
+    With -Recover: the session id to skip (the running one). Default $env:CLAUDE_CODE_SESSION_ID.
+
 .PARAMETER DryRun
     Print the handoff and the intended comment action without writing or posting.
 
@@ -91,6 +105,10 @@
 param(
     [switch]  $Save,
     [switch]  $Resume,
+    # Rebuild a lost session from its local transcript when no handoff was saved (#730).
+    [switch]  $Recover,
+    [string]  $ProjectsRoot = "",
+    [string]  $ExcludeSessionId = "",
     [string]  $NextStep = "",
     [string[]]$Done = @(),
     [string[]]$OpenThreads = @(),
@@ -361,6 +379,196 @@ function Get-HandoffSaveMode {
     return 'refuse'
 }
 
+# -- Recover-side helpers (#730) -------------------------------------------------
+# A session that ends without -Save leaves no [abios-handoff] comment and no HANDOFF.md, so
+# -Resume has nothing. Claude Code still wrote the transcript locally, at
+# ~/.claude/projects/<slug>/<session-id>.jsonl. These helpers find it and pull out just enough to
+# re-ground a new session - streaming, because a transcript is routinely hundreds of MB and also
+# carries the whole context window (global instructions included) that must never be dumped.
+
+# The project-folder names Claude Code may have used for $path. Claude Code replaces every
+# non-alphanumeric character with '-' (same rule as Get-AutoMemorySlug); the narrower form (only
+# '\', '/' and ':') is also tried so a path with '.' or '_' still matches either way. Pure.
+function Get-TranscriptSlugCandidates([string]$path) {
+    $p = ([string]$path).TrimEnd('\', '/')
+    if (-not $p) { return @() }
+    $out = [System.Collections.Generic.List[string]]::new()
+    foreach ($s in @(($p -replace '[^A-Za-z0-9]', '-'), ($p -replace '[\\/:]', '-'))) {
+        if ($s -and -not $out.Contains($s)) { $out.Add($s) }
+    }
+    return @($out)
+}
+
+# Pick the most recent transcript of this repo, never the running session's own. With a known
+# session id that id is excluded; without one (-ExcludeNewestIfLive, i.e. running inside Claude
+# Code with no id exported) the newest file is skipped when it was written in the last
+# $LiveSeconds - that is this session writing its own transcript. Reads directory entries only.
+function Find-RecoverTranscript {
+    param(
+        [string]  $ProjectsRoot,
+        [string[]]$Slugs = @(),
+        [string]  $ExcludeSessionId = "",
+        [switch]  $ExcludeNewestIfLive,
+        [datetime]$Now = (Get-Date),
+        [int]     $LiveSeconds = 120
+    )
+    $result = [pscustomobject]@{ File = $null; Skipped = ""; Considered = 0; Dirs = @() }
+    if (-not $ProjectsRoot -or -not (Test-Path -LiteralPath $ProjectsRoot -PathType Container)) { return $result }
+    $files = @()
+    foreach ($slug in @($Slugs | Where-Object { $_ } | Select-Object -Unique)) {
+        $dir = Join-Path $ProjectsRoot $slug
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+        $result.Dirs += $dir
+        $files += @(Get-ChildItem -LiteralPath $dir -Filter '*.jsonl' -File -ErrorAction SilentlyContinue)
+    }
+    $files = @($files | Sort-Object LastWriteTimeUtc -Descending)
+    $result.Considered = $files.Count
+    if ($ExcludeSessionId) {
+        $mine  = @($files | Where-Object { $_.BaseName -eq $ExcludeSessionId })
+        if ($mine.Count) { $result.Skipped = $ExcludeSessionId }
+        $files = @($files | Where-Object { $_.BaseName -ne $ExcludeSessionId })
+    } elseif ($ExcludeNewestIfLive -and $files.Count -and
+              (($Now.ToUniversalTime() - $files[0].LastWriteTimeUtc).TotalSeconds -lt $LiveSeconds)) {
+        $result.Skipped = $files[0].BaseName
+        $files = @($files | Select-Object -Skip 1)
+    }
+    if ($files.Count) { $result.File = $files[0] }
+    return $result
+}
+
+# The plain-text parts of a transcript message content (a string, or an array of typed blocks of
+# which only {type:'text'} carries prose - tool_use / tool_result / thinking are skipped). Pure.
+function Get-TranscriptTextParts($content) {
+    if ($null -eq $content) { return @() }
+    if ($content -is [string]) { return @($content) }
+    return @(@($content) | Where-Object { $_ -and $_.PSObject.Properties['type'] -and $_.type -eq 'text' -and $_.text } |
+             ForEach-Object { [string]$_.text })
+}
+
+# Stream a transcript ONE LINE AT A TIME and keep only bounded queues: the last $MaxUserTurns
+# human turns (each truncated to $MaxChars) and the last $MaxAssistantLines non-empty lines of
+# assistant prose. Memory stays flat whatever the file size - never Get-Content -Raw, never
+# ReadAllText (#730). Harness noise is dropped: tool results (toolUseResult), meta entries, and
+# any text that starts with '<' (<system-reminder>, <task-notification>, <command-name>...).
+# Opened with FileShare.ReadWrite because the owning session may still be appending to it.
+function Read-TranscriptDigest {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [int]$MaxUserTurns = 20,
+        [int]$MaxChars = 200,
+        [int]$MaxAssistantLines = 45
+    )
+    $users = [System.Collections.Generic.Queue[object]]::new()
+    $asst  = [System.Collections.Generic.Queue[string]]::new()
+    $linesRead = 0; $malformed = 0; $lastTs = ""; $gitBranch = ""; $cwd = ""
+    $rx = [regex]'"type"\s*:\s*"(user|assistant)"'
+    $fs = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    $reader = [System.IO.StreamReader]::new($fs, [System.Text.UTF8Encoding]::new($false))
+    try {
+        while ($null -ne ($line = $reader.ReadLine())) {
+            $linesRead++
+            if (-not $rx.IsMatch($line)) { continue }   # cheap prefilter: skip summaries, snapshots...
+            try { $o = $line | ConvertFrom-Json -Depth 64 -ErrorAction Stop } catch { $malformed++; continue }
+            if (-not $o -or -not $o.PSObject.Properties['type']) { continue }
+            if ($o.PSObject.Properties['timestamp'] -and $o.timestamp) { $lastTs = [string]$o.timestamp }
+            if ($o.PSObject.Properties['gitBranch'] -and $o.gitBranch) { $gitBranch = [string]$o.gitBranch }
+            if ($o.PSObject.Properties['cwd'] -and $o.cwd) { $cwd = [string]$o.cwd }
+            $msg = if ($o.PSObject.Properties['message']) { $o.message } else { $null }
+            $content = if ($msg -and $msg.PSObject.Properties['content']) { $msg.content } else { $null }
+            if ($o.type -eq 'user') {
+                if ($o.PSObject.Properties['toolUseResult']) { continue }
+                if ($o.PSObject.Properties['isMeta'] -and $o.isMeta) { continue }
+                foreach ($t in (Get-TranscriptTextParts $content)) {
+                    $clean = ($t.Trim() -replace '\s+', ' ')
+                    if (-not $clean -or $clean.StartsWith('<')) { continue }
+                    if ($clean.Length -gt $MaxChars) { $clean = $clean.Substring(0, [Math]::Max(0, $MaxChars - 3)) + '...' }
+                    $users.Enqueue([pscustomobject]@{ at = $lastTs; text = $clean })
+                    while ($users.Count -gt $MaxUserTurns) { [void]$users.Dequeue() }
+                }
+            } elseif ($o.type -eq 'assistant') {
+                foreach ($t in (Get-TranscriptTextParts $content)) {
+                    foreach ($ln in ($t -split "`r?`n")) {
+                        if (-not $ln.Trim()) { continue }
+                        $asst.Enqueue($ln.TrimEnd())
+                        while ($asst.Count -gt $MaxAssistantLines) { [void]$asst.Dequeue() }
+                    }
+                }
+            }
+        }
+    } finally {
+        $reader.Dispose(); $fs.Dispose()
+    }
+    return [pscustomobject]@{
+        Path           = $Path
+        SessionId      = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+        LinesRead      = $linesRead
+        Malformed      = $malformed
+        LastTimestamp  = $lastTs
+        GitBranch      = $gitBranch
+        Cwd            = $cwd
+        UserTurns      = @($users.ToArray())
+        AssistantLines = @($asst.ToArray())
+    }
+}
+
+# Render the recovery report: what the transcript says was ATTEMPTED, next to what live git says
+# LANDED, and the closing offer to write the missing handoff. Pure - the caller gathers git.
+# The two halves are kept visibly apart on purpose: a transcript line like "merged, deployed" is a
+# claim the dead session made, not a fact; only git/forge state is evidence (#730).
+function Format-RecoverReport {
+    param(
+        [Parameter(Mandatory)]$Digest,
+        [string]  $Branch = "",
+        [string[]]$StatusLines = @(),
+        [string]  $Upstream = "",
+        [int]     $Ahead = -1,
+        [int]     $Behind = -1,
+        [string[]]$LogLines = @()
+    )
+    $o = @()
+    $when = if ($Digest.LastTimestamp) { $Digest.LastTimestamp } else { 'unknown' }
+    $o += "== ATTEMPTED - what the lost session was doing (transcript, NOT evidence) =="
+    $o += "  Session  : $($Digest.SessionId)  (last activity $when, $($Digest.LinesRead) lines streamed)"
+    if ($Digest.GitBranch) { $o += "  Its branch: $($Digest.GitBranch)" }
+    $o += ""
+    $o += "-- Last $(@($Digest.UserTurns).Count) user turn(s) --"
+    if (@($Digest.UserTurns).Count) { foreach ($u in $Digest.UserTurns) { $o += "  > $($u.text)" } }
+    else { $o += "  (none - only tool traffic or harness messages)" }
+    $o += ""
+    $o += "-- Closing assistant text (last $(@($Digest.AssistantLines).Count) line(s)) --"
+    if (@($Digest.AssistantLines).Count) { foreach ($l in $Digest.AssistantLines) { $o += "  | $l" } }
+    else { $o += "  (none)" }
+    $o += ""
+    $o += "== LANDED - live git state, now (evidence) =="
+    $o += "  Branch   : $(if ($Branch) { $Branch } else { '(detached)' })"
+    if ($Upstream) {
+        $ab = if ($Ahead -ge 0 -and $Behind -ge 0) { "ahead $Ahead, behind $Behind" } else { 'ahead/behind unknown' }
+        $o += "  Upstream : $Upstream ($ab)"
+        if ($Ahead -gt 0) { $o += "             $Ahead local commit(s) are NOT pushed." }
+    } else {
+        $o += "  Upstream : none - nothing on this branch is pushed."
+    }
+    $status = @($StatusLines | Where-Object { $_ -and $_ -notmatch '^##' })
+    if ($status.Count) {
+        $o += "  Working tree: $($status.Count) uncommitted change(s)"
+        $o += @($status | Select-Object -First 20 | ForEach-Object { "    $_" })
+    } else { $o += "  Working tree: clean" }
+    if (@($LogLines).Count) {
+        $o += "  Recent commits:"
+        $o += @($LogLines | ForEach-Object { "    $_" })
+    }
+    if ($Digest.GitBranch -and $Branch -and $Digest.GitBranch -ne $Branch) {
+        $o += "  ! The lost session was on '$($Digest.GitBranch)'; you are on '$Branch'."
+    }
+    $o += ""
+    $o += "The transcript is what was ATTEMPTED; git and the forge say what LANDED. Do not report a merge,"
+    $o += "push or deploy as done because the transcript says so - check it (gh pr view, gh run list)."
+    $o += ""
+    $o += "Next: write the missing handoff now, so this does not have to be recovered again:"
+    $o += "  Board-Handoff.ps1 -Save -BodyFile <json>   (tag a claim [V] only after verifying it live)"
+    return $o
+}
+
 # ==============================================================================
 # Main entry. Dot-source guard: the test harness sets ABIOS_HANDOFF_DOTSOURCE to
 # load the helpers above without running any of the side-effecting code below.
@@ -394,8 +602,57 @@ if ($BodyFile) {
 # mirror unnoticed.
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
 
-if ($Save -and $Resume) { throw "Pass either -Save or -Resume, not both." }
-if (-not ($Save -or $Resume)) { throw "Pass an action: -Save (snapshot) or -Resume (rehydrate)." }
+if (@($Save, $Resume, $Recover | Where-Object { $_ }).Count -gt 1) { throw "Pass ONE action: -Save, -Resume or -Recover." }
+if (-not ($Save -or $Resume -or $Recover)) { throw "Pass an action: -Save (snapshot), -Resume (rehydrate) or -Recover (rebuild a session that never saved)." }
+
+# ==============================================================================
+# RECOVER (#730) - a session ended without -Save. Rebuild what it was doing from its local
+# transcript and cross it against live git. Local only: no token, no gh, writes nothing. Runs
+# BEFORE the token check on purpose - recovering must work even when the forge is unreachable.
+# ==============================================================================
+if ($Recover) {
+    $recoverRoot = (git rev-parse --show-toplevel 2>$null)
+    if (-not $recoverRoot) { throw "Not inside a git working tree - -Recover reads this repo's transcripts." }
+    if (-not $ProjectsRoot) {
+        $ProjectsRoot = if ($HOME) { Join-Path (Join-Path $HOME '.claude') 'projects' } else { '' }
+    }
+    # A session may have started in the repo root or in the current folder; both slugs are tried.
+    $slugs = @(Get-TranscriptSlugCandidates $recoverRoot) + @(Get-TranscriptSlugCandidates (Get-Location).Path) | Select-Object -Unique
+    $excl  = if ($ExcludeSessionId) { $ExcludeSessionId } else { [string]$env:CLAUDE_CODE_SESSION_ID }
+    $pick  = Find-RecoverTranscript -ProjectsRoot $ProjectsRoot -Slugs $slugs -ExcludeSessionId $excl `
+                                    -ExcludeNewestIfLive:([bool]$env:CLAUDECODE -and -not $excl)
+
+    Write-Host "=== /board handoff recover  (same machine only) ===" -ForegroundColor Cyan
+    Write-Host ""
+    if (-not $pick.File) {
+        Write-Host "  No earlier session transcript found for this repo on this machine." -ForegroundColor Yellow
+        Write-Host "  Looked in: $ProjectsRoot  (folders: $($slugs -join ', '))" -ForegroundColor DarkGray
+        if ($pick.Skipped) { Write-Host "  Skipped the running session ($($pick.Skipped))." -ForegroundColor DarkGray }
+        Write-Host "  Transcripts never leave the machine that ran the session - on another machine there is" -ForegroundColor DarkGray
+        Write-Host "  nothing to recover. Fall back to git: git status -sb, git log, and the board." -ForegroundColor DarkGray
+        return
+    }
+    if ($pick.Skipped) { Write-Host "  Skipped the running session ($($pick.Skipped))." -ForegroundColor DarkGray }
+
+    $digest = Read-TranscriptDigest -Path $pick.File.FullName
+
+    # Live git state - the only part of this report that is evidence.
+    $curBranch = (git branch --show-current 2>$null)
+    $statusLn  = @(git status -sb 2>$null)
+    $upstream  = (git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null)
+    if ($LASTEXITCODE -ne 0) { $upstream = "" }
+    $ahead = -1; $behind = -1
+    if ($upstream) {
+        $counts = (git rev-list --left-right --count 'HEAD...@{u}' 2>$null)
+        if ($LASTEXITCODE -eq 0 -and "$counts" -match '^\s*(\d+)\s+(\d+)\s*$') { $ahead = [int]$Matches[1]; $behind = [int]$Matches[2] }
+    }
+    $logLn = @(git log --oneline -10 2>$null)
+
+    $report = Format-RecoverReport -Digest $digest -Branch $curBranch -StatusLines $statusLn -Upstream $upstream `
+                                   -Ahead $ahead -Behind $behind -LogLines $logLn
+    foreach ($ln in $report) { Write-Host $ln }
+    return
+}
 
 if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $(. (Join-Path $PSScriptRoot 'Get-AbiosAccounts.ps1'); Get-AbiosTokenValue -VarName $TokenVar -AllowAmbient:(-not $PSBoundParameters.ContainsKey('TokenVar'))) }
 if (-not $env:GH_TOKEN) { throw "No GitHub token: $TokenVar is unset, GH_TOKEN is empty and gh has no stored login. Run 'gh auth login', or map the account with /board setup." }
@@ -528,7 +785,9 @@ if ($Resume) {
         $source = "local HANDOFF.md"
     }
     if (-not $body) {
-        throw "No handoff found$(if ($Issue -gt 0) { " for $Repo#$Issue" }) - no [abios-handoff] comment and no local HANDOFF.md."
+        # Point at -Recover (#730): a session that ended without -Save left its transcript on this
+        # machine, and that is the only trail left.
+        throw "No handoff found$(if ($Issue -gt 0) { " for $Repo#$Issue" }) - no [abios-handoff] comment and no local HANDOFF.md. If the last session ended without -Save, rebuild it from its local transcript: Board-Handoff.ps1 -Recover"
     }
 
     # Regenerate the local mirror when the source was the remote comment (machine B).

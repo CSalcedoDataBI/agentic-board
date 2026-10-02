@@ -305,6 +305,11 @@ $ErrorActionPreference = "Stop"
 # -Surface app, and -RegisterSession's registry write.
 . (Join-Path $PSScriptRoot 'BoardWork.Surface.ps1')
 
+# Fail-closed run-ledger checkpoint (#771, fixes #730): while a ledger-tracked run is active, every
+# side-effecting step below records itself in .agentic-board/active-run.json BEFORE it runs, and
+# refuses to run when that write fails. A strict no-op when no run is active.
+. (Join-Path $PSScriptRoot 'RunLedgerCheckpoint.ps1')
+
 # NOTE: the GH_TOKEN check lives in the main-entry guard below (after every function
 # is defined) so the pure helpers can be dot-sourced for unit tests without a token
 # and without side effects (set $env:ABIOS_BOARDWORK_DOTSOURCE=1 before dot-sourcing).
@@ -1768,6 +1773,11 @@ function Invoke-IssueStart {
         return $result
     }
 
+    # -- Checkpoint the run ledger BEFORE the first mutation (#771) -------------
+    # Throws when a run is active and the checkpoint cannot be written, so nothing below runs: a
+    # single -Start surfaces the error, a -Parallel batch records it as this issue's skip.
+    $null = Write-RunLedgerCheckpoint -Step 'start' -Issue $IssueNum -Detail $branchName
+
     # -- Execute: Status -> In Progress -----------------------------------------
     # -Graphql throws on a non-zero exit OR an exit-0 errors[] body, so we never print "OK" for a
     # move that never happened - the whole start aborts loudly instead (the issue must really be
@@ -2802,6 +2812,9 @@ if ($CloseCrossRepo -gt 0) {
         exit 0
     }
     $body = "All $($plan.Verdict.Total) recorded pull request(s) are merged: " + ((@($plan.Prs) | ForEach-Object { "$($_.repo)#$($_.number)" }) -join ', ') + '.'
+    # Checkpoint before the close (#771): throws - and closes nothing - when a run is active and
+    # its ledger cannot be written.
+    $null = Write-RunLedgerCheckpoint -Step 'close-cross-repo' -Issue $CloseCrossRepo
     $null = Invoke-Gh -GhArgs @('issue', 'close', "$CloseCrossRepo", '--repo', $plan.Repo, '--reason', 'completed', '--comment', $body) `
                       -What "close issue $($plan.Repo)#$CloseCrossRepo"
     Write-Host "  OK  issue $($plan.Repo)#$CloseCrossRepo closed (all its PRs were merged)." -ForegroundColor Green
@@ -2860,6 +2873,9 @@ if ($Lock -gt 0 -or $Unlock -gt 0) {
     # The [abios-claim] comment IS the lock marker other sessions read - if it silently fails to
     # post, -Start would not see the lock. Fail closed (throw) so a lock that did not happen is
     # never reported as posted (#314).
+    # Checkpoint before the first write (#771): throws - and changes nothing - when a run is active
+    # and its ledger cannot be written.
+    $null = Write-RunLedgerCheckpoint -Step $(if ($locking) { 'lock' } else { 'unlock' }) -Issue $n
     $null = Invoke-Gh -GhArgs @('issue','comment',"$n",'--repo',$repo,'--body',$fingerprint) `
                       -What "post the [abios-claim] comment on #$n"
     if ($targetOpt) {
@@ -3384,6 +3400,9 @@ query($owner:String!, $num:Int!) {
 
     # -Graphql throws on exit OR errors[]: never print "OK -> In Review" for a move that silently
     # no-op'd (PR is open, the gate expects In Review, but the item stayed put) (#314).
+    # Checkpoint before the move (#771): throws - and moves nothing - when a run is active and its
+    # ledger cannot be written.
+    $null = Write-RunLedgerCheckpoint -Step 'to-review' -Issue $ToReview
     $toReviewMutation = '
 mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!) {
   updateProjectV2ItemFieldValue(input:{

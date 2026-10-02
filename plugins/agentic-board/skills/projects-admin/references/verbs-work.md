@@ -409,6 +409,9 @@ Notes:
   the session re-grounds and resumes the queue unattended. Opt-in per run and a **strict no-op**
   otherwise — no marker means the hook stays silent. Keep entries lightweight (a decision, a
   gotcha, the next step); the board remains the source of truth for per-issue **status**.
+  While the run is active, every side-effecting `Board-Work.ps1` step (start, launch, to-review,
+  lock, close) **auto-checkpoints** the marker first and refuses to run when that write fails
+  (#771) — see compact-survival.md. A session that died without saving: `Board-Handoff.ps1 -Recover`.
 - **Worktree mode**: when the working copy is busy (dirty tree, another `issue-*` branch, or a
   clean feature branch carrying commits the default branch lacks),
   `-Branch` creates/reuses an isolated worktree `../<repo>--issue-<n>` instead of switching —
