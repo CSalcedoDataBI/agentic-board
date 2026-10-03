@@ -7,7 +7,7 @@ override file, never in an edit here. The toolkit catalogs have their own page:
 ## CLI adapter registry (`adapters.json`)
 
 One entry per AI CLI that `/board work -Fleet` can launch (claude, antigravity, jules, codex,
-copilot). The fleet launcher, the fleet planner's routing and the review gate's reviewer roster
+copilot, and the dsh pilot). The fleet launcher, the fleet planner's routing and the review gate's reviewer roster
 all read this one registry, so **adding a backend is a JSON entry, not a code change** (#772).
 
 ### Override tiers
@@ -78,6 +78,7 @@ Example - a user tier that keeps one more credential for codex and adds a backen
 | `command` | Executable that must be on PATH - a bare name, no path. |
 | `kind` | `repl` (live tab in the worktree) or `async` (dispatches a cloud task). |
 | `isDefault` | `true` for claude only: the fallback for an unavailable CLI is hard-wired to claude. |
+| `lowTrust` | Optional, default `false`. `true` confines the CLI (#773): it may rank only the `docs` and `chore` routes, it can never be a reviewer or the default, and it is offered only for an issue whose repository is known to be **PUBLIC**. Private, internal or unknown visibility never qualifies, both in the planner and again at launch. A later tier cannot clear the flag. |
 | `installArgs` | Exactly `["npm", "i", "-g", "<package>@x.y.z"]` (an exact version, #765), or `null`. |
 | `installUrl` | An `https://` page for a CLI with no pinnable package (shown, never run). |
 | `probeArgs` | The cheapest command that proves auth, starting with `command`; never the bypass flag (#761). `null` only for claude, the host CLI. |
@@ -93,8 +94,10 @@ Example - a user tier that keeps one more credential for codex and adds a backen
 
 `launch.args` are written after `command`, in order. `{briefingContent}` as a whole argument
 becomes the briefing file's text, read when the session starts; `{briefingFile}` inside an argument
-becomes the briefing path. `stdinNull: true` pipes `$null` in, for a CLI that waits on stdin even
-with a prompt argument. The bypass flags are appended only on opt-in.
+becomes the briefing path. `{workPath}` inside an argument becomes the worktree path, for a CLI that
+runs in a container and mounts it. A path holding `,`, `"` or a line break is refused, because it
+could add an option to a `--mount` spec. `stdinNull: true` pipes `$null` in, for a CLI that waits on
+stdin even with a prompt argument. The bypass flags are appended only on opt-in.
 
 Templates are data, never code: an argument is written as a plain token only when it is one (letters,
 digits and `-_.:=/`), and otherwise as a single-quoted literal with every quote doubled, so a path
@@ -114,9 +117,31 @@ shipped registry:
 |-------|---------|------------|
 | `heavy` | label security / architecture, type Spike, size L / XL | claude |
 | `refactor` | label or type Refactor | codex, claude |
-| `docs` | label docs / documentation, type Docs | antigravity, copilot, claude |
-| `chore` | type Chore, size S / XS | copilot, antigravity, claude |
+| `docs` | label docs / documentation, type Docs | antigravity, copilot, dsh (public repos only), claude |
+| `chore` | type Chore, size S / XS | copilot, antigravity, dsh (public repos only), claude |
 | `default` | anything else | claude |
+
+### dsh (pilot, #773)
+
+`dsh` is DeepSeek Harness (`@deepseek-ai/dsh` 0.2.0-rc.2, its headless profile with the `--json`
+event stream), and it runs only inside the `agentic-board/dsh` image. Its `command` is therefore
+`docker`, and its probe and launch are both `docker run --rm` of that image:
+
+- the worktree is the one writable mount (`{workPath}`);
+- the root is read-only, with a tmpfs `/tmp`;
+- the container gets no home folder, no Docker socket, a non-root user and CPU/memory/pid limits;
+- `DEEPSEEK_API_KEY` is the only host variable it receives, and there is no GitHub token.
+
+It has no `installArgs`: the pin (exact package version plus lockfile, base image by digest) lives
+in the image recipe, which you build yourself. See
+[`containers/dsh`](https://github.com/CSalcedoDataBI/agentic-board/tree/main/containers/dsh),
+including how dsh's session-log upload and telemetry are switched off and verified.
+
+The adapter is `lowTrust`, so it gets Docs/Chore issues of public repositories only. It needs no
+permission bypass: headless dsh edits inside its workspace in its default `workspace-write` mode.
+Its probe rules read dsh's own error codes (`dsh: AUTH:`, `MISSING_CREDENTIAL`, `QUOTA`,
+`RATE_LIMIT`, `CONTEXT_WINDOW_EXCEEDED`) and Docker's (`No such image`, daemon not running). OK
+needs the `--json` stream's closing `final` event to answer OK.
 
 `commonProbeRules` are the API-failure phrases several CLIs share. They are phrases, not bare
 words: a healthy banner can say "Quota remaining: 500" or carry "401" inside an id (#537), and QUOTA

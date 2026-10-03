@@ -49,6 +49,13 @@ without arguments.
     `~/.claude/agentic-board/compact-markers.jsonl`.
 - With `/board work ... -Launch` or `-Fleet` only: it opens one terminal session per started issue
   and runs a coding CLI in it (`claude`, and with `-Fleet` also `codex`, `copilot`, `agy` or `jules`).
+- **`dsh` (DeepSeek Harness, pilot)** with `-Fleet` only, and only for Docs/Chore issues of a
+  **public** repository (an unknown visibility counts as private). It never runs on your machine
+  directly: the session is `docker run --rm` of the local image `agentic-board/dsh:0.2.0-rc.2`,
+  with the worktree as its only writable mount, a read-only root, no home folder, no Docker
+  socket, a non-root user, CPU/memory limits and one variable from your environment,
+  `DEEPSEEK_API_KEY` (no GitHub token: it edits files, it does not push). Details and the image
+  recipe: [`containers/dsh`](https://github.com/CSalcedoDataBI/agentic-board/tree/main/containers/dsh).
 - **Permissions of launched sessions.** By default each launched CLI keeps its own permission mode
   and your allow-list, so a headless session is *denied*, not asked, for any tool outside it. The
   CLIs' bypass flags (`--permission-mode bypassPermissions`, `--dangerously-bypass-approvals-and-sandbox`,
@@ -61,7 +68,9 @@ without arguments.
 - Installs software **only after a y/N prompt**: when `-Fleet` finds a CLI missing it offers
   `npm i -g @openai/codex@0.160.0`, `npm i -g @github/copilot@1.0.91` or `npm i -g @google/jules@0.1.42`
   (pinned versions). Antigravity ships only a remote install script, so it is never run for you: you
-  get the install page instead.
+  get the install page instead. `dsh` is never installed for you either: you build its image
+  yourself (`docker build -t agentic-board/dsh:0.2.0-rc.2 containers/dsh`), from a pinned base image
+  and a lockfile, and the fleet never pulls an image.
 - `/cleanup plugins` runs `claude plugin marketplace update` and `claude plugin update` for your
   installed plugins.
 
@@ -77,6 +86,13 @@ without arguments.
   repository `CSalcedoDataBI/agentic-board`.
 - `/docs` checks DeepWiki indexing with an HTTP GET to `https://deepwiki.com/<owner>/<repo>`,
   and only for a public repository.
+- A `dsh` session sends its task (the issue briefing) and whatever it reads or runs in the worktree
+  to DeepSeek's API (`https://api.deepseek.com/anthropic`), under DeepSeek's own terms. dsh's
+  extra uploads are switched off in the image: the session-log upload (a copy of the session log
+  that dsh 0.2.0-rc.2 adds to every API request by default) and its OpenTelemetry export; the image
+  build fails if they are not. Per dsh's documentation its API requests still carry a session id
+  and an anonymous user id, which here is random per run (dsh's home folder lives in the
+  container's temporary storage and is discarded on exit).
 - Nothing else: there is no analytics or telemetry upload. `/board telemetry` reads your local
   Claude Code transcripts and writes its results locally.
 
