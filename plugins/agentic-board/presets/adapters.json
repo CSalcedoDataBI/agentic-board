@@ -145,6 +145,34 @@
       "launch": { "args": ["-p", "{briefingContent}"] },
       "routing": { "docs": 200, "chore": 100 },
       "reviewer": false
+    },
+    {
+      "name": "dsh",
+      "note": "PILOT (#773). DeepSeek Harness (@deepseek-ai/dsh 0.2.0-rc.2, headless profile, --json event stream), run ONLY inside the agentic-board/dsh image built from containers/dsh - never on the host, so the command is docker and there is no npm install argv (the pin lives in containers/dsh/package.json + package-lock.json). The container gets the worktree as its only writable mount, a tmpfs /tmp (DSH_HOME, so dsh's session log dies with it), a read-only root, no host home, no docker socket, a non-root user, CPU/memory/pid limits and ONE host variable, DEEPSEEK_API_KEY - no GitHub token: dsh edits files, the host flow commits and opens the PR. The session-log upload (session-log-deepseek, on by default in 0.2.0-rc.2, carried inside the API request) and the OTLP telemetry are disabled by the image (no-upload.patch.yml + DSH_TELEMETRY_DISABLED), the image build fails if the composed config still mounts them, and --add-host points the telemetry collectors at 127.0.0.1. Headless dsh edits inside its workspace in its default workspace-write mode, so no bypass is needed (requiresBypass false, no bypassArgs). lowTrust: public repos only, docs/chore routes only, never a reviewer.",
+      "command": "docker",
+      "kind": "repl",
+      "isDefault": false,
+      "lowTrust": true,
+      "installArgs": null,
+      "installUrl": "https://github.com/CSalcedoDataBI/agentic-board/tree/main/containers/dsh",
+      "probeArgs": ["docker", "run", "--rm", "--pull=never", "--read-only", "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=512m", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--cpus=2", "--memory=2g", "--pids-limit=512", "--user=node", "--env=DEEPSEEK_API_KEY", "--add-host=dsh-otel-collector.deepseeksvc.com:127.0.0.1", "--add-host=harness-telemetry.deepseeksvc.com:127.0.0.1", "--workdir=/tmp", "agentic-board/dsh:0.2.0-rc.2", "--profile", "headless", "--json", "reply OK"],
+      "probeRules": [
+        { "code": "ERROR", "note": "--pull=never: a missing image is never fetched from a registry, it is reported.", "pattern": "(?i)No such image: agentic-board/dsh|Unable to find image 'agentic-board/dsh", "reason": "the sandbox image is not built - docker build -t agentic-board/dsh:0.2.0-rc.2 containers/dsh" },
+        { "code": "ERROR", "pattern": "(?i)Cannot connect to the Docker daemon|error during connect|docker daemon is not running|dockerDesktopLinuxEngine", "reason": "Docker is not running" },
+        { "code": "ERROR", "pattern": "abios-dsh: refusing to run", "reason": "the sandbox entrypoint refused to start dsh (see its message)" },
+        { "code": "AUTH", "note": "dsh prints 'dsh: <code>: <message>' on stderr and the same code in the --json turn_end event.", "pattern": "\"code\":\"(AUTH|MISSING_CREDENTIAL|INVALID_CREDENTIAL)\"|(?m)^dsh: (AUTH|MISSING_CREDENTIAL|INVALID_CREDENTIAL):", "reason": "DEEPSEEK_API_KEY is missing or rejected" },
+        { "code": "QUOTA", "pattern": "\"code\":\"QUOTA\"|(?m)^dsh: QUOTA:|(?i)insufficient balance", "reason": "DeepSeek account out of balance" },
+        { "code": "RATE_LIMIT", "pattern": "\"code\":\"RATE_LIMIT\"|(?m)^dsh: RATE_LIMIT:", "reason": "rate limited - retry later" },
+        { "code": "CONTEXT_WINDOW", "pattern": "\"code\":\"CONTEXT_WINDOW_EXCEEDED\"|(?m)^dsh: CONTEXT_WINDOW_EXCEEDED:", "reason": "the prompt does not fit the model context window" },
+        { "include": "common" },
+        { "code": "OK", "note": "The --json stream's closing event, on exit 0: the answer itself, not just 'no error seen'.", "pattern": "(?m)^\\{\"type\":\"final\",\"text\":\"\\s*OK\\b", "reason": "answered" }
+      ],
+      "bypassArgs": "",
+      "requiresBypass": false,
+      "keepEnv": ["DEEPSEEK_API_KEY"],
+      "launch": { "args": ["run", "--rm", "--pull=never", "--read-only", "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=512m", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--cpus=2", "--memory=2g", "--pids-limit=512", "--user=node", "--env=DEEPSEEK_API_KEY", "--add-host=dsh-otel-collector.deepseeksvc.com:127.0.0.1", "--add-host=harness-telemetry.deepseeksvc.com:127.0.0.1", "--mount=type=bind,src={workPath},dst=/work", "--workdir=/work", "agentic-board/dsh:0.2.0-rc.2", "--profile", "headless", "--json", "{briefingContent}"] },
+      "routing": { "docs": 250, "chore": 250 },
+      "reviewer": false
     }
   ]
 }

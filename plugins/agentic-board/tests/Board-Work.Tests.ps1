@@ -1669,7 +1669,8 @@ Describe 'non-claude adapters' {
     }
     It 'no adapter invokes the retired gemini CLI (#615)' {
         foreach ($a in (Get-CliAdapters)) {
-            (& $a.BuildLaunch @{ BriefingFile = 'C:\b\brief.txt' }) | Should -Not -Match '\bgemini\b'
+            # WorkPath: the containerised dsh launch (#773) mounts it and refuses to render without one.
+            (& $a.BuildLaunch @{ BriefingFile = 'C:\b\brief.txt'; WorkPath = 'C:\wt\issue-1' }) | Should -Not -Match '\bgemini\b'
         }
     }
     It 'codex BuildLaunch uses exec with an stdin EOF guard; the sandbox bypass only on opt-in (#761)' {

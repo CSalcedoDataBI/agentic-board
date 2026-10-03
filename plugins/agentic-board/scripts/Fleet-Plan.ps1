@@ -19,6 +19,8 @@
       Docs                                             -> antigravity -> copilot -> claude
       Chore / size S/XS                                -> copilot -> antigravity -> claude
       otherwise                                        -> claude
+    dsh (#773, pilot) also ranks Docs and Chore (after antigravity/copilot, before claude) but is
+    LOW-TRUST: it is offered only for an issue whose repo is PUBLIC; private or unknown never.
     A user (~/.agentic-board/adapters.json) or project (.agentic-board/adapters.json) override
     that adds a backend with a `routing` entry is routed here with no code change.
 
@@ -85,7 +87,9 @@ function Select-CliForIssue {
     # from the registry (#772). A CLI the registry does not know (the retired 'gemini', #615) has no
     # rank anywhere, so offering it never beats claude.
     $route = Select-CliRoute -Issue $Issue
-    $pref  = @(Get-CliRoutePreference -Route $route)
+    # The issue repo's visibility gates a low-trust adapter (#773): only PUBLIC qualifies, and an
+    # issue that carries none (unknown) never routes to one.
+    $pref  = @(Get-CliRoutePreference -Route $route -Visibility "$($Issue.visibility)")
     foreach ($p in $pref)      { if ($avail -contains $p) { return $p } }
     if ($avail -contains 'claude') { return 'claude' }
     return $avail[0]
@@ -196,7 +200,7 @@ query(`$o:String!, `$n:Int!, `$cursor:String) {
             ... on Issue {
               number title state
               labels(first:15) { nodes { name } }
-              repository { nameWithOwner }
+              repository { nameWithOwner visibility }
             }
           }
         }
@@ -232,6 +236,8 @@ query(`$o:String!, `$n:Int!, `$cursor:String) {
             type      = $fields.Type
             priority  = $fields.Priority
             repo      = $repo
+            # PUBLIC / PRIVATE / INTERNAL from GraphQL; empty if absent - which keeps dsh away (#773).
+            visibility = "$($it.content.repository.visibility)"
             blockedBy = $blockedBy
         }
     }

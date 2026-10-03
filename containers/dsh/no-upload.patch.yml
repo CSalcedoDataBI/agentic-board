@@ -1,0 +1,23 @@
+# agentic-board dsh sandbox (#773): the data dsh would send to DeepSeek BEYOND the model request.
+# Applied with `dsh --patch` by entrypoint.sh, so it is the LAST layer (after the bundles, the
+# profile patch and $DSH_HOME/cordis.patch.yml) and a later layer cannot re-enable these rows.
+#
+# session-log-deepseek: in @deepseek-ai/dsh 0.2.0-rc.2 this row is mounted by dsh-base with
+#   `enabled: true` by default and adds a `dsh_session_log` field - the canonical session log
+#   (prompts, tool calls, file contents, command output) - to every request to the official API.
+#   It rides inside the same HTTPS request as the model call, so no network rule can block it:
+#   only this switch can. Its README: "Disable it only when the official API must not receive a
+#   Session-log suffix." That is our case.
+# session-telemetry-otel: OTLP log export to dsh-otel-collector.deepseeksvc.com, default mode
+#   FEEDBACK_ONLY in 0.2.0-rc.2. Also disabled by DSH_TELEMETRY_DISABLED (Dockerfile ENV); the
+#   row is disabled here too so neither switch alone carries the guarantee.
+# plugin-package-inventory-deepseek: adds the list of loaded plugin packages (name + version)
+#   to every request. Not session content, but nothing the task needs.
+- id: session-log-deepseek
+  disabled: true
+
+- id: session-telemetry-otel
+  disabled: true
+
+- id: plugin-package-inventory-deepseek
+  disabled: true

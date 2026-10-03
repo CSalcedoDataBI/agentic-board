@@ -120,8 +120,16 @@ $script:CliBuiltinLaunchers = @{ claude = 'Build-ClaudeLaunch' }
 
 # Override files may set these fields on an adapter. 'note' is free text the loader ignores (JSON
 # has no comments; it keeps the WHY next to the data).
-$script:CliAdapterFields = @('name', 'note', 'command', 'kind', 'isDefault', 'installArgs', 'installUrl',
+$script:CliAdapterFields = @('name', 'note', 'command', 'kind', 'isDefault', 'lowTrust', 'installArgs', 'installUrl',
     'probeArgs', 'probeRules', 'bypassArgs', 'requiresBypass', 'keepEnv', 'launch', 'routing', 'reviewer')
+
+# A LOW-TRUST adapter (#773, the dsh pilot): a backend we run sandboxed and only on work whose
+# content is already public. Enforced in code, not left to the docs:
+#   * it may rank only these routes, and is never a reviewer nor the default (Test-CliAdapterSpec);
+#   * the planner offers it only for an issue whose repo visibility is known to be PUBLIC, and the
+#     fleet launch re-checks that visibility - unknown fails closed (Test-CliLowTrustAllowed);
+#   * a later tier cannot clear the flag on an adapter an earlier tier marked low-trust.
+$script:CliLowTrustRoutes = @('docs', 'chore')
 # The only fields the REPO tier may set, on existing adapters (see Import-CliAdapterRegistry).
 $script:CliAdapterRepoFields = @('name', 'note', 'routing', 'reviewer')
 
@@ -214,6 +222,17 @@ function Test-CliAdapterSpec {
     # Resolve-LaunchCli falls back to 'claude' by name, so the default is claude and only claude.
     if ($Spec.isDefault -is [bool] -and $Spec.isDefault -ne ($name -ceq 'claude')) {
         $errs.Add("isDefault must be true for claude and false for every other adapter (the fallback is hard-wired to claude)")
+    }
+    # #773: optional (absent = false). A low-trust adapter is confined to the low-risk routes and
+    # can never judge another CLI's work.
+    if ($Spec.Contains('lowTrust') -and $Spec.lowTrust -isnot [bool]) { $errs.Add('lowTrust must be true or false') }
+    if ($Spec.lowTrust -eq $true) {
+        if ($Spec.isDefault -eq $true) { $errs.Add('a lowTrust adapter cannot be the default') }
+        if ($Spec.reviewer -eq $true)  { $errs.Add('a lowTrust adapter cannot be a reviewer (#773)') }
+        if ($Spec.routing -is [System.Collections.IDictionary]) {
+            $bad = @($Spec.routing.Keys | Where-Object { $script:CliLowTrustRoutes -cnotcontains $_ })
+            if ($bad.Count) { $errs.Add("a lowTrust adapter may only rank the routes $($script:CliLowTrustRoutes -join ', ') (#773); got $($bad -join ', ')") }
+        }
     }
 
     # #765: a pinned argv or nothing. The shape is EXACT - npm, i|install, -g, <pkg>@x.y.z - so an
@@ -365,6 +384,10 @@ function Import-CliAdapterRegistry {
                 $candidate[$k] = $o[$k]
             }
             $e = @(Test-CliAdapterSpec -Spec $candidate -RouteNames $routeNames)
+            # #773: low-trust is sticky - an override may tighten an adapter, never un-sandbox one.
+            if ($adapters.Contains($name) -and $adapters[$name].lowTrust -eq $true -and $candidate.lowTrust -ne $true) {
+                $e += "it clears lowTrust on '$name', which an earlier tier marked low-trust (#773)"
+            }
             if ($e.Count) {
                 $kept = if ($adapters.Contains($name)) { "keeping the $($sources[$name]) definition" } else { 'it is not added' }
                 Write-Warning "adapters: '$($tier.Path)' adapter '$name' rejected - $($e -join '; '). $kept."
@@ -435,6 +458,14 @@ function Format-CliTemplateLaunch {
             continue
         }
         $v = $a.Replace('{briefingFile}', [string]$Ctx.BriefingFile)
+        # {workPath} (#773): the worktree, for a CLI that runs in a container and mounts it. It lands
+        # inside a docker --mount spec, where ',' separates options - a path holding one (or a quote
+        # or a line break) could smuggle in another mount option, so it fails closed.
+        if ($v.Contains('{workPath}')) {
+            $wp = [string]$Ctx.WorkPath
+            if (-not $wp -or $wp -match '[,"\r\n\0]') { throw "launch: the worktree path '$wp' cannot be passed to a container mount (empty, or holds , `" or a line break)." }
+            $v = $v.Replace('{workPath}', $wp)
+        }
         if ($v -cmatch '^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=/-]*$') { $parts.Add($v) } else { $parts.Add((ConvertTo-CliQuotedLiteral $v)) }
     }
     $line = $parts -join ' '
@@ -510,6 +541,7 @@ function Get-CliAdapters {
             ProbeRules     = @(ConvertTo-CliProbeRules -Rules @($s.probeRules) -Common $reg.Common)
             BypassArgs     = $bypass
             RequiresBypass = [bool]$s.requiresBypass
+            LowTrust       = ($s.lowTrust -eq $true)
             # Credentials this CLI may read from the environment, kept by the secret scrub (#769).
             # claude's own is the -ClaudeAuthVar, which Build-WorktreeLaunch always keeps.
             KeepEnv        = @($s.keepEnv | Where-Object { $_ })
@@ -544,13 +576,76 @@ function Select-CliRoute {
     return $null
 }
 
-# The adapters that suit a route, best first (rank, then name for a stable tie-break).
+# May a low-trust adapter (#773) work an issue of a repo with this visibility? Only PUBLIC, compared
+# case-sensitively after the caller normalises it (GraphQL already says 'PUBLIC'): private,
+# internal, empty or anything unrecognised is NO - unknown fails closed. Any other adapter: yes. Pure.
+function Test-CliLowTrustAllowed([object]$Adapter, [AllowNull()][AllowEmptyString()][string]$Visibility) {
+    if (-not $Adapter.LowTrust) { return $true }
+    return ("$Visibility".Trim().ToUpperInvariant() -ceq 'PUBLIC')
+}
+
+# The adapters that suit a route, best first (rank, then name for a stable tie-break). -Visibility
+# is the issue repo's visibility; without it (unknown) a low-trust adapter is never offered (#773).
 function Get-CliRoutePreference {
-    param([string]$Route, [object[]]$Adapters)
+    param([string]$Route, [object[]]$Adapters, [string]$Visibility = '')
     if (-not $PSBoundParameters.ContainsKey('Adapters')) { $Adapters = @(Get-CliAdapters) }
     if (-not $Route) { return @() }
-    @($Adapters | Where-Object { $_.Routing -and $_.Routing.ContainsKey($Route) } |
+    @($Adapters | Where-Object { $_.Routing -and $_.Routing.ContainsKey($Route) -and (Test-CliLowTrustAllowed $_ $Visibility) } |
         Sort-Object @{ Expression = { $_.Routing[$Route] } }, Name | ForEach-Object Name)
+}
+
+# The visibility of owner/repo as PUBLIC / PRIVATE / INTERNAL, or $null when it cannot be read (no
+# gh, no access, a bad name) - and $null keeps a low-trust adapter away (#773). Impure (gh).
+function Get-CliRepoVisibility([string]$Repo) {
+    if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { return $null }
+    try {
+        # Through Invoke-Gh (#303, RawGh lint): a bare gh turns a 401 into an empty answer. Here a
+        # failure throws, and the catch turns it into $null - which keeps a low-trust adapter away.
+        if (-not (Get-Command Invoke-Gh -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1') }
+        $v = ((Invoke-Gh -GhArgs @('api', "repos/$Repo", '--jq', '.visibility') -What "read the visibility of $Repo") | Out-String).Trim()
+        if (-not $v) { return $null }
+        return $v.ToUpperInvariant()
+    } catch { return $null }
+}
+
+# Why a low-trust adapter may NOT work this issue, or $null when it may (#773). The planner already
+# routes it only to Docs/Chore issues of public repos, but the launch has other doors - the fleet's
+# interactive picker, an explicit per-issue choice, a relaunch - so this is checked again at launch,
+# on the issue's own facts { labels; type; size; visibility }:
+#   * the route the issue takes (Select-CliRoute, the planner's own rule) must be docs or chore;
+#   * the repo visibility must be PUBLIC.
+# No facts, or a fact that is missing, is a refusal: unknown fails closed. -Routes overrides the
+# registry routes for tests. Pure.
+function Get-CliLowTrustRefusal {
+    param([object]$Adapter, [object]$Facts, [object[]]$Routes)
+    if (-not $Adapter.LowTrust) { return $null }
+    if ($null -eq $Facts) { return "the issue's route and repository visibility are unknown" }
+    $routeArgs = @{ Issue = $Facts }
+    if ($PSBoundParameters.ContainsKey('Routes')) { $routeArgs.Routes = $Routes }
+    $route = Select-CliRoute @routeArgs
+    if ($script:CliLowTrustRoutes -cnotcontains $route) {
+        $shown = if ($route) { $route } else { 'none' }
+        return "the issue takes the '$shown' route, and $($Adapter.Name) works only $($script:CliLowTrustRoutes -join '/') issues"
+    }
+    if (-not (Test-CliLowTrustAllowed $Adapter "$($Facts.visibility)")) {
+        $v = if ("$($Facts.visibility)".Trim()) { "$($Facts.visibility)".Trim().ToUpperInvariant() } else { 'unknown' }
+        return "the repository visibility is $v, and $($Adapter.Name) works only PUBLIC repositories"
+    }
+    return $null
+}
+
+# Launch-time guard (#773): the CLI to launch for a chosen one, and the one-line warning when a
+# low-trust choice is refused and degraded to claude (the same fallback as an unavailable CLI).
+# Returns { Cli; Warning } - Warning is $null when nothing changed. Pure.
+function Resolve-CliLowTrustLaunch {
+    param([string]$Chosen, [object[]]$Adapters, [object]$Facts, [int]$IssueNum = 0, [object[]]$Routes)
+    $a = @($Adapters | Where-Object Name -ceq $Chosen | Select-Object -First 1)
+    $refArgs = @{ Facts = $Facts }
+    if ($PSBoundParameters.ContainsKey('Routes')) { $refArgs.Routes = $Routes }
+    $why = if ($a.Count) { Get-CliLowTrustRefusal -Adapter $a[0] @refArgs } else { $null }
+    if (-not $why) { return [pscustomobject]@{ Cli = $Chosen; Warning = $null } }
+    $who = if ($IssueNum) { "#${IssueNum}: " } else { '' }
+    [pscustomobject]@{ Cli = 'claude'; Warning = "${who}not launching $Chosen - $why. Launching claude instead (#773)." }
 }
 
 
@@ -678,6 +773,9 @@ function Select-CliPerIssue([int[]]$Issues, [hashtable]$Availability) {
 function Build-FleetPlan([object[]]$Started, [hashtable]$CliMap) {
     foreach ($r in $Started) {
         $cli = if ($CliMap.ContainsKey($r.issue)) { $CliMap[$r.issue] } else { 'claude' }
-        [PSCustomObject]@{ issue=$r.issue; repo=$r.repo; branch=$r.branch; workPath=$r.workPath; cli=$cli }
+        # facts (#773): the issue's route + visibility facts and its text, which the launch needs to
+        # judge a low-trust CLI and to brief one that has no gh. $null when the start did not record them.
+        $facts = if ($r.PSObject.Properties['facts']) { $r.facts } else { $null }
+        [PSCustomObject]@{ issue=$r.issue; repo=$r.repo; branch=$r.branch; workPath=$r.workPath; cli=$cli; facts=$facts }
     }
 }
