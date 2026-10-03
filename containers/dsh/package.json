@@ -1,0 +1,9 @@
+{
+  "name": "abios-dsh-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The pinned dsh install inside the agentic-board dsh sandbox image (#773). Exact version, no range: package-lock.json pins every transitive package by integrity.",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.0-rc.2"
+  }
+}

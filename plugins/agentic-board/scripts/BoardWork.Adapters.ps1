@@ -120,8 +120,16 @@ $script:CliBuiltinLaunchers = @{ claude = 'Build-ClaudeLaunch' }
 
 # Override files may set these fields on an adapter. 'note' is free text the loader ignores (JSON
 # has no comments; it keeps the WHY next to the data).
-$script:CliAdapterFields = @('name', 'note', 'command', 'kind', 'isDefault', 'installArgs', 'installUrl',
+$script:CliAdapterFields = @('name', 'note', 'command', 'kind', 'isDefault', 'lowTrust', 'installArgs', 'installUrl',
     'probeArgs', 'probeRules', 'bypassArgs', 'requiresBypass', 'keepEnv', 'launch', 'routing', 'reviewer')
+
+# A LOW-TRUST adapter (#773, the dsh pilot): a backend we run sandboxed and only on work whose
+# content is already public. Enforced in code, not left to the docs:
+#   * it may rank only these routes, and is never a reviewer nor the default (Test-CliAdapterSpec);
+#   * the planner offers it only for an issue whose repo visibility is known to be PUBLIC, and the
+#     fleet launch re-checks that visibility - unknown fails closed (Test-CliLowTrustAllowed);
+#   * a later tier cannot clear the flag on an adapter an earlier tier marked low-trust.
+$script:CliLowTrustRoutes = @('docs', 'chore')
 # The only fields the REPO tier may set, on existing adapters (see Import-CliAdapterRegistry).
 $script:CliAdapterRepoFields = @('name', 'note', 'routing', 'reviewer')
 
@@ -214,6 +222,17 @@ function Test-CliAdapterSpec {
     # Resolve-LaunchCli falls back to 'claude' by name, so the default is claude and only claude.
     if ($Spec.isDefault -is [bool] -and $Spec.isDefault -ne ($name -ceq 'claude')) {
         $errs.Add("isDefault must be true for claude and false for every other adapter (the fallback is hard-wired to claude)")
+    }
+    # #773: optional (absent = false). A low-trust adapter is confined to the low-risk routes and
+    # can never judge another CLI's work.
+    if ($Spec.Contains('lowTrust') -and $Spec.lowTrust -isnot [bool]) { $errs.Add('lowTrust must be true or false') }
+    if ($Spec.lowTrust -eq $true) {
+        if ($Spec.isDefault -eq $true) { $errs.Add('a lowTrust adapter cannot be the default') }
+        if ($Spec.reviewer -eq $true)  { $errs.Add('a lowTrust adapter cannot be a reviewer (#773)') }
+        if ($Spec.routing -is [System.Collections.IDictionary]) {
+            $bad = @($Spec.routing.Keys | Where-Object { $script:CliLowTrustRoutes -cnotcontains $_ })
+            if ($bad.Count) { $errs.Add("a lowTrust adapter may only rank the routes $($script:CliLowTrustRoutes -join ', ') (#773); got $($bad -join ', ')") }
+        }
     }
 
     # #765: a pinned argv or nothing. The shape is EXACT - npm, i|install, -g, <pkg>@x.y.z - so an
@@ -365,6 +384,10 @@ function Import-CliAdapterRegistry {
                 $candidate[$k] = $o[$k]
             }
             $e = @(Test-CliAdapterSpec -Spec $candidate -RouteNames $routeNames)
+            # #773: low-trust is sticky - an override may tighten an adapter, never un-sandbox one.
+            if ($adapters.Contains($name) -and $adapters[$name].lowTrust -eq $true -and $candidate.lowTrust -ne $true) {
+                $e += "it clears lowTrust on '$name', which an earlier tier marked low-trust (#773)"
+            }
             if ($e.Count) {
                 $kept = if ($adapters.Contains($name)) { "keeping the $($sources[$name]) definition" } else { 'it is not added' }
                 Write-Warning "adapters: '$($tier.Path)' adapter '$name' rejected - $($e -join '; '). $kept."
@@ -435,6 +458,14 @@ function Format-CliTemplateLaunch {
             continue
         }
         $v = $a.Replace('{briefingFile}', [string]$Ctx.BriefingFile)
+        # {workPath} (#773): the worktree, for a CLI that runs in a container and mounts it. It lands
+        # inside a docker --mount spec, where ',' separates options - a path holding one (or a quote
+        # or a line break) could smuggle in another mount option, so it fails closed.
+        if ($v.Contains('{workPath}')) {
+            $wp = [string]$Ctx.WorkPath
+            if (-not $wp -or $wp -match '[,"\r\n\0]') { throw "launch: the worktree path '$wp' cannot be passed to a container mount (empty, or holds , `" or a line break)." }
+            $v = $v.Replace('{workPath}', $wp)
+        }
         if ($v -cmatch '^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=/-]*$') { $parts.Add($v) } else { $parts.Add((ConvertTo-CliQuotedLiteral $v)) }
     }
     $line = $parts -join ' '
@@ -510,6 +541,7 @@ function Get-CliAdapters {
             ProbeRules     = @(ConvertTo-CliProbeRules -Rules @($s.probeRules) -Common $reg.Common)
             BypassArgs     = $bypass
             RequiresBypass = [bool]$s.requiresBypass
+            LowTrust       = ($s.lowTrust -eq $true)
             # Credentials this CLI may read from the environment, kept by the secret scrub (#769).
             # claude's own is the -ClaudeAuthVar, which Build-WorktreeLaunch always keeps.
             KeepEnv        = @($s.keepEnv | Where-Object { $_ })
@@ -544,13 +576,43 @@ function Select-CliRoute {
     return $null
 }
 
-# The adapters that suit a route, best first (rank, then name for a stable tie-break).
+# May a low-trust adapter (#773) work an issue of a repo with this visibility? Only PUBLIC, compared
+# case-sensitively after the caller normalises it (GraphQL already says 'PUBLIC'): private,
+# internal, empty or anything unrecognised is NO - unknown fails closed. Any other adapter: yes. Pure.
+function Test-CliLowTrustAllowed([object]$Adapter, [AllowNull()][AllowEmptyString()][string]$Visibility) {
+    if (-not $Adapter.LowTrust) { return $true }
+    return ("$Visibility".Trim().ToUpperInvariant() -ceq 'PUBLIC')
+}
+
+# The adapters that suit a route, best first (rank, then name for a stable tie-break). -Visibility
+# is the issue repo's visibility; without it (unknown) a low-trust adapter is never offered (#773).
 function Get-CliRoutePreference {
-    param([string]$Route, [object[]]$Adapters)
+    param([string]$Route, [object[]]$Adapters, [string]$Visibility = '')
     if (-not $PSBoundParameters.ContainsKey('Adapters')) { $Adapters = @(Get-CliAdapters) }
     if (-not $Route) { return @() }
-    @($Adapters | Where-Object { $_.Routing -and $_.Routing.ContainsKey($Route) } |
+    @($Adapters | Where-Object { $_.Routing -and $_.Routing.ContainsKey($Route) -and (Test-CliLowTrustAllowed $_ $Visibility) } |
         Sort-Object @{ Expression = { $_.Routing[$Route] } }, Name | ForEach-Object Name)
+}
+
+# The visibility of owner/repo as PUBLIC / PRIVATE / INTERNAL, or $null when it cannot be read (no
+# gh, no access, a bad name) - and $null keeps a low-trust adapter away (#773). Impure (gh).
+function Get-CliRepoVisibility([string]$Repo) {
+    if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { return $null }
+    try {
+        $v = (& gh api "repos/$Repo" --jq '.visibility' 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $v) { return $null }
+        return $v.ToUpperInvariant()
+    } catch { return $null }
+}
+
+# Launch-time guard (#773): the planner already routes a low-trust CLI only to public repos, but the
+# fleet picker lets a human type any available CLI - so the launch re-checks the visibility and
+# degrades to claude (the same fallback as an unavailable CLI) when it is not known to be PUBLIC.
+# -Visibility is the looked-up value; pass it in tests, the launch passes Get-CliRepoVisibility. Pure.
+function Resolve-CliLowTrustLaunch([string]$Chosen, [object[]]$Adapters, [AllowNull()][AllowEmptyString()][string]$Visibility) {
+    $a = @($Adapters | Where-Object Name -ceq $Chosen | Select-Object -First 1)
+    if ($a.Count -and -not (Test-CliLowTrustAllowed $a[0] $Visibility)) { return 'claude' }
+    return $Chosen
 }
 
 

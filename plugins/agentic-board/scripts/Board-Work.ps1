@@ -3627,6 +3627,17 @@ if ($Parallel.Count -gt 0) {
             $launchHook = {
                 param($entry, $cli)
                 $actualCli = Resolve-LaunchCli -Chosen $cli -Availability $availability
+                # A low-trust CLI (#773, dsh) only ever works an issue of a repo known to be PUBLIC:
+                # the human picker can name it for any issue, so the visibility is checked here, at
+                # spawn, and anything else (private, internal, unreadable) falls back to claude.
+                $fleetAdapters = @(Get-CliAdapters)
+                if (@($fleetAdapters | Where-Object { $_.Name -ceq $actualCli -and $_.LowTrust }).Count) {
+                    $lowTrustCli = $actualCli
+                    $actualCli   = Resolve-CliLowTrustLaunch -Chosen $actualCli -Adapters $fleetAdapters -Visibility (Get-CliRepoVisibility $entry.repo)
+                    if ($actualCli -cne $lowTrustCli) {
+                        Write-Host ("  #{0}: {1} runs only on PUBLIC repos and {2} is not known to be public - launching claude instead." -f $entry.issue, $lowTrustCli, $entry.repo) -ForegroundColor DarkYellow
+                    }
+                }
                 $marker    = New-FleetSessionMarker $entry.issue $runId
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
                                                -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `

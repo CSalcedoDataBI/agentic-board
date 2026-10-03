@@ -70,8 +70,8 @@ AfterAll {
 
 Describe 'The shipped registry yields the same adapters as before #772' {
     BeforeAll { $script:A = @(Get-CliAdapters -UserPath $script:None -RepoPath $script:None) }
-    It 'loads the five adapters, in order, all from the preset' {
-        $script:A.Name | Should -Be @('claude', 'antigravity', 'jules', 'codex', 'copilot')
+    It 'loads the six adapters, in order, all from the preset (dsh since #773)' {
+        $script:A.Name | Should -Be @('claude', 'antigravity', 'jules', 'codex', 'copilot', 'dsh')
         @($script:A | Where-Object Source -ne 'preset').Count | Should -Be 0
     }
     It 'keeps claude the one default, with no probe to run and its launch in code' {
@@ -112,7 +112,7 @@ Describe 'The shipped registry yields the same adapters as before #772' {
         $seq.copilot     | Should -Be "QUOTA,AUTH,$common,OK"
     }
     It 'renders the template launches exactly as the old scriptblocks did' {
-        $ctx = @{ BriefingFile = "C:\Users\O'Brien\b.txt"; AllowBypass = $true }
+        $ctx = @{ BriefingFile = "C:\Users\O'Brien\b.txt"; WorkPath = 'D:\wt\issue-1'; AllowBypass = $true }
         $by = @{}; foreach ($a in $script:A) { $by[$a.Name] = & $a.BuildLaunch $ctx }
         $by.antigravity | Should -BeExactly "agy -p 'Read the file C:\Users\O''Brien\b.txt and follow its instructions to the letter.' --dangerously-skip-permissions"
         $by.jules       | Should -BeExactly "jules new (Get-Content -Raw -LiteralPath 'C:\Users\O''Brien\b.txt')"
@@ -147,7 +147,7 @@ Describe 'Override tiers: preset -> user -> repo, per field (#772)' {
         $codex.Source | Should -Be 'repo'
     }
     It 'with no override files the result is the preset alone' {
-        (Get-CliAdapters -UserPath $script:None -RepoPath $script:None).Count | Should -Be 5
+        (Get-CliAdapters -UserPath $script:None -RepoPath $script:None).Count | Should -Be 6
     }
     It 'reads the default tiers from ABIOS_ADAPTERS_USER_FILE / ABIOS_ADAPTERS_REPO_FILE' {
         $old = $env:ABIOS_ADAPTERS_USER_FILE
@@ -226,7 +226,7 @@ Describe 'A backend added by an override JSON entry, with no code change (#772)'
 
     It 'shows up in Get-CliAdapters, after the shipped ones, with its own probe and rules' {
         $all = @(Get-CliAdapters)
-        $all.Name | Should -Be @('claude', 'antigravity', 'jules', 'codex', 'copilot', 'acme')
+        $all.Name | Should -Be @('claude', 'antigravity', 'jules', 'codex', 'copilot', 'dsh', 'acme')
         $acme = $all | Where-Object Name -eq 'acme'
         $acme.Source | Should -Be 'user'
         $acme.IsDefault | Should -BeFalse
@@ -341,13 +341,13 @@ Describe 'Malformed files (#772)' {
         $p = New-RawFile '{ "version": 1, "adapters": [ { "name": "codex", '
         $w = $null
         $all = @(Get-CliAdapters -UserPath $p -RepoPath $script:None -WarningVariable w -WarningAction SilentlyContinue)
-        $all.Count | Should -Be 5
+        $all.Count | Should -Be 6
         (@($w) -join "`n") | Should -Match 'could not parse'
     }
     It 'ignores an override whose top level is not an object' {
         $p = New-RawFile '[ { "name": "codex" } ]'
         $w = $null
-        @(Get-CliAdapters -UserPath $script:None -RepoPath $p -WarningVariable w -WarningAction SilentlyContinue).Count | Should -Be 5
+        @(Get-CliAdapters -UserPath $script:None -RepoPath $p -WarningVariable w -WarningAction SilentlyContinue).Count | Should -Be 6
         (@($w) -join "`n") | Should -Match 'could not parse'
     }
     It 'ignores an override written for another schema version' {
