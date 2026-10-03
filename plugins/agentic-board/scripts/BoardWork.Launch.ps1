@@ -177,6 +177,31 @@ function Get-SessionBriefing {
             "Work ONLY this issue - never touch other worktrees or issues. " + $closing)
 }
 
+# The briefing for a LOW-TRUST CLI (#773, dsh). It runs in a container that holds the worktree at
+# /work and nothing else: no gh, no pwsh, no plugin scripts, no GitHub token. So it is given the
+# issue text itself (it cannot fetch it) and exactly one job - edit files - and told plainly that
+# git, the PR and the network are not its business: the human reviews `git diff` and opens the PR.
+# The body is the issue's own text, capped so a huge issue cannot crowd out the instructions. Pure.
+$script:ContainerBriefBodyCap = 8000
+function Get-ContainerEditBriefing {
+    param([int]$IssueNum, [string]$Repo, [string]$Title, [string]$Body)
+    $text = "$Body".Trim()
+    if ($text.Length -gt $script:ContainerBriefBodyCap) { $text = $text.Substring(0, $script:ContainerBriefBodyCap) + "`n[... issue text truncated]" }
+    if (-not $text) { $text = '(the issue has no description)' }
+    @(
+        "Issue #$IssueNum in $Repo - $Title"
+        ''
+        '--- issue text ---'
+        $text
+        '--- end of issue text ---'
+        ''
+        'Your job: edit the files in the current directory (/work, a checkout of the repository) so that they resolve this issue. Keep the change to what the issue asks for.'
+        'That is the whole job. Only read and edit files under /work.'
+        'Do NOT run git (no add, commit, branch or push), do NOT try to open a pull request or comment on the issue, and do NOT use the network: a person reviews your edits and does all of that.'
+        'When you are done, reply with a short summary of the files you changed and why.'
+    ) -join "`n"
+}
+
 # -- Fleet session marker (reaper fingerprint) ---------------------------------
 # Every fleet-spawned session is stamped at launch with ABIOS_FLEET_SESSION=<issue>-<runId>
 # in its generated launch-<n>.ps1, so the child (claude/antigravity/...) and its CLI grandchild
@@ -284,6 +309,13 @@ function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefi
     $adapter = Get-CliAdapters | Where-Object { $_.Name -eq $Cli } | Select-Object -First 1
     if (-not $adapter) { throw "Unknown CLI adapter '$Cli'." }
     $launchScript = & $adapter.BuildLaunch $ctx
+    # A low-trust CLI (dsh, #773) only edits files: it has no token, commits nothing and opens no PR,
+    # and nothing here does it for it. When its container exits, the tab says what is left - for the
+    # human. The worktree path is a single-quoted literal (quotes doubled), never code.
+    if ($adapter.LowTrust) {
+        $wpLit = "'" + [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($workPath) + "'"
+        $launchScript += "`r`n" + ('Write-Host (''{0} finished (exit {{0}}). It does not commit, push or open a PR. Next step for you: review `git diff` in {{1}}, then commit and open the PR.'' -f $LASTEXITCODE, {1}) -ForegroundColor Yellow' -f $adapter.Name, $wpLit)
+    }
     # Scrub inherited secrets before the CLI starts (#769): the model credential this adapter
     # authenticates with and one GitHub identity survive, nothing else matching the pattern does.
     $keep = @($claudeAuthVar) + @($adapter.KeepEnv | Where-Object { $_ })
@@ -384,8 +416,30 @@ function Start-WorktreeSession {
         [int]$SessionBudgetMinutes = 0,
         # Explicit opt-in to the CLI's permission bypass flag (#761). Off by default.
         [switch]$AllowPermissionBypass,
+        # The issue's facts { labels; type; size; visibility; title; body } (#773, Get-IssueLaunchFacts).
+        # A low-trust CLI is launched only when they put the issue on the docs/chore route of a
+        # PUBLIC repo; without them (a relaunch, an older caller) it is refused - claude starts.
+        [object]$IssueFacts = $null,
         [switch]$Preview
     )
+    # Launch-time low-trust gate (#773). Every path that starts a session comes through here - the
+    # fleet picker, an explicit per-issue choice, a relaunch - so this is where dsh is refused for an
+    # issue that is not Docs/Chore of a public repo, with one line saying why.
+    $chosenAdapter = Get-CliAdapters | Where-Object { $_.Name -ceq $Cli } | Select-Object -First 1
+    if ($chosenAdapter -and $chosenAdapter.LowTrust) {
+        $facts = $IssueFacts
+        # The board item normally carries the visibility; when it does not, ask GitHub once
+        # (an unreadable answer stays empty, and empty is refused).
+        if ($facts -and -not "$($facts.visibility)".Trim()) {
+            $facts = [pscustomobject]@{ labels = $facts.labels; type = $facts.type; size = $facts.size
+                                        visibility = "$(Get-CliRepoVisibility $Repo)"; title = $facts.title; body = $facts.body }
+        }
+        $gate = Resolve-CliLowTrustLaunch -Chosen $Cli -Adapters @($chosenAdapter) -Facts $facts -IssueNum $IssueNum
+        if ($gate.Warning) { Write-Host "  WARN $($gate.Warning)" -ForegroundColor DarkYellow }
+        $Cli = $gate.Cli
+        $IssueFacts = $facts
+    }
+    $lowTrust = [bool]($chosenAdapter -and $chosenAdapter.LowTrust -and $Cli -ceq $chosenAdapter.Name)
     $abios = Get-AbiosDir
     $briefingFile = if ($abios) { Join-Path $abios "briefing-$IssueNum.txt" } else { Join-Path $WorkPath "briefing-$IssueNum.txt" }
     # Redirect this session's stream to logs/issue-<n>.log so the -Sessions dashboard can
@@ -396,6 +450,8 @@ function Start-WorktreeSession {
     # the GH_TOKEN it inherited, as before.
     $ghVar = if ($StopAtPR) { 'GITHUB_TOKEN_AGENT' } else { 'GH_TOKEN' }
     $plan  = Build-WorktreeLaunch $IssueNum $WorkPath $briefingFile "abios-parallel" $ClaudeAuthVar $Cli $FleetSession $logPath ([bool]$AllowPermissionBypass) $ghVar
+    # The CLI that will actually start (#773: a refused low-trust choice became claude above).
+    $plan | Add-Member -NotePropertyName cli -NotePropertyValue $Cli -Force
 
     if ($Preview) {
         Write-Host ("  [preview] #{0}: {1} {2}" -f $IssueNum, $plan.launcher, ($plan.args -join ' ')) -ForegroundColor Gray
@@ -467,7 +523,12 @@ function Start-WorktreeSession {
         if ($xrEntry.PSObject.Properties['targetRepos']) { $xrRepos = @($xrEntry.targetRepos | Where-Object { $_ }) }
         if ($xrEntry.PSObject.Properties['crossRepo'])   { $xrFlag  = [bool]$xrEntry.crossRepo }
     }
-    Set-Content -LiteralPath $briefingFile -Value (Get-SessionBriefing $IssueNum $Repo $Branch $WorkPath $Cli -StopAtPR:$StopAtPR -BriefFile $BriefFile -TargetRepos $xrRepos -CrossRepo:$xrFlag) -Encoding UTF8
+    # A low-trust CLI (dsh, #773) runs in a container with no gh, no pwsh, no GitHub token and no
+    # plugin scripts: the fleet briefing (gh issue view, Fleet-* scripts, commit, PR) would order it
+    # to do what it cannot and must not. It gets the issue text and one job - edit the files.
+    $briefingText = if ($lowTrust) { Get-ContainerEditBriefing -IssueNum $IssueNum -Repo $Repo -Title $IssueFacts.title -Body $IssueFacts.body }
+                    else { Get-SessionBriefing $IssueNum $Repo $Branch $WorkPath $Cli -StopAtPR:$StopAtPR -BriefFile $BriefFile -TargetRepos $xrRepos -CrossRepo:$xrFlag }
+    Set-Content -LiteralPath $briefingFile -Value $briefingText -Encoding UTF8
     # Persist the launch script so wt/pwsh runs it via -File (no ';' on wt's command
     # line -> no stray tab-splitting). See Build-WorktreeLaunch header for the why.
     Set-Content -LiteralPath $plan.launchScriptFile -Value $plan.launchScript -Encoding UTF8

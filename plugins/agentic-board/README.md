@@ -54,7 +54,10 @@ without arguments.
   directly: the session is `docker run --rm` of the local image `agentic-board/dsh:0.2.0-rc.2`,
   with the worktree as its only writable mount, a read-only root, no home folder, no Docker
   socket, a non-root user, CPU/memory limits and one variable from your environment,
-  `DEEPSEEK_API_KEY` (no GitHub token: it edits files, it does not push). Details and the image
+  `DEEPSEEK_API_KEY` (no GitHub token: it edits files, it does not push). The launch itself
+  re-checks the issue's route and the repository's visibility, and starts claude instead when
+  either fails. When dsh finishes, the tab tells you to review `git diff` and to commit and open
+  the PR yourself. Details and the image
   recipe: [`containers/dsh`](https://github.com/CSalcedoDataBI/agentic-board/tree/main/containers/dsh).
 - **Permissions of launched sessions.** By default each launched CLI keeps its own permission mode
   and your allow-list, so a headless session is *denied*, not asked, for any tool outside it. The

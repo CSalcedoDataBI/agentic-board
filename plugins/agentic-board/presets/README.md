@@ -137,7 +137,18 @@ in the image recipe, which you build yourself. See
 [`containers/dsh`](https://github.com/CSalcedoDataBI/agentic-board/tree/main/containers/dsh),
 including how dsh's session-log upload and telemetry are switched off and verified.
 
-The adapter is `lowTrust`, so it gets Docs/Chore issues of public repositories only. It needs no
+The adapter is `lowTrust`, so it gets Docs/Chore issues of public repositories only. The planner
+checks this, and so does every launch, whatever chose dsh: the fleet picker, a per-issue choice or a
+relaunch. The launch reads the issue's labels, Type, Size and repository visibility from the board.
+If the route is not docs/chore, the repository is not PUBLIC, or the facts are missing (a relaunch),
+it prints one warning line and starts claude instead.
+
+dsh has no gh and no token, so it never gets the fleet briefing. Its briefing is the issue text plus
+one job: edit the files in `/work`. It is told not to run git, open a PR or use the network. When
+the container exits, the tab prints the next step for you: review `git diff` in the worktree, then
+commit and open the PR. Nothing is committed or pushed for you.
+
+It needs no
 permission bypass: headless dsh edits inside its workspace in its default `workspace-write` mode.
 Its probe rules read dsh's own error codes (`dsh: AUTH:`, `MISSING_CREDENTIAL`, `QUOTA`,
 `RATE_LIMIT`, `CONTEXT_WINDOW_EXCEEDED`) and Docker's (`No such image`, daemon not running). OK

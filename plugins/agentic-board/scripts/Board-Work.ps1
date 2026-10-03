@@ -1209,6 +1209,26 @@ function Get-AllPages {
     return $all
 }
 
+# The facts a launch needs about an issue beyond its number (#773), from the board item: the route
+# inputs the planner uses (labels; Type and Size through the field vocabulary, #671), the repo
+# visibility, and the issue text - a low-trust CLI is judged on these at launch, and one that runs
+# without gh (dsh) is briefed with the text itself. Missing values stay empty, which a low-trust
+# check treats as unknown (refused). Pure.
+function Get-IssueLaunchFacts([object]$Item) {
+    if (-not $Item -or -not $Item.content) { return $null }
+    $byName = @{}
+    foreach ($fv in @($Item.fieldValues.nodes)) { if ($fv -and $fv.field.name) { $byName[$fv.field.name] = $fv.name } }
+    $type = Get-ValueByFieldKey -ByName $byName -Key 'Type'
+    [pscustomobject]@{
+        labels     = @($Item.content.labels.nodes | ForEach-Object { $_.name } | Where-Object { $_ })
+        type       = $(if ($type) { Get-CanonicalSynonym 'Type' $type } else { $null })
+        size       = Get-ValueByFieldKey -ByName $byName -Key 'Size'
+        visibility = "$($Item.content.repository.visibility)"
+        title      = "$($Item.content.title)"
+        body       = "$($Item.content.body)"
+    }
+}
+
 # Find the board item for an issue number, paginating the WHOLE board (issue #246) with
 # one retry for GitHub eventual consistency. $projectId is closed over by the fetcher.
 function Get-BoardItem([string]$projectId, [int]$issueNum) {
@@ -1242,7 +1262,7 @@ query(`$proj:ID!, `$cursor:String) {
               number title state url body
               labels(first:30) { nodes { name } }
               assignees(first:5) { nodes { login } }
-              repository { nameWithOwner }
+              repository { nameWithOwner visibility }
             }
           }
         }
@@ -1694,6 +1714,7 @@ function Invoke-IssueStart {
         issue = $IssueNum; title = ""; repo = ""; branch = ""; workPath = ""
         started = $false; dryRun = [bool]$DryRunStart; skipped = ""
         crossRepo = $false; targetRepos = @()
+        facts = $null
     }
 
     $item = Get-BoardItem $Ctx.projectId $IssueNum
@@ -1706,6 +1727,7 @@ function Invoke-IssueStart {
     $result.title = $item.content.title
     $repo         = $item.content.repository.nameWithOwner
     $result.repo  = $repo
+    $result.facts = Get-IssueLaunchFacts $item
     $currentStatus = ($item.fieldValues.nodes | Where-Object { $_.field.name -eq "Status" }).name
     if (-not $currentStatus) { $currentStatus = "(empty)" }
 
@@ -2685,6 +2707,9 @@ if ($Relaunch -gt 0) {
         Write-Host ("  Relaunch #{0} FAILED: the worktree does not exist or could not be launched - registry untouched." -f $Relaunch) -ForegroundColor Red
         exit 1
     }
+    # A relaunch carries no issue facts, so a low-trust CLI (dsh, #773) is refused there and claude
+    # starts instead: record the CLI that actually started.
+    if ($spawn.PSObject.Properties['cli'] -and $spawn.cli) { $cli = $spawn.cli }
     Register-LaunchedSession -Spawn $spawn -IssueNum $Relaunch -Cli $cli -FleetSession $marker
     Write-Host ("  Relaunched #{0} [{1}]." -f $Relaunch, $cli) -ForegroundColor Green
     exit 0
@@ -3627,22 +3652,15 @@ if ($Parallel.Count -gt 0) {
             $launchHook = {
                 param($entry, $cli)
                 $actualCli = Resolve-LaunchCli -Chosen $cli -Availability $availability
-                # A low-trust CLI (#773, dsh) only ever works an issue of a repo known to be PUBLIC:
-                # the human picker can name it for any issue, so the visibility is checked here, at
-                # spawn, and anything else (private, internal, unreadable) falls back to claude.
-                $fleetAdapters = @(Get-CliAdapters)
-                if (@($fleetAdapters | Where-Object { $_.Name -ceq $actualCli -and $_.LowTrust }).Count) {
-                    $lowTrustCli = $actualCli
-                    $actualCli   = Resolve-CliLowTrustLaunch -Chosen $actualCli -Adapters $fleetAdapters -Visibility (Get-CliRepoVisibility $entry.repo)
-                    if ($actualCli -cne $lowTrustCli) {
-                        Write-Host ("  #{0}: {1} runs only on PUBLIC repos and {2} is not known to be public - launching claude instead." -f $entry.issue, $lowTrustCli, $entry.repo) -ForegroundColor DarkYellow
-                    }
-                }
                 $marker    = New-FleetSessionMarker $entry.issue $runId
+                # -IssueFacts (#773): Start-WorktreeSession refuses a low-trust CLI (dsh) unless the
+                # issue's route is docs/chore AND its repo is PUBLIC - whatever picked it - and then
+                # launches claude instead; $spawn.cli is the CLI that actually started.
                 $spawn = Start-WorktreeSession -IssueNum $entry.issue -Repo $entry.repo -Branch $entry.branch `
                                                -WorkPath $entry.workPath -ClaudeAuthVar $ClaudeAuthVar -Cli $actualCli -FleetSession $marker `
                                                -StopAtPR:$launchBrake -BriefFile $BriefFile -Irreversible $Irreversible -EndToEnd:$EndToEnd -SessionBudgetMinutes $BudgetMinutes `
-                                               -AllowPermissionBypass:$AllowPermissionBypass
+                                               -AllowPermissionBypass:$AllowPermissionBypass -IssueFacts $entry.facts
+                if ($spawn -and $spawn.PSObject.Properties['cli'] -and $spawn.cli) { $actualCli = $spawn.cli }
                 Register-LaunchedSession -Spawn $spawn -IssueNum $entry.issue -Cli $actualCli -FleetSession $marker
                 $actualCli
             }.GetNewClosure()

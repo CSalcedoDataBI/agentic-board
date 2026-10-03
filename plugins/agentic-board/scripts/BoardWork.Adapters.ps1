@@ -605,14 +605,44 @@ function Get-CliRepoVisibility([string]$Repo) {
     } catch { return $null }
 }
 
-# Launch-time guard (#773): the planner already routes a low-trust CLI only to public repos, but the
-# fleet picker lets a human type any available CLI - so the launch re-checks the visibility and
-# degrades to claude (the same fallback as an unavailable CLI) when it is not known to be PUBLIC.
-# -Visibility is the looked-up value; pass it in tests, the launch passes Get-CliRepoVisibility. Pure.
-function Resolve-CliLowTrustLaunch([string]$Chosen, [object[]]$Adapters, [AllowNull()][AllowEmptyString()][string]$Visibility) {
+# Why a low-trust adapter may NOT work this issue, or $null when it may (#773). The planner already
+# routes it only to Docs/Chore issues of public repos, but the launch has other doors - the fleet's
+# interactive picker, an explicit per-issue choice, a relaunch - so this is checked again at launch,
+# on the issue's own facts { labels; type; size; visibility }:
+#   * the route the issue takes (Select-CliRoute, the planner's own rule) must be docs or chore;
+#   * the repo visibility must be PUBLIC.
+# No facts, or a fact that is missing, is a refusal: unknown fails closed. -Routes overrides the
+# registry routes for tests. Pure.
+function Get-CliLowTrustRefusal {
+    param([object]$Adapter, [object]$Facts, [object[]]$Routes)
+    if (-not $Adapter.LowTrust) { return $null }
+    if ($null -eq $Facts) { return "the issue's route and repository visibility are unknown" }
+    $routeArgs = @{ Issue = $Facts }
+    if ($PSBoundParameters.ContainsKey('Routes')) { $routeArgs.Routes = $Routes }
+    $route = Select-CliRoute @routeArgs
+    if ($script:CliLowTrustRoutes -cnotcontains $route) {
+        $shown = if ($route) { $route } else { 'none' }
+        return "the issue takes the '$shown' route, and $($Adapter.Name) works only $($script:CliLowTrustRoutes -join '/') issues"
+    }
+    if (-not (Test-CliLowTrustAllowed $Adapter "$($Facts.visibility)")) {
+        $v = if ("$($Facts.visibility)".Trim()) { "$($Facts.visibility)".Trim().ToUpperInvariant() } else { 'unknown' }
+        return "the repository visibility is $v, and $($Adapter.Name) works only PUBLIC repositories"
+    }
+    return $null
+}
+
+# Launch-time guard (#773): the CLI to launch for a chosen one, and the one-line warning when a
+# low-trust choice is refused and degraded to claude (the same fallback as an unavailable CLI).
+# Returns { Cli; Warning } - Warning is $null when nothing changed. Pure.
+function Resolve-CliLowTrustLaunch {
+    param([string]$Chosen, [object[]]$Adapters, [object]$Facts, [int]$IssueNum = 0, [object[]]$Routes)
     $a = @($Adapters | Where-Object Name -ceq $Chosen | Select-Object -First 1)
-    if ($a.Count -and -not (Test-CliLowTrustAllowed $a[0] $Visibility)) { return 'claude' }
-    return $Chosen
+    $refArgs = @{ Facts = $Facts }
+    if ($PSBoundParameters.ContainsKey('Routes')) { $refArgs.Routes = $Routes }
+    $why = if ($a.Count) { Get-CliLowTrustRefusal -Adapter $a[0] @refArgs } else { $null }
+    if (-not $why) { return [pscustomobject]@{ Cli = $Chosen; Warning = $null } }
+    $who = if ($IssueNum) { "#${IssueNum}: " } else { '' }
+    [pscustomobject]@{ Cli = 'claude'; Warning = "${who}not launching $Chosen - $why. Launching claude instead (#773)." }
 }
 
 
@@ -740,6 +770,9 @@ function Select-CliPerIssue([int[]]$Issues, [hashtable]$Availability) {
 function Build-FleetPlan([object[]]$Started, [hashtable]$CliMap) {
     foreach ($r in $Started) {
         $cli = if ($CliMap.ContainsKey($r.issue)) { $CliMap[$r.issue] } else { 'claude' }
-        [PSCustomObject]@{ issue=$r.issue; repo=$r.repo; branch=$r.branch; workPath=$r.workPath; cli=$cli }
+        # facts (#773): the issue's route + visibility facts and its text, which the launch needs to
+        # judge a low-trust CLI and to brief one that has no gh. $null when the start did not record them.
+        $facts = if ($r.PSObject.Properties['facts']) { $r.facts } else { $null }
+        [PSCustomObject]@{ issue=$r.issue; repo=$r.repo; branch=$r.branch; workPath=$r.workPath; cli=$cli; facts=$facts }
     }
 }

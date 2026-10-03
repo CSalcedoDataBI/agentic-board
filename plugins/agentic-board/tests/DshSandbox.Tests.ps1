@@ -152,10 +152,11 @@ Describe 'dsh routing: docs/chore on PUBLIC repos only (#773)' {
         Select-CliForIssue ([pscustomobject]@{ labels = @(); type = 'Feature'; visibility = 'PUBLIC' }) @('claude', 'dsh') | Should -Be 'claude'
     }
     It 'the launch re-check degrades dsh to claude unless the repo is PUBLIC' {
-        Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Visibility 'PUBLIC'  | Should -Be 'dsh'
-        Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Visibility 'PRIVATE' | Should -Be 'claude'
-        Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Visibility $null     | Should -Be 'claude'
-        Resolve-CliLowTrustLaunch -Chosen 'codex' -Adapters $script:A -Visibility $null   | Should -Be 'codex'
+        $docs = @{ labels = @('docs') }
+        (Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Facts ([pscustomobject]($docs + @{ visibility = 'PUBLIC' }))).Cli  | Should -Be 'dsh'
+        (Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Facts ([pscustomobject]($docs + @{ visibility = 'PRIVATE' }))).Cli | Should -Be 'claude'
+        (Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Facts ([pscustomobject]($docs + @{ visibility = '' }))).Cli        | Should -Be 'claude'
+        (Resolve-CliLowTrustLaunch -Chosen 'codex' -Adapters $script:A -Facts $null).Cli | Should -Be 'codex'
     }
     It 'the repo visibility lookup refuses a malformed repo name without calling gh' {
         Mock gh { throw 'gh must not run' }
@@ -300,5 +301,110 @@ Describe 'dsh install pin and image recipe (#773, #765)' {
         $script:Entry | Should -Match 'DSH_PERMISSION_MODE:-}" = "workspace-write"'
         $script:Entry | Should -Match '\*TOKEN\*\|\*KEY\*\|\*SECRET\*\|\*PASSWORD\*'
         $script:Entry | Should -Not -Match "`r" -Because 'sh reads a CR as part of the command (.gitattributes eol=lf)'
+    }
+}
+
+Describe 'dsh at LAUNCH: route docs/chore AND repo PUBLIC, whatever picked it (#773)' {
+    BeforeAll {
+        function script:Facts([string[]]$Labels = @(), [string]$Type = $null, [string]$Size = $null, [string]$Vis = 'PUBLIC') {
+            [pscustomobject]@{ labels = $Labels; type = $Type; size = $Size; visibility = $Vis; title = 'T'; body = 'B' }
+        }
+    }
+    It 'a public Docs issue launches dsh, with no warning' {
+        $r = Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Facts (Facts -Labels 'docs') -IssueNum 7
+        $r.Cli | Should -Be 'dsh'
+        $r.Warning | Should -BeNullOrEmpty
+        (Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Facts (Facts -Type 'Chore')).Cli | Should -Be 'dsh'
+    }
+    It 'falls back to claude, with one warning line, for a <name> issue even on a public repo' -ForEach @(
+        @{ name = 'heavy (security label)'; labels = @('security'); type = $null;      size = $null; route = 'heavy' }
+        @{ name = 'heavy (docs, but size L)'; labels = @('docs');   type = $null;      size = 'L';   route = 'heavy' }
+        @{ name = 'refactor';                labels = @('refactor'); type = $null;     size = $null; route = 'refactor' }
+        @{ name = 'default (a Feature)';     labels = @();          type = 'Feature';  size = 'M';   route = 'default' }
+    ) {
+        $r = Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Facts (Facts -Labels $labels -Type $type -Size $size) -IssueNum 7
+        $r.Cli | Should -Be 'claude'
+        $r.Warning | Should -Match "^#7: not launching dsh - the issue takes the '$route' route"
+        $r.Warning | Should -Match 'Launching claude instead'
+        @($r.Warning -split "`n").Count | Should -Be 1
+    }
+    It 'falls back for a private repo or when the facts are unknown' {
+        (Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Facts (Facts -Labels 'docs' -Vis 'PRIVATE')).Warning | Should -Match 'visibility is PRIVATE'
+        (Resolve-CliLowTrustLaunch -Chosen 'dsh' -Adapters $script:A -Facts $null).Warning | Should -Match 'unknown'
+    }
+    It 'the picker choosing dsh for a heavy issue still launches claude (Start-WorktreeSession gate)' {
+        $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
+        . (Join-Path $script:ScriptDir 'Board-Work.ps1')
+        $env:ABIOS_BOARDWORK_DOTSOURCE = ''
+        Mock Get-CliRepoVisibility { throw 'no gh in tests' }
+        # The picker's own core happily maps the issue to an available dsh ...
+        $map = Resolve-IssueCliMap -Issues @(7) -Choices @{ 7 = 'dsh' } -Availability @{ dsh = 'OK'; claude = 'OK' }
+        $map[7] | Should -Be 'dsh'
+        $work = Join-Path $TestDrive 'wt-7'; New-Item -ItemType Directory -Force $work | Out-Null
+        Push-Location $TestDrive
+        try {
+            # ... and the launch refuses it: heavy route -> claude.
+            $heavy = Start-WorktreeSession -IssueNum 7 -Repo 'o/r' -Branch 'issue-7-x' -WorkPath $work -Cli $map[7] -IssueFacts (Facts -Labels 'architecture') -Preview 6>$null
+            $heavy.cli | Should -Be 'claude'
+            $heavy.launchScript | Should -Not -Match 'agentic-board/dsh'
+            # A relaunch carries no facts: refused as well.
+            (Start-WorktreeSession -IssueNum 7 -Repo 'o/r' -Branch 'issue-7-x' -WorkPath $work -Cli 'dsh' -Preview 6>$null).cli | Should -Be 'claude'
+            # Public + docs: dsh, in its container.
+            $docs = Start-WorktreeSession -IssueNum 7 -Repo 'o/r' -Branch 'issue-7-x' -WorkPath $work -Cli 'dsh' -IssueFacts (Facts -Labels 'docs') -Preview 6>$null
+            $docs.cli | Should -Be 'dsh'
+            $docs.launchScript | Should -Match 'docker run --rm .* agentic-board/dsh:0\.2\.0-rc\.2 '
+        } finally { Pop-Location }
+    }
+}
+
+Describe 'dsh briefing and the human next step (#773)' {
+    BeforeAll {
+        $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
+        . (Join-Path $script:ScriptDir 'Board-Work.ps1')
+        $env:ABIOS_BOARDWORK_DOTSOURCE = ''
+        $script:Brief = Get-ContainerEditBriefing -IssueNum 42 -Repo 'CSalcedoDataBI/demo' -Title 'Add a Contributing note' -Body 'README needs a short Contributing section.'
+    }
+    It 'carries the issue itself, since dsh cannot fetch it' {
+        $script:Brief | Should -Match '^Issue #42 in CSalcedoDataBI/demo - Add a Contributing note'
+        $script:Brief | Should -Match 'README needs a short Contributing section\.'
+    }
+    It 'gives one job - edit the files in /work - and forbids git, PRs and the network' {
+        $script:Brief | Should -Match 'edit the files in the current directory \(/work'
+        $script:Brief | Should -Match 'Do NOT run git'
+        $script:Brief | Should -Match 'do NOT try to open a pull request'
+        $script:Brief | Should -Match 'do NOT use the network'
+    }
+    It 'never tells it to use gh, pwsh, the plugin scripts, commit or open a PR' {
+        $script:Brief | Should -Not -Match '\bgh\b|pwsh|Fleet-|New-BoardPR|Board-ReviewGate|git commit|gh pr|gh issue'
+        $script:Brief | Should -Not -Match '(?im)^(?!.*\bnot\b).*\b(commit|push|pull request)\b' -Because 'commit / push / PR only ever appear in a prohibition'
+    }
+    It 'caps a huge issue body and names an empty one' {
+        $big = Get-ContainerEditBriefing -IssueNum 1 -Repo 'o/r' -Title 't' -Body ('x' * 20000)
+        $big.Length | Should -BeLessThan 9500
+        $big | Should -Match 'issue text truncated'
+        Get-ContainerEditBriefing -IssueNum 1 -Repo 'o/r' -Title 't' -Body '' | Should -Match 'has no description'
+    }
+    It 'Start-WorktreeSession writes the dsh briefing, not the fleet one, for a dsh launch' {
+        $work = Join-Path $TestDrive 'wt-42'; New-Item -ItemType Directory -Force $work | Out-Null
+        Mock Get-AbiosDir { $null }
+        Mock Write-RunLedgerCheckpoint { }
+        . (Join-Path $script:ScriptDir 'Brake-Guard.ps1')
+        Mock Set-BrakeArmedState { 'unchanged' }
+        Mock Start-Process { $null }
+        $facts = [pscustomobject]@{ labels = @('docs'); type = $null; size = $null; visibility = 'PUBLIC'; title = 'Add a Contributing note'; body = 'Please add it.' }
+        $p = Start-WorktreeSession -IssueNum 42 -Repo 'o/r' -Branch 'issue-42-x' -WorkPath $work -Cli 'dsh' -IssueFacts $facts 6>$null
+        $p.cli | Should -Be 'dsh'
+        $written = Get-Content -Raw -LiteralPath (Join-Path $work 'briefing-42.txt')
+        $written | Should -Match 'Please add it\.'
+        $written | Should -Not -Match 'gh issue view|Fleet-Findings|New-BoardPR'
+        Should -Invoke Start-Process -Times 1
+    }
+    It 'prints the human next step when the container exits, and never commits or pushes' {
+        $l = Build-WorktreeLaunch -issueNum 42 -workPath "D:\wt\O'Brien\issue-42" -briefingFile 'D:\b\briefing-42.txt' -Cli 'dsh'
+        $last = ($l.launchScript -split "`r?`n")[-1]
+        $last | Should -BeExactly ('Write-Host (''dsh finished (exit {0}). It does not commit, push or open a PR. Next step for you: review `git diff` in {1}, then commit and open the PR.'' -f $LASTEXITCODE, ''D:\wt\O''''Brien\issue-42'') -ForegroundColor Yellow')
+        $l.launchScript | Should -Not -Match '(?m)^\s*git |gh pr create|New-BoardPR'
+        $c = Build-WorktreeLaunch -issueNum 42 -workPath 'D:\wt\issue-42' -briefingFile 'D:\b\briefing-42.txt' -Cli 'claude'
+        $c.launchScript | Should -Not -Match 'Next step for you'
     }
 }
