@@ -599,8 +599,11 @@ function Get-CliRoutePreference {
 function Get-CliRepoVisibility([string]$Repo) {
     if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { return $null }
     try {
-        $v = (& gh api "repos/$Repo" --jq '.visibility' 2>$null | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $v) { return $null }
+        # Through Invoke-Gh (#303, RawGh lint): a bare gh turns a 401 into an empty answer. Here a
+        # failure throws, and the catch turns it into $null - which keeps a low-trust adapter away.
+        if (-not (Get-Command Invoke-Gh -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1') }
+        $v = ((Invoke-Gh -GhArgs @('api', "repos/$Repo", '--jq', '.visibility') -What "read the visibility of $Repo") | Out-String).Trim()
+        if (-not $v) { return $null }
         return $v.ToUpperInvariant()
     } catch { return $null }
 }
