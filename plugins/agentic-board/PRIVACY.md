@@ -1,7 +1,6 @@
 # Privacy policy — agentic-board
 
-*Effective 2026-10-03. Maintainer: CSalcedoDataBI — questions through
-[GitHub issues](https://github.com/CSalcedoDataBI/agentic-board/issues).*
+*Effective 2026-10-03. Maintainer: CSalcedoDataBI — contacto@csalcedodatabi.com.*
 
 This policy covers the **agentic-board** plugin for Claude Code.
 
@@ -48,4 +47,4 @@ The plugin is a developer tool and is not directed at anyone under 18.
 ## Changes and contact
 
 Changes to this policy are made in this file and recorded in the repository history.
-Questions: [GitHub issues](https://github.com/CSalcedoDataBI/agentic-board/issues).
+Questions: contacto@csalcedodatabi.com, or [GitHub issues](https://github.com/CSalcedoDataBI/agentic-board/issues).
