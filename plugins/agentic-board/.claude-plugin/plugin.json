@@ -2,7 +2,7 @@
   "name": "agentic-board",
   "displayName": "Agentic Board",
   "version": "0.44.0",
-  "description": "Run coding agents off your real GitHub Projects board — a quota-aware, review-gated coordinator, not another local Kanban. Cross-account board & issue governance, parallel /board work sessions (one worktree + agent per issue), a multi-CLI fleet, session handoff (save/resume context), a skills-ops lifecycle module, a sanitized improvement-feedback flow, and a private-content guard.",
+  "description": "Run coding agents off your real GitHub Projects board: a quota-aware, review-gated coordinator, not another local Kanban.",
   "author": {
     "name": "CSalcedoDataBI",
     "url": "https://github.com/CSalcedoDataBI"
@@ -10,6 +10,9 @@
   "license": "MIT",
   "homepage": "https://github.com/CSalcedoDataBI/agentic-board",
   "repository": "https://github.com/CSalcedoDataBI/agentic-board",
+  "documentationUrl": "https://github.com/CSalcedoDataBI/agentic-board/tree/main/plugins/agentic-board#readme",
+  "supportUrl": "https://github.com/CSalcedoDataBI/agentic-board/issues",
+  "privacyPolicyUrl": "https://github.com/CSalcedoDataBI/agentic-board/blob/main/plugins/agentic-board/PRIVACY.md",
   "keywords": [
     "github",
     "github-projects",

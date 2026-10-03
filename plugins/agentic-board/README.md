@@ -65,6 +65,10 @@ without arguments.
 - `/cleanup plugins` runs `claude plugin marketplace update` and `claude plugin update` for your
   installed plugins.
 
+- **Credentials.** Your GitHub token is read from `GH_TOKEN`, the stored `gh` login, or a variable
+  named in your own `~/.agentic-board/accounts.json` (names only, never values). It is passed to
+  `gh`/`git` for the call and never written to disk by the plugin.
+
 **Sends**
 
 - GitHub API calls through `gh`, as the account whose token you configured: reading and editing
@@ -82,11 +86,13 @@ without arguments.
 
 **Fetches**
 
-- `/skills bootstrap` and `/tools` install skills with `git clone --depth 1` from the public GitHub
+- `/skills bootstrap` and `/tools` install skills by fetching one pinned commit of the public GitHub
   repository listed in the catalog, and keep that repository's LICENSE next to the skill.
 - `Suggest-HeavyMemory.ps1` (the optional heavy-memory proposal) reads package metadata from
   `https://pypi.org/pypi/basic-memory/json`. Only with `-Install -AcceptAgpl -Version <x>` does it
   install that exact version of `basic-memory` (AGPL-3.0) through `uv` or `pipx`.
+
+Full privacy policy: [PRIVACY.md](PRIVACY.md).
 
 ## License
 
