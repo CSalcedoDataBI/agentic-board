@@ -22,6 +22,7 @@ on your machine or goes to the GitHub repositories and boards you point it at.
 | `/skills bootstrap`, `/tools` install | Fetches one pinned commit of a public skill repository | github.com (read only) |
 | Heavy-memory proposal (optional) | Reads package metadata; installs only with explicit flags | pypi.org |
 | `/board work -Launch` / `-Fleet` | Starts a coding CLI (`claude`, `codex`, `copilot`, `agy`, `jules`) in a terminal on your machine | Whatever that CLI's own service is, under that CLI's own terms |
+| `/board work -Fleet` with dsh (pilot: public repos, Docs/Chore only) | Runs dsh only inside a local Docker container that sees the worktree and nothing else; sends the task and what dsh reads or runs in that worktree. dsh's session-log upload, telemetry and package inventory are switched off, and the image build fails if they are not | DeepSeek's API (api.deepseek.com), under DeepSeek's terms |
 | Hooks (`PreCompact`) | Appends one line (time, repo, session id, transcript path and size) | `~/.claude/agentic-board/compact-markers.jsonl`, local |
 | `/board telemetry` | Reads your local Claude Code transcripts | Results written locally only |
 
