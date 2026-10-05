@@ -1,5 +1,6 @@
 ---
 description: Manage the project knowledge references registry by domain (add/harvest/list/gen/wiki). Versioned in knowledge/registry.json + generated KNOWLEDGE.md.
+argument-hint: "[add|harvest|list|gen|wiki] [args]"
 ---
 
 # /knowledge

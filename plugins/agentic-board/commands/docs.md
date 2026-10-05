@@ -1,5 +1,6 @@
 ---
 description: Publish all wiki pages (product docs + knowledge registry) in a single push; or check DeepWiki indexing status for this repo.
+argument-hint: "[wiki|deepwiki]"
 ---
 
 # /docs

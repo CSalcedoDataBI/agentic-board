@@ -1,5 +1,6 @@
 ---
 description: Agent Skills lifecycle — verbs create/improve/organize/audit/bootstrap [quality|bi]/freshness.
+argument-hint: "[create|improve|organize|audit|bootstrap [quality|bi]|freshness] [args]"
 ---
 You are running the agentic-board /skills command.
 

@@ -1,5 +1,6 @@
 ---
 description: Run a tracked plan autonomously as an expert persona, stopping at the irreversible line — verbs config/auto/roles.
+argument-hint: "[config|auto|roles] [args]"
 ---
 You are running the agentic-board /expert command (typed as `/agentic-board:expert`).
 

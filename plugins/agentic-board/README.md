@@ -94,7 +94,7 @@ without arguments.
 - `/docs` checks DeepWiki indexing with an HTTP GET to `https://deepwiki.com/<owner>/<repo>`,
   and only for a public repository.
 - A `dsh` session sends its task (the issue briefing) and whatever it reads or runs in the worktree
-  to DeepSeek's API (`https://api.deepseek.com/anthropic`), under DeepSeek's own terms. dsh's
+  to DeepSeek's API at api.deepseek.com, under DeepSeek's own policies. dsh's
   extra uploads are switched off in the image: the session-log upload (a copy of the session log
   that dsh 0.2.0-rc.2 adds to every API request by default) and its OpenTelemetry export; the image
   build fails if they are not. Per dsh's documentation its API requests still carry a session id
