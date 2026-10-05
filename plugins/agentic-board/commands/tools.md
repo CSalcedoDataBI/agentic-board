@@ -1,5 +1,6 @@
 ---
 description: The project's referenced external tools in one catalog — verbs browse/research/install/install --all (a skill-clone keeps its LICENSE).
+argument-hint: "[browse|research|install <id>|install --all]"
 ---
 You are running the agentic-board /tools command.
 

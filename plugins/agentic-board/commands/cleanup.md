@@ -1,5 +1,6 @@
 ---
 description: Machine housekeeping for Claude Code, apart from board work — verbs sessions/transcripts/disk/plugins. Plans first, acts on one confirmation.
+argument-hint: "[sessions|transcripts|disk|plugins] [args]"
 ---
 You are running the agentic-board /cleanup command.
 

@@ -1,5 +1,6 @@
 ---
 description: Turn the current repo's untracked work (code TODOs, doc checklists, plans) into a ready board — issues, priorities, a plan epic — on one confirmation.
+argument-hint: "[apply] [-Rows n,...]"
 ---
 You are running the agentic-board /scan command.
 

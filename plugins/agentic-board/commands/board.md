@@ -1,5 +1,6 @@
 ---
 description: Run a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/actions-cost/setup. No arguments shows the menu.
+argument-hint: "[work|plan|fill|init|add|move|field|bulk|automate|templates|labels|update|changelog|handoff|doctor|close-cycle|telemetry|triage|complete|bi-checklist|actions-cost|setup] [args]"
 ---
 You are running the agentic-board /board command.
 
