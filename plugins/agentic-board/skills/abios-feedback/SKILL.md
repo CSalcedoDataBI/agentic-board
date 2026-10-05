@@ -1,6 +1,6 @@
 ---
 name: abios-feedback
-description: "Use when a bug or improvement is found in the agentic-board plugin itself (its skills, scripts or commands) while working in any project. Files a sanitized, English issue on the tool's public repo, never in the current project. Not for bugs in the current project — use /board issue or /scan. Triggers — \"mejora para la herramienta\", \"abios bug\", \"esto deberíamos arreglarlo en el plugin\", \"this is an agentic-board bug\", a block from agentic-board's guard-no-private hook."
+description: "Use when a bug or improvement is found in the agentic-board plugin itself (its skills, scripts or commands) while working in any project. Files a sanitized, English issue on the tool's public repo, never in the current project. Load it before asking the user for details: it says what to collect. Not for bugs in the current project — use /board issue or /scan. Triggers — \"mejora para la herramienta\", \"abios bug\", \"esto deberíamos arreglarlo en el plugin\", \"this is an agentic-board bug\", a block from agentic-board's guard-no-private hook."
 user-invocable: false
 ---
 
