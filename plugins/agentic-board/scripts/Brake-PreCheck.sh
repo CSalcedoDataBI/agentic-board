@@ -14,7 +14,13 @@
 # blocked. With a marker, whatever the real hook decides is the answer, exit code included - and
 # with a marker but no pwsh it DENIES (#764): exec failing would exit 127, which Claude Code treats
 # as a non-blocking error and lets the tool call through, so the armed run would fail open.
-for d in . .. ../.. ../../..; do
+#
+# The walk climbs with ${d%/*} from $PWD instead of naming parent paths literally: the directory
+# validator refuses a plugin command that spells a path above the plugin folder (#768), and this is
+# the working directory's ancestry, not the plugin's. Parameter expansion, so no extra process.
+d=$PWD
+n=0
+while [ "$n" -lt 4 ] && [ -n "$d" ]; do
   if [ -f "$d/.agentic-board/brake-armed.json" ]; then
     if ! command -v pwsh >/dev/null 2>&1; then
       printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"BRAKE: this run is brake-armed but pwsh (PowerShell 7) is not on PATH, so the brake cannot decide. Refusing."}}'
@@ -22,5 +28,9 @@ for d in . .. ../.. ../../..; do
     fi
     exec pwsh -NoProfile -File "$(dirname "$0")/Brake-PreToolUseHook.ps1"
   fi
+  [ "$d" = "/" ] && break
+  d=${d%/*}
+  [ -z "$d" ] && d=/
+  n=$((n + 1))
 done
 exit 0

@@ -53,11 +53,11 @@ full context. Or do it by hand:
 
 ## Tests
 
-The suite lives in `plugins/agentic-board/tests/`. Run it locally before
+The suite lives in `tests/agentic-board/`. Run it locally before
 opening a PR — CI runs the same suite on every PR and **blocks the merge on any failure**:
 
 ```powershell
-Invoke-Pester -Path plugins/agentic-board/tests
+Invoke-Pester -Path tests/agentic-board
 ```
 
 New behavior needs a test. Side-effecting scripts expose a dot-source guard (e.g.
