@@ -19,8 +19,8 @@
     for a reason that has nothing to do with the code under test. #>
 
 BeforeAll {
-    $script:Backup   = (Join-Path $PSScriptRoot '..' 'scripts' 'Backup-Board.ps1'         | Resolve-Path).Path
-    $script:Snapshot = (Join-Path $PSScriptRoot '..' 'scripts' 'Export-BoardSnapshot.ps1' | Resolve-Path).Path
+    $script:Backup   = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Backup-Board.ps1'         | Resolve-Path).Path
+    $script:Snapshot = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Export-BoardSnapshot.ps1' | Resolve-Path).Path
 
     # A fake gh: exits with %FAKE_GH_EXIT%, prints %FAKE_GH_OUT% on stdout and %FAKE_GH_ERR%
     # on stderr. With %FAKE_GH_FAIL_ON% set it counts calls in %FAKE_GH_COUNT% and fails only

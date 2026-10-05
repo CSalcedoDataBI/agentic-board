@@ -6,7 +6,7 @@
     with zero I/O, plus a disk round-trip via -Path injection. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Fleet-Ownership.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Fleet-Ownership.ps1' | Resolve-Path
     $env:ABIOS_FLEETOWNERSHIP_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_FLEETOWNERSHIP_DOTSOURCE = ''

@@ -15,7 +15,7 @@
     the git-based path and the directory-walk fallback are both exercised. #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
 
     $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = '1'
     . (Join-Path $script:Scripts 'ExpertContractIo.ps1')

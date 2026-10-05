@@ -6,7 +6,7 @@
     destinations (PR body / issue comment / versioned file). #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-Evidence.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-Evidence.ps1' | Resolve-Path
     $env:ABIOS_EXPERTEVIDENCE_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTEVIDENCE_DOTSOURCE = ''

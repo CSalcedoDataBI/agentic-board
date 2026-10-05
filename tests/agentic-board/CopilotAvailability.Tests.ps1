@@ -7,7 +7,7 @@
     expires). The marker file I/O is exercised against $TestDrive via HOME redirection. #>
 
 BeforeAll {
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'CopilotAvailability.ps1')
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'CopilotAvailability.ps1')
     function script:Review($login, $body) { [pscustomobject]@{ author = [pscustomobject]@{ login = $login }; body = $body } }
 }
 

@@ -15,7 +15,7 @@
     "over generated commands nothing the old patterns denied is allowed now". #>
 
 BeforeAll {
-    $script:GuardPath = Join-Path $PSScriptRoot '..' 'scripts' 'Brake-Guard.ps1' | Resolve-Path
+    $script:GuardPath = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-Guard.ps1' | Resolve-Path
     $env:ABIOS_BRAKEGUARD_DOTSOURCE = '1'
     . $script:GuardPath
     $env:ABIOS_BRAKEGUARD_DOTSOURCE = ''

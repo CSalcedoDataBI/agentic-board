@@ -8,7 +8,7 @@
     issue #86 (a board owner may be a USER or an ORGANIZATION). #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Fill.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Fill.ps1' | Resolve-Path
     $env:ABIOS_BOARDFILL_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDFILL_DOTSOURCE = ''

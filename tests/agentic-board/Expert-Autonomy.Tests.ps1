@@ -5,7 +5,7 @@
     Pure behind ABIOS_EXPERTAUTONOMY_DOTSOURCE. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-Autonomy.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-Autonomy.ps1' | Resolve-Path
     $env:ABIOS_EXPERTAUTONOMY_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTAUTONOMY_DOTSOURCE = ''

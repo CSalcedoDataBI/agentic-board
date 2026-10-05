@@ -24,7 +24,7 @@ $HasGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
 $IsWindowsHost = ($env:OS -eq 'Windows_NT')
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Worktree-Ghosts.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Worktree-Ghosts.ps1' | Resolve-Path
     $env:ABIOS_WORKTREE_GHOSTS_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_WORKTREE_GHOSTS_DOTSOURCE = ''

@@ -12,7 +12,7 @@
 
 BeforeAll {
     $env:ABIOS_TRANSCRIPTS_DOTSOURCE = '1'
-    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Cleanup-Transcripts.ps1' | Resolve-Path) }
+    try { . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Cleanup-Transcripts.ps1' | Resolve-Path) }
     finally { $env:ABIOS_TRANSCRIPTS_DOTSOURCE = '' }
     $script:Now = [datetime]::SpecifyKind([datetime]'2026-09-29T12:00:00', 'Utc')
     function script:T {

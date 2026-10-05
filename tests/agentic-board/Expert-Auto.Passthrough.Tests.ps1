@@ -12,7 +12,7 @@ BeforeAll {
     # The identity tests run against a FIXED account map, never the developer's own (#762).
     $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
     $env:ABIOS_ACCOUNTS_FILE = Join-Path $PSScriptRoot 'fixtures' 'accounts.identity.json'
-    $script:ScriptsDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:ScriptsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $script:Script     = Join-Path $script:ScriptsDir 'Expert-Auto.ps1'
     $env:ABIOS_EXPERTAUTO_DOTSOURCE = '1'
     . $script:Script
@@ -23,7 +23,7 @@ BeforeAll {
         dod = @{ ci = $true; tests = $true }
         budget = @{ maxIterations = 8; maxMinutes = 120 }
     }
-    $script:SkillDir = Join-Path $PSScriptRoot '..' 'skills' 'board-expert' | Resolve-Path
+    $script:SkillDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills' 'board-expert' | Resolve-Path
 }
 AfterAll { $env:ABIOS_ACCOUNTS_FILE = $script:SavedAccountsFile }
 

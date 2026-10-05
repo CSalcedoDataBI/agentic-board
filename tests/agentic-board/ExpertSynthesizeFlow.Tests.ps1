@@ -10,7 +10,7 @@
     Nothing is mocked. #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $script:Dirs = [System.Collections.Generic.List[string]]::new()
     function New-Tracked([string]$Tag) {
         $d = Join-Path ([System.IO.Path]::GetTempPath()) ("$Tag-" + [guid]::NewGuid().ToString('N'))

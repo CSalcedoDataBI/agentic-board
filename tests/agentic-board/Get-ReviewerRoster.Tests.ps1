@@ -12,7 +12,7 @@
     deadline all run for real; only the vendor CLI is replaced.  #>
 
 BeforeAll {
-    $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     # Hermetic registry (#772): the roster comes from the shipped preset only, never this
     # machine's ~/.agentic-board/adapters.json or the repo's .agentic-board/adapters.json.
     $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'

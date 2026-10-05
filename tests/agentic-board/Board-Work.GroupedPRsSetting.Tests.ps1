@@ -9,11 +9,11 @@
     integration tests. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
-    $script:Plugin = Join-Path $PSScriptRoot '..'
+    $script:Plugin = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board'
 
     function New-ThrowawayRepo([string]$Name) {
         $path = Join-Path $TestDrive $Name

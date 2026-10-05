@@ -8,7 +8,7 @@
     Resolved at merge time; this pins it. #>
 
 BeforeAll {
-    $script:Src = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Changelog.ps1') -Raw
+    $script:Src = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Changelog.ps1') -Raw
     $m = [regex]::Match($script:Src, '(?s)function Select-ChangelogItems \{.*?\r?\n\}\r?\n')
     $script:SelectBody = $m.Value
 }
@@ -23,7 +23,7 @@ Describe 'Select-ChangelogItems reads the type through the vocabulary (#671 x #6
     }
     It 'Get-ItemTypeName understands the field names of all three kinds of board' {
         # Dot-sourcing the script would run it; take just the function and the vocabulary it needs.
-        . (Join-Path $PSScriptRoot '..' 'scripts' 'Get-BoardVocabulary.ps1')
+        . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-BoardVocabulary.ps1')
         $fn = [regex]::Match($script:Src, '(?s)function Get-ItemTypeName \{.*?\r?\n\}\r?\n').Value
         $fn | Should -Not -BeNullOrEmpty
         Invoke-Expression $fn

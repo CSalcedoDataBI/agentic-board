@@ -7,7 +7,7 @@
     that helper. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Handoff-SessionStartHook.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Handoff-SessionStartHook.ps1' | Resolve-Path
     $env:ABIOS_HANDOFF_HOOK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_HANDOFF_HOOK_DOTSOURCE = ''

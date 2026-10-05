@@ -7,7 +7,7 @@
 #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Get-DeepWikiStatus.ps1'
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-DeepWikiStatus.ps1'
 
     # Dot-source to load only the pure helpers (the dot-source guard blocks live path)
     $env:ABIOS_DOTSOURCE_GUARD = '1'

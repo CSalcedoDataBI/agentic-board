@@ -5,7 +5,7 @@
     Every filesystem test runs inside a fresh TestDrive path - no repo state is touched. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Get-BoardConfig.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-BoardConfig.ps1' | Resolve-Path
     . $script:Script
 }
 

@@ -10,17 +10,17 @@
 # Evaluated at DISCOVERY time (a -Skip condition is read before any BeforeAll runs): is this a
 # checkout of the repo itself? Absent when the tests run from an installed plugin cache, where
 # the layout is flatter.
-$discoveryRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..' '..') -ErrorAction SilentlyContinue).Path
+$discoveryRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..') -ErrorAction SilentlyContinue).Path
 $discoveryInThisRepo = [bool]($discoveryRepoRoot -and (Test-Path (Join-Path $discoveryRepoRoot 'plugins/agentic-board/scripts/New-BoardPR.ps1')))
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
 
     $script:ScriptsDir = Split-Path -Parent $script:Script
-    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..' '..') -ErrorAction SilentlyContinue).Path
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..') -ErrorAction SilentlyContinue).Path
 
     # Every `pwsh <script>.ps1` the briefing tells the session to run, as the token it would type.
     function Get-BriefingScriptTokens([string]$Briefing) {

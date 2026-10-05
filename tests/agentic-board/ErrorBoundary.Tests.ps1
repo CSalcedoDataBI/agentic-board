@@ -28,7 +28,7 @@
     PS exception format (CategoryInfo, FullyQualifiedErrorId, file:line). #>
 
 BeforeAll {
-    $script:Dir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Dir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
 
     # A var name guaranteed absent from the Windows USER environment.
     $script:AbsentVar = 'ABIOS_ERROR_BOUNDARY_TEST_485'

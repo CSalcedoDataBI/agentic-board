@@ -6,8 +6,8 @@
 #>
 
 BeforeAll {
-    $script:PluginRoot = Join-Path $PSScriptRoot '..' | Resolve-Path
-    $script:RepoRoot   = Join-Path $PSScriptRoot '..' '..' '..' | Resolve-Path
+    $script:PluginRoot = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' | Resolve-Path
+    $script:RepoRoot   = Join-Path $PSScriptRoot '..' '..' | Resolve-Path
     $script:SkillMd    = Join-Path $script:PluginRoot 'skills' 'diagram-authoring' 'SKILL.md'
     $script:CommandMd  = Join-Path $script:PluginRoot 'commands' 'diagram-authoring.md'
     $script:RegPath    = Join-Path $script:RepoRoot 'knowledge' 'registry.json'

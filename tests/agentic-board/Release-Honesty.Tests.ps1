@@ -12,7 +12,7 @@
     tooling agreeing with a wrong claim.  #>
 
 BeforeAll {
-    $script:ScriptsDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:ScriptsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
 
     $env:ABIOS_RELEASE_DOTSOURCE = '1'
     . (Join-Path $script:ScriptsDir 'New-Release.ps1')

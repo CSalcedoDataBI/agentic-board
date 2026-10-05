@@ -12,7 +12,7 @@
     Pure -> no git, no gh, no token. #>
 
 BeforeAll {
-    $script:Helper = Join-Path $PSScriptRoot '..' 'scripts' 'Get-RepoFromOrigin.ps1' | Resolve-Path
+    $script:Helper = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-RepoFromOrigin.ps1' | Resolve-Path
     . $script:Helper
 }
 
@@ -120,7 +120,7 @@ Describe 'the broken pattern is gone from every script (#281)' {
     It 'no script inlines the dot-eating regex any more' {
         # The bug was duplication: fixed in 3 of 11 copies, left broken in 8. If this fails,
         # someone pasted it back instead of dot-sourcing the resolver.
-        $scripts = Get-ChildItem (Join-Path $PSScriptRoot '..' 'scripts') -Filter '*.ps1' -File |
+        $scripts = Get-ChildItem (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts') -Filter '*.ps1' -File |
                    Where-Object { $_.Name -ne 'Get-RepoFromOrigin.ps1' }   # it documents the bug in a comment
         $offenders = @($scripts | Where-Object { (Get-Content $_.FullName -Raw) -match '\[\^/\.\]\+' })
         $offenders.Name | Should -BeNullOrEmpty
@@ -139,7 +139,7 @@ Describe 'every origin-deriving script uses the shared helper (#392)' {
     # it already dot-sources the helper anyway, so the check still passes for it.
     It 'every script that reads git remote get-url origin dot-sources Get-RepoFromOrigin.ps1' {
         $helper = 'Get-RepoFromOrigin.ps1'
-        $scripts = Get-ChildItem (Join-Path $PSScriptRoot '..' 'scripts') -Filter '*.ps1' -File |
+        $scripts = Get-ChildItem (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts') -Filter '*.ps1' -File |
                    Where-Object { $_.Name -ne $helper }
         $offenders = @($scripts | Where-Object {
             $content = Get-Content $_.FullName -Raw

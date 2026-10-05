@@ -8,7 +8,7 @@
 #>
 
 BeforeAll {
-    $script:Install = Join-Path $PSScriptRoot '..' 'scripts' 'Install-ToolFromCatalog.ps1'
+    $script:Install = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Install-ToolFromCatalog.ps1'
 
     # --- fixtures: a plugin, a skill-clone, and a bare reference
     $script:Root = Join-Path $TestDrive 'proj'

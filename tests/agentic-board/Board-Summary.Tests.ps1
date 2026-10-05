@@ -9,7 +9,7 @@
     to act. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Summary.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Summary.ps1' | Resolve-Path
     $env:ABIOS_BOARDSUMMARY_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDSUMMARY_DOTSOURCE = ''

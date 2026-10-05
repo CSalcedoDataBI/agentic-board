@@ -8,7 +8,7 @@
     broken. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Get-FieldLedger.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-FieldLedger.ps1' | Resolve-Path
     $env:ABIOS_FIELDLEDGER_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_FIELDLEDGER_DOTSOURCE = ''

@@ -15,7 +15,7 @@
     board and manufacturing its duplicate. #>
 
 BeforeAll {
-    $script:Script = (Join-Path $PSScriptRoot '..' 'scripts' 'Resolve-Board.ps1' | Resolve-Path).Path
+    $script:Script = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Resolve-Board.ps1' | Resolve-Path).Path
 
     # Run the real script, keep its return value apart from what it printed.
     function Invoke-Resolve {

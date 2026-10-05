@@ -10,7 +10,7 @@
     The fix renames [Unreleased] to the dated version header and merges the board entries into it. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Changelog.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Changelog.ps1' | Resolve-Path
     $env:ABIOS_CHANGELOG_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_CHANGELOG_DOTSOURCE = ''

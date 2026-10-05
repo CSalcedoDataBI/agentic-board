@@ -10,7 +10,7 @@
     mocking it simulates any exit code / body with no token and no network. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Invoke-Gh.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Invoke-Gh.ps1' | Resolve-Path
     . $script:Script
 }
 

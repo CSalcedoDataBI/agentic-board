@@ -6,7 +6,7 @@
     that. Getting this wrong in the permissive direction ships something he wanted to see. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-WorkClass.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-WorkClass.ps1' | Resolve-Path
     $env:ABIOS_WORKCLASS_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_WORKCLASS_DOTSOURCE = ''

@@ -9,7 +9,7 @@
     unreadable start time are all reproduced exactly. Nothing mocks the function under test.  #>
 
 BeforeAll {
-    $scripts = Join-Path $PSScriptRoot '..' 'scripts'
+    $scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts'
     # The recycled-pid rule (Test-SessionStartConsistent) lives in Board-Work.ps1 and is what the state
     # library reuses for liveness; load it the way Board-Doctor does.
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
@@ -48,7 +48,7 @@ Describe 'Get-HolderLiveness - pid AND start time, three-valued' {
     It 'is unknown - not dead - when the reused start-time rule is not loaded' {
         # A fresh process that loads the state library WITHOUT Board-Work.ps1, asking about this very
         # (live) test process: the answer must be 'unknown', not 'dead' and not 'live'.
-        $lib = Join-Path $PSScriptRoot '..' 'scripts' 'PluginState.ps1'
+        $lib = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'PluginState.ps1'
         $answer = pwsh -NoProfile -Command ". '$lib'; Get-HolderLiveness -ProcessId $PID -StartFt '$($script:MyFt)'"
         "$answer".Trim() | Should -Be 'unknown'
     }

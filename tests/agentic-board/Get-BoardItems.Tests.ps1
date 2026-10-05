@@ -12,7 +12,7 @@
 #>
 
 BeforeAll {
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'Get-BoardItems.ps1')
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-BoardItems.ps1')
 
     # N items shaped like `gh project item-list --format json` emits them.
     function script:Items([int]$n) {
@@ -121,7 +121,7 @@ Describe 'Regression: every board item read must go through the shared reader' {
         Get-BoardItems or asks Get-BoardItemReadLimit for the shared ceiling. #>
 
     BeforeDiscovery {
-        $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts'
+        $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts'
         # Get-BoardItems itself is where the one legitimate item-list call lives.
         $script:ReaderFile = 'Get-BoardItems.ps1'
     }
@@ -162,37 +162,37 @@ Describe 'Regression: no caller may state an absence off a possibly-short read' 
         291-item board; what these add is "nobody deleted the guard". #>
 
     It 'Board-Work consults the truncation flag before its "Nothing pending"' {
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1') -Raw
         $t | Should -Match 'Nothing pending'          # the all-clear still exists...
         $t | Should -Match 'if \(\$truncWarn\)'      # ...and so does the guard on it
     }
     It 'Board-Triage consults it before its "(no pending items)"' {
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Triage.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Triage.ps1') -Raw
         $t | Should -Match 'no pending items'
         $t | Should -Match 'if \(\$itemTrunc\)'
     }
     It 'Assert-BoardComplete refuses to PASS on a truncated read' {
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Assert-BoardComplete.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Assert-BoardComplete.ps1') -Raw
         $t | Should -Match '\$truncWarn -and \$result\.Complete'
     }
     It 'Apply-FieldPreset refuses to DELETE an option verified by a truncated read' {
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Apply-FieldPreset.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Apply-FieldPreset.ps1') -Raw
         $t | Should -Match '\$postRead\.Truncated'
     }
     It 'Backup-Board refuses to write a partial snapshot' {
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Backup-Board.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Backup-Board.ps1') -Raw
         $t | Should -Match 'a partial backup is not a backup'
     }
     It 'Export-BoardSnapshot refuses to publish a truncated "N of M"' {
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Export-BoardSnapshot.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Export-BoardSnapshot.ps1') -Raw
         $t | Should -Match '\$items\.Count -ge \$itemLimit'
     }
     It 'Set-BoardField does not exit 0 after a partial sweep' {
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Set-BoardField.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Set-BoardField.ps1') -Raw
         $t | Should -Match 'if \(\$itemRead\.Truncated\) \{ exit 1 \}'
     }
     It 'Assert-BoardComplete reports truncated on every -Json response, not just the fail-closed one' {
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Assert-BoardComplete.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Assert-BoardComplete.ps1') -Raw
         # Two emitters: the fail-closed branch and the normal one. BOTH must carry the field, or a
         # consumer reads a floor as an exact count on the path that still found pending items.
         @([regex]::Matches($t, 'truncated\s*=')).Count | Should -BeGreaterOrEqual 2
@@ -217,7 +217,7 @@ Describe 'Regression: a wrapper return value must never be counted as one item' 
         # assertion went red, which is the only reason it is trusted. A companion check that
         # merely counted `.Items` occurrences file-wide stayed GREEN with the bug present and was
         # deleted rather than kept as decoration.
-        $t = Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Apply-FieldPreset.ps1') -Raw
+        $t = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Apply-FieldPreset.ps1') -Raw
         $t | Should -Not -Match '@\(Get-ItemsOnOption'
     }
 }

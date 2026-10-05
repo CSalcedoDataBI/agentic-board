@@ -8,7 +8,7 @@
     reasoning — never a silent P-value). #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Triage.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Triage.ps1' | Resolve-Path
     $env:ABIOS_TRIAGE_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_TRIAGE_DOTSOURCE = ''

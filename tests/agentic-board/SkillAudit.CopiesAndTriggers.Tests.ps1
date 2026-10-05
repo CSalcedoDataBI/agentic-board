@@ -7,7 +7,7 @@
     Invoke-SkillAudit.ps1. #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $script:Engine  = Join-Path $script:Scripts 'Get-SkillInventory.ps1'
     $script:Audit   = Join-Path $script:Scripts 'Invoke-SkillAudit.ps1'
     $script:Tmp     = Join-Path ([System.IO.Path]::GetTempPath()) ('skillcopies-' + [guid]::NewGuid().ToString('N'))

@@ -5,7 +5,7 @@
     ($env:ABIOS_FLEETPLAN_DOTSOURCE) exposes the pure planner core for unit tests. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Fleet-Plan.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Fleet-Plan.ps1' | Resolve-Path
     # Hermetic registry (#772): routing comes from the shipped preset only, never this machine's
     # ~/.agentic-board/adapters.json or the repo's .agentic-board/adapters.json.
     $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'

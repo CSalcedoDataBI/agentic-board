@@ -3,7 +3,7 @@
     classification against an injected upstream-SHA map (no network). #>
 
 BeforeAll {
-    $script:Fresh = Join-Path $PSScriptRoot '..' 'scripts' 'Get-ToolkitFreshness.ps1' | Resolve-Path
+    $script:Fresh = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-ToolkitFreshness.ps1' | Resolve-Path
 
     function New-Prov($dir, $name, $repo, $path, $sha) {
         $skill = Join-Path $dir $name

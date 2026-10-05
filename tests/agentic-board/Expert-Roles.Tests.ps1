@@ -3,7 +3,7 @@
     and explain which role a plan resolves to. Pure behind ABIOS_EXPERTROLESCMD_DOTSOURCE. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-Roles.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-Roles.ps1' | Resolve-Path
     $env:ABIOS_EXPERTROLESCMD_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTROLESCMD_DOTSOURCE = ''

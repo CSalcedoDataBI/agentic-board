@@ -6,7 +6,7 @@
     each other, so a mock would only re-assert an assumption. #>
 
 BeforeAll {
-    $script:DoctorScript = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Doctor.ps1' | Resolve-Path
+    $script:DoctorScript = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Doctor.ps1' | Resolve-Path
     $env:ABIOS_DOCTOR_DOTSOURCE = '1'
     . $script:DoctorScript
     $env:ABIOS_DOCTOR_DOTSOURCE = ''

@@ -21,7 +21,7 @@
     network. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Set-BoardField.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Set-BoardField.ps1' | Resolve-Path
     # The script guards on $env:GH_TOKEN before the reads; set a dummy so we exercise the reads,
     # not the token guard. The mock never looks at it.
     $script:PrevToken = $env:GH_TOKEN

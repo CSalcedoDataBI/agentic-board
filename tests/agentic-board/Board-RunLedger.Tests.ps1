@@ -7,7 +7,7 @@
     helpers, with a FIXED clock so the stamps are deterministic. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-RunLedger.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-RunLedger.ps1' | Resolve-Path
     $env:ABIOS_RUNLEDGER_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_RUNLEDGER_DOTSOURCE = ''

@@ -2,7 +2,7 @@
 <#  Pester tests for Invoke-KnowledgeHarvest.ps1: finds docs md files + http links,
     dedups against the existing registry, and never writes. #>
 BeforeAll {
-    $script:Engine = Join-Path $PSScriptRoot '..' 'scripts' 'Invoke-KnowledgeHarvest.ps1' | Resolve-Path
+    $script:Engine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Invoke-KnowledgeHarvest.ps1' | Resolve-Path
     $script:Root   = Join-Path ([IO.Path]::GetTempPath()) ("knhrv-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path (Join-Path $script:Root 'docs') -Force | Out-Null
     "# Fabric Capacity`nbody" | Set-Content -LiteralPath (Join-Path $script:Root 'docs' 'cap.md') -Encoding utf8

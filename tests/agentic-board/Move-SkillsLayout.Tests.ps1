@@ -5,7 +5,7 @@
     writes skills-index.json, and a second dry-run is a no-op (idempotent). #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Move-SkillsLayout.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Move-SkillsLayout.ps1' | Resolve-Path
     $script:Root   = Join-Path ([System.IO.Path]::GetTempPath()) ("skillmove-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
 

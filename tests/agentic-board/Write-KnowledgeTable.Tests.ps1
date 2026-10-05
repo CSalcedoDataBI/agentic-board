@@ -2,7 +2,7 @@
 <#  Pester tests for Write-KnowledgeTable.ps1. Writes a two-domain registry, regenerates
     the table, and asserts grouping, the generated-header guard, and url link rendering. #>
 BeforeAll {
-    $script:Engine = Join-Path $PSScriptRoot '..' 'scripts' 'Write-KnowledgeTable.ps1' | Resolve-Path
+    $script:Engine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Write-KnowledgeTable.ps1' | Resolve-Path
     $script:Root   = Join-Path ([IO.Path]::GetTempPath()) ("kntbl-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path (Join-Path $script:Root 'knowledge') -Force | Out-Null
     $reg = [pscustomobject]@{ version=1; project='fix'; domains=@('Fabric','DAX')

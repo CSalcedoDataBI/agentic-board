@@ -4,7 +4,7 @@
     + near-duplicate + over-cap + first-person) and asserts the inventory contract. #>
 
 BeforeAll {
-    $script:Engine = Join-Path $PSScriptRoot '..' 'scripts' 'Get-SkillInventory.ps1' | Resolve-Path
+    $script:Engine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-SkillInventory.ps1' | Resolve-Path
     $script:Root   = Join-Path ([System.IO.Path]::GetTempPath()) ("skillinv-" + [guid]::NewGuid().ToString('N'))
 
     function New-Skill {

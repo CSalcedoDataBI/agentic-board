@@ -7,7 +7,7 @@
     pure version + manifest-consistency logic. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'New-Release.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'New-Release.ps1' | Resolve-Path
     $env:ABIOS_RELEASE_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_RELEASE_DOTSOURCE = ''

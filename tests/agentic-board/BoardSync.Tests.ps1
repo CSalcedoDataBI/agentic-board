@@ -25,7 +25,7 @@ Describe 'board-sync.sh items load (#679)' -Skip:(-not $script:CanRun) {
             @('C:\Program Files\Git\bin\bash.exe', 'C:\Program Files (x86)\Git\bin\bash.exe') |
                 Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
         } else { (Get-Command bash).Source }
-        $script:Sync = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'board-sync.sh' | Resolve-Path
+        $script:Sync = Join-Path $PSScriptRoot '..' '..' 'scripts' 'board-sync.sh' | Resolve-Path
         $script:Root = Join-Path ([IO.Path]::GetTempPath()) ("boardsync-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Force $script:Root | Out-Null
 

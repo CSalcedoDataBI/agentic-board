@@ -12,7 +12,7 @@
     Everything runs against real fixture trees and the real scripts; nothing is mocked. #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $env:ABIOS_EXPERTROLE_DOTSOURCE = '1'
     . (Join-Path $script:Scripts 'Expert-RoleSynthesis.ps1')
     $env:ABIOS_EXPERTROLE_DOTSOURCE = ''

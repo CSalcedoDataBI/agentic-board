@@ -6,7 +6,7 @@
     small temp scripts written for the purpose. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path
     $env:ABIOS_VOCABLEAK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_VOCABLEAK_DOTSOURCE = ''

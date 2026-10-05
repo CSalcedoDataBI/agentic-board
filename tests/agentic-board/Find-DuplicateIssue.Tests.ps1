@@ -9,8 +9,8 @@
         at every report about a popular script would be switched off within a week.  #>
 
 BeforeAll {
-    $script:ScriptPath = Join-Path $PSScriptRoot '..' 'scripts' 'Find-DuplicateIssue.ps1' | Resolve-Path
-    $script:LibPath    = Join-Path $PSScriptRoot '..' 'scripts' 'IssueSearch.ps1' | Resolve-Path
+    $script:ScriptPath = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Find-DuplicateIssue.ps1' | Resolve-Path
+    $script:LibPath    = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'IssueSearch.ps1' | Resolve-Path
     . $script:LibPath
 
     function script:I { param([int]$N, [string]$T, [string]$S = 'CLOSED', [string]$R = 'NOT_PLANNED', [string]$B = '', $Closed = $null)
@@ -254,7 +254,7 @@ Describe 'Get-IssueCandidates - the live read fails LOUDLY and honours the close
 
 Describe 'the feedback skill runs the duplicate check BEFORE it files (#675)' {
     BeforeAll {
-        $script:Skill = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' 'skills' 'abios-feedback' 'SKILL.md') -Raw
+        $script:Skill = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills' 'abios-feedback' 'SKILL.md') -Raw
     }
     It 'names the helper, and does so before the first gh issue create' {
         $check  = $script:Skill.IndexOf('Find-DuplicateIssue.ps1')
@@ -365,7 +365,7 @@ Describe 'Report text travels as FILES - shell metacharacters are data, not code
 
 Describe 'abios-feedback SKILL.md never puts report text inside shell quotes (#675, review thread)' {
     BeforeAll {
-        $script:SkillPath = Join-Path $PSScriptRoot '..' 'skills' 'abios-feedback' 'SKILL.md' | Resolve-Path
+        $script:SkillPath = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills' 'abios-feedback' 'SKILL.md' | Resolve-Path
         $script:Skill = (Get-Content -LiteralPath $script:SkillPath -Raw) -replace "`r`n", "`n"
     }
     It 'no command interpolates a placeholder for the title or body inside quotes' {

@@ -11,7 +11,7 @@
     every step up to addSubIssue succeeds and only the link returns errors[]. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Breakdown.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Breakdown.ps1' | Resolve-Path
     $script:PrevToken = $env:GH_TOKEN
     $env:GH_TOKEN = 'dummy'
 }

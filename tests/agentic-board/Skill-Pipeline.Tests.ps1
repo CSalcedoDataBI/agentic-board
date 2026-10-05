@@ -6,7 +6,7 @@
     criteria, and the audit gate that ends the improve loop. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Skill-Pipeline.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Skill-Pipeline.ps1' | Resolve-Path
     $env:ABIOS_SKILLPIPE_DOTSOURCE = '1'
     try { . $script:Script } finally { $env:ABIOS_SKILLPIPE_DOTSOURCE = '' }
     function script:Sk([string]$Name, [string]$Desc, [string]$Scope = 'personal') {
@@ -111,7 +111,7 @@ Describe 'Test-SkillAuditGate - the loop ends only when no high or medium findin
 }
 
 Describe '/skills menu offers create and improve and routes them' {
-    BeforeAll { $script:Cmd = Get-Content (Join-Path $PSScriptRoot '..' 'commands' 'skills.md') -Raw }
+    BeforeAll { $script:Cmd = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'commands' 'skills.md') -Raw }
     It 'lists both verbs in the menu' {
         $script:Cmd | Should -Match '(?m)^\d+\.\s+create\s'
         $script:Cmd | Should -Match '(?m)^\d+\.\s+improve\s'
@@ -119,6 +119,6 @@ Describe '/skills menu offers create and improve and routes them' {
     It 'routes them to the skills-create skill and the pipeline script' {
         $script:Cmd | Should -Match 'skills-create'
         $script:Cmd | Should -Match 'Skill-Pipeline\.ps1'
-        Test-Path (Join-Path $PSScriptRoot '..' 'skills' 'skills-create' 'SKILL.md') | Should -BeTrue
+        Test-Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills' 'skills-create' 'SKILL.md') | Should -BeTrue
     }
 }

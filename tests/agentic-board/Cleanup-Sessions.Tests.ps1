@@ -8,7 +8,7 @@
 
 BeforeAll {
     $env:ABIOS_SWEEP_DOTSOURCE = '1'
-    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Cleanup-Sessions.ps1' | Resolve-Path) }
+    try { . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Cleanup-Sessions.ps1' | Resolve-Path) }
     finally { $env:ABIOS_SWEEP_DOTSOURCE = '' }
 
     function script:Act {

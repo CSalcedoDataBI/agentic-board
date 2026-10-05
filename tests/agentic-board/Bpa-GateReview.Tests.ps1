@@ -8,7 +8,7 @@
     TE invocation and the safe-skip paths (no model / no rules / no tool) are integration behavior. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Bpa-GateReview.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Bpa-GateReview.ps1' | Resolve-Path
     $env:ABIOS_BPA_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BPA_DOTSOURCE = ''

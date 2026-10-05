@@ -8,7 +8,7 @@
     and nothing else. That is the exact rule that decides whether the board "quedó full". #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Assert-BoardComplete.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Assert-BoardComplete.ps1' | Resolve-Path
     $env:ABIOS_BOARDCOMPLETE_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDCOMPLETE_DOTSOURCE = ''

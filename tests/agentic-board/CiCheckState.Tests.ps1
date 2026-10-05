@@ -18,7 +18,7 @@
     positive evidence, and a genuinely failing check must keep blocking as a failure. #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     . (Join-Path $script:Scripts 'CiCheckState.ps1')
 
     $env:ABIOS_REVIEWGATE_DOTSOURCE = '1'

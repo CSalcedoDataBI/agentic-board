@@ -8,7 +8,7 @@
     treats a PR as existing only when the row carries a positive-integer number. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'New-BoardPR.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'New-BoardPR.ps1' | Resolve-Path
     $env:ABIOS_NEWBOARDPR_DOTSOURCE = '1'
     . $script:Script -Issue 1              # -Issue is Mandatory; the guard returns before it is used
     $env:ABIOS_NEWBOARDPR_DOTSOURCE = ''

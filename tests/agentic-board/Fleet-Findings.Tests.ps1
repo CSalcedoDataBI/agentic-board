@@ -9,7 +9,7 @@
     temp file via the -Path injection on Read-FleetFindings / Write-FleetFinding. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Fleet-Findings.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Fleet-Findings.ps1' | Resolve-Path
     $env:ABIOS_FLEETFINDINGS_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_FLEETFINDINGS_DOTSOURCE = ''

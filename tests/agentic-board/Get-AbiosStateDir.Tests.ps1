@@ -6,7 +6,7 @@
     that never loses state. Uses -Root (a temp dir) so no git repo is needed. #>
 
 BeforeAll {
-    $script:Helper = Join-Path $PSScriptRoot '..' 'scripts' 'Get-AbiosStateDir.ps1' | Resolve-Path
+    $script:Helper = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-AbiosStateDir.ps1' | Resolve-Path
     . $script:Helper
 
     function New-TempRoot {

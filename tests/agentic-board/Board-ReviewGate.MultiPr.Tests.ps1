@@ -8,7 +8,7 @@
     never a pass), and the classic `-Repo x -PR n` call still binds and behaves as before. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-ReviewGate.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-ReviewGate.ps1' | Resolve-Path
     $env:ABIOS_REVIEWGATE_DOTSOURCE = '1'
     . $script:Script -Repo 'owner/repo'    # -Repo is Mandatory in the classic set; the guard returns before it is used
     $env:ABIOS_REVIEWGATE_DOTSOURCE = ''

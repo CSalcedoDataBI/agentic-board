@@ -14,8 +14,8 @@
       * the upload switches in the image (patch rows disabled, telemetry env, entrypoint refusals).  #>
 
 BeforeAll {
-    $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
-    $script:RepoRoot  = Join-Path $PSScriptRoot '..' '..' '..' | Resolve-Path
+    $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
+    $script:RepoRoot  = Join-Path $PSScriptRoot '..' '..' | Resolve-Path
     $script:Box       = Join-Path $script:RepoRoot 'containers' 'dsh'
     $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
     $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'

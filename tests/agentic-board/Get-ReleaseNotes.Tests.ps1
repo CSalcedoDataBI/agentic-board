@@ -7,7 +7,7 @@
     files and no gh. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'Get-ReleaseNotes.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'scripts' 'Get-ReleaseNotes.ps1' | Resolve-Path
     $env:ABIOS_RELEASENOTES_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_RELEASENOTES_DOTSOURCE = ''

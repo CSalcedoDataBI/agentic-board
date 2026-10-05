@@ -9,8 +9,8 @@
     runs of Board-Triage / Board-Fill live in Field-Vocabulary.EndToEnd.Tests.ps1. #>
 
 BeforeAll {
-    $script:Scripts = (Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path).Path
-    $script:Presets = (Join-Path $PSScriptRoot '..' 'presets' | Resolve-Path).Path
+    $script:Scripts = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path).Path
+    $script:Presets = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' | Resolve-Path).Path
     . (Join-Path $script:Scripts 'Get-BoardVocabulary.ps1')
     $script:Aacute = [string][char]0x00C1
     $script:Ntilde = [string][char]0x00F1

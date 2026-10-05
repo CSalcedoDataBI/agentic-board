@@ -11,7 +11,7 @@
     session; anything else must reach pwsh. An invalid session id must stay silent.  #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $script:Shim = Join-Path $script:Scripts 'PluginStale-NoticePreCheck.sh'
     $script:Hook = Join-Path $script:Scripts 'PluginStale-NoticeHook.ps1'
     . (Join-Path $script:Scripts 'PluginState.ps1')
@@ -76,7 +76,7 @@ BeforeAll {
 }
 
 Describe 'hooks.json routes UserPromptSubmit through the shim' {
-    BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
+    BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
     It 'calls the .sh shim through sh, not pwsh directly, and keeps the 10 s timeout' {
         $h = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks })[0]
         $h.command | Should -Match '^sh '

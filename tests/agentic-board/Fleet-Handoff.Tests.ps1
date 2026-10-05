@@ -5,7 +5,7 @@
     ($env:ABIOS_FLEETHANDOFF_DOTSOURCE); only the CLI touches gh / the blackboard. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Fleet-Handoff.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Fleet-Handoff.ps1' | Resolve-Path
     $env:ABIOS_FLEETHANDOFF_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_FLEETHANDOFF_DOTSOURCE = ''

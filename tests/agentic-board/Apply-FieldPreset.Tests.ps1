@@ -11,7 +11,7 @@
     not throw here, so `Should -Throw` + `field-create -Times 0 -Exactly` is what pins the fix. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Apply-FieldPreset.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Apply-FieldPreset.ps1' | Resolve-Path
 }
 
 Describe 'Apply-FieldPreset fails closed when the field-list read fails (#313)' {
@@ -53,7 +53,7 @@ Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
     # succeeds and returns an empty board, every field-create fails.
 
     BeforeAll {
-        $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Apply-FieldPreset.ps1' | Resolve-Path
+        $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Apply-FieldPreset.ps1' | Resolve-Path
 
         # All streams to a FILE, and the terminating error swallowed. The run is SUPPOSED to end
         # in an error now, and `... | Out-String` inside a throwing pipeline never assigns - which
@@ -149,7 +149,7 @@ Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
         # after it. The last field is READ FROM THE PRESET rather than spelled here - hardcoding
         # "Target" would quietly stop testing anything the day someone reorders fields.en.json,
         # and the test would keep passing while proving nothing (review of #672).
-        $presetPath = Join-Path $PSScriptRoot '..' 'presets' 'fields.en.json' | Resolve-Path
+        $presetPath = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'fields.en.json' | Resolve-Path
         $lastField  = (Get-Content $presetPath -Raw -Encoding UTF8 | ConvertFrom-Json).fields[-1].name
         $lastField | Should -Not -BeNullOrEmpty -Because 'the preset must have fields to test with'
 

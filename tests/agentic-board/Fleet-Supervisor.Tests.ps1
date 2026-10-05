@@ -6,7 +6,7 @@
     ($env:ABIOS_FLEETSUPERVISOR_DOTSOURCE); only the CLI reads sessions.json / gh. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Fleet-Supervisor.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Fleet-Supervisor.ps1' | Resolve-Path
     $env:ABIOS_FLEETSUPERVISOR_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_FLEETSUPERVISOR_DOTSOURCE = ''

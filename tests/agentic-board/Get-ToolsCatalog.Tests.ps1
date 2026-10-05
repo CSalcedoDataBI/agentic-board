@@ -8,7 +8,7 @@
 #>
 
 BeforeAll {
-    $script:Resolver = Join-Path $PSScriptRoot '..' 'scripts' 'Get-ToolsCatalog.ps1'
+    $script:Resolver = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-ToolsCatalog.ps1'
 
     # --- fixture: a registry with one ref that OVERLAPS a preset (skills-for-fabric) and one that does not
     $script:Root = Join-Path $TestDrive 'proj'

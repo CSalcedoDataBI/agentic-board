@@ -4,7 +4,7 @@
     branch tip. These tests keep every install path the tool can run on a fixed version.  #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     # Hermetic registry (#772): the shipped preset only, never this machine's overrides.
     $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
     $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'
@@ -56,7 +56,7 @@ Describe 'No unpinned install in the shipped scripts' {
 
 Describe 'Skill clones are pinned to a commit' {
     It 'every skill-clone entry in the toolkits carries a full commit SHA as ref' {
-        $dir = Join-Path $PSScriptRoot '..' 'presets' 'toolkits' | Resolve-Path
+        $dir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'toolkits' | Resolve-Path
         $clones = foreach ($f in Get-ChildItem $dir -Filter *.json) {
             @(Get-Content $f.FullName -Raw | ConvertFrom-Json) | Where-Object kind -eq 'skill-clone'
         }

@@ -13,7 +13,7 @@
     not an inference. A .cmd is Windows-only (CI runs Pester on windows-latest). #>
 
 BeforeAll {
-    $script:Script = (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Triage.ps1' | Resolve-Path).Path
+    $script:Script = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Triage.ps1' | Resolve-Path).Path
     $env:ABIOS_TRIAGE_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_TRIAGE_DOTSOURCE = ''

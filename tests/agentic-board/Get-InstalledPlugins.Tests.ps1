@@ -3,7 +3,7 @@
     match keys (plugin + marketplace), best-effort. #>
 
 BeforeAll {
-    $script:Plugins = Join-Path $PSScriptRoot '..' 'scripts' 'Get-InstalledPlugins.ps1' | Resolve-Path
+    $script:Plugins = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-InstalledPlugins.ps1' | Resolve-Path
     $script:Sample = @'
 Installed plugins:
 

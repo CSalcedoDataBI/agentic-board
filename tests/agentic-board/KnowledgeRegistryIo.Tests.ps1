@@ -7,7 +7,7 @@
     including URLs with ':' and notes with quotes/# that would break a naive line-based YAML. #>
 
 BeforeAll {
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'KnowledgeRegistryIo.ps1')
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'KnowledgeRegistryIo.ps1')
     $script:Reg = [pscustomobject]@{
         version = 1
         project = 'agentic-bi-ops'

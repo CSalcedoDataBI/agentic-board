@@ -13,7 +13,7 @@
     are the vendor's message shapes as reported by users of those CLIs.  #>
 
 BeforeAll {
-    $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     # Hermetic registry (#772): the shipped preset only, never this machine's overrides.
     $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
     $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'

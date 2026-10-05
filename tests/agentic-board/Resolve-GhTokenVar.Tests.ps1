@@ -11,7 +11,7 @@ BeforeAll {
     # The identity tests run against a FIXED account map, never the developer's own (#762).
     $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
     $env:ABIOS_ACCOUNTS_FILE = Join-Path $PSScriptRoot 'fixtures' 'accounts.identity.json'
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Resolve-GhTokenVar.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Resolve-GhTokenVar.ps1' | Resolve-Path
     $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_TOKENVAR_DOTSOURCE = $null
@@ -105,7 +105,7 @@ Describe 'Resolve-GhTokenVar is actually USED — not a fifth copy of the rule (
     # These tests exist so the claim and the code cannot drift apart again.
 
     BeforeAll {
-        $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+        $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
         $script:Sources = @(Get-ChildItem -Path $script:ScriptDir -Filter '*.ps1' |
             Where-Object { $_.Name -ne 'Resolve-GhTokenVar.ps1' })
     }
@@ -182,12 +182,12 @@ Describe 'An explicit -TokenVar cannot buy back the owner identity (#550, review
     It 'is enforced on ONE path — the push script cannot branch around it' {
         # The structural half: New-BoardPR must hand its -TokenVar to the resolver rather than
         # handling it in a branch of its own, which is precisely how the leak happened.
-        $src = Get-Content (Join-Path (Join-Path $PSScriptRoot '..' 'scripts') 'New-BoardPR.ps1') -Raw
+        $src = Get-Content (Join-Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts') 'New-BoardPR.ps1') -Raw
         $src | Should -Match 'Get-GhTokenForContext[^\n]*-ExplicitVar'
         $src | Should -Not -Match 'if \(\$TokenVar\) \{'
     }
     It 'no script hardcodes the list of known owners any more' {
-        $dir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+        $dir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
         $offenders = @()
         foreach ($f in (Get-ChildItem $dir -Filter '*.ps1' | Where-Object { $_.Name -ne 'Resolve-GhTokenVar.ps1' })) {
             $t = Get-Content $f.FullName -Raw

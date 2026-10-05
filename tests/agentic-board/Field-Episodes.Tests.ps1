@@ -10,7 +10,7 @@
     one-directional suite while making the whole sweep worthless. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Get-FieldEpisodes.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-FieldEpisodes.ps1' | Resolve-Path
     $env:ABIOS_FIELDEPISODES_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_FIELDEPISODES_DOTSOURCE = ''

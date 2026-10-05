@@ -9,7 +9,7 @@
     goes red. "A green suite proves nothing on its own" — each check must be falsifiable. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-RunVerify.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-RunVerify.ps1' | Resolve-Path
     $env:ABIOS_EXPERTRUNVERIFY_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTRUNVERIFY_DOTSOURCE = ''
@@ -163,7 +163,7 @@ Describe 'Expert-RunVerify CLI — the evidence file is resolved from the WORKIN
     # one that always says COMPLETE. Asserted on the source, because the CLI half sits below the
     # dot-source guard and cannot be invoked without a repo + network.
 
-    BeforeAll { $script:Src = Get-Content -Raw (Join-Path $PSScriptRoot '..' 'scripts' 'Expert-RunVerify.ps1') }
+    BeforeAll { $script:Src = Get-Content -Raw (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-RunVerify.ps1') }
 
     It 'asks git for the working repo root' {
         $script:Src | Should -Match 'git rev-parse --show-toplevel'
@@ -172,7 +172,7 @@ Describe 'Expert-RunVerify CLI — the evidence file is resolved from the WORKIN
         $script:Src | Should -Match 'Get-Location'
     }
     It 'never derives the repo root by walking up from the script location' {
-        # The exact defect: Join-Path $PSScriptRoot '..' '..' '..'
+        # The exact defect: Join-Path $PSScriptRoot '..' '..'
         $script:Src | Should -Not -Match "PSScriptRoot\s+'\.\.'\s+'\.\.'\s+'\.\.'"
     }
 }

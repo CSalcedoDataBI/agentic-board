@@ -6,7 +6,7 @@
     any network call or install. These tests exercise only those helpers. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Suggest-HeavyMemory.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Suggest-HeavyMemory.ps1' | Resolve-Path
     $env:ABIOS_HEAVYMEM_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_HEAVYMEM_DOTSOURCE = ''

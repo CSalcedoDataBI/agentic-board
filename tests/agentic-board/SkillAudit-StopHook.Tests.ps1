@@ -2,7 +2,7 @@
 <#  Pester tests for SkillAudit-StopHook.ps1 — passive, suggest-only, never throws. #>
 
 BeforeAll {
-    $script:Hook = Join-Path $PSScriptRoot '..' 'scripts' 'SkillAudit-StopHook.ps1' | Resolve-Path
+    $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'SkillAudit-StopHook.ps1' | Resolve-Path
     $script:Root = Join-Path ([System.IO.Path]::GetTempPath()) ("skillhook-" + [guid]::NewGuid().ToString('N'))
 
     function New-Skill {

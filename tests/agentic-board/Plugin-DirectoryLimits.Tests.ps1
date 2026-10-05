@@ -7,7 +7,7 @@
     submission, not after. Local eval output (evals/results, gitignored) is not shipped and is skipped.  #>
 
 BeforeAll {
-    $script:PluginRoot = Split-Path -Parent $PSScriptRoot
+    $script:PluginRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../plugins/agentic-board')).Path
     $script:Files = @(Get-ChildItem -LiteralPath $script:PluginRoot -Recurse -File |
         Where-Object { $_.FullName -notmatch '[\/]evals[\/]results[\/]' })
 }

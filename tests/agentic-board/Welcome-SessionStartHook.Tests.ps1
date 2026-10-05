@@ -7,7 +7,7 @@
     the filesystem. These tests exercise only those helpers. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Welcome-SessionStartHook.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Welcome-SessionStartHook.ps1' | Resolve-Path
     $env:ABIOS_WELCOME_HOOK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_WELCOME_HOOK_DOTSOURCE = ''

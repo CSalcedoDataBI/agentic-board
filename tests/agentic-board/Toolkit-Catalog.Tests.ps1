@@ -2,7 +2,7 @@
 <#  Pester tests for the toolkit catalogs (presets/toolkits/*.json) — schema + content. #>
 
 BeforeAll {
-    $script:ToolkitsDir = Join-Path $PSScriptRoot '..' 'presets' 'toolkits' | Resolve-Path
+    $script:ToolkitsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'toolkits' | Resolve-Path
     $script:QualityPath = Join-Path $script:ToolkitsDir 'quality.json'
     $script:BiPath      = Join-Path $script:ToolkitsDir 'bi.json'
     $script:McpPath     = Join-Path $script:ToolkitsDir 'mcp.json'
@@ -141,7 +141,7 @@ Describe 'mcp.json content (#416)' {
 
 Describe 'legacy catalog removed' {
     It 'presets/recommended-skills.json no longer exists (migrated to toolkits/)' {
-        $legacy = Join-Path $PSScriptRoot '..' 'presets' 'recommended-skills.json'
+        $legacy = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'recommended-skills.json'
         Test-Path $legacy | Should -BeFalse
     }
 }

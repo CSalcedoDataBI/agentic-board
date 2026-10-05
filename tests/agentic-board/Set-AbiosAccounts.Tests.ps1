@@ -3,7 +3,7 @@
     existing map, and never writes outside the file it was pointed at.  #>
 
 BeforeAll {
-    $script:Script = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts') 'Set-AbiosAccounts.ps1'
+    $script:Script = Join-Path (Join-Path ((Resolve-Path (Join-Path $PSScriptRoot '../../plugins/agentic-board')).Path) 'scripts') 'Set-AbiosAccounts.ps1'
     $script:SavedFile = $env:ABIOS_ACCOUNTS_FILE
     function script:Run-Setup([string[]]$ArgList) {
         & pwsh -NoProfile -File $script:Script @ArgList 2>&1 | Out-String

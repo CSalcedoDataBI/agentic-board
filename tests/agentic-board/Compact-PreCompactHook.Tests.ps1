@@ -8,7 +8,7 @@
     FIXED clock so the name is deterministic. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Compact-PreCompactHook.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Compact-PreCompactHook.ps1' | Resolve-Path
     $env:ABIOS_PRECOMPACT_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_PRECOMPACT_DOTSOURCE = ''

@@ -17,7 +17,7 @@
 BeforeDiscovery {
     # Discovery-time on purpose: it gives one `It` per script, so a failure names the file in the
     # test name instead of hiding inside one aggregate assertion.
-    $script:ScriptRoot = Join-Path $PSScriptRoot '..' | Resolve-Path
+    $script:ScriptRoot = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' | Resolve-Path
     $script:ScriptFiles = @(
         Get-ChildItem -Path (Join-Path $script:ScriptRoot 'scripts') -Filter '*.ps1' -File -ErrorAction SilentlyContinue
         Get-ChildItem -Path (Join-Path $script:ScriptRoot 'hooks')   -Filter '*.ps1' -File -ErrorAction SilentlyContinue

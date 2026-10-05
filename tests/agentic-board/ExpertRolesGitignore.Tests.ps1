@@ -10,7 +10,7 @@
     repository - never by grepping .gitignore for the expected text. Nothing is mocked. #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $env:ABIOS_EXPERTROLES_DOTSOURCE = '1'
     . (Join-Path $script:Scripts 'ExpertRolesIo.ps1')
     $env:ABIOS_EXPERTROLES_DOTSOURCE = ''

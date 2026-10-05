@@ -13,16 +13,16 @@
 
 # --- discovery scope: -ForEach cases ------------------------------------------
 $CommandCases = @(
-    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'commands') -Filter '*.md' |
+    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'commands') -Filter '*.md' |
         ForEach-Object { @{ Name = $_.Name; Path = $_.FullName } }
 )
 $ScriptCases = @(
-    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'scripts') -Filter '*.ps1' |
+    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts') -Filter '*.ps1' |
         Where-Object { $_.Name -ne 'Find-InternalVocabularyLeak.ps1' } |
         ForEach-Object { @{ Name = $_.Name; Path = $_.FullName } }
 )
 $SkillCases = @(
-    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'skills') -Directory | ForEach-Object {
+    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills') -Directory | ForEach-Object {
         $md = Join-Path $_.FullName 'SKILL.md'
         if ((Test-Path $md) -and ((Get-Content -LiteralPath $md -Raw) -match '(?m)^\s*user-invocable:\s*false\s*$')) {
             @{ Skill = $_.Name }
@@ -31,14 +31,14 @@ $SkillCases = @(
 )
 
 BeforeAll {
-    $script:CommandsDir  = Join-Path $PSScriptRoot '..' 'commands'
+    $script:CommandsDir  = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'commands'
     $script:CommandFiles = @(Get-ChildItem -Path $script:CommandsDir -Filter '*.md')
     $script:RealCommands = @($script:CommandFiles.BaseName)
     $env:ABIOS_VOCABLEAK_DOTSOURCE = '1'
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
     $env:ABIOS_VOCABLEAK_DOTSOURCE = ''
     $script:InternalSkills = @(
-        Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'skills') -Directory | ForEach-Object {
+        Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills') -Directory | ForEach-Object {
             $md = Join-Path $_.FullName 'SKILL.md'
             if ((Test-Path $md) -and ((Get-Content -LiteralPath $md -Raw) -match '(?m)^\s*user-invocable:\s*false\s*$')) { $_.Name }
         }
@@ -84,7 +84,7 @@ Describe 'Command surface - engines opened by path (#763)' {
     # context, but the model can no longer reach it through the Skill tool. The command that owns it
     # must therefore open it by path, and that path must exist - otherwise the verb silently breaks.
     BeforeAll {
-        $script:PluginDir = Split-Path -Parent $PSScriptRoot
+        $script:PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '../../plugins/agentic-board')).Path
         $script:Engines = @(Get-ChildItem -Path (Join-Path $script:PluginDir 'skills') -Directory | Where-Object {
             $f = Join-Path $_.FullName 'SKILL.md'
             (Test-Path $f) -and ((Get-Content -LiteralPath $f -TotalCount 12) -match '^disable-model-invocation:\s*true\s*$')
@@ -137,7 +137,7 @@ Describe 'Command surface — every command ends with the closing summary (#493)
         stops mid-thought. The expected headings are read from the renderer itself, so this test
         can never drift into being a second, stale copy of the contract. #>
     BeforeAll {
-        $summaryScript = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Summary.ps1' | Resolve-Path
+        $summaryScript = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Summary.ps1' | Resolve-Path
         $prev = $env:ABIOS_BOARDSUMMARY_DOTSOURCE
         $env:ABIOS_BOARDSUMMARY_DOTSOURCE = '1'
         try { . $summaryScript } finally { $env:ABIOS_BOARDSUMMARY_DOTSOURCE = $prev }
@@ -241,7 +241,7 @@ Describe 'Command surface — verb and flag names are English (#733)' {
                     if ($l -match '^\s*\d+\.\s+([a-z][a-z0-9-]+)') { [pscustomobject]@{ Where = "$($cmd.Name) menu"; Name = $matches[1] } }
                 }
             }
-            foreach ($ps in (Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'scripts') -Filter '*.ps1')) {
+            foreach ($ps in (Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts') -Filter '*.ps1')) {
                 $ast = [System.Management.Automation.Language.Parser]::ParseFile($ps.FullName, [ref]$null, [ref]$null)
                 if ($ast.ParamBlock) {
                     foreach ($p in $ast.ParamBlock.Parameters) {
@@ -278,9 +278,9 @@ Describe 'Command surface — verb and flag names are English (#733)' {
 # --- discovery scope: every frontmatter the client parses as YAML (#677) --------
 $FrontmatterCases = @(
     foreach ($pattern in @(
-            (Join-Path $PSScriptRoot '..' 'commands' '*.md'),
-            (Join-Path $PSScriptRoot '..' 'skills' '*' 'SKILL.md'),
-            (Join-Path $PSScriptRoot '..' 'agents' '*.md'))) {
+            (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'commands' '*.md'),
+            (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills' '*' 'SKILL.md'),
+            (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'agents' '*.md'))) {
         Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
             ForEach-Object { @{ Name = "$($_.Directory.Name)/$($_.Name)"; Path = $_.FullName } }
     }

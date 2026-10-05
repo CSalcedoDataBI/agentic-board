@@ -14,7 +14,7 @@
     `-Exactly` is the assertion.) #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Resolve-Board.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Resolve-Board.ps1' | Resolve-Path
 }
 
 Describe 'Resolve-Board fails closed when the board-list read fails (#313)' {

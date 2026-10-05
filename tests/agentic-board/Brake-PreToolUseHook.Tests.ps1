@@ -12,7 +12,7 @@
       - marker + anything unclear -> deny. Inside an armed run, "I could not tell" is not a yes. #>
 
 BeforeAll {
-    $script:Hook = Join-Path $PSScriptRoot '..' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
+    $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
     $script:Root = Join-Path ([System.IO.Path]::GetTempPath()) ("brakehook-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
 
@@ -243,8 +243,8 @@ Describe 'Budget-only marker - a contract that does not brake on merge still get
 
 Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767)' {
     BeforeAll {
-        $script:PreCheck = Join-Path $PSScriptRoot '..' 'scripts' 'Brake-PreCheck.sh' | Resolve-Path
-        $script:HooksJson = Get-Content (Join-Path $PSScriptRoot '..' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json
+        $script:PreCheck = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-PreCheck.sh' | Resolve-Path
+        $script:HooksJson = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json
     }
 
     It 'hooks.json routes PreToolUse through the sh shim, not straight into pwsh' {
@@ -253,11 +253,35 @@ Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767)' 
         $cmd | Should -Match 'Brake-PreCheck\.sh'
         $cmd | Should -Not -Match 'Brake-PreToolUseHook\.ps1'
     }
-    It 'the shim walks the working dir plus three ancestors' {
+    It 'the shim walks the working dir plus three ancestors, without naming a parent path (#768)' {
         $body = Get-Content $script:PreCheck -Raw
-        $body | Should -Match ([regex]::Escape('for d in . .. ../.. ../../..; do'))
+        $body | Should -Match ([regex]::Escape('while [ "$n" -lt 4 ]'))
         $body | Should -Match ([regex]::Escape('$d/.agentic-board/brake-armed.json'))
         $body | Should -Match 'Brake-PreToolUseHook\.ps1'
+        # The directory validator blocks a plugin command that spells a path above the plugin.
+        ($body -split "`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n" | Should -Not -Match '\.\.'
+    }
+    It 'finds a marker three levels up (cwd + 3 ancestors) and not four' {
+        $three = Join-Path $TestDrive 'depth3'
+        $deep  = Join-Path $three 'a' 'b' 'c'
+        New-Item -ItemType Directory -Path (Join-Path $three '.agentic-board') -Force | Out-Null
+        New-Item -ItemType Directory -Path $deep -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $three '.agentic-board' 'brake-armed.json') -Encoding UTF8 -Value '{"issue":5,"irreversible":["merge"],"endToEnd":false}'
+        $shim = "$($script:PreCheck)".Replace('\', '/')
+        Push-Location $deep
+        try {
+            # Empty PATH: when the marker is found the shim denies (no pwsh), which proves it saw it.
+            $found = (& sh -c "PATH=/nonexistent-768; export PATH; . '$shim'" 2>&1 | Out-String)
+            $found | Should -Match '"permissionDecision":"deny"'
+        } finally { Pop-Location }
+        $tooDeep = Join-Path $deep 'd'
+        New-Item -ItemType Directory -Path $tooDeep -Force | Out-Null
+        Push-Location $tooDeep
+        try {
+            $none = (& sh -c "PATH=/nonexistent-768; export PATH; . '$shim'" 2>&1 | Out-String).Trim()
+            $none | Should -BeNullOrEmpty
+            $LASTEXITCODE | Should -Be 0
+        } finally { Pop-Location }
     }
     It 'without a marker it exits 0 fast and NEVER starts pwsh' {
         $wt = Join-Path $TestDrive 'clean-dir'

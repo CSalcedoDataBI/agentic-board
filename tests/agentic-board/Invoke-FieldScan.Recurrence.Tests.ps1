@@ -10,7 +10,7 @@
     filed issues supplied through -CandidatesFile - the offline path, so no GitHub, no token.  #>
 
 BeforeAll {
-    $script:Scan = Join-Path $PSScriptRoot '..' 'scripts' 'Invoke-FieldScan.ps1' | Resolve-Path
+    $script:Scan = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Invoke-FieldScan.ps1' | Resolve-Path
     $script:Tmp  = Join-Path ([System.IO.Path]::GetTempPath()) ('fs-rec-' + [guid]::NewGuid().ToString('N'))
     $script:Proj = Join-Path $script:Tmp 'projects'
     $script:Field = Join-Path $script:Tmp 'field'

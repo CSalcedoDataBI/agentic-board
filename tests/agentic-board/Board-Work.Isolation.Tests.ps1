@@ -13,7 +13,7 @@ BeforeAll {
         $root = New-Item -ItemType Directory -Force -Path (Join-Path ([System.IO.Path]::GetTempPath()) "abios-drive-C-$PID")
         New-PSDrive -Name C -PSProvider FileSystem -Root $root.FullName -Scope Global | Out-Null
     }
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
@@ -116,7 +116,7 @@ Describe 'the session briefing tells the agent to commit with an explicit pathsp
         }
     }
     It 'the shared skill reference documents the same rule where step 5 commits' {
-        $ref = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' 'skills' 'projects-admin' 'references' 'verbs-work.md') -Raw
+        $ref = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills' 'projects-admin' 'references' 'verbs-work.md') -Raw
         ($ref -match 'explicit\s+pathspec') | Should -BeTrue
     }
 }

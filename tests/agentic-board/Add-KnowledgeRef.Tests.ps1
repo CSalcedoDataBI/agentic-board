@@ -3,7 +3,7 @@
     regenerates the table, enforces the domain guard and the local-path-exists guard,
     infers type, and increments ids. #>
 BeforeAll {
-    $script:Engine = Join-Path $PSScriptRoot '..' 'scripts' 'Add-KnowledgeRef.ps1' | Resolve-Path
+    $script:Engine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Add-KnowledgeRef.ps1' | Resolve-Path
     function New-Root { Join-Path ([IO.Path]::GetTempPath()) ("knadd-" + [guid]::NewGuid().ToString('N')) }
 }
 

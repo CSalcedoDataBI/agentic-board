@@ -5,7 +5,7 @@
 #>
 
 BeforeAll {
-    $script:Show = Join-Path $PSScriptRoot '..' 'scripts' 'Show-ToolsCatalog.ps1'
+    $script:Show = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Show-ToolsCatalog.ps1'
 
     $script:Root = Join-Path $TestDrive 'proj'
     $regDir = Join-Path $script:Root 'knowledge'; New-Item -ItemType Directory -Force -Path $regDir | Out-Null

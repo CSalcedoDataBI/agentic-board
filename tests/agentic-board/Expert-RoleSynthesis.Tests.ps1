@@ -6,7 +6,7 @@
     render the role-as-objective block. Pure (no gh) behind ABIOS_EXPERTROLE_DOTSOURCE. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-RoleSynthesis.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-RoleSynthesis.ps1' | Resolve-Path
     $env:ABIOS_EXPERTROLE_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTROLE_DOTSOURCE = ''
@@ -21,7 +21,7 @@ BeforeAll {
     # whatever `.agentic-board/roles.json` the working directory happens to hold — so adding a
     # local role to any project broke the plugin's own suite. A unit test of the classification
     # logic must not depend on the checkout it runs in.
-    $presets = Join-Path $PSScriptRoot '..' 'presets' 'roles.json' | Resolve-Path
+    $presets = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'roles.json' | Resolve-Path
     $pj = Get-Content -Raw -LiteralPath $presets | ConvertFrom-Json
     $script:Factory = @{
         qualityProfile = @($pj.qualityProfile)

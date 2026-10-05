@@ -8,7 +8,7 @@
     fake that fails must never read as up to date.  #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . (Join-Path $script:Scripts 'Board-Work.ps1')
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''

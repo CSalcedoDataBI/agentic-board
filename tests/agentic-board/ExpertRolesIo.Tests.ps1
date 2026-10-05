@@ -4,7 +4,7 @@
     (no gh) behind ABIOS_EXPERTROLES_DOTSOURCE. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'ExpertRolesIo.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'ExpertRolesIo.ps1' | Resolve-Path
     $env:ABIOS_EXPERTROLES_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTROLES_DOTSOURCE = ''

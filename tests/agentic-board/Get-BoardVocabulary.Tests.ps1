@@ -4,7 +4,7 @@
     silently invisible to /board work, and /board field apply could not migrate it). #>
 
 BeforeAll {
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'Get-BoardVocabulary.ps1' | Resolve-Path)
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-BoardVocabulary.ps1' | Resolve-Path)
 }
 
 Describe 'Get-CanonicalOptionNames' {

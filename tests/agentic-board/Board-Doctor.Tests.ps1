@@ -14,7 +14,7 @@
     now covers every script in the plugin, in Scripts.Parse.Tests.ps1 (#282). #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Doctor.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Doctor.ps1' | Resolve-Path
     # The doctor dot-sources Board-Work.ps1 for Get-SessionCompletion; both guards must be set
     # so neither script runs its main entry (or demands a token).
     $env:ABIOS_DOCTOR_DOTSOURCE   = '1'
@@ -59,7 +59,7 @@ Describe 'Board-Doctor parameter binding survives the dot-source' {
     # `-Fix -DryRun` printed "DRY-RUN" and then really deleted branches. Caught by running it.
     It 'shares parameter names with Board-Work, so the clobbering risk is real and must stay covered' {
         $doctor = (Get-Command $script:Script).Parameters.Keys
-        $work   = (Get-Command (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path)).Parameters.Keys
+        $work   = (Get-Command (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path)).Parameters.Keys
         $shared = @($doctor | Where-Object { $work -contains $_ -and $_ -notin [System.Management.Automation.PSCmdlet]::CommonParameters })
         # If this ever drops to zero the restore is dead code and can go; today it is not.
         $shared | Should -Contain 'DryRun'

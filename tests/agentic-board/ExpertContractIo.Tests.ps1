@@ -6,7 +6,7 @@
     on-disk contract still resolve every key (so `auto` never hits a missing setting). #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'ExpertContractIo.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'ExpertContractIo.ps1' | Resolve-Path
     $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTCONTRACT_DOTSOURCE = ''

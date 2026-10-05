@@ -108,10 +108,9 @@ jobs:
           #     counts only the people who take the zip. It is a secondary, partial signal — NOT an
           #     install count. The durable adoption measure is the traffic snapshot, not this.
           #
-          # tests/ is excluded: it is the CI suite, dead weight in an install artifact.
+          # The test suite lives in tests/agentic-board/, outside the plugin folder (#768).
           set -euo pipefail
-          zip -q -r "agentic-board-$TAG.zip" plugins/agentic-board \
-            -x 'plugins/agentic-board/tests/*'
+          zip -q -r "agentic-board-$TAG.zip" plugins/agentic-board
 
           # Assert rather than just print. This step runs BEFORE the release is created, so a
           # failure here means no release is published at all — which is the safe direction. Without

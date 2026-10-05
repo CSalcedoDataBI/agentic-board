@@ -6,7 +6,7 @@
     so the developer's own ~/.agentic-board/accounts.json never leaks into a verdict.  #>
 
 BeforeAll {
-    $script:ScriptDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts'
+    $script:ScriptDir = Join-Path ((Resolve-Path (Join-Path $PSScriptRoot '../../plugins/agentic-board')).Path) 'scripts'
     $script:SavedFile = $env:ABIOS_ACCOUNTS_FILE
     . (Join-Path $script:ScriptDir 'Get-AbiosAccounts.ps1')
     function script:Write-Map([string]$Json) {
@@ -86,7 +86,7 @@ Describe 'Get-AbiosDefaultOwner (#762)' {
 
 Describe 'Nothing account-specific ships in the plugin (#762)' {
     It 'no script or skill hard-codes a default owner login' {
-        $root = Split-Path -Parent $PSScriptRoot
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '../../plugins/agentic-board')).Path
         $hits = @(Get-ChildItem -Path (Join-Path $root 'scripts') -Filter *.ps1 |
             Select-String -Pattern '\[string\]\$Owner\s*=\s*[''"][A-Za-z0-9]' |
             ForEach-Object { "$($_.Filename):$($_.LineNumber)" })

@@ -12,7 +12,7 @@
     Design: each guard is verified by its exact success and failure conditions. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-ClaimsGate.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-ClaimsGate.ps1' | Resolve-Path
     $env:ABIOS_EXPERTCLAIMSGATE_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTCLAIMSGATE_DOTSOURCE = ''

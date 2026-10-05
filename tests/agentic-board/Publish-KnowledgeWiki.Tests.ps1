@@ -11,9 +11,9 @@
     The page-generation internals are tested exhaustively in Publish-DocsWiki.Tests.ps1.
 #>
 BeforeAll {
-    $script:Engine     = Join-Path $PSScriptRoot '..' 'scripts' 'Publish-KnowledgeWiki.ps1' | Resolve-Path
-    $script:DocsEngine = Join-Path $PSScriptRoot '..' 'scripts' 'Publish-DocsWiki.ps1'     | Resolve-Path
-    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
+    $script:Engine     = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Publish-KnowledgeWiki.ps1' | Resolve-Path
+    $script:DocsEngine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Publish-DocsWiki.ps1'     | Resolve-Path
+    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
 
     function New-KnRoot {
         $root = Join-Path ([IO.Path]::GetTempPath()) ("knwiki-t-" + [guid]::NewGuid().ToString('N'))

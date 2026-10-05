@@ -11,13 +11,13 @@
 
 BeforeAll {
     $env:ABIOS_BRAKEGUARD_DOTSOURCE = '1'
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'Brake-Guard.ps1' | Resolve-Path)
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-Guard.ps1' | Resolve-Path)
     $env:ABIOS_BRAKEGUARD_DOTSOURCE = ''
     $env:ABIOS_FLEETSUPERVISOR_DOTSOURCE = '1'
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'Fleet-Supervisor.ps1' | Resolve-Path)
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Fleet-Supervisor.ps1' | Resolve-Path)
     $env:ABIOS_FLEETSUPERVISOR_DOTSOURCE = ''
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path)
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path)
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
 
     function script:New-ArmedDir {

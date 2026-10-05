@@ -6,7 +6,7 @@
     live sessions protect their files at any age, and durable/unrecognized files never leave. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Clear-AbiosState.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Clear-AbiosState.ps1' | Resolve-Path
     $env:ABIOS_CLEARSTATE_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_CLEARSTATE_DOTSOURCE = ''

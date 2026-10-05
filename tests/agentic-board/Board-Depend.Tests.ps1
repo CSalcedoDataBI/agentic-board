@@ -12,7 +12,7 @@
     Everything above the seam (Invoke-Gh's parsing, the resolver, the verifier) is the real code.  #>
 
 BeforeAll {
-    $script:ScriptPath = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Depend.ps1' | Resolve-Path
+    $script:ScriptPath = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Depend.ps1' | Resolve-Path
     $env:ABIOS_BOARDDEPEND_DOTSOURCE = '1'
     . $script:ScriptPath
     $env:ABIOS_BOARDDEPEND_DOTSOURCE = $null

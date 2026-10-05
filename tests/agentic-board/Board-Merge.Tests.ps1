@@ -21,8 +21,8 @@
     cause. (Same failure family as the -DryRun incident: dot-sourcing clobbers your parameters.)  #>
 
 BeforeAll {
-    $script:MergePath = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Merge.ps1' | Resolve-Path
-    $script:GatePath  = Join-Path $PSScriptRoot '..' 'scripts' 'Board-ReviewGate.ps1' | Resolve-Path
+    $script:MergePath = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Merge.ps1' | Resolve-Path
+    $script:GatePath  = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-ReviewGate.ps1' | Resolve-Path
 
     $tokens = $null; $errors = $null
     $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile(

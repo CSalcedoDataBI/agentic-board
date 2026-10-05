@@ -16,7 +16,7 @@ BeforeDiscovery {
     # Discovery-time on purpose: one `It` per plugin entry, so a failure names the offending
     # plugin in the test name instead of hiding inside one aggregate assertion.
     #   tests/ -> agentic-board/ -> plugins/ -> repo root
-    $script:RepoRoot = Join-Path $PSScriptRoot '..' '..' '..' | Resolve-Path
+    $script:RepoRoot = Join-Path $PSScriptRoot '..' '..' | Resolve-Path
     $script:MarketplacePath = Join-Path $script:RepoRoot '.claude-plugin' 'marketplace.json'
 
     $script:PluginEntries = @()
@@ -40,12 +40,12 @@ BeforeDiscovery {
 
 Describe 'marketplace.json plugin structure' {
     It 'the marketplace manifest exists at the repo root' {
-        $script:MarketplacePath = Join-Path (Join-Path $PSScriptRoot '..' '..' '..' | Resolve-Path) '.claude-plugin' 'marketplace.json'
+        $script:MarketplacePath = Join-Path (Join-Path $PSScriptRoot '..' '..' | Resolve-Path) '.claude-plugin' 'marketplace.json'
         Test-Path $script:MarketplacePath | Should -BeTrue
     }
 
     It 'the manifest is valid JSON with at least one plugin entry' {
-        $mp = Join-Path (Join-Path $PSScriptRoot '..' '..' '..' | Resolve-Path) '.claude-plugin' 'marketplace.json'
+        $mp = Join-Path (Join-Path $PSScriptRoot '..' '..' | Resolve-Path) '.claude-plugin' 'marketplace.json'
         $manifest = Get-Content $mp -Raw | ConvertFrom-Json
         @($manifest.plugins).Count | Should -BeGreaterThan 0
     }

@@ -4,8 +4,8 @@
     no when-not clause) so the classifier's findings can be asserted. #>
 
 BeforeAll {
-    $script:Audit    = Join-Path $PSScriptRoot '..' 'scripts' 'Invoke-SkillAudit.ps1'   | Resolve-Path
-    $script:Resolver = Join-Path $PSScriptRoot '..' 'scripts' 'Resolve-SkillOwner.ps1'  | Resolve-Path
+    $script:Audit    = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Invoke-SkillAudit.ps1'   | Resolve-Path
+    $script:Resolver = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Resolve-SkillOwner.ps1'  | Resolve-Path
     $script:Root     = Join-Path ([System.IO.Path]::GetTempPath()) ("skillaudit-" + [guid]::NewGuid().ToString('N'))
 
     function New-Skill {

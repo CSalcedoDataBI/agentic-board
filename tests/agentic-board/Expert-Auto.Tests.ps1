@@ -6,7 +6,7 @@
     machinery, and ENFORCEMENT lives in the PreToolUse hook (Brake-Guard). #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-Auto.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-Auto.ps1' | Resolve-Path
     $env:ABIOS_EXPERTAUTO_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTAUTO_DOTSOURCE = ''

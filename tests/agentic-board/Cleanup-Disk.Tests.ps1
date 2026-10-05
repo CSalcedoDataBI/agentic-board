@@ -8,7 +8,7 @@
 
 BeforeAll {
     $env:ABIOS_DISK_DOTSOURCE = '1'
-    try { . (Join-Path $PSScriptRoot '..' 'scripts' 'Cleanup-Disk.ps1' | Resolve-Path) }
+    try { . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Cleanup-Disk.ps1' | Resolve-Path) }
     finally { $env:ABIOS_DISK_DOTSOURCE = '' }
     function script:Snap([string]$Sid = 's1', [long]$Bytes = 100, [string]$Head = 'AAA') {
         [pscustomobject]@{ SessionId = $Sid; Bytes = $Bytes; Head = $Head }

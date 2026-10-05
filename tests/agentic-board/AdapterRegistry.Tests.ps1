@@ -15,8 +15,8 @@
     No CLI runs and nothing touches the network; every override lives in $TestDrive.  #>
 
 BeforeAll {
-    $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
-    $script:Preset    = Join-Path $PSScriptRoot '..' 'presets' 'adapters.json' | Resolve-Path
+    $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
+    $script:Preset    = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'adapters.json' | Resolve-Path
     # Hermetic: the default tiers point at files that do not exist.
     $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
     $env:ABIOS_ADAPTERS_REPO_FILE = Join-Path $TestDrive 'no-repo-adapters.json'

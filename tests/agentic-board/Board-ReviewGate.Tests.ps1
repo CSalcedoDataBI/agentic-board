@@ -8,7 +8,7 @@
     the known limitation (a commit with no PR of its own is invisible) is asserted, not papered over. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-ReviewGate.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-ReviewGate.ps1' | Resolve-Path
     $env:ABIOS_REVIEWGATE_DOTSOURCE = '1'
     . $script:Script -Repo 'owner/repo'    # -Repo is Mandatory; the guard returns before it is used
     $env:ABIOS_REVIEWGATE_DOTSOURCE = ''

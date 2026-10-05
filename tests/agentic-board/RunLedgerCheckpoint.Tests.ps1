@@ -9,7 +9,7 @@
          exactly as before. gh is mocked throughout (Invoke-Gh); nothing touches the network. #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     . (Join-Path $script:Scripts 'RunLedgerCheckpoint.ps1')
 
     $script:T0 = [datetime]'2026-10-02T10:00:00Z'

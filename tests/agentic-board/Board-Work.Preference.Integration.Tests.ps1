@@ -10,7 +10,7 @@
     .agentic-board/config.json is never touched. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
 
     function New-ThrowawayRepo {
         param([string]$Name)

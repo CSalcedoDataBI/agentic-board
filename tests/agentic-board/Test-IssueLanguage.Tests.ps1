@@ -13,7 +13,7 @@
     161 clean, highest English title score 0, highest English body score 2. #>
 
 BeforeAll {
-    $script:ScriptPath = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'Test-IssueLanguage.ps1' |
+    $script:ScriptPath = Join-Path $PSScriptRoot '..' '..' 'scripts' 'Test-IssueLanguage.ps1' |
         Resolve-Path
     $env:ABIOS_ISSUELANG_DOTSOURCE = '1'
     . $script:ScriptPath

@@ -14,7 +14,7 @@
 
 BeforeAll {
     $env:ABIOS_VOCABLEAK_DOTSOURCE = '1'
-    . (Join-Path $PSScriptRoot '..' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
     $env:ABIOS_VOCABLEAK_DOTSOURCE = ''
     $script:Spanish = '(?i)[áéíóúñ¿¡]|\b(que|para|los|las|una|unos|sin|con|esta|pude|puedo|hay|rama|ramas|sesion|sesiones|borrar|limpiar|todavia|tambien|aqui|ningun|ninguna|nada|corre|revisa|listo|lista|quedo|sigue|siguen|mas|dias|hecho|cambio|cambios|abiertos|pendientes|borrador|omitido|conservo|conserva)\b'
     # Frozen 2026-09-29 at 371 messages in 32 files; all translated in #751. It stays empty: a
@@ -31,7 +31,7 @@ Describe 'Console output is English (ratchet over the Spanish still printed)' {
         'Could not list the PRs' | Should -Not -Match $script:Spanish
     }
     It 'every script matches its frozen count of Spanish messages EXACTLY' {
-        $violations = foreach ($f in Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'scripts') -Filter '*.ps1') {
+        $violations = foreach ($f in Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts') -Filter '*.ps1') {
             $count = script:Get-SpanishCount $f.FullName
             $allowed = if ($script:Baseline.ContainsKey($f.Name)) { $script:Baseline[$f.Name] } else { 0 }
             if ($count -gt $allowed) { "{0}: {1} Spanish message(s), baseline {2} - write new console output in English (the agent translates for the user)" -f $f.Name, $count, $allowed }
@@ -44,7 +44,7 @@ Describe 'Console output is English (ratchet over the Spanish still printed)' {
     }
     It 'the cleanup scripts, written under this rule, print no Spanish at all' {
         foreach ($n in 'Cleanup-Sessions.ps1', 'Cleanup-Transcripts.ps1', 'Cleanup-Disk.ps1') {
-            script:Get-SpanishCount (Join-Path $PSScriptRoot '..' 'scripts' $n) | Should -Be 0 -Because "$n was written after the English-output rule"
+            script:Get-SpanishCount (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' $n) | Should -Be 0 -Because "$n was written after the English-output rule"
             $script:Baseline.ContainsKey($n) | Should -BeFalse
         }
     }

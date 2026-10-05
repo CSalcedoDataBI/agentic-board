@@ -16,7 +16,7 @@ BeforeAll {
     # The identity tests run against a FIXED account map, never the developer's own (#762).
     $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
     $env:ABIOS_ACCOUNTS_FILE = Join-Path $PSScriptRoot 'fixtures' 'accounts.identity.json'
-    $script:ScriptDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $env:ABIOS_TOKENVAR_DOTSOURCE = '1'
     . (Join-Path $script:ScriptDir 'Resolve-GhTokenVar.ps1')
     . (Join-Path $script:ScriptDir 'Invoke-Gh.ps1')

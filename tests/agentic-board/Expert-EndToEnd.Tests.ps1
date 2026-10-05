@@ -6,7 +6,7 @@
     cannot collapse into one flag. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-EndToEnd.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-EndToEnd.ps1' | Resolve-Path
     $env:ABIOS_ENDTOEND_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_ENDTOEND_DOTSOURCE = ''

@@ -7,7 +7,7 @@
     caller. A review of #693 said exactly that. These pin the wording in the rendered brief. #>
 
 BeforeAll {
-    $script:ScriptsDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:ScriptsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
     $env:ABIOS_EXPERTAUTO_DOTSOURCE = '1'
     . (Join-Path $script:ScriptsDir 'Expert-Auto.ps1')
     $env:ABIOS_EXPERTAUTO_DOTSOURCE = ''

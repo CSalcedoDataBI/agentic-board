@@ -8,7 +8,7 @@
     reads ~/.claude and -Recover needs no token and no network. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Handoff.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Handoff.ps1' | Resolve-Path
     $env:ABIOS_HANDOFF_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_HANDOFF_DOTSOURCE = ''

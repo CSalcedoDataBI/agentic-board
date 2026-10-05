@@ -14,7 +14,7 @@
     code and architecture reference, route users to DeepWiki instead.
 #>
 BeforeAll {
-    $script:Engine = Join-Path $PSScriptRoot '..' 'scripts' 'Publish-DocsWiki.ps1' | Resolve-Path
+    $script:Engine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Publish-DocsWiki.ps1' | Resolve-Path
 
     # Helper: run the script in -PagesOnly mode and return a hashtable of page-name -> content
     function Invoke-PagesOnly {
@@ -51,7 +51,7 @@ BeforeAll {
 Describe 'Publish-DocsWiki — page set' {
     BeforeAll {
         # Use the real README.md from the repo root (three levels up from tests/)
-        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
         $script:Out      = Join-Path ([IO.Path]::GetTempPath()) ("docswiki-out-" + [guid]::NewGuid().ToString('N'))
         $script:Pages    = Invoke-PagesOnly -Root $script:RepoRoot -OutDir $script:Out
     }
@@ -84,7 +84,7 @@ Describe 'Publish-DocsWiki — page set' {
 # ─────────────────────────────────────────────────────────────────────────────────────
 Describe 'Publish-DocsWiki — Docs-Home content' {
     BeforeAll {
-        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
         $script:Out      = Join-Path ([IO.Path]::GetTempPath()) ("docswiki-home-" + [guid]::NewGuid().ToString('N'))
         $script:Pages    = Invoke-PagesOnly -Root $script:RepoRoot -OutDir $script:Out
         $script:DocsHomePage = $script:Pages['Docs-Home']
@@ -125,7 +125,7 @@ Describe 'Publish-DocsWiki — Docs-Home content' {
 # ─────────────────────────────────────────────────────────────────────────────────────
 Describe 'Publish-DocsWiki — knowledge registry pages' {
     BeforeAll {
-        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
         $script:Out      = Join-Path ([IO.Path]::GetTempPath()) ("docswiki-kn-" + [guid]::NewGuid().ToString('N'))
         $script:Pages    = Invoke-PagesOnly -Root $script:RepoRoot -OutDir $script:Out
         # Determine whether the registry is present and its domains
@@ -178,7 +178,7 @@ Describe 'Publish-DocsWiki — knowledge registry pages' {
 # ─────────────────────────────────────────────────────────────────────────────────────
 Describe 'Publish-DocsWiki — _Sidebar content' {
     BeforeAll {
-        $script:RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
+        $script:RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
         $script:Out       = Join-Path ([IO.Path]::GetTempPath()) ("docswiki-sidebar-" + [guid]::NewGuid().ToString('N'))
         $script:Pages     = Invoke-PagesOnly -Root $script:RepoRoot -OutDir $script:Out
         $script:SidebarPage = $script:Pages['_Sidebar']
@@ -226,7 +226,7 @@ Describe 'Publish-DocsWiki — _Sidebar content' {
 # ─────────────────────────────────────────────────────────────────────────────────────
 Describe 'Publish-DocsWiki — _Footer content' {
     BeforeAll {
-        $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
+        $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
         $script:Out        = Join-Path ([IO.Path]::GetTempPath()) ("docswiki-footer-" + [guid]::NewGuid().ToString('N'))
         $script:Pages      = Invoke-PagesOnly -Root $script:RepoRoot -OutDir $script:Out
         $script:FooterPage = $script:Pages['_Footer']
@@ -256,7 +256,7 @@ Describe 'Publish-DocsWiki — error cases' {
     }
 
     It 'throws when -PagesOnly is given without -OutDir' {
-        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
         { & $script:Engine -Root $root -PagesOnly } | Should -Throw -ExpectedMessage '*-PagesOnly requires -OutDir*'
     }
 }
@@ -264,7 +264,7 @@ Describe 'Publish-DocsWiki — error cases' {
 # ─────────────────────────────────────────────────────────────────────────────────────
 Describe 'Publish-DocsWiki — uninitialized wiki error' {
     BeforeAll {
-        $script:UninitRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..'))
+        $script:UninitRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
         $script:PriorGit   = Get-Item 'Function:git' -ErrorAction SilentlyContinue
         $script:PriorGh    = Get-Item 'Function:gh'  -ErrorAction SilentlyContinue
 

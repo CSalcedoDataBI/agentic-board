@@ -13,7 +13,7 @@
     as call sites, and every phantom allowance was headroom a real new call could hide under). #>
 
 BeforeAll {
-    $script:ScriptsDir = Join-Path $PSScriptRoot '..' 'scripts' | Resolve-Path
+    $script:ScriptsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
 
     function script:Get-RawGhCount {
         param([string]$Path)

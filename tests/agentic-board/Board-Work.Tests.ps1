@@ -19,7 +19,7 @@ BeforeAll {
             }
         }
     }
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
     # Hermetic adapter registry (#772): never read this machine's ~/.agentic-board/adapters.json
     # or the repo's .agentic-board/adapters.json - only the shipped preset.
     $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'
@@ -2654,7 +2654,7 @@ Describe 'Get-CloseLoopDisposition (close-cycle router #302/#650)' {
         # text any more. Reuses the #494 detector so this stays true even if the codebase grows
         # a new banned pattern later.
         $env:ABIOS_VOCABLEAK_DOTSOURCE = '1'
-        . (Join-Path $PSScriptRoot '..' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
+        . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
         $env:ABIOS_VOCABLEAK_DOTSOURCE = ''
         $prMerged = [pscustomobject]@{ number = 1; state = 'MERGED'; merged = $true }
         $prAdv    = [pscustomobject]@{ number = 2; state = 'MERGED'; merged = $false }

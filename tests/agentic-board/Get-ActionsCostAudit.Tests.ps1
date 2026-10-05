@@ -13,7 +13,7 @@
       - the audit writes nothing: every gh call is a plain GET. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Get-ActionsCostAudit.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-ActionsCostAudit.ps1' | Resolve-Path
     $env:ABIOS_ACTIONSCOST_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_ACTIONSCOST_DOTSOURCE = ''
@@ -137,7 +137,7 @@ steps:
     }
 
     It 'parses every workflow this repository actually ships (the real-world smoke test)' {
-        $dir = Join-Path $PSScriptRoot '..' '..' '..' '.github' 'workflows'
+        $dir = Join-Path $PSScriptRoot '..' '..' '.github' 'workflows'
         $files = @(Get-ChildItem -LiteralPath $dir -Filter '*.yml')
         $files.Count | Should -BeGreaterThan 0
         foreach ($f in $files) {
@@ -994,7 +994,7 @@ Describe 'Read-only by construction' {
 
 Describe 'Command surface - the verb is routed and documented (#614)' {
     BeforeAll {
-        $plugin = Join-Path $PSScriptRoot '..' | Resolve-Path
+        $plugin = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' | Resolve-Path
         $script:Board = Get-Content (Join-Path $plugin 'commands' 'board.md') -Raw
         $script:Skill = Get-Content (Join-Path $plugin 'skills' 'projects-admin' 'SKILL.md') -Raw
         $script:RefPath = Join-Path $plugin 'skills' 'projects-admin' 'references' 'verbs-actions-cost.md'

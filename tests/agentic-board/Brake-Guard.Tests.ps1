@@ -6,7 +6,7 @@
     matter are the ones asserting a REFUSAL happens, not that a string was rendered. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Brake-Guard.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-Guard.ps1' | Resolve-Path
     $env:ABIOS_BRAKEGUARD_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BRAKEGUARD_DOTSOURCE = $null
@@ -420,7 +420,7 @@ Describe 'New-BrakeDenyJson — the payload the hook contract requires' {
 
 Describe 'Brake-PreToolUseHook — end to end through the real hook contract' {
     BeforeAll {
-        $script:Hook = Join-Path $PSScriptRoot '..' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
+        $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
         $script:HRoot  = Join-Path ([IO.Path]::GetTempPath()) ("brakehook-" + [Guid]::NewGuid().ToString('N'))
         $script:HArmed = Join-Path $script:HRoot 'armed'
         $script:HPlain = Join-Path $script:HRoot 'plain'

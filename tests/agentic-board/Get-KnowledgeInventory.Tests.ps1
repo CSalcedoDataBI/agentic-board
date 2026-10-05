@@ -3,7 +3,7 @@
     local path, a duplicate ref, an orphan domain and a missing note, then asserts the
     health contract. Also asserts the empty-registry seed path. #>
 BeforeAll {
-    $script:Engine = Join-Path $PSScriptRoot '..' 'scripts' 'Get-KnowledgeInventory.ps1' | Resolve-Path
+    $script:Engine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-KnowledgeInventory.ps1' | Resolve-Path
     $script:Root   = Join-Path ([IO.Path]::GetTempPath()) ("kninv-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path (Join-Path $script:Root 'knowledge') -Force | Out-Null
     New-Item -ItemType File -Path (Join-Path $script:Root 'real.md') -Force | Out-Null

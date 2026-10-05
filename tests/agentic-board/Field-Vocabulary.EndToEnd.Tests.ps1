@@ -9,8 +9,8 @@
     "which field id did the write go to" is read from the `item-edit` line, not inferred. #>
 
 BeforeAll {
-    $script:Triage = (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Triage.ps1' | Resolve-Path).Path
-    $script:Fill   = (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Fill.ps1'   | Resolve-Path).Path
+    $script:Triage = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Triage.ps1' | Resolve-Path).Path
+    $script:Fill   = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Fill.ps1'   | Resolve-Path).Path
     $script:Ntilde = [string][char]0x00F1
     $script:Aacute = [string][char]0x00C1
 

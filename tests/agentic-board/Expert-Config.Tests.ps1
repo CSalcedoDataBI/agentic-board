@@ -4,7 +4,7 @@
     ABIOS_EXPERTCONFIG_DOTSOURCE; it reuses ExpertContractIo + Expert-RoleSynthesis. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Expert-Config.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Expert-Config.ps1' | Resolve-Path
     $env:ABIOS_EXPERTCONFIG_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_EXPERTCONFIG_DOTSOURCE = ''

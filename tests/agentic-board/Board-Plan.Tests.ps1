@@ -9,7 +9,7 @@
     can tell an enriched-but-unfilled plan from a filled one. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Board-Plan.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Plan.ps1' | Resolve-Path
     $env:ABIOS_BOARDPLAN_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDPLAN_DOTSOURCE = ''

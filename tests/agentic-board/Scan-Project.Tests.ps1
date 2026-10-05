@@ -7,7 +7,7 @@
     steps Get-ScanApplySteps lists, and its -DryRun is exercised end to end with no token. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' 'scripts' 'Scan-Project.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Scan-Project.ps1' | Resolve-Path
     $env:ABIOS_SCAN_DOTSOURCE = '1'
     try { . $script:Script } finally { $env:ABIOS_SCAN_DOTSOURCE = '' }
     function script:Item([string]$Title = 'Do a thing', [string]$Type = 'feature', [string]$Prio = 'P2', [string]$Path = 'src/a/x.ps1', [int[]]$Deps = @(), [string]$Kind = 'checklist') {
@@ -78,7 +78,7 @@ Describe 'ConvertFrom-MarkdownScan - checklists, pending sections and plans' {
 
 Describe 'Get-ScanType - preset labels, never ad-hoc type:* ones (#731)' {
     It 'every type is a label of presets/labels.json' {
-        $preset = (Get-Content (Join-Path $PSScriptRoot '..' 'presets' 'labels.json') -Raw | ConvertFrom-Json).labels.name
+        $preset = (Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'labels.json') -Raw | ConvertFrom-Json).labels.name
         foreach ($t in @(
             (Get-ScanType 'checklist' '' 'Investigate the slow query' 'x'),
             (Get-ScanType 'checklist' '' 'Fix the broken link' 'x'),
@@ -298,7 +298,7 @@ Describe 'Scan-Project.ps1 end to end in a throw-away repo (no token)' {
 
 Describe 'Invoke-ScanApply - the whole sequence with GitHub mocked' {
     BeforeAll {
-        . (Join-Path $PSScriptRoot '..' 'scripts' 'Invoke-Gh.ps1' | Resolve-Path)
+        . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Invoke-Gh.ps1' | Resolve-Path)
         function script:New-ApplyPlan {
             $items = @(Set-ScanOrder @((script:Item 'Add paging' -Prio 'P1'), (script:Item 'Ship it' -Deps @(3)), (script:Item 'Investigate cache' -Type 'spike')))
             [pscustomobject]@{ repo = 'me/proj'; items = $items; batches = @(Get-ScanBatches $items); board = 0; epic = 0 }
@@ -371,6 +371,6 @@ Describe 'Invoke-ScanApply - the whole sequence with GitHub mocked' {
 
 Describe 'Board-Fill maps the spike label to Task Type Spike (#731)' {
     It 'has the mapping' {
-        Get-Content (Join-Path $PSScriptRoot '..' 'scripts' 'Board-Fill.ps1') -Raw | Should -Match '\$labels -contains "spike"\)\s*\{ \$detectedType = "Spike" \}'
+        Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Fill.ps1') -Raw | Should -Match '\$labels -contains "spike"\)\s*\{ \$detectedType = "Spike" \}'
     }
 }

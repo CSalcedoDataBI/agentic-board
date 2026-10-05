@@ -6,7 +6,7 @@
     must be current. These are the assertions that fail if one of those links is dropped.  #>
 
 BeforeAll {
-    $script:Plugin = Join-Path $PSScriptRoot '..' | Resolve-Path
+    $script:Plugin = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' | Resolve-Path
     # Plugin updates are machine housekeeping, not board work: they moved from /board to /cleanup.
     $script:Cleanup = Get-Content (Join-Path $script:Plugin 'commands' 'cleanup.md') -Raw
     $script:Board = Get-Content (Join-Path $script:Plugin 'commands' 'board.md') -Raw

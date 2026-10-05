@@ -36,7 +36,7 @@ Describe 'PowerShell source encoding' {
 
     BeforeAll {
         #   tests/ -> agentic-board/ -> plugins/ -> repo root
-        $script:RepoRoot = (Join-Path $PSScriptRoot '..' '..' '..' | Resolve-Path).Path
+        $script:RepoRoot = (Join-Path $PSScriptRoot '..' '..' | Resolve-Path).Path
         # git-tracked only: the point is what we SHIP. Untracked/ignored session artifacts (the
         # .agentic-board/launch-*.ps1 scratch files) are none of this ratchet's business.
         Push-Location $script:RepoRoot

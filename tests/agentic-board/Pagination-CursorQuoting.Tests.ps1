@@ -25,7 +25,7 @@ Describe 'Paginated board reads thread the cursor as a GraphQL variable, never q
 
     BeforeAll {
         function Get-CodeOnly([string]$fileName) {
-            $path = Join-Path $PSScriptRoot '..' 'scripts' $fileName | Resolve-Path
+            $path = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' $fileName | Resolve-Path
             # Drop whole-line comments so we assert on CODE, not the explanatory prose.
             (Get-Content $path) | Where-Object { $_ -notmatch '^\s*#' } | Out-String
         }
