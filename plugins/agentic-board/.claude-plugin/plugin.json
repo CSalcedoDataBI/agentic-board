@@ -1,7 +1,7 @@
 {
   "name": "agentic-board",
   "displayName": "Agentic Board",
-  "version": "0.44.0",
+  "version": "0.45.0",
   "description": "Run coding agents off your real GitHub Projects board: a quota-aware, review-gated coordinator, not another local Kanban.",
   "author": {
     "name": "CSalcedoDataBI",

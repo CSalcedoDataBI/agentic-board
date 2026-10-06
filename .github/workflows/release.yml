@@ -160,3 +160,16 @@ jobs:
           # rewriting the channel. Pushes made with GITHUB_TOKEN do not retrigger workflows.
           git push origin "$SHA:refs/heads/release"
           echo "::notice::release channel -> $SHA"
+
+      - name: Advance the directory channel (stable) to the released commit
+        if: steps.v.outputs.release == 'true'
+        env:
+          SHA: ${{ steps.v.outputs.sha }}
+        run: |
+          # The claude.ai plugin directory tracks `stable` (#768), not main: it scans every commit on
+          # the branch it tracks and each new one replaces the version in review, so main's daily
+          # commits must not reach it. `stable` moves here and only here, to each released commit -
+          # same rules as `release` above: created on the first release, fast-forwarded after, a
+          # non-fast-forward rejected loudly instead of rewriting what a reviewer already read.
+          git push origin "$SHA:refs/heads/stable"
+          echo "::notice::stable (plugin directory) -> $SHA"

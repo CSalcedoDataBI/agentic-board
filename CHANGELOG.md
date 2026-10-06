@@ -1,6 +1,37 @@
 ﻿# Changelog
 
 
+## [0.45.0] - 2026-10-06
+Ready for the Anthropic plugin directory: safe by default, portable, pinned, and measured with
+Anthropic's own validators. Plus a sandboxed low-cost fleet adapter (pilot) and a declarative
+adapter registry.
+### Added
+- **Declarative CLI adapter registry (#772).** `presets/adapters.json` with preset → user → repo
+  overrides; a cloned repo's file may only set `routing` and `reviewer`, never a command.
+- **Normalized probe codes (#770).** Every CLI probe ends in `OK | AUTH | RATE_LIMIT | QUOTA |
+  CONTEXT_WINDOW | ERROR`; unknown output is `ERROR`, never a false OK.
+- **Fail-closed run-ledger checkpoint and `Board-Handoff -Recover` (#771, #730).** A checkpoint is
+  written before each side-effecting step and the step does not run if it cannot be; `-Recover`
+  rebuilds a session that ended without `-Save` from its local transcript.
+- **dsh as a sandboxed fleet adapter, pilot (#773).** Only in a pinned Docker container, only for
+  Docs/Chore issues of public repos, session-log upload off.
+- **Per-user account map and `/board setup` (#762).** No author defaults ship in the plugin.
+- **Secret scrub for launched sessions (#769).**
+- `PRIVACY.md`, listing links, icon and command argument hints for the directory listing (#768).
+### Changed
+- **Permission bypass is an explicit opt-in (#761).**
+- **Always-on context ~2,810 → ~760 tokens (#763).**
+- **Cross-platform PowerShell 7 core (#767):** Windows, macOS and Linux; CI runs on Windows and
+  Ubuntu.
+- **Every runtime install pinned, no `Invoke-Expression` (#765).**
+- `Board-Work.ps1` split below 256 KiB (#759); README inside the plugin folder (#760).
+- The test suite moved out of the shipped plugin folder to `tests/agentic-board/` (#768).
+### Fixed
+- The brake fails closed when an armed run has no `pwsh` (#764).
+- The brake precheck no longer names a parent path (`COMMAND_PATH_ABOVE_PLUGIN`, #768).
+- `abios-feedback` loads before asking for details; `/expert` opens its engine first (#764).
+- Skill-reviewer and plugin-validator findings (#764).
+
 ## [0.44.0] - 2026-09-29
 `/scan` goes from untracked work to a ready board in one command, `/skills` can create and improve a
 skill end to end, and the whole tool now speaks English: the agent translates for the user.

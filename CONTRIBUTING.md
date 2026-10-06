@@ -182,12 +182,13 @@ exit-code clean (0 ok / 1 drift) so a CI gate can call it.
 
 ### What happens after the version-bump lands on `main`
 
-Two channels, so users never install whatever `main` HEAD happens to be:
+Three channels, so users never install whatever `main` HEAD happens to be:
 
 - **`main`** is the development channel — every merged PR lands here.
 - **`release`** is the branch installs actually fetch. `marketplace.json`'s plugin `source` is a
   `git-subdir` pinned at `ref: release` (#323), so a fresh install or `plugin update` gets the
   `release` commit, not `main` HEAD.
+- **`stable`** is the branch the claude.ai plugin directory tracks; it moves with `release`.
 
 When a `chore(release): X.Y.Z` commit changes `plugin.json`'s version on `main`, the **Release**
 workflow (`.github/workflows/release.yml`, #322) fires automatically and:
@@ -195,10 +196,26 @@ workflow (`.github/workflows/release.yml`, #322) fires automatically and:
 1. creates the git tag `vX.Y.Z` + a GitHub Release, notes taken from that version's `CHANGELOG.md`
    block (`scripts/Get-ReleaseNotes.ps1`), on the exact commit that set the version, and
 2. fast-forwards the `release` branch to that commit — the one push that moves pinned installs.
+3. fast-forwards the `stable` branch to the same commit — the one the plugin directory tracks.
 
 So tagging and the release channel are **no longer manual**: land the version bump on `main` and CI
 does the rest. `plugin.json`'s `version` is still what drives `plugin update` detection for users, so
 it must change on every release (the bump commit is exactly that).
+
+### Releases and the plugin directory
+
+The claude.ai plugin directory tracks the **`stable`** branch, not `main`. It scans every commit
+that lands on the branch it tracks and puts each one in review, replacing the one before, so a
+push to a tracked `main` would restart the review every day. `stable` moves only when a release is
+published (the step above), so `main` can take commits every day.
+
+- **Batch the work.** A release is a review cycle measured in days, not a deploy.
+- **Test before merging the release commit**, in Claude Code against the local plugin
+  (`claude --plugin-dir plugins/agentic-board`): what is on claude.ai is only ever what the
+  reviewer approved.
+- **Do not release while a version is in review**, unless it carries a security fix: the new
+  version replaces the one the reviewer is reading.
+- Never push to `stable` by hand outside a release, and never force it.
 
 ## Good first issues
 
