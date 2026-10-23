@@ -38,7 +38,10 @@ BeforeAll {
     New-Skill '.claude/skills/proj/inref' 'inref' 'See the references.' 'Wildcard: mcp__powerbi-modeling-mcp__*'
 
     # selfref: a plugin's skill naming its OWN plugin prefix, from a tree where that plugin is not enabled.
-    New-Skill 'plugins/pack-z/skills/selfref' 'selfref' 'Run `mcp__plugin_pack-z_codegraph__codegraph_search`.'
+    # Its second, foreign prefix is the control that proves the skill was audited at all.
+    New-Skill 'plugins/pack-z/skills/selfref' 'selfref' 'Run `mcp__plugin_pack-z_codegraph__codegraph_search`, then `mcp__plugin_pack-y_codegraph__codegraph_node`.'
+    # both: documents both install forms, one of which works here.
+    New-Skill '.claude/skills/proj/both' 'both' 'Use `mcp__powerbi-modeling-mcp__model_operations`, or `mcp__plugin_fabric-skills_powerbi-modeling-mcp__model_operations` when the plugin brings it.'
 
     $script:Servers = @('codegraph', 'plugin_fabric-skills_powerbi-modeling-mcp')
     $script:Res = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers $script:Servers
@@ -64,7 +67,26 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         (Get-McpFinding 'fine').Count | Should -Be 0
     }
     It 'does not flag a plugin skill that names its own plugin prefix' {
-        (Get-McpFinding 'selfref').Count | Should -Be 0
+        $f = Get-McpFinding 'selfref'
+        $f.Count | Should -Be 1                     # only the foreign pack-y prefix
+        $f[0].detail | Should -Match 'plugin_pack-y_codegraph'
+    }
+    It 'does not flag a skill that already gives the working name too' {
+        (Get-McpFinding 'both').Count | Should -Be 0
+    }
+    It 'skips the check, and keeps the rest of the audit, when discovery fails' {
+        # A copy of the scripts whose discovery throws, so the failure is real and does not depend on this machine.
+        $copy = Join-Path ([System.IO.Path]::GetTempPath()) ("skillaudit-scripts-" + [guid]::NewGuid().ToString('N'))
+        Copy-Item -Path (Split-Path $script:Audit -Parent) -Destination $copy -Recurse
+        try {
+            "throw 'discovery broke'" | Set-Content -LiteralPath (Join-Path $copy 'Get-McpServerNames.ps1') -Encoding utf8BOM
+            $r = & (Join-Path $copy 'Invoke-SkillAudit.ps1') -Root $script:Root -Scope project -CurrentRepo 'me/proj' -WarningVariable w -WarningAction SilentlyContinue
+            @($r.findings | Where-Object type -eq 'mcp-tool-name').Count | Should -Be 0
+            $r.summary.skillsAudited | Should -BeGreaterThan 0
+            ($w -join ' ') | Should -Match 'discovery failed'
+        } finally {
+            Remove-Item $copy -Recurse -Force
+        }
     }
     It 'stays silent about a server that is not installed under any prefix' {
         (Get-McpFinding 'absent').Count | Should -Be 0

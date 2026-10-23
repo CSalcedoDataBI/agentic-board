@@ -146,7 +146,9 @@ foreach ($o in $inv.overlaps) {
 # installed at all says nothing (this machine cannot tell a typo from a server the user never added).
 # Copies of one skill are folded like the description lints: per variant, owner and reference.
 if (-not $PSBoundParameters.ContainsKey('McpServers')) {
-    $McpServers = @(& $mcpNames -Root $Root | ForEach-Object { $_.prefix })
+    # An optional check: a discovery failure costs this check only, never the rest of the audit.
+    try   { $McpServers = @(& $mcpNames -Root $Root | ForEach-Object { $_.prefix }) }
+    catch { Write-Warning "MCP server discovery failed ($($_.Exception.Message)) - the mcp-tool-name check is skipped."; $McpServers = @() }
 }
 function Split-McpPrefix {
     # Plugin names are kebab-case, so the first underscore after plugin_ ends the plugin name.
@@ -164,7 +166,7 @@ if ($available.Count) {
         $files = @($s.path)
         $refDir = Join-Path $dir 'references'
         if (Test-Path -LiteralPath $refDir -PathType Container) {
-            $files += @(Get-ChildItem -LiteralPath $refDir -Recurse -File -Filter '*.md' | ForEach-Object { $_.FullName })
+            $files += @(Get-ChildItem -LiteralPath $refDir -Recurse -File -Filter '*.md' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
         }
         $text = ($files | ForEach-Object { Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue }) -join "`n"
         # The plugin this copy belongs to: its manifest identity, or plugins/<x>/skills/ in a source tree.
@@ -182,7 +184,8 @@ if ($available.Count) {
             if ($parts.plugin -and $parts.plugin -in $ownPlugins) { continue }
             $server = $parts.server
             $alt = @($available | Where-Object { $_.server -ieq $server } | ForEach-Object { "mcp__$($_.prefix)__$tool" })
-            if (-not $alt.Count) { continue }
+            # No working name, or the skill already gives it too (it documents both install forms).
+            if (-not $alt.Count -or @($alt | Where-Object { $refs.Contains($_) }).Count) { continue }
             $o = Get-Owner $s
             $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)|$($ref.ToLowerInvariant())"
             if (-not $mcpGroups.Contains($gk)) { $mcpGroups[$gk] = [pscustomobject]@{ ref = $ref; server = $server; tool = $tool; alt = $alt; members = [System.Collections.Generic.List[object]]::new() } }
