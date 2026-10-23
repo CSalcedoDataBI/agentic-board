@@ -29,6 +29,16 @@ same owner are one finding, which carries `copies` and `paths` (local evidence: 
 into a filed issue). `summary.perCopyFindingsFolded` says how many findings that saved. A copy whose
 description differs keeps its own findings, and per-file defects (`missing-name`, `misplaced`) stay per file.
 
+`mcp-tool-name` catches a skill (its `SKILL.md` or `references/`) that hardcodes `mcp__<server>__<tool>`
+under a prefix the agent does not have. The same server reaches the agent as `mcp__<server>__…` when it is
+configured directly and as `mcp__plugin_<plugin>_<server>__…` when a plugin brings it, so a hardcoded name
+breaks on any machine that installed it the other way. `Get-McpServerNames.ps1` lists the real prefixes
+from `~/.claude.json`, the project's `.mcp.json` and the enabled plugins' manifests (what `claude mcp list`
+reads, without its slow health checks); pass `-McpServers` to audit against another set. Only a server
+that IS available under another prefix is reported, with the working name. The fix to suggest is the
+server-agnostic form: name the server and the operation ("the powerbi-modeling-mcp `connection_operations`
+tool") instead of a prefix.
+
 Ownership comes from the plugin's OWN manifest (`.claude-plugin/plugin.json`, else the marketplace
 entry), never from a path segment (that segment is the marketplace name in the installed cache
 and the word `marketplaces` in a marketplaces clone). A plugin is the tool's only if its name AND its

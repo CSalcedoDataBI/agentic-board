@@ -22,6 +22,9 @@ param(
     [ValidateSet('all','plugin','personal','project')][string]$Scope = 'all',
     [string]$Name,
     [string]$CurrentRepo,
+    # MCP server prefixes the agent sees (bare `server` or `plugin_<plugin>_<server>`). Omitted, they
+    # are read from this machine's config by Get-McpServerNames.ps1; tests pass them explicitly.
+    [string[]]$McpServers,
     [switch]$Json
 )
 
@@ -29,6 +32,7 @@ $ErrorActionPreference = 'Stop'
 $here     = $PSScriptRoot
 $engine   = Join-Path $here 'Get-SkillInventory.ps1'
 $resolver = Join-Path $here 'Resolve-SkillOwner.ps1'
+$mcpNames = Join-Path $here 'Get-McpServerNames.ps1'
 
 $inv = & $engine -Root $Root -Scope $Scope
 $skills = $inv.skills
@@ -135,6 +139,59 @@ foreach ($o in $inv.overlaps) {
     }
 }
 
+# MCP tool names (a defect of the BODY): a skill that hardcodes mcp__<server>__<tool> points the agent
+# at a tool that is not in its list when the same server is installed under another prefix — through a
+# plugin it is mcp__plugin_<plugin>_<server>__<tool>, and the reverse. Only a reference whose server IS
+# available under a different prefix is reported, with the name that works here; a server that is not
+# installed at all says nothing (this machine cannot tell a typo from a server the user never added).
+# Copies of one skill are folded like the description lints: per variant, owner and reference.
+if (-not $PSBoundParameters.ContainsKey('McpServers')) {
+    $McpServers = @(& $mcpNames -Root $Root | ForEach-Object { $_.prefix })
+}
+function Split-McpPrefix {
+    # Plugin names are kebab-case, so the first underscore after plugin_ ends the plugin name.
+    param([string]$Prefix)
+    $m = [regex]::Match($Prefix, '^plugin_([^_]+)_(.+)$')
+    if ($m.Success) { [pscustomobject]@{ plugin = $m.Groups[1].Value; server = $m.Groups[2].Value } }
+    else            { [pscustomobject]@{ plugin = $null; server = $Prefix } }
+}
+$available = @($McpServers | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ prefix = $_; server = (Split-McpPrefix $_).server } })
+if ($available.Count) {
+    $availableSet = [System.Collections.Generic.HashSet[string]]::new([string[]]@($available.prefix), [StringComparer]::OrdinalIgnoreCase)
+    $mcpGroups = [ordered]@{}
+    foreach ($s in $skills) {
+        $dir = Split-Path $s.path -Parent
+        $files = @($s.path)
+        $refDir = Join-Path $dir 'references'
+        if (Test-Path -LiteralPath $refDir -PathType Container) {
+            $files += @(Get-ChildItem -LiteralPath $refDir -Recurse -File -Filter '*.md' | ForEach-Object { $_.FullName })
+        }
+        $text = ($files | ForEach-Object { Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue }) -join "`n"
+        $refs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($m in [regex]::Matches([string]$text, 'mcp__([A-Za-z0-9_-]+?)__([A-Za-z0-9_-]+|\*)')) { [void]$refs.Add($m.Value) }
+        foreach ($ref in $refs) {
+            $m = [regex]::Match($ref, '^mcp__([A-Za-z0-9_-]+?)__(.+)$')
+            $prefix = $m.Groups[1].Value; $tool = $m.Groups[2].Value
+            if ($availableSet.Contains($prefix)) { continue }
+            $server = (Split-McpPrefix $prefix).server
+            $alt = @($available | Where-Object { $_.server -ieq $server } | ForEach-Object { "mcp__$($_.prefix)__$tool" })
+            if (-not $alt.Count) { continue }
+            $o = Get-Owner $s
+            $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)|$($ref.ToLowerInvariant())"
+            if (-not $mcpGroups.Contains($gk)) { $mcpGroups[$gk] = [pscustomobject]@{ ref = $ref; server = $server; tool = $tool; alt = $alt; members = [System.Collections.Generic.List[object]]::new() } }
+            $mcpGroups[$gk].members.Add($s)
+        }
+    }
+    foreach ($g in $mcpGroups.Values) {
+        $members = @($g.members | Sort-Object @{ e = { $_.copyRank } }, @{ e = { $_.path } })
+        $op = if ($g.tool -eq '*') { 'tools' } else { "``$($g.tool)`` tool" }
+        Add-Finding $members[0] 'med' 'mcp-tool-name' ("References ``$($g.ref)``, which is not in the agent's tool list: here that server is " +
+            "``$(($g.alt) -join '` or `')``. Name the server and the operation instead of a hardcoded prefix " +
+            "(the $($g.server) $op), so the skill works however the server is installed.") $members
+        $foldedFindings += $members.Count - 1
+    }
+}
+
 $order  = @{ high=0; med=1; low=2 }
 $sorted = $findings | Sort-Object @{e={$order[$_.severity]}}, skill
 
@@ -143,8 +200,8 @@ $result = [pscustomobject]@{
         skillsAudited = @($skills).Count
         # Copies of one skill folded before the overlap pass (whole inventory, not filtered by -Name).
         copiesCollapsed = $inv.summary.collapsedCopies
-        # Description-lint findings NOT emitted because the same skill (same name, description and
-        # owner) was already reported through another copy: findings + this = the per-copy count.
+        # Description-lint and mcp-tool-name findings NOT emitted because the same skill (same name,
+        # description and owner) was already reported through another copy: findings + this = the per-copy count.
         perCopyFindingsFolded = $foldedFindings
         findings      = $sorted.Count
         high          = @($sorted | Where-Object severity -eq 'high').Count
