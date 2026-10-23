@@ -189,12 +189,15 @@ function Get-SweepContainment {
 }
 
 # The paths `git check-attr -z merge` gives a custom merge driver. PURE. -z output, split on NUL, is
-# path / attribute / value triplets; unspecified / set / unset are git's own text and binary merges.
+# path / attribute / value triplets; set / unset / "" are git's own text and binary merges, and so is
+# unspecified - unless `merge.default` names a driver, which then merges every unspecified path.
 function Get-SweepDrivenPaths {
-    param([string[]]$CheckAttr = @())
+    param([string[]]$CheckAttr = @(), [bool]$DefaultIsDriver = $false)
+    $own = @('set', 'unset', '')
+    if (-not $DefaultIsDriver) { $own += 'unspecified' }
     $a = @($CheckAttr)
     return @(for ($i = 0; $i + 2 -lt $a.Count; $i += 3) {
-        if ($a[$i + 2] -notin @('unspecified', 'set', 'unset')) { $a[$i] }
+        if ($a[$i + 2] -notin $own) { $a[$i] }
     })
 }
 
@@ -373,7 +376,14 @@ function Invoke-SweepGit {
         $code = $LASTEXITCODE
     } catch { return [pscustomobject]@{ Code = -1; Items = @() } }
     finally { [Console]::OutputEncoding = $prevEnc }
-    $items = if ($Z) { @((($out -join "`n") -split "`0") | Where-Object { $_ -ne '' }) } else { @($out) }
+    # -z ends with a NUL terminator: drop only that last empty field. An empty field inside is data
+    # (check-attr prints "" for `merge=`), and dropping it would shift every triplet after it.
+    $items = @($out)
+    if ($Z) {
+        $items = @(($out -join "`n") -split "`0")
+        if ($items.Count -gt 0 -and $items[-1] -eq '') { $items = @($items | Select-Object -SkipLast 1) }
+        if ($items.Count -eq 1 -and $items[0] -eq '') { $items = @() }
+    }
     # [string[]]: `if` unrolls a one-item array to a bare string, and Items[0] would be its first CHARACTER.
     return [pscustomobject]@{ Code = $code; Items = [string[]]@($items) }
 }
@@ -412,6 +422,9 @@ function Get-BranchContainment([string]$Default, [string]$Branch) {
         $cur.Add($p); $len += $p.Length + 3
     }
     if ($cur.Count -gt 0) { $batches += , @($cur) }
+    $md = Invoke-SweepGit @('config', '--get', 'merge.default')
+    if ($md.Code -notin 0, 1) { return 'unknown' }
+    $defaultIsDriver = ($md.Code -eq 0 -and "$($md.Items)".Trim() -notin @('', 'text'))
     $driven = @()
     foreach ($src in @('', $base, $head)) {
         # Built as an array on purpose: `if` would unroll a one-item array to a string, and a string
@@ -420,7 +433,7 @@ function Get-BranchContainment([string]$Default, [string]$Branch) {
         foreach ($b in $batches) {
             $attr = Invoke-SweepGit (@('check-attr', '-z') + $sa + @('merge', '--') + @($b)) -Z
             if ($attr.Code -ne 0) { return 'unknown' }
-            $driven += @(Get-SweepDrivenPaths -CheckAttr $attr.Items)
+            $driven += @(Get-SweepDrivenPaths -CheckAttr $attr.Items -DefaultIsDriver $defaultIsDriver)
         }
     }
     # Each driven path is compared blob by blob. A path neither side has means the name did not

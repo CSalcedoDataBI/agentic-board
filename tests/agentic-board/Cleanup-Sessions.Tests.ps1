@@ -247,6 +247,40 @@ Describe 'Get-SweepContainment - reading git merge-tree --write-tree' {
         Get-SweepDrivenPaths -CheckAttr @('a.txt', 'merge', 'unspecified', 'b.bin', 'merge', 'unset', 'c.txt', 'merge', 'set',
             'cfg.txt', 'merge', 'ours', 'dir/x: merge: y.lock', 'merge', 'union') |
             Should -Be @('cfg.txt', 'dir/x: merge: y.lock')
+        # `merge=` prints an empty value: it is git's text merge, and it must not shift the next triplet.
+        Get-SweepDrivenPaths -CheckAttr @('p1', 'merge', '', 'p2', 'merge', 'ours') | Should -Be @('p2')
+        # merge.default names a driver: every unspecified path goes through it.
+        Get-SweepDrivenPaths -CheckAttr @('a.txt', 'merge', 'unspecified', 'c.txt', 'merge', 'set') -DefaultIsDriver $true | Should -Be @('a.txt')
+    }
+    It 'is not fooled by merge.default naming a driver, with no attribute at all' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            & $g init -q -b main
+            & $g config merge.ours.driver true
+            & $g config merge.default ours
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'base'; & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b feature
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'branch only'; & $g add -A; & $g commit -q -m 'feat: cfg'
+            & $g checkout -q main
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'main moved on'; & $g add -A; & $g commit -q -m 'main edit'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            Push-Location -LiteralPath $r
+            try { Get-BranchContainment -Default 'main' -Branch 'feature' | Should -Be 'adds' }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'keeps an empty field inside git -z output, drops only the terminator' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            & git -C $r init -q -b main 2>$null
+            Set-Content -LiteralPath (Join-Path $r '.gitattributes') -Value @('p1 merge=', 'p2 merge=ours')
+            Push-Location -LiteralPath $r
+            try { (Invoke-SweepGit @('check-attr', '-z', 'merge', '--', 'p1', 'p2') -Z).Items | Should -Be @('p1', 'merge', '', 'p2', 'merge', 'ours') }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
