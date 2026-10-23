@@ -57,7 +57,9 @@ whether its work already reached the default branch through a different PR:
 2. **Likely superseded (a hint, so a human decides):** its own closed PR says "superseded by #N", or
    the merge conflicts and every issue/PR it references (`issue-NNN` in its name, `#NNN` in its
    commit subjects) was done by a merged PR → `needs-decision` naming that PR, instead of a
-   duplicate draft PR. A clean merge that adds something is new work and is still parked.
+   duplicate draft PR. A clean merge that adds something is new work and is still parked. The
+   hint never applies to a branch with uncommitted changes (`wip-park` saves them first) or to
+   commits made after the branch's own PR merged (`merged-advanced` is new work).
 
 If git or gh cannot answer, the branch keeps its old disposition (`park`): a check that fails never
 deletes anything.

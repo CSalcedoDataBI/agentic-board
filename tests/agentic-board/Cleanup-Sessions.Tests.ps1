@@ -125,7 +125,13 @@ Describe 'Get-SweepItemAction - work already on main through another PR is not p
         $a.Resolved | Should -BeFalse
         $a.Reason | Should -Match 'likely superseded by #749'
         (Get-SweepItemAction -Class 'closed-unmerged' -CommitsAhead 3 -SupersededBy '#749').Reason | Should -Match 'superseded by #749'
-        (Get-SweepItemAction -Class 'dirty' -Dirty 'dirty' -CommitsAhead 3 -SupersededBy '#749').Action | Should -Be 'needs-decision'
+    }
+    It 'still saves uncommitted changes first - they cannot be on main, whatever the hint says' {
+        (Get-SweepItemAction -Class 'dirty' -Dirty 'dirty' -CommitsAhead 3 -SupersededBy '#749').Action | Should -Be 'wip-park'
+    }
+    It 'ignores the hint on commits made after its own PR merged - that is new work by definition' {
+        # Its squashed originals conflict with main and reference a done issue, exactly like superseded work.
+        (Get-SweepItemAction -Class 'merged-advanced' -CommitsAhead 2 -Containment 'conflict' -SupersededBy '#753').Action | Should -Be 'park'
     }
     It 'deletes locally even in another account''s repo - nothing is published' {
         (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'contained' -ForeignOwner 'SomeCompany').Action | Should -Be 'delete-contained'

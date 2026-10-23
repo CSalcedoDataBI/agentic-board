@@ -140,8 +140,10 @@ function Get-SweepItemAction {
             return (& $mk 'delete-contained' $true 'its content is already on the default branch (merged through another PR) - branch and worktree removed')
         }
         # Only a hint, so a human decides: deleting on a heuristic could lose the one commit it missed.
-        if ($SupersededBy) {
-            return (& $mk 'needs-decision' $false "likely superseded by $SupersededBy - its work seems to be on the default branch already; delete the branch if so, instead of parking a duplicate PR")
+        # Never over uncommitted changes (they cannot be on main: wip-park saves them first), and
+        # never for merged-advanced: commits after its own PR merged are new work by definition.
+        if ($SupersededBy -and $Dirty -eq 'clean' -and $Class -ne 'merged-advanced') {
+            return (& $mk 'needs-decision' $false "likely superseded by $SupersededBy - its work seems to be on the default branch already; check that its newest commits are there too, then delete the branch instead of parking a duplicate PR")
         }
     }
     if ($Class -eq 'closed-unmerged') {
@@ -421,10 +423,13 @@ $openPaths = @($openPaths | Where-Object { $_ } | Select-Object -Unique)
 
 # --- already on the default branch? (#755) ------------------------------------
 # Run inside the repo. `merge-tree --write-tree` merges in memory: no worktree, index or ref changes.
+# Fully qualified refs: a short name can resolve to a local branch called "origin/main" or to a tag
+# named like the branch, and the proof would then be about a different commit than `branch -D` deletes.
 function Get-BranchContainment([string]$Default, [string]$Branch) {
-    $dt = (git rev-parse --verify --quiet "origin/$Default^{tree}" 2>$null)
+    $base = "refs/remotes/origin/$Default"; $head = "refs/heads/$Branch"
+    $dt = (git rev-parse --verify --quiet "$base^{tree}" 2>$null)
     if ($LASTEXITCODE -ne 0 -or -not $dt) { return 'unknown' }
-    $out = @(git merge-tree --write-tree "origin/$Default" $Branch 2>$null)
+    $out = @(git merge-tree --write-tree $base $head 2>$null)
     return (Get-SweepContainment -ExitCode $LASTEXITCODE -Output $out -DefaultTree "$dt")
 }
 
