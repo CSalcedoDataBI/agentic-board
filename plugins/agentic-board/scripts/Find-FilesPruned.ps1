@@ -87,13 +87,18 @@ function Find-FilesPruned {
 
         if ($under) {
             $n = 0
+            $files = [System.Collections.Generic.List[string]]::new()
             try {
                 foreach ($f in [System.IO.Directory]::EnumerateFiles($dir, $Filter)) {
                     if ((++$n % $CheckEvery) -eq 0 -and (& $Clock) -gt $Deadline) { $timedOut = $true; break }
                     # The OS-level pattern can over-match (8.3 names); re-check the leaf exactly.
-                    if ([System.IO.Path]::GetFileName($f) -like $Filter) { $found.Add($f) }
+                    if ([System.IO.Path]::GetFileName($f) -like $Filter) { $files.Add($f) }
                 }
             } catch { <# unreadable directory: skip it, keep walking #> }
+            # Listing order is the file system's: NTFS returns names sorted, ext4 in hash order. Callers
+            # rank by "first found", so each listing is sorted - the same answer on every OS.
+            $files.Sort([System.StringComparer]::OrdinalIgnoreCase)
+            $found.AddRange($files)
             if ($timedOut) { break }
         }
 
@@ -112,6 +117,7 @@ function Find-FilesPruned {
             }
         } catch { <# unreadable directory: keep whatever was listed before the failure #> }
         if ($timedOut) { break }
+        $subs.Sort([System.Comparison[object]] { param($x, $y) [System.StringComparer]::OrdinalIgnoreCase.Compare($x[0], $y[0]) })
         # Pushed in reverse so the first subdirectory is popped first: the same pre-order
         # (a directory's files, then each subdirectory in turn) Get-ChildItem -Recurse gives,
         # so results keep the order callers already saw. Outside the try: a listing that fails
