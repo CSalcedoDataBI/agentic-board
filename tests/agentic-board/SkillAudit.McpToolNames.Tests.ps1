@@ -43,6 +43,26 @@ BeforeAll {
     # both: documents both install forms, one of which works here.
     New-Skill '.claude/skills/proj/both' 'both' 'Use `mcp__powerbi-modeling-mcp__model_operations`, or `mcp__plugin_fabric-skills_powerbi-modeling-mcp__model_operations` when the plugin brings it.'
 
+    # allowed: the bare mcp__<server> form allowed-tools uses for all of a server's tools.
+    New-Skill '.claude/skills/proj/allowed' 'allowed' "Frontmatter would say allowed-tools: mcp__powerbi-modeling-mcp, Read."
+
+    # Runs a COPY of the scripts whose discovery is replaced by $Stub, without -McpServers unless given:
+    # the audit's own discovery path, on known data, never this machine's config.
+    function Invoke-StubbedAudit {
+        param([string]$Stub, [hashtable]$Extra = @{})
+        $copy = Join-Path ([System.IO.Path]::GetTempPath()) ("skillaudit-scripts-" + [guid]::NewGuid().ToString('N'))
+        Copy-Item -Path (Split-Path $script:Audit -Parent) -Destination $copy -Recurse
+        try {
+            $Stub | Set-Content -LiteralPath (Join-Path $copy 'Get-McpServerNames.ps1') -Encoding utf8BOM
+            $w = $null
+            $r = & (Join-Path $copy 'Invoke-SkillAudit.ps1') -Root $script:Root -Scope project -CurrentRepo 'me/proj' @Extra -WarningVariable w -WarningAction SilentlyContinue
+            [pscustomobject]@{ result = $r; warnings = ($w -join ' ') }
+        } finally {
+            Remove-Item $copy -Recurse -Force
+        }
+    }
+    $script:StubPluginOnly = "[pscustomobject]@{ prefix = 'plugin_fabric-skills_powerbi-modeling-mcp'; server = 'powerbi-modeling-mcp'; plugin = 'fabric-skills' }"
+
     $script:Servers = @('codegraph', 'plugin_fabric-skills_powerbi-modeling-mcp')
     $script:Res = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers $script:Servers
     function Get-McpFinding { param([string]$Skill) @($script:Res.findings | Where-Object { $_.skill -eq $Skill -and $_.type -eq 'mcp-tool-name' }) }
@@ -75,17 +95,39 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         (Get-McpFinding 'both').Count | Should -Be 0
     }
     It 'skips the check, and keeps the rest of the audit, when discovery fails' {
-        # A copy of the scripts whose discovery throws, so the failure is real and does not depend on this machine.
-        $copy = Join-Path ([System.IO.Path]::GetTempPath()) ("skillaudit-scripts-" + [guid]::NewGuid().ToString('N'))
-        Copy-Item -Path (Split-Path $script:Audit -Parent) -Destination $copy -Recurse
+        $x = Invoke-StubbedAudit "throw 'discovery broke'"
+        @($x.result.findings | Where-Object type -eq 'mcp-tool-name').Count | Should -Be 0
+        $x.result.summary.skillsAudited | Should -BeGreaterThan 0
+        $x.warnings | Should -Match 'discovery failed'
+    }
+    It 'uses the discovered records when -McpServers is omitted' {
+        $x = Invoke-StubbedAudit $script:StubPluginOnly
+        $f = @($x.result.findings | Where-Object { $_.skill -eq 'bare' -and $_.type -eq 'mcp-tool-name' })
+        $f.Count | Should -Be 1
+        $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__connection_operations'))
+    }
+    It 'takes the server name from the record when the plugin name holds an underscore' {
+        New-Skill '.claude/skills/proj/gh' 'gh' 'Call `mcp__github__create_issue`.'
         try {
-            "throw 'discovery broke'" | Set-Content -LiteralPath (Join-Path $copy 'Get-McpServerNames.ps1') -Encoding utf8BOM
-            $r = & (Join-Path $copy 'Invoke-SkillAudit.ps1') -Root $script:Root -Scope project -CurrentRepo 'me/proj' -WarningVariable w -WarningAction SilentlyContinue
-            @($r.findings | Where-Object type -eq 'mcp-tool-name').Count | Should -Be 0
-            $r.summary.skillsAudited | Should -BeGreaterThan 0
-            ($w -join ' ') | Should -Match 'discovery failed'
+            $x = Invoke-StubbedAudit "[pscustomobject]@{ prefix = 'plugin_acme_tools_github'; server = 'github'; plugin = 'acme_tools' }"
+            $f = @($x.result.findings | Where-Object { $_.skill -eq 'gh' -and $_.type -eq 'mcp-tool-name' })
+            $f.Count | Should -Be 1
+            $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_acme_tools_github__create_issue'))
         } finally {
-            Remove-Item $copy -Recurse -Force
+            Remove-Item (Join-Path $script:Root '.claude/skills/proj/gh') -Recurse -Force
+        }
+    }
+    It 'flags the bare server-only form that allowed-tools uses' {
+        $f = Get-McpFinding 'allowed'
+        $f.Count | Should -Be 1
+        $f[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_fabric-skills_powerbi-modeling-mcp`'))
+        $f[0].detail | Should -Match 'the powerbi-modeling-mcp tools'
+    }
+    It 'never puts a local path in a finding detail (they may be filed publicly)' {
+        foreach ($f in @($script:Res.findings | Where-Object type -eq 'mcp-tool-name')) {
+            $f.detail | Should -Not -Match ([regex]::Escape($script:Root))
+            $f.detail | Should -Not -Match ([regex]::Escape(($script:Root -replace '\\','/')))
+            $f.detail | Should -Not -Match 'references/|SKILL\.md'
         }
     }
     It 'stays silent about a server that is not installed under any prefix' {
@@ -111,9 +153,10 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
             Remove-Item (Join-Path $script:Root '.claude/worktrees') -Recurse -Force
         }
     }
-    It 'skips the check when no MCP server is known' {
-        $r = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers @()
-        @($r.findings | Where-Object type -eq 'mcp-tool-name').Count | Should -Be 0
+    It 'skips the check when -McpServers is an explicit empty list, without falling back to discovery' {
+        # The stub WOULD produce findings, so a fallback to discovery fails this test.
+        $x = Invoke-StubbedAudit $script:StubPluginOnly @{ McpServers = @() }
+        @($x.result.findings | Where-Object type -eq 'mcp-tool-name').Count | Should -Be 0
     }
 }
 
@@ -137,10 +180,13 @@ Describe 'Get-McpServerNames' {
         Write-Json (Join-Path $pb '.claude-plugin/plugin.json') @{ name = 'pack-b'; mcpServers = './servers.json' }
         Write-Json (Join-Path $pb 'servers.json') @{ mcpServers = @{ 'from-file' = @{}; 'second' = @{} } }
         Write-Json (Join-Path $pc '.mcp.json') @{ mcpServers = @{ 'disabled-one' = @{} } }
+        $pw = Join-Path $script:Home2 'plugins/w'; Write-Json (Join-Path $pw '.mcp.json') @{ mcpServers = @{ 'wrapped-one' = @{} } }
+        $pw = Join-Path $script:Home2 'plugins/w'; Write-Json (Join-Path $pw '.mcp.json') @{ mcpServers = @{ 'wrapped-one' = @{} } }
         Write-Json (Join-Path $script:Home2 '.claude/plugins/installed_plugins.json') @{ version = 2; plugins = @{
             'fabric-skills@m' = @(@{ scope = 'user'; installPath = $pa; lastUpdated = '2026-01-01' })
             'pack-b@m'        = @(@{ scope = 'user'; installPath = $pb; lastUpdated = '2026-01-01' })
             'pack-c@m'        = @(@{ scope = 'user'; installPath = $pc; lastUpdated = '2026-01-01' })
+            'pack-w@m'        = @(@{ scope = 'user'; installPath = $pw; lastUpdated = '2026-01-01' })
         } }
         Write-Json (Join-Path $script:Home2 '.claude/settings.json') @{ enabledPlugins = @{ 'pack-c@m' = $false } }
         $script:Names = @(& $script:Discover -Root $script:Repo2 -UserHome $script:Home2)
@@ -184,7 +230,8 @@ Describe 'Get-McpServerNames' {
         }
     }
     It 'leaves out disabled plugins' {
-        $script:Names.prefix | Should -Not -Contain 'plugin_pack-c_disabled-one'
+        $script:Names.prefix | Should -Contain 'plugin_pack-w_wrapped-one'     # the same wrapped shape IS read when enabled
+        @($script:Names.prefix | Where-Object { $_ -like 'plugin_pack-c_*' }).Count | Should -Be 0
     }
     Context 'installs, scopes and manifest shapes' {
         BeforeAll {

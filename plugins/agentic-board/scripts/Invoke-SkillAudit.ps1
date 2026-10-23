@@ -145,21 +145,31 @@ foreach ($o in $inv.overlaps) {
 # available under a different prefix is reported, with the name that works here; a server that is not
 # installed at all says nothing (this machine cannot tell a typo from a server the user never added).
 # Copies of one skill are folded like the description lints: per variant, owner and reference.
-if (-not $PSBoundParameters.ContainsKey('McpServers')) {
+if ($PSBoundParameters.ContainsKey('McpServers')) {
+    # Bare strings: a plugin prefix is split at the first underscore after plugin_ (the kebab-case norm).
+    $available = @($McpServers | Where-Object { $_ } | ForEach-Object {
+        $m = [regex]::Match($_, '^plugin_([^_]+)_(.+)$')
+        [pscustomobject]@{ prefix = $_; server = $(if ($m.Success) { $m.Groups[2].Value } else { $_ }) } })
+} else {
+    # Discovered records carry their server name, so a plugin whose name holds `_` is not split wrongly.
     # An optional check: a discovery failure costs this check only, never the rest of the audit.
-    try   { $McpServers = @(& $mcpNames -Root $Root | ForEach-Object { $_.prefix }) }
-    catch { Write-Warning "MCP server discovery failed ($($_.Exception.Message)) - the mcp-tool-name check is skipped."; $McpServers = @() }
+    try   { $available = @(& $mcpNames -Root $Root | Where-Object { $_.prefix } | ForEach-Object { [pscustomobject]@{ prefix = [string]$_.prefix; server = [string]$_.server } }) }
+    catch { Write-Warning "MCP server discovery failed ($($_.Exception.Message)) - the mcp-tool-name check is skipped."; $available = @() }
 }
-function Split-McpPrefix {
-    # Plugin names are kebab-case, so the first underscore after plugin_ ends the plugin name.
-    param([string]$Prefix)
-    $m = [regex]::Match($Prefix, '^plugin_([^_]+)_(.+)$')
-    if ($m.Success) { [pscustomobject]@{ plugin = $m.Groups[1].Value; server = $m.Groups[2].Value } }
-    else            { [pscustomobject]@{ plugin = $null; server = $Prefix } }
-}
-$available = @($McpServers | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ prefix = $_; server = (Split-McpPrefix $_).server } })
 if ($available.Count) {
     $availableSet = [System.Collections.Generic.HashSet[string]]::new([string[]]@($available.prefix), [StringComparer]::OrdinalIgnoreCase)
+    # Longest first, so plugin_a_b-c resolves to server b-c before it could resolve to c.
+    $serverNames = @($available.server | Sort-Object -Unique | Sort-Object Length -Descending)
+    function Resolve-RefServer {
+        # The server a referenced prefix names. plugin_<plugin>_<server> is ambiguous when the plugin
+        # name holds `_`, so the known server names decide where the plugin name ends.
+        param([string]$Prefix)
+        if ($Prefix -notmatch '^plugin_') { return $Prefix }
+        foreach ($sv in $serverNames) {
+            if ($Prefix.Length -gt 8 + $sv.Length -and $Prefix.EndsWith("_$sv", [StringComparison]::OrdinalIgnoreCase)) { return $sv }
+        }
+        $null
+    }
     $mcpGroups = [ordered]@{}
     foreach ($s in $skills) {
         $dir = Split-Path $s.path -Parent
@@ -172,18 +182,22 @@ if ($available.Count) {
         # The plugin this copy belongs to: its manifest identity, or plugins/<x>/skills/ in a source tree.
         $ownPlugins = @($s.plugin, [regex]::Match($s.path, '(?i)(?:^|/)plugins/([^/]+)/skills/').Groups[1].Value) |
             Where-Object { $_ } | ForEach-Object { $_ -replace '[^A-Za-z0-9_-]', '_' }
-        $refs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($m in [regex]::Matches([string]$text, 'mcp__([A-Za-z0-9_-]+?)__([A-Za-z0-9_-]+|\*)')) { [void]$refs.Add($m.Value) }
-        foreach ($ref in $refs) {
-            $m = [regex]::Match($ref, '^mcp__([A-Za-z0-9_-]+?)__(.+)$')
-            $prefix = $m.Groups[1].Value; $tool = $m.Groups[2].Value
+        # mcp__<prefix>__<tool>, mcp__<prefix>__* and the bare mcp__<prefix> (all of a server's tools,
+        # as allowed-tools writes it). Placeholders such as mcp__<server>__<tool> do not match.
+        $refs = [ordered]@{}
+        foreach ($m in [regex]::Matches([string]$text, 'mcp__([A-Za-z0-9_-]+?)(?:__([A-Za-z0-9_-]+|\*)|(?![A-Za-z0-9_-]))')) {
+            if (-not $refs.Contains($m.Value)) { $refs[$m.Value] = [pscustomobject]@{ prefix = $m.Groups[1].Value; tool = $m.Groups[2].Value } }
+        }
+        foreach ($ref in @($refs.Keys)) {
+            $prefix = $refs[$ref].prefix; $tool = $refs[$ref].tool
             if ($availableSet.Contains($prefix)) { continue }
-            $parts = Split-McpPrefix $prefix
             # A plugin's skill naming its OWN plugin prefix is right wherever that plugin is enabled; it
             # is only missing here because this copy's plugin is not (a marketplace clone, a disabled one).
-            if ($parts.plugin -and $parts.plugin -in $ownPlugins) { continue }
-            $server = $parts.server
-            $alt = @($available | Where-Object { $_.server -ieq $server } | ForEach-Object { "mcp__$($_.prefix)__$tool" })
+            if (@($ownPlugins | Where-Object { $prefix.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
+            $server = Resolve-RefServer $prefix
+            if (-not $server) { continue }
+            $suffix = if ($tool) { "__$tool" } else { '' }
+            $alt = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -ine $prefix } | ForEach-Object { "mcp__$($_.prefix)$suffix" })
             # No working name, or the skill already gives it too (it documents both install forms).
             if (-not $alt.Count -or @($alt | Where-Object { $refs.Contains($_) }).Count) { continue }
             $o = Get-Owner $s
@@ -194,7 +208,7 @@ if ($available.Count) {
     }
     foreach ($g in $mcpGroups.Values) {
         $members = @($g.members | Sort-Object @{ e = { $_.copyRank } }, @{ e = { $_.path } })
-        $op = if ($g.tool -eq '*') { 'tools' } else { "``$($g.tool)`` tool" }
+        $op = if (-not $g.tool -or $g.tool -eq '*') { 'tools' } else { "``$($g.tool)`` tool" }
         Add-Finding $members[0] 'med' 'mcp-tool-name' ("References ``$($g.ref)``, which is not in the agent's tool list: here that server is " +
             "``$(($g.alt) -join '` or `')``. Name the server and the operation instead of a hardcoded prefix " +
             "(the $($g.server) $op), so the skill works however the server is installed.") $members
