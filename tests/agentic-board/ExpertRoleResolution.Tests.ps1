@@ -247,12 +247,18 @@ Describe 'Find-FilesPruned never enters an excluded directory (#609)' {
     It 'yields nothing for a root that does not exist' {
         @(Find-FilesPruned -Root (Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-dir-zz') -Filter '*.md').Count | Should -Be 0
     }
-    It 'returns files in the same order Get-ChildItem -Recurse does' {
+    It 'returns files in sorted pre-order - what Get-ChildItem -Recurse gives on NTFS - on every OS' {
+        # The oracle is written out, not taken from Get-ChildItem: on ext4 that returns hash order,
+        # which is the very nondeterminism the walker removes.
         $root = New-Tracked 'prune-order'
         foreach ($rel in 'b', 'a/z', 'a/y', 'c/d/e') { New-Item -ItemType Directory -Path (Join-Path $root $rel) -Force | Out-Null }
         foreach ($f in 'top.md', 'a/one.md', 'a/y/two.md', 'a/z/three.md', 'b/four.md', 'c/d/e/five.md') { Set-Content -LiteralPath (Join-Path $root $f) -Value 'x' }
-        $expected = @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.md') | ForEach-Object { $_.FullName }
+        $expected = @('top.md', 'a/one.md', 'a/y/two.md', 'a/z/three.md', 'b/four.md', 'c/d/e/five.md') |
+            ForEach-Object { [System.IO.Path]::GetFullPath((Join-Path $root $_)) }
         @(Find-FilesPruned -Root $root -Filter '*.md') | Should -Be $expected
+        if ($IsWindows) {
+            @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.md' | ForEach-Object FullName) | Should -Be $expected
+        }
     }
     It 'does not follow a junction (no cycles, same as Get-ChildItem -Recurse)' -Skip:(-not $IsWindows) {
         $root = New-Tracked 'prune-junction'
