@@ -49,6 +49,14 @@
 
 $script:PrunedWalkDefaultExclude = @('node_modules','.git','dist','build','vendor','bin','obj','out','.next','coverage')
 
+# The order every listing is sorted in: case-insensitive (what NTFS returns), with a case-sensitive
+# tie-break, so README.md and readme.md side by side on ext4 also come out the same on every run.
+$script:PrunedWalkOrder = [System.Comparison[string]] {
+    param($x, $y)
+    $c = [System.StringComparer]::OrdinalIgnoreCase.Compare($x, $y)
+    if ($c -ne 0) { $c } else { [System.StringComparer]::Ordinal.Compare($x, $y) }
+}
+
 function Find-FilesPruned {
     [CmdletBinding()]
     param(
@@ -97,7 +105,7 @@ function Find-FilesPruned {
             } catch { <# unreadable directory: skip it, keep walking #> }
             # Listing order is the file system's: NTFS returns names sorted, ext4 in hash order. Callers
             # rank by "first found", so each listing is sorted - the same answer on every OS.
-            $files.Sort([System.StringComparer]::OrdinalIgnoreCase)
+            $files.Sort($script:PrunedWalkOrder)
             $found.AddRange($files)
             if ($timedOut) { break }
         }
@@ -117,7 +125,7 @@ function Find-FilesPruned {
             }
         } catch { <# unreadable directory: keep whatever was listed before the failure #> }
         if ($timedOut) { break }
-        $subs.Sort([System.Comparison[object]] { param($x, $y) [System.StringComparer]::OrdinalIgnoreCase.Compare($x[0], $y[0]) })
+        $subs.Sort([System.Comparison[object]] { param($x, $y) $script:PrunedWalkOrder.Invoke($x[0], $y[0]) })
         # Pushed in reverse so the first subdirectory is popped first: the same pre-order
         # (a directory's files, then each subdirectory in turn) Get-ChildItem -Recurse gives,
         # so results keep the order callers already saw. Outside the try: a listing that fails
