@@ -117,7 +117,11 @@ try {
         try { $marker = Get-Content $markerPath -Raw | ConvertFrom-Json } catch { $marker = $null }
         $ctx = Get-CompactSessionContext $marker
     } else {
+        # A TRACKED HANDOFF.md is the project's own guide, not a saved handoff: Board-Handoff.ps1
+        # keeps its mirror at .handoffs/active.md in that case (#795).
         $handoffPath = Join-Path $root 'HANDOFF.md'
+        git -C $root ls-files --error-unmatch -- 'HANDOFF.md' 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $handoffPath = Join-Path (Join-Path $root '.handoffs') 'active.md' }
         if (-not (Test-Path $handoffPath)) { exit 0 }
         $body = Get-Content $handoffPath -Raw
         $ctx = Get-HandoffSessionContext $body
