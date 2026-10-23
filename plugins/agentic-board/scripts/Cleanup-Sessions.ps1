@@ -345,6 +345,33 @@ function New-ParkedPrBody {
     return ($lines -join "`n")
 }
 
+# Is this branch provably contained in origin's default branch? (#755) Defined above the dot-source
+# guard so the tests run it on a real repo; defining it touches nothing.
+# Run inside the repo. `merge-tree --write-tree` merges in memory: no worktree, index or ref changes.
+# Fully qualified refs: a short name can resolve to a local branch called "origin/main" or to a tag
+# named like the branch, and the proof would then be about a different commit than `branch -D` deletes.
+function Get-BranchContainment([string]$Default, [string]$Branch) {
+    $base = "refs/remotes/origin/$Default"; $head = "refs/heads/$Branch"
+    $dt = (git rev-parse --verify --quiet "$base^{tree}" 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $dt) { return 'unknown' }
+    # merge-tree also exits 1 on a ref it cannot read, which would read as "conflict".
+    $null = (git rev-parse --verify --quiet "$head^{commit}" 2>$null)
+    if ($LASTEXITCODE -ne 0) { return 'unknown' }
+    $out = @(git merge-tree --write-tree $base $head 2>$null)
+    $c = Get-SweepContainment -ExitCode $LASTEXITCODE -Output $out -DefaultTree "$dt"
+    if ($c -ne 'contained') { return $c }
+    # merge-tree honours the repo's merge drivers: a `merge=ours` file merges "cleanly" to main's side
+    # and would look contained while the branch's change is on main nowhere. So the deletion also
+    # needs the plain-diff proof: no path the branch changed differs between it and the default branch.
+    $mb = (git merge-base $base $head 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $mb) { return 'unknown' }
+    $q = @('-c', 'core.quotePath=false', 'diff', '--no-renames', '--name-only')
+    $mine = @(git @q "$mb" $head 2>$null);  if ($LASTEXITCODE -ne 0) { return 'unknown' }
+    $diff = @(git @q $base $head 2>$null);  if ($LASTEXITCODE -ne 0) { return 'unknown' }
+    if (@($mine | Where-Object { $_ -and $diff -contains $_ }).Count -gt 0) { return 'adds' }
+    return 'contained'
+}
+
 # Dot-source guard: with $env:ABIOS_SWEEP_DOTSOURCE set, return after defining the pure helpers
 # WITHOUT touching disk, git, gh or the token.
 if ($env:ABIOS_SWEEP_DOTSOURCE) { return }
@@ -422,17 +449,6 @@ foreach ($s in @((Read-ClaudeSessions).Sessions)) {
 $openPaths = @($openPaths | Where-Object { $_ } | Select-Object -Unique)
 
 # --- already on the default branch? (#755) ------------------------------------
-# Run inside the repo. `merge-tree --write-tree` merges in memory: no worktree, index or ref changes.
-# Fully qualified refs: a short name can resolve to a local branch called "origin/main" or to a tag
-# named like the branch, and the proof would then be about a different commit than `branch -D` deletes.
-function Get-BranchContainment([string]$Default, [string]$Branch) {
-    $base = "refs/remotes/origin/$Default"; $head = "refs/heads/$Branch"
-    $dt = (git rev-parse --verify --quiet "$base^{tree}" 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $dt) { return 'unknown' }
-    $out = @(git merge-tree --write-tree $base $head 2>$null)
-    return (Get-SweepContainment -ExitCode $LASTEXITCODE -Output $out -DefaultTree "$dt")
-}
-
 # The superseded hint of one branch. A hint that cannot be read is no hint: the branch then gets
 # the disposition it had before #755 (park), never a deletion.
 $refCache = @{}
@@ -445,7 +461,8 @@ function Get-BranchSupersededHint([string]$Repo, [string]$Default, $Branch, [str
         }
         $refs = @()
         if ($Containment -eq 'conflict') {
-            $subjects = @(git log --format=%s "origin/$Default..$($Branch.Branch)" 2>$null)
+            $subjects = @(git log --format=%s "refs/remotes/origin/$Default..refs/heads/$($Branch.Branch)" 2>$null)
+            if ($LASTEXITCODE -ne 0) { return '' }   # a partial reference list would make a false hint
             $o, $name = $Repo -split '/', 2
             $q = 'query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issueOrPullRequest(number:$n){__typename ... on Issue{state closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number merged}}} ... on PullRequest{merged}}}}'
             foreach ($n in (Get-SweepIssueRefs -Branch $Branch.Branch -Subjects $subjects)) {

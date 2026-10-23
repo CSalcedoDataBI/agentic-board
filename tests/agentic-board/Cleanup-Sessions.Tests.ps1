@@ -164,16 +164,43 @@ Describe 'Get-SweepContainment - reading git merge-tree --write-tree' {
             Set-Content -LiteralPath (Join-Path $r 'b.txt') -Value 'two'; & $g add -A; & $g commit -q -m 'fix: two (#751)'
             & $g checkout -q main
             & $g merge -q --squash worktree-agent-x; & $g commit -q -m 'feat: squashed (#753)'
-            $dt = "$(& $g rev-parse 'main^{tree}')".Trim()
-            $out = @(& $g merge-tree --write-tree main worktree-agent-x); $code = $LASTEXITCODE
-            Get-SweepContainment -ExitCode $code -Output $out -DefaultTree $dt | Should -Be 'contained'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
             [int]"$(& $g rev-list --count main..worktree-agent-x)" | Should -Be 2 -Because 'it still looks like 2 commits with no PR'
+            Push-Location -LiteralPath $r
+            try {
+                Get-BranchContainment -Default 'main' -Branch 'worktree-agent-x' | Should -Be 'contained'
+                # A local branch literally named "origin/main" must not stand in for the real one.
+                & $g branch origin/main HEAD~1
+                Get-BranchContainment -Default 'main' -Branch 'worktree-agent-x' | Should -Be 'contained'
 
-            # One more commit on the branch: no longer contained, so it is parked as before.
-            & $g checkout -q worktree-agent-x
-            Set-Content -LiteralPath (Join-Path $r 'c.txt') -Value 'new'; & $g add -A; & $g commit -q -m 'feat: more'
-            $out = @(& $g merge-tree --write-tree main worktree-agent-x); $code = $LASTEXITCODE
-            Get-SweepContainment -ExitCode $code -Output $out -DefaultTree $dt | Should -Be 'adds'
+                # One more commit on the branch: no longer contained, so it is parked as before.
+                & $g checkout -q worktree-agent-x
+                Set-Content -LiteralPath (Join-Path $r 'c.txt') -Value 'new'; & $g add -A; & $g commit -q -m 'feat: more'
+                Get-BranchContainment -Default 'main' -Branch 'worktree-agent-x' | Should -Be 'adds'
+                Get-BranchContainment -Default 'main' -Branch 'no-such-branch' | Should -Be 'unknown'
+            } finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'is not fooled by a merge=ours driver that keeps main''s side of the branch''s only change' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            & $g init -q -b main
+            & $g config merge.ours.driver true
+            Set-Content -LiteralPath (Join-Path $r '.gitattributes') -Value 'cfg.txt merge=ours'
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'base'; & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b feature
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'the branch''s own change'; & $g add -A; & $g commit -q -m 'feat: change cfg'
+            & $g checkout -q main
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'main moved on'; & $g add -A; & $g commit -q -m 'main edit'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            # merge-tree alone says "merges to main's own tree" here - the driver kept main's side.
+            $out = @(& $g merge-tree --write-tree refs/remotes/origin/main refs/heads/feature)
+            Get-SweepContainment -ExitCode $LASTEXITCODE -Output $out -DefaultTree "$(& $g rev-parse 'main^{tree}')".Trim() | Should -Be 'contained'
+            Push-Location -LiteralPath $r
+            try { Get-BranchContainment -Default 'main' -Branch 'feature' | Should -Be 'adds' }
+            finally { Pop-Location }
         } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
