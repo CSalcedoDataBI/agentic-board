@@ -92,6 +92,121 @@ Describe 'Get-SweepItemAction - one disposition per branch' {
     }
 }
 
+Describe 'Get-SweepItemAction - work already on main through another PR is not parked (#755)' {
+    <#  Measured on this repo, 2026-09-29: 4 of 5 `park` rows were subagent worktree branches whose
+        work had been squash-merged by another PR - each would have opened a duplicate draft PR. #>
+    It 'deletes a clean branch whose content is proven to be on the default branch, as resolved' {
+        $a = Get-SweepItemAction -Class 'working' -CommitsAhead 8 -Containment 'contained'
+        $a.Action | Should -Be 'delete-contained'
+        $a.Resolved | Should -BeTrue
+        $a.Reason | Should -Match 'already on the default branch'
+        (Get-SweepItemAction -Class 'stale' -CommitsAhead 2 -Containment 'contained').Action | Should -Be 'delete-contained'
+        (Get-SweepItemAction -Class 'closed-unmerged' -CommitsAhead 2 -Containment 'contained').Action | Should -Be 'delete-contained'
+        (Get-SweepItemAction -Class 'merged-advanced' -CommitsAhead 1 -Containment 'contained').Action | Should -Be 'delete-contained'
+    }
+    It 'never deletes a contained branch that has uncommitted changes - those are saved first' {
+        (Get-SweepItemAction -Class 'dirty' -Dirty 'dirty' -CommitsAhead 3 -Containment 'contained').Action | Should -Be 'wip-park'
+    }
+    It 'leaves its own PR in charge: merged tears down, open stays in review' {
+        (Get-SweepItemAction -Class 'merged' -CommitsAhead 1 -Containment 'contained').Action | Should -Be 'teardown'
+        (Get-SweepItemAction -Class 'in-review' -CommitsAhead 1 -Containment 'contained').Action | Should -Be 'keep-review'
+    }
+    It 'a working session still vetoes it' {
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'contained' -SessionOpen $true).Action | Should -Be 'skip-open'
+    }
+    It 'still parks a branch that adds something new, or whose containment is unknown' {
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'adds').Action | Should -Be 'park'
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'unknown').Action | Should -Be 'park'
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'conflict').Action | Should -Be 'park'
+    }
+    It 'turns a superseded hint into a decision naming the PR - never a deletion, never a park' {
+        $a = Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'conflict' -SupersededBy '#749'
+        $a.Action | Should -Be 'needs-decision'
+        $a.Resolved | Should -BeFalse
+        $a.Reason | Should -Match 'likely superseded by #749'
+        (Get-SweepItemAction -Class 'closed-unmerged' -CommitsAhead 3 -SupersededBy '#749').Reason | Should -Match 'superseded by #749'
+        (Get-SweepItemAction -Class 'dirty' -Dirty 'dirty' -CommitsAhead 3 -SupersededBy '#749').Action | Should -Be 'needs-decision'
+    }
+    It 'deletes locally even in another account''s repo - nothing is published' {
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'contained' -ForeignOwner 'SomeCompany').Action | Should -Be 'delete-contained'
+    }
+}
+
+Describe 'Get-SweepContainment - reading git merge-tree --write-tree' {
+    It 'contained when the merged tree is the default branch''s own tree' {
+        Get-SweepContainment -ExitCode 0 -Output @('22aab2744eb36eb6cb42dda8859f62dd5a3a140d') -DefaultTree '22aab2744eb36eb6cb42dda8859f62dd5a3a140d' | Should -Be 'contained'
+    }
+    It 'adds when it merges cleanly into a different tree' {
+        Get-SweepContainment -ExitCode 0 -Output @('1111111111111111111111111111111111111111') -DefaultTree '22aab2744eb36eb6cb42dda8859f62dd5a3a140d' | Should -Be 'adds'
+    }
+    It 'conflict on exit 1, unknown on any other failure or an unreadable answer' {
+        Get-SweepContainment -ExitCode 1 -Output @('1111111111111111111111111111111111111111', 'CONFLICT') -DefaultTree 'x' | Should -Be 'conflict'
+        Get-SweepContainment -ExitCode 128 -Output @() -DefaultTree '22aab2744eb36eb6cb42dda8859f62dd5a3a140d' | Should -Be 'unknown'
+        Get-SweepContainment -ExitCode 0 -Output @('usage: git merge-tree') -DefaultTree '22aab2744eb36eb6cb42dda8859f62dd5a3a140d' | Should -Be 'unknown'
+        Get-SweepContainment -ExitCode 0 -Output @('22aab2744eb36eb6cb42dda8859f62dd5a3a140d') -DefaultTree '' | Should -Be 'unknown'
+    }
+    It 'proves a squash-merged branch contained on a real repository' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            # No param block: git's own -q / -b reach $args instead of binding as PowerShell parameters.
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            & $g init -q -b main
+            Set-Content -LiteralPath (Join-Path $r 'a.txt') -Value 'base'; & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b worktree-agent-x
+            Set-Content -LiteralPath (Join-Path $r 'b.txt') -Value 'one'; & $g add -A; & $g commit -q -m 'feat: one (#751)'
+            Set-Content -LiteralPath (Join-Path $r 'b.txt') -Value 'two'; & $g add -A; & $g commit -q -m 'fix: two (#751)'
+            & $g checkout -q main
+            & $g merge -q --squash worktree-agent-x; & $g commit -q -m 'feat: squashed (#753)'
+            $dt = "$(& $g rev-parse 'main^{tree}')".Trim()
+            $out = @(& $g merge-tree --write-tree main worktree-agent-x); $code = $LASTEXITCODE
+            Get-SweepContainment -ExitCode $code -Output $out -DefaultTree $dt | Should -Be 'contained'
+            [int]"$(& $g rev-list --count main..worktree-agent-x)" | Should -Be 2 -Because 'it still looks like 2 commits with no PR'
+
+            # One more commit on the branch: no longer contained, so it is parked as before.
+            & $g checkout -q worktree-agent-x
+            Set-Content -LiteralPath (Join-Path $r 'c.txt') -Value 'new'; & $g add -A; & $g commit -q -m 'feat: more'
+            $out = @(& $g merge-tree --write-tree main worktree-agent-x); $code = $LASTEXITCODE
+            Get-SweepContainment -ExitCode $code -Output $out -DefaultTree $dt | Should -Be 'adds'
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'Superseded hint - a heuristic that asks, it does not delete (#755)' {
+    It 'collects the branch''s issue and every #NNN of its commit subjects, once each' {
+        $r = Get-SweepIssueRefs -Branch 'issue-737-disk' -Subjects @('feat(disk): x (#737)', 'fix: y #751 and #752', 'chore: no ref')
+        $r | Should -Be @(737, 751, 752)
+        Get-SweepIssueRefs -Branch 'worktree-agent-af205' -Subjects @('wip') | Should -BeNullOrEmpty
+    }
+    It 'reads GitHub''s node: a merged PR, an issue closed by a merged PR, and everything else' {
+        $pr = ConvertTo-SweepRefState -Number 753 -Node ([pscustomobject]@{ __typename = 'PullRequest'; merged = $true })
+        $pr.Done | Should -BeTrue; $pr.By | Should -Be 753
+        $iss = ConvertTo-SweepRefState -Number 737 -Node ([pscustomobject]@{ __typename = 'Issue'; state = 'CLOSED'
+            closedByPullRequestsReferences = [pscustomobject]@{ nodes = @([pscustomobject]@{ number = 748; merged = $false }, [pscustomobject]@{ number = 749; merged = $true }) } })
+        $iss.Done | Should -BeTrue; $iss.By | Should -Be 749
+        (ConvertTo-SweepRefState -Number 1 -Node ([pscustomobject]@{ __typename = 'Issue'; state = 'OPEN' })).Done | Should -BeFalse
+        (ConvertTo-SweepRefState -Number 1 -Node ([pscustomobject]@{ __typename = 'Issue'; state = 'CLOSED'; closedByPullRequestsReferences = [pscustomobject]@{ nodes = @() } })).Done | Should -BeFalse -Because 'closed as not planned is not "done by a PR"'
+        (ConvertTo-SweepRefState -Number 1 -Node ([pscustomobject]@{ __typename = 'PullRequest'; merged = $false })).Done | Should -BeFalse
+        (ConvertTo-SweepRefState -Number 1 -Node $null).Done | Should -BeFalse
+    }
+    It 'names the PR from a "Superseded by #N" comment on the branch''s own closed PR' {
+        Get-SweepSupersededHint -PrComments @('Closing.', 'Superseded by #749.') | Should -Be '#749'
+        # The real comment that closed #748 here links the PR by URL.
+        Get-SweepSupersededHint -PrComments @('Superseded by https://github.com/CSalcedoDataBI/agentic-board/pull/749 - transcripts moved') | Should -Be '#749'
+        Get-SweepSupersededHint -PrComments @('Looks good, merging soon.') | Should -Be ''
+    }
+    It 'names the merged PRs when the merge conflicts and every reference is done' {
+        $refs = @([pscustomobject]@{ Number = 751; Done = $true; By = 753 }, [pscustomobject]@{ Number = 753; Done = $true; By = 753 })
+        Get-SweepSupersededHint -Containment 'conflict' -Refs $refs | Should -Be '#753'
+    }
+    It 'gives no hint when one reference is still open, when there are none, or when it merges cleanly' {
+        $mixed = @([pscustomobject]@{ Number = 751; Done = $true; By = 753 }, [pscustomobject]@{ Number = 760; Done = $false; By = 0 })
+        Get-SweepSupersededHint -Containment 'conflict' -Refs $mixed | Should -Be ''
+        Get-SweepSupersededHint -Containment 'conflict' -Refs @() | Should -Be ''
+        Get-SweepSupersededHint -Containment 'adds' -Refs @([pscustomobject]@{ Number = 751; Done = $true; By = 753 }) | Should -Be '' -Because 'a clean merge that adds something is new work'
+    }
+}
+
 Describe 'Get-SweepArchiveVerdict - archive a session only when nothing is left behind it' {
     BeforeAll {
         $script:Now = [datetime]'2026-09-29T12:00:00Z'

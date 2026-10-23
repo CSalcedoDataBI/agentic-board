@@ -46,8 +46,21 @@ it chooses **one** disposition, and then decides which host-app sessions may be 
 | `wip-park` | uncommitted changes | Commits them as `wip: parked by close-cycle --all` (hooks run), then parks |
 | `keep-review` | PR open, everything pushed | Nothing; the PR already makes it visible. Commits the PR does not have yet are pushed first (as `park`), because archiving removes the worktree |
 | `delete-empty` | clean branch with no commits | Deletes it; there is no work to lose |
-| `needs-decision` | PR closed unmerged, unreadable state, or parking in **another account's** repo | Nothing; reported with the reason |
+| `delete-contained` | clean branch whose content is **already on the default branch** through another PR (squash-merged, cherry-picked; typical of `worktree-agent-*` branches) | Deletes it. Proven with `git merge-tree --write-tree origin/<default> <branch>`: the merged tree equals the default branch's tree. Proven again right before the delete |
+| `needs-decision` | PR closed unmerged, unreadable state, parking in **another account's** repo, or **likely superseded by #N** | Nothing; reported with the reason |
 | `skip-open` | a session is still working on it | Nothing |
+
+**Already on main? (#755)** Before a branch is parked (or left as closed-unmerged), the sweep checks
+whether its work already reached the default branch through a different PR:
+
+1. **Contained (exact):** the merge adds nothing → `delete-contained`.
+2. **Likely superseded (a hint, so a human decides):** its own closed PR says "superseded by #N", or
+   the merge conflicts and every issue/PR it references (`issue-NNN` in its name, `#NNN` in its
+   commit subjects) was done by a merged PR → `needs-decision` naming that PR, instead of a
+   duplicate draft PR. A clean merge that adds something is new work and is still parked.
+
+If git or gh cannot answer, the branch keeps its old disposition (`park`): a check that fails never
+deletes anything.
 
 **Session archive rule:** a session is archived only when the work behind it is resolved:
 - its branch was torn down, parked or is in review; or
