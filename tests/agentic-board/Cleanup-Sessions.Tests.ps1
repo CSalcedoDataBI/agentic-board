@@ -203,6 +203,29 @@ Describe 'Get-SweepContainment - reading git merge-tree --write-tree' {
             finally { Pop-Location }
         } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
     }
+    It 'still proves it contained when main edited the same file after the squash - the usual case' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            $f = Join-Path $r 'f.txt'
+            & $g init -q -b main
+            Set-Content -LiteralPath $f -Value (1..12 | ForEach-Object { "line $_" }); & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b worktree-agent-y
+            Set-Content -LiteralPath $f -Value (@('line 1 by the subagent') + (2..12 | ForEach-Object { "line $_" })); & $g add -A; & $g commit -q -m 'feat: subagent (#751)'
+            & $g checkout -q main
+            & $g merge -q --squash worktree-agent-y; & $g commit -q -m 'feat: parent PR (#753)'
+            Set-Content -LiteralPath $f -Value (@('line 1 by the subagent') + (2..11 | ForEach-Object { "line $_" }) + 'line 12 edited on main'); & $g add -A; & $g commit -q -m 'later edit'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            Push-Location -LiteralPath $r
+            try { Get-BranchContainment -Default 'main' -Branch 'worktree-agent-y' | Should -Be 'contained' }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'reads which paths git check-attr gives a custom merge driver' {
+        Get-SweepDrivenPaths -CheckAttr @('a.txt: merge: unspecified', 'b.bin: merge: unset', 'c.txt: merge: set', 'cfg.txt: merge: ours', 'dir/x y.lock: merge: union') |
+            Should -Be @('cfg.txt', 'dir/x y.lock')
+    }
 }
 
 Describe 'Superseded hint - a heuristic that asks, it does not delete (#755)' {
@@ -210,6 +233,9 @@ Describe 'Superseded hint - a heuristic that asks, it does not delete (#755)' {
         $r = Get-SweepIssueRefs -Branch 'issue-737-disk' -Subjects @('feat(disk): x (#737)', 'fix: y #751 and #752', 'chore: no ref')
         $r | Should -Be @(737, 751, 752)
         Get-SweepIssueRefs -Branch 'worktree-agent-af205' -Subjects @('wip') | Should -BeNullOrEmpty
+    }
+    It 'does not read another repo''s number, or C#12, as one of this repo''s' {
+        Get-SweepIssueRefs -Subjects @('fix: port other-org/other-repo#12', 'docs: C#12 sample', 'feat: x (#5)') | Should -Be @(5)
     }
     It 'reads GitHub''s node: a merged PR, an issue closed by a merged PR, and everything else' {
         $pr = ConvertTo-SweepRefState -Number 753 -Node ([pscustomobject]@{ __typename = 'PullRequest'; merged = $true })
@@ -225,7 +251,9 @@ Describe 'Superseded hint - a heuristic that asks, it does not delete (#755)' {
     It 'names the PR from a "Superseded by #N" comment on the branch''s own closed PR' {
         Get-SweepSupersededHint -PrComments @('Closing.', 'Superseded by #749.') | Should -Be '#749'
         # The real comment that closed #748 here links the PR by URL.
-        Get-SweepSupersededHint -PrComments @('Superseded by https://github.com/CSalcedoDataBI/agentic-board/pull/749 - transcripts moved') | Should -Be '#749'
+        Get-SweepSupersededHint -Repo 'CSalcedoDataBI/agentic-board' -PrComments @('Superseded by https://github.com/CSalcedoDataBI/agentic-board/pull/749 - transcripts moved') | Should -Be '#749'
+        Get-SweepSupersededHint -Repo 'CSalcedoDataBI/agentic-board' -PrComments @('Superseded by https://github.com/other/repo/pull/749') | Should -Be '' -Because 'another repo''s PR says nothing about this branch'
+        Get-SweepSupersededHint -Repo 'CSalcedoDataBI/agentic-board' -PrComments @('superseded by other/repo#749') | Should -Be ''
         Get-SweepSupersededHint -PrComments @('Looks good, merging soon.') | Should -Be ''
     }
     It 'names the merged PRs when the merge conflicts and every reference is done' {

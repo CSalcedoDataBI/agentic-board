@@ -188,12 +188,22 @@ function Get-SweepContainment {
     return 'adds'
 }
 
+# The paths `git check-attr merge` gives a custom merge driver. PURE. Its lines read
+# "path: merge: value"; unspecified / set / unset are git's own text and binary merges.
+function Get-SweepDrivenPaths {
+    param([string[]]$CheckAttr = @())
+    return @(foreach ($l in $CheckAttr) {
+        if ("$l" -match '^(.*): merge: (.*)$' -and $Matches[2].Trim() -notin @('unspecified', 'set', 'unset')) { $Matches[1] }
+    })
+}
+
 # The issue and PR numbers a branch talks about: its issue-NNN name and every #NNN of its commit subjects.
+# Not "owner/repo#12" (another repo's number) nor "C#12".
 function Get-SweepIssueRefs {
     param([string]$Branch = '', [string[]]$Subjects = @())
     $n = @()
     if ($Branch -match '^issue-(\d+)') { $n += [int]$Matches[1] }
-    foreach ($s in $Subjects) { foreach ($m in [regex]::Matches("$s", '#(\d+)\b')) { $n += [int]$m.Groups[1].Value } }
+    foreach ($s in $Subjects) { foreach ($m in [regex]::Matches("$s", '(?<![\w/.-])#(\d+)\b')) { $n += [int]$m.Groups[1].Value } }
     return @($n | Select-Object -Unique)
 }
 
@@ -217,9 +227,11 @@ function ConvertTo-SweepRefState {
 #   - it no longer merges cleanly AND every issue/PR it references was done by a merged PR.
 # A clean merge that adds something is left alone: that is what new, unparked work looks like.
 function Get-SweepSupersededHint {
-    param([string]$Containment = '', [object[]]$Refs = @(), [string[]]$PrComments = @())
-    # "#749" or the full PR URL - the comment that closed #748 in this repo used the URL.
-    foreach ($c in $PrComments) { if ("$c" -match '(?i)superseded\s+by\s+(?:#|https?://\S+?/pull/)(\d+)') { return "#$($Matches[1])" } }
+    param([string]$Containment = '', [object[]]$Refs = @(), [string[]]$PrComments = @(), [string]$Repo = '')
+    # "#749" or the full PR URL - the comment that closed #748 in this repo used the URL. A URL counts
+    # only when it is THIS repo's PR: another repo's #749 says nothing about this branch.
+    $url = if ($Repo) { "https?://github\.com/$([regex]::Escape($Repo))/pull/" } else { '(?!)' }
+    foreach ($c in $PrComments) { if ("$c" -match "(?i)superseded\s+by\s+(?:(?<![\w/.-])#|$url)(\d+)\b") { return "#$($Matches[1])" } }
     if ($Containment -ne 'conflict') { return '' }
     $all = @($Refs | Where-Object { $_ })
     if ($all.Count -eq 0 -or @($all | Where-Object { -not $_.Done }).Count -gt 0) { return '' }
@@ -361,15 +373,34 @@ function Get-BranchContainment([string]$Default, [string]$Branch) {
     $c = Get-SweepContainment -ExitCode $LASTEXITCODE -Output $out -DefaultTree "$dt"
     if ($c -ne 'contained') { return $c }
     # merge-tree honours the repo's merge drivers: a `merge=ours` file merges "cleanly" to main's side
-    # and would look contained while the branch's change is on main nowhere. So the deletion also
-    # needs the plain-diff proof: no path the branch changed differs between it and the default branch.
+    # and would look contained while the branch's change is on main nowhere. For the paths the branch
+    # changed that have a custom driver - and only those: main editing a file after the squash is the
+    # usual case and merges correctly - the deletion needs the plain proof that main has the same file.
     $mb = (git merge-base $base $head 2>$null)
     if ($LASTEXITCODE -ne 0 -or -not $mb) { return 'unknown' }
-    $q = @('-c', 'core.quotePath=false', 'diff', '--no-renames', '--name-only')
-    $mine = @(git @q "$mb" $head 2>$null);  if ($LASTEXITCODE -ne 0) { return 'unknown' }
-    $diff = @(git @q $base $head 2>$null);  if ($LASTEXITCODE -ne 0) { return 'unknown' }
-    if (@($mine | Where-Object { $_ -and $diff -contains $_ }).Count -gt 0) { return 'adds' }
-    return 'contained'
+    $q = @('-c', 'core.quotePath=false')
+    $mine = @(git @q diff --no-renames --name-only "$mb" $head 2>$null | Where-Object { $_ })
+    if ($LASTEXITCODE -ne 0) { return 'unknown' }
+    if ($mine.Count -eq 0) { return 'contained' }
+    # Attributes can come from the working tree, either side's tree, info/attributes or core.attributesFile.
+    # Paths go as arguments, in batches under Windows' command-line limit: piped into git on Windows
+    # every line arrives with a trailing CR, and "f.txt`r" matches no attribute pattern.
+    $driven = @()
+    foreach ($src in @('', $base, $head)) {
+        # Built as an array on purpose: `if` would unroll a one-item array to a string, and a string
+        # splatted into git does not arrive as one argument.
+        $sa = @(); if ($src) { $sa = @("--source=$src") }
+        for ($i = 0; $i -lt $mine.Count; $i += 200) {
+            $batch = @($mine[$i..([math]::Min($i + 199, $mine.Count - 1))])
+            $attr = @(git @q check-attr @sa merge -- @batch 2>$null)
+            if ($LASTEXITCODE -ne 0) { return 'unknown' }
+            $driven += @(Get-SweepDrivenPaths -CheckAttr $attr)
+        }
+    }
+    $driven = @($driven | Select-Object -Unique)
+    if ($driven.Count -eq 0) { return 'contained' }
+    $null = (git @q --literal-pathspecs diff --quiet --no-renames $base $head -- @driven 2>$null)
+    switch ($LASTEXITCODE) { 0 { return 'contained' } 1 { return 'adds' } default { return 'unknown' } }
 }
 
 # Dot-source guard: with $env:ABIOS_SWEEP_DOTSOURCE set, return after defining the pure helpers
@@ -474,7 +505,7 @@ function Get-BranchSupersededHint([string]$Repo, [string]$Default, $Branch, [str
                 $refs += $refCache[$key]
             }
         }
-        return (Get-SweepSupersededHint -Containment $Containment -Refs $refs -PrComments $texts)
+        return (Get-SweepSupersededHint -Containment $Containment -Refs $refs -PrComments $texts -Repo $Repo)
     } catch { return '' }
 }
 
