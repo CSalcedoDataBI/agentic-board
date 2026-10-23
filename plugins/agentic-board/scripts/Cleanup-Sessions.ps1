@@ -188,12 +188,13 @@ function Get-SweepContainment {
     return 'adds'
 }
 
-# The paths `git check-attr merge` gives a custom merge driver. PURE. Its lines read
-# "path: merge: value"; unspecified / set / unset are git's own text and binary merges.
+# The paths `git check-attr -z merge` gives a custom merge driver. PURE. -z output, split on NUL, is
+# path / attribute / value triplets; unspecified / set / unset are git's own text and binary merges.
 function Get-SweepDrivenPaths {
     param([string[]]$CheckAttr = @())
-    return @(foreach ($l in $CheckAttr) {
-        if ("$l" -match '^(.*): merge: (.*)$' -and $Matches[2].Trim() -notin @('unspecified', 'set', 'unset')) { $Matches[1] }
+    $a = @($CheckAttr)
+    return @(for ($i = 0; $i + 2 -lt $a.Count; $i += 3) {
+        if ($a[$i + 2] -notin @('unspecified', 'set', 'unset')) { $a[$i] }
     })
 }
 
@@ -357,52 +358,82 @@ function New-ParkedPrBody {
     return ($lines -join "`n")
 }
 
+# One git call for the containment proof. Output is read as UTF-8 and, with -z, split on NUL - so a
+# path comes back byte-exact: no C-quoting, no console code page, no CR. A git that fails to start
+# (a command line over the OS limit) throws instead of setting $LASTEXITCODE, which would otherwise
+# keep the PREVIOUS call's 0; here it is exit -1, and the proof turns it into 'unknown'.
+function Invoke-SweepGit {
+    param([string[]]$GitArgs, [switch]$Z)
+    $prevEnc = [Console]::OutputEncoding
+    try {
+        $ErrorActionPreference = 'Stop'
+        [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        $global:LASTEXITCODE = -1
+        $out = @(& git @GitArgs 2>$null)
+        $code = $LASTEXITCODE
+    } catch { return [pscustomobject]@{ Code = -1; Items = @() } }
+    finally { [Console]::OutputEncoding = $prevEnc }
+    $items = if ($Z) { @((($out -join "`n") -split "`0") | Where-Object { $_ -ne '' }) } else { @($out) }
+    # [string[]]: `if` unrolls a one-item array to a bare string, and Items[0] would be its first CHARACTER.
+    return [pscustomobject]@{ Code = $code; Items = [string[]]@($items) }
+}
+
 # Is this branch provably contained in origin's default branch? (#755) Defined above the dot-source
-# guard so the tests run it on a real repo; defining it touches nothing.
+# guard so the tests run it on a real repo; defining it touches nothing. Needs git 2.40+
+# (`check-attr --source`); an older git answers 'unknown' and the branch is parked as before.
 # Run inside the repo. `merge-tree --write-tree` merges in memory: no worktree, index or ref changes.
 # Fully qualified refs: a short name can resolve to a local branch called "origin/main" or to a tag
 # named like the branch, and the proof would then be about a different commit than `branch -D` deletes.
 function Get-BranchContainment([string]$Default, [string]$Branch) {
     $base = "refs/remotes/origin/$Default"; $head = "refs/heads/$Branch"
-    $dt = (git rev-parse --verify --quiet "$base^{tree}" 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $dt) { return 'unknown' }
+    $dt = Invoke-SweepGit @('rev-parse', '--verify', '--quiet', "$base^{tree}")
+    if ($dt.Code -ne 0 -or -not $dt.Items) { return 'unknown' }
     # merge-tree also exits 1 on a ref it cannot read, which would read as "conflict".
-    $null = (git rev-parse --verify --quiet "$head^{commit}" 2>$null)
-    if ($LASTEXITCODE -ne 0) { return 'unknown' }
-    $out = @(git merge-tree --write-tree $base $head 2>$null)
-    $c = Get-SweepContainment -ExitCode $LASTEXITCODE -Output $out -DefaultTree "$dt"
+    if ((Invoke-SweepGit @('rev-parse', '--verify', '--quiet', "$head^{commit}")).Code -ne 0) { return 'unknown' }
+    $mt = Invoke-SweepGit @('merge-tree', '--write-tree', $base, $head)
+    $c = Get-SweepContainment -ExitCode $mt.Code -Output $mt.Items -DefaultTree "$($dt.Items[0])"
     if ($c -ne 'contained') { return $c }
     # merge-tree honours the repo's merge drivers: a `merge=ours` file merges "cleanly" to main's side
     # and would look contained while the branch's change is on main nowhere. For the paths the branch
     # changed that have a custom driver - and only those: main editing a file after the squash is the
     # usual case and merges correctly - the deletion needs the plain proof that main has the same file.
-    $mb = (git merge-base $base $head 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $mb) { return 'unknown' }
-    $q = @('-c', 'core.quotePath=false')
-    $mine = @(git @q diff --no-renames --name-only "$mb" $head 2>$null | Where-Object { $_ })
-    if ($LASTEXITCODE -ne 0) { return 'unknown' }
-    if ($mine.Count -eq 0) { return 'contained' }
+    $mb = Invoke-SweepGit @('merge-base', $base, $head)
+    if ($mb.Code -ne 0 -or -not $mb.Items) { return 'unknown' }
+    $mine = Invoke-SweepGit @('diff', '-z', '--no-renames', '--name-only', "$($mb.Items[0])", $head) -Z
+    if ($mine.Code -ne 0) { return 'unknown' }
+    $paths = @($mine.Items)
+    if ($paths.Count -eq 0) { return 'contained' }
     # Attributes can come from the working tree, either side's tree, info/attributes or core.attributesFile.
-    # Paths go as arguments, in batches under Windows' command-line limit: piped into git on Windows
-    # every line arrives with a trailing CR, and "f.txt`r" matches no attribute pattern.
+    # Paths go as arguments (piped into git on Windows each line gains a CR), in batches bounded by
+    # LENGTH so no command line nears the OS limit.
+    $batches = @(); $cur = [System.Collections.Generic.List[string]]::new(); $len = 0
+    foreach ($p in $paths) {
+        if ($cur.Count -gt 0 -and $len + $p.Length -gt 8000) { $batches += , @($cur); $cur = [System.Collections.Generic.List[string]]::new(); $len = 0 }
+        $cur.Add($p); $len += $p.Length + 3
+    }
+    if ($cur.Count -gt 0) { $batches += , @($cur) }
     $driven = @()
     foreach ($src in @('', $base, $head)) {
         # Built as an array on purpose: `if` would unroll a one-item array to a string, and a string
         # splatted into git does not arrive as one argument.
         $sa = @(); if ($src) { $sa = @("--source=$src") }
-        for ($i = 0; $i -lt $mine.Count; $i += 200) {
-            $batch = @($mine[$i..([math]::Min($i + 199, $mine.Count - 1))])
-            $attr = @(git @q check-attr @sa merge -- @batch 2>$null)
-            if ($LASTEXITCODE -ne 0) { return 'unknown' }
-            $driven += @(Get-SweepDrivenPaths -CheckAttr $attr)
+        foreach ($b in $batches) {
+            $attr = Invoke-SweepGit (@('check-attr', '-z') + $sa + @('merge', '--') + @($b)) -Z
+            if ($attr.Code -ne 0) { return 'unknown' }
+            $driven += @(Get-SweepDrivenPaths -CheckAttr $attr.Items)
         }
     }
-    $driven = @($driven | Select-Object -Unique)
-    if ($driven.Count -eq 0) { return 'contained' }
-    $null = (git @q --literal-pathspecs diff --quiet --no-renames $base $head -- @driven 2>$null)
-    switch ($LASTEXITCODE) { 0 { return 'contained' } 1 { return 'adds' } default { return 'unknown' } }
+    # Each driven path is compared blob by blob. A path neither side has means the name did not
+    # survive the round trip - never "nothing differs".
+    foreach ($p in @($driven | Select-Object -Unique)) {
+        $bo = Invoke-SweepGit @('rev-parse', '--verify', '--quiet', "${base}:$p")
+        $ho = Invoke-SweepGit @('rev-parse', '--verify', '--quiet', "${head}:$p")
+        if ($bo.Code -notin 0, 1 -or $ho.Code -notin 0, 1) { return 'unknown' }
+        if (-not $bo.Items -and -not $ho.Items) { return 'unknown' }
+        if ("$($bo.Items)" -ne "$($ho.Items)") { return 'adds' }
+    }
+    return 'contained'
 }
-
 # Dot-source guard: with $env:ABIOS_SWEEP_DOTSOURCE set, return after defining the pure helpers
 # WITHOUT touching disk, git, gh or the token.
 if ($env:ABIOS_SWEEP_DOTSOURCE) { return }

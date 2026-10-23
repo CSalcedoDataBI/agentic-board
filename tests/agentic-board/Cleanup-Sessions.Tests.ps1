@@ -203,6 +203,26 @@ Describe 'Get-SweepContainment - reading git merge-tree --write-tree' {
             finally { Pop-Location }
         } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
     }
+    It 'reads a non-ASCII driven file name byte-exact - a mangled name must not prove "nothing differs"' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            $f = Join-Path $r "caf$([char]0xE9) a$([char]0x00F1)o.lock"
+            & $g init -q -b main
+            & $g config merge.ours.driver true
+            Set-Content -LiteralPath (Join-Path $r '.gitattributes') -Value '*.lock merge=ours'
+            Set-Content -LiteralPath $f -Value 'base'; & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b feature
+            Set-Content -LiteralPath $f -Value 'branch only'; & $g add -A; & $g commit -q -m 'feat: lock'
+            & $g checkout -q main
+            Set-Content -LiteralPath $f -Value 'main moved on'; & $g add -A; & $g commit -q -m 'main edit'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            Push-Location -LiteralPath $r
+            try { Get-BranchContainment -Default 'main' -Branch 'feature' | Should -Be 'adds' }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     It 'still proves it contained when main edited the same file after the squash - the usual case' {
         $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $r | Out-Null
@@ -223,8 +243,10 @@ Describe 'Get-SweepContainment - reading git merge-tree --write-tree' {
         } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
     }
     It 'reads which paths git check-attr gives a custom merge driver' {
-        Get-SweepDrivenPaths -CheckAttr @('a.txt: merge: unspecified', 'b.bin: merge: unset', 'c.txt: merge: set', 'cfg.txt: merge: ours', 'dir/x y.lock: merge: union') |
-            Should -Be @('cfg.txt', 'dir/x y.lock')
+        # check-attr -z, split on NUL: path / attribute / value. A name with ": merge: " in it stays one path.
+        Get-SweepDrivenPaths -CheckAttr @('a.txt', 'merge', 'unspecified', 'b.bin', 'merge', 'unset', 'c.txt', 'merge', 'set',
+            'cfg.txt', 'merge', 'ours', 'dir/x: merge: y.lock', 'merge', 'union') |
+            Should -Be @('cfg.txt', 'dir/x: merge: y.lock')
     }
 }
 

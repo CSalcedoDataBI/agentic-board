@@ -62,7 +62,7 @@ whether its work already reached the default branch through a different PR:
    commits made after the branch's own PR merged (`merged-advanced` is new work).
 
 If git or gh cannot answer, the branch keeps its old disposition (`park`): a check that fails never
-deletes anything.
+deletes anything. The containment proof needs git 2.40 or later; an older git parks as before.
 
 **Session archive rule:** a session is archived only when the work behind it is resolved:
 - its branch was torn down, parked or is in review; or
