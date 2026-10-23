@@ -137,6 +137,55 @@ Describe 'Get-McpServerNames' {
     It 'leaves out disabled plugins' {
         $script:Names.prefix | Should -Not -Contain 'plugin_pack-c_disabled-one'
     }
+    Context 'installs, scopes and manifest shapes' {
+        BeforeAll {
+            $script:Home3 = Join-Path $script:Root 'home3'
+            $script:Repo3 = Join-Path $script:Root 'repo3'
+            New-Item -ItemType Directory -Path $script:Repo3 -Force | Out-Null
+            $repoKey = ($script:Repo3 -replace '\\','/')
+            $old = Join-Path $script:Home3 'p/old'; $new = Join-Path $script:Home3 'p/new'
+            Write-Json (Join-Path $old '.mcp.json') @{ 'old-server' = @{} }
+            Write-Json (Join-Path $new '.mcp.json') @{ 'new-server' = @{} }
+            $other = Join-Path $script:Home3 'p/other'; Write-Json (Join-Path $other '.mcp.json') @{ 'other-proj' = @{} }
+            $mine  = Join-Path $script:Home3 'p/mine';  Write-Json (Join-Path $mine  '.mcp.json') @{ 'my.server' = @{} }
+            $arr   = Join-Path $script:Home3 'p/arr'
+            Write-Json (Join-Path $arr '.claude-plugin/plugin.json') @{ name = 'arr'; mcpServers = @('./a.json', './b.json') }
+            Write-Json (Join-Path $arr 'a.json') @{ mcpServers = @{ 'from-a' = @{} } }
+            Write-Json (Join-Path $arr 'b.json') @{ 'from-b' = @{} }
+            $off = Join-Path $script:Home3 'p/off'; Write-Json (Join-Path $off '.mcp.json') @{ 'off-server' = @{} }
+            # The newer install has the EARLIER month: a string sort of MM/dd/yyyy would pick the old one.
+            Write-Json (Join-Path $script:Home3 '.claude/plugins/installed_plugins.json') @{ version = 2; plugins = @{
+                'dated@m' = @(
+                    @{ scope = 'user'; installPath = $old; lastUpdated = '2025-11-05T10:00:00.000Z' },
+                    @{ scope = 'user'; installPath = $new; lastUpdated = '2026-02-10T10:00:00.000Z' })
+                'elsewhere@m' = @(@{ scope = 'project'; projectPath = 'C:/some/other/repo'; installPath = $other; lastUpdated = '2026-01-01T00:00:00Z' })
+                'mine@m'      = @(@{ scope = 'local'; projectPath = $repoKey; installPath = $mine; lastUpdated = '2026-01-01T00:00:00Z' })
+                'arr@m'       = @(@{ scope = 'user'; installPath = $arr; lastUpdated = '2026-01-01T00:00:00Z' })
+                'off@m'       = @(@{ scope = 'user'; installPath = $off; lastUpdated = '2026-01-01T00:00:00Z' })
+            } }
+            Write-Json (Join-Path $script:Repo3 '.claude/settings.local.json') @{ enabledPlugins = @{ 'off@m' = $false } }
+            Push-Location $script:Repo3
+            try { $script:Names3 = @(& $script:Discover -Root . -UserHome $script:Home3).prefix } finally { Pop-Location }
+        }
+        It 'picks the most recently updated install by date, not by its text' {
+            $script:Names3 | Should -Contain 'plugin_dated_new-server'
+            $script:Names3 | Should -Not -Contain 'plugin_dated_old-server'
+        }
+        It 'counts a project-scope install only in its own project' {
+            $script:Names3 | Should -Not -Contain 'plugin_elsewhere_other-proj'
+        }
+        It 'resolves a relative -Root against the PowerShell location and normalizes names' {
+            $script:Names3 | Should -Contain 'plugin_mine_my_server'
+        }
+        It 'reads every file of an array-valued mcpServers' {
+            $script:Names3 | Should -Contain 'plugin_arr_from-a'
+            $script:Names3 | Should -Contain 'plugin_arr_from-b'
+            @($script:Names3 | Where-Object { $_ -match '_(Length|Count|Rank)$' }).Count | Should -Be 0
+        }
+        It 'honors a plugin disabled in the project settings' {
+            $script:Names3 | Should -Not -Contain 'plugin_off_off-server'
+        }
+    }
     It 'returns nothing on an empty home' {
         $empty = Join-Path $script:Root 'empty'; New-Item -ItemType Directory -Path $empty -Force | Out-Null
         @(& $script:Discover -Root $empty -UserHome $empty).Count | Should -Be 0
