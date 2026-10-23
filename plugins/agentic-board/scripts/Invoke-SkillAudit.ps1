@@ -167,13 +167,20 @@ if ($available.Count) {
             $files += @(Get-ChildItem -LiteralPath $refDir -Recurse -File -Filter '*.md' | ForEach-Object { $_.FullName })
         }
         $text = ($files | ForEach-Object { Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue }) -join "`n"
+        # The plugin this copy belongs to: its manifest identity, or plugins/<x>/skills/ in a source tree.
+        $ownPlugins = @($s.plugin, [regex]::Match($s.path, '(?i)(?:^|/)plugins/([^/]+)/skills/').Groups[1].Value) |
+            Where-Object { $_ } | ForEach-Object { $_ -replace '[^A-Za-z0-9_-]', '_' }
         $refs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($m in [regex]::Matches([string]$text, 'mcp__([A-Za-z0-9_-]+?)__([A-Za-z0-9_-]+|\*)')) { [void]$refs.Add($m.Value) }
         foreach ($ref in $refs) {
             $m = [regex]::Match($ref, '^mcp__([A-Za-z0-9_-]+?)__(.+)$')
             $prefix = $m.Groups[1].Value; $tool = $m.Groups[2].Value
             if ($availableSet.Contains($prefix)) { continue }
-            $server = (Split-McpPrefix $prefix).server
+            $parts = Split-McpPrefix $prefix
+            # A plugin's skill naming its OWN plugin prefix is right wherever that plugin is enabled; it
+            # is only missing here because this copy's plugin is not (a marketplace clone, a disabled one).
+            if ($parts.plugin -and $parts.plugin -in $ownPlugins) { continue }
+            $server = $parts.server
             $alt = @($available | Where-Object { $_.server -ieq $server } | ForEach-Object { "mcp__$($_.prefix)__$tool" })
             if (-not $alt.Count) { continue }
             $o = Get-Owner $s

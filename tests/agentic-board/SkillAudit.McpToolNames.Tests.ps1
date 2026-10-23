@@ -37,6 +37,9 @@ BeforeAll {
     # inref: the wrong name sits in references/, not in SKILL.md.
     New-Skill '.claude/skills/proj/inref' 'inref' 'See the references.' 'Wildcard: mcp__powerbi-modeling-mcp__*'
 
+    # selfref: a plugin's skill naming its OWN plugin prefix, from a tree where that plugin is not enabled.
+    New-Skill 'plugins/pack-z/skills/selfref' 'selfref' 'Run `mcp__plugin_pack-z_codegraph__codegraph_search`.'
+
     $script:Servers = @('codegraph', 'plugin_fabric-skills_powerbi-modeling-mcp')
     $script:Res = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers $script:Servers
     function Get-McpFinding { param([string]$Skill) @($script:Res.findings | Where-Object { $_.skill -eq $Skill -and $_.type -eq 'mcp-tool-name' }) }
@@ -59,6 +62,9 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
     }
     It 'does not flag names that exist, nor placeholder patterns' {
         (Get-McpFinding 'fine').Count | Should -Be 0
+    }
+    It 'does not flag a plugin skill that names its own plugin prefix' {
+        (Get-McpFinding 'selfref').Count | Should -Be 0
     }
     It 'stays silent about a server that is not installed under any prefix' {
         (Get-McpFinding 'absent').Count | Should -Be 0
@@ -97,13 +103,17 @@ Describe 'Get-McpServerNames' {
         $repoKey = ([System.IO.Path]::GetFullPath($script:Repo2) -replace '\\','/')
         Write-Json (Join-Path $script:Home2 '.claude.json') ([ordered]@{
             mcpServers = @{ codegraph = @{ command = 'codegraph' } }
-            projects   = @{ $repoKey = @{ mcpServers = @{ 'local-one' = @{ command = 'x' } } }; 'C:/elsewhere' = @{ mcpServers = @{ 'not-here' = @{} } } }
+            projects   = @{
+                $repoKey = @{ mcpServers = @{ 'local-one' = @{ command = 'x' }; 'switched-off' = @{} }
+                              enabledMcpjsonServers = @('proj-one'); disabledMcpServers = @('switched-off', 'plugin:pack-b:from-file') }
+                'C:/elsewhere' = @{ mcpServers = @{ 'not-here' = @{} } }
+            }
         })
-        Write-Json (Join-Path $script:Repo2 '.mcp.json') @{ mcpServers = @{ 'proj-one' = @{ command = 'y' } } }
+        Write-Json (Join-Path $script:Repo2 '.mcp.json') @{ mcpServers = @{ 'proj-one' = @{ command = 'y' }; 'unapproved' = @{} } }
         $pa = Join-Path $script:Home2 'plugins/a'; $pb = Join-Path $script:Home2 'plugins/b'; $pc = Join-Path $script:Home2 'plugins/c'
         Write-Json (Join-Path $pa '.mcp.json') @{ 'powerbi-modeling-mcp' = @{ command = 'z' } }                 # flat map
         Write-Json (Join-Path $pb '.claude-plugin/plugin.json') @{ name = 'pack-b'; mcpServers = './servers.json' }
-        Write-Json (Join-Path $pb 'servers.json') @{ mcpServers = @{ 'from-file' = @{} } }
+        Write-Json (Join-Path $pb 'servers.json') @{ mcpServers = @{ 'from-file' = @{}; 'second' = @{} } }
         Write-Json (Join-Path $pc '.mcp.json') @{ mcpServers = @{ 'disabled-one' = @{} } }
         Write-Json (Join-Path $script:Home2 '.claude/plugins/installed_plugins.json') @{ version = 2; plugins = @{
             'fabric-skills@m' = @(@{ scope = 'user'; installPath = $pa; lastUpdated = '2026-01-01' })
@@ -121,7 +131,24 @@ Describe 'Get-McpServerNames' {
     }
     It 'lists plugin servers with the plugin prefix, from .mcp.json and from plugin.json' {
         $script:Names.prefix | Should -Contain 'plugin_fabric-skills_powerbi-modeling-mcp'
-        $script:Names.prefix | Should -Contain 'plugin_pack-b_from-file'
+        $script:Names.prefix | Should -Contain 'plugin_pack-b_second'
+    }
+    It 'leaves out servers switched off in the project, direct and plugin ones' {
+        $script:Names.prefix | Should -Not -Contain 'switched-off'
+        $script:Names.prefix | Should -Not -Contain 'plugin_pack-b_from-file'
+    }
+    It 'leaves out a project .mcp.json server that was never approved' {
+        $script:Names.prefix | Should -Not -Contain 'unapproved'
+    }
+    It 'still reads ~/.claude.json when it holds keys that differ only in case' {
+        $file = Join-Path $script:Home2 '.claude.json'
+        $saved = Get-Content -LiteralPath $file -Raw
+        try {
+            '{"mcpServers":{"codegraph":{}},"projects":{"c:/dup":{},"C:/dup":{}}}' | Set-Content -LiteralPath $file -Encoding utf8
+            @(& $script:Discover -Root $script:Repo2 -UserHome $script:Home2).prefix | Should -Contain 'codegraph'
+        } finally {
+            $saved | Set-Content -LiteralPath $file -Encoding utf8 -NoNewline
+        }
     }
     It 'never reads the other keys of ~/.claude.json or a project entry as servers' {
         Write-Json (Join-Path $script:Home2 '.claude.json') @{ numStartups = 3; projects = @{ 'C:/x' = @{ allowedTools = @() } } }
