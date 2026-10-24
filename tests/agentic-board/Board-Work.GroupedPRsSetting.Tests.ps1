@@ -104,7 +104,7 @@ Describe 'Show-GroupingOffer states which setting produced each proposed group (
     }
     It 'the pending list passes the label from the repo config (script-level wiring)' {
         $src = Get-Content -LiteralPath $script:Script -Raw
-        $src | Should -Match '(?s)Show-GroupingOffer -Suggestions \$groups -Posture \$posture -CurrentRepo \$hereRepo\s*`\s*-SettingLabel \(Format-GroupingSettingLabel \(Get-GroupingSetting \$cfgRead\.config\)\)'
+        $src | Should -Match '(?s)Show-GroupingOffer -Suggestions \$groups -Posture \$posture -CurrentRepo \$hereRepo\s*`\s*-SettingLabel \(Format-GroupingSettingLabel \(Get-GroupingSetting \$cfgRead\.config -ExpertDeclared:\$expertDeclared\)\)'
     }
 }
 

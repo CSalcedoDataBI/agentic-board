@@ -31,6 +31,7 @@ param()
 function Get-BoardConfigDefaults {
     @{
         preferGroupedPRs = $null
+        mergeAuthority   = $null
     }
 }
 
@@ -147,26 +148,32 @@ function Set-BoardConfigValue {
 #   'auto'    - no decision recorded: propose grouping only where there is EVIDENCE the
 #               issues overlap. This is the default, and it is what #662 changes - the old
 #               default proposed nothing and left one-PR-per-issue as the silent posture.
+#
+# -ExpertDeclared (#797): a repo whose merges are decided by its own expert has already said what
+# shape its PRs take - one per group of related issues - so when nothing is recorded (or what is
+# recorded cannot be read), the default it falls back to is 'always', not 'auto'. A recorded
+# answer, including a hand-written "auto", still wins: the declaration is a default, not an override.
 function Resolve-GroupingPosture {
     [CmdletBinding()]
-    param($Config)
+    param($Config, [switch]$ExpertDeclared)
 
-    if ($null -eq $Config) { return 'auto' }
+    $fallback = if ($ExpertDeclared) { 'always' } else { 'auto' }
+    if ($null -eq $Config) { return $fallback }
     $v = $Config['preferGroupedPRs']
-    if ($null -eq $v) { return 'auto' }
+    if ($null -eq $v) { return $fallback }
     if ($v -is [string]) {
         switch ($v.Trim().ToLowerInvariant()) {
             'true'  { return 'always' }
             'false' { return 'never' }
             'auto'  { return 'auto' }
-            default { return 'auto' }
+            default { return $fallback }
         }
     }
     # Only a real boolean is a decision here. `[bool]` on anything else is truthiness (0 -> a silent
     # 'never', 42 -> 'always', an object -> 'always'): a hand edit the tool cannot read must fall
-    # back to auto like the unreadable strings above, not be read as an answer.
+    # back to the default like the unreadable strings above, not be read as an answer.
     if ($v -is [bool]) { if ($v) { return 'always' } else { return 'never' } }
-    return 'auto'
+    return $fallback
 }
 
 # What a user sees and types for the grouped-PR setting, and WHERE its value came from (#681).
@@ -176,11 +183,14 @@ function Resolve-GroupingPosture {
 # non-null preferGroupedPRs in .agentic-board/config.json) or nothing was decided and the tool's
 # default applies ('default'). A recorded `auto` is stored as null, so "auto" from the default and
 # "auto" chosen on purpose are the same to the tool and are reported as 'default'.
+#
+# With -ExpertDeclared and nothing recorded, the source is 'expert': the value in force came from
+# the repo's merge-authority declaration, which is neither the tool's default nor a grouping answer.
 function Get-GroupingSetting {
     [CmdletBinding()]
-    param($Config)
+    param($Config, [switch]$ExpertDeclared)
 
-    $posture  = Resolve-GroupingPosture $Config
+    $posture  = Resolve-GroupingPosture $Config -ExpertDeclared:$ExpertDeclared
     # 'config' only when the stored value is one Resolve-GroupingPosture actually understands.
     # A garbage value (a hand edit: 42, "maybe", an object) falls back to auto INSIDE the resolver,
     # so calling it "config del repo" would report a decision the repo never made - intent stated as
@@ -194,6 +204,186 @@ function Get-GroupingSetting {
     [pscustomobject]@{
         value   = switch ($posture) { 'always' { 'on' } 'never' { 'off' } default { 'auto' } }
         posture = $posture
-        source  = $(if ($recorded) { 'config' } else { 'default' })
+        source  = $(if ($recorded) { 'config' } elseif ($ExpertDeclared) { 'expert' } else { 'default' })
     }
+}
+
+# Who decides the merge at /board work step 5d/5e (#797). Two answers:
+#   'user'   - today's flow: a merge-confirmation summary, then the user says yes. The default.
+#   'expert' - the repo declares an expert agent that reviews the whole PR with clean context and
+#              merges without asking when its conditions hold, or PROPOSES to the user when not.
+#
+# Deterministic, from files only - no network, no model judgement:
+#   1. `mergeAuthority` in .agentic-board/config.json: 'user' is an explicit opt-out and always
+#      wins; 'expert' declares it outright.
+#   2. Otherwise the repo declares it by its files: a `FICHA.md` at the root carrying an
+#      `Aprobada: YYYY-MM-DD` line (the owner's approval of the plan) AND `.claude/agents/experto.md`.
+#      A FICHA with no approval line is a draft: a plan the owner has not signed cannot hand
+#      anyone the right to merge against it.
+#   3. Either way the expert agent file must exist. A declaration with no expert to run is reported
+#      (`warning`) and falls back to 'user' - merging on a declaration nobody can carry out would be
+#      the tool answering for an expert that is not there.
+#   4. It fails CLOSED. Merging is irreversible, so anything the tool cannot read - an unrecognised
+#      `mergeAuthority` value (`false`, "none", a typo: most likely an attempted opt-out), or a
+#      config.json that exists but cannot be parsed (-ConfigUnreadable) - resolves to 'user' with a
+#      warning, never to "let the files decide". The grouping preference can fall back to a default;
+#      the right to merge without asking cannot.
+#   5. -GitRef (what Board-Work passes: the default branch) reads the declaration as COMMITTED there,
+#      not from the checkout. At step 5d the checkout IS the PR under review, and a PR that adds an
+#      approved FICHA.md, loosens experto.md or writes "mergeAuthority": "expert" must not be judged
+#      by its own rules. So an 'expert' grant counts only from that ref, while an opt-out (or
+#      anything unreadable) counts from ANYWHERE - the local -Config included - because it can only
+#      make the flow ask more. A ref that does not resolve is unreadable: 'user'.
+#      Without -GitRef the files are read from -Root on disk (the unit tests' mode).
+function Read-DeclarationFile {
+    param([string]$Root, [string]$GitRef, [string]$RelPath)
+    if (-not $Root) { return $null }
+    if ($GitRef) {
+        $text = git -C $Root show "${GitRef}:$RelPath" 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        return (@($text) -join "`n")
+    }
+    $p = Join-Path $Root $RelPath
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return $null }
+    # An existing empty file reads as '' (not $null), like an empty blob in git mode.
+    $raw = try { Get-Content -LiteralPath $p -Raw -ErrorAction Stop } catch { '' }
+    if ($null -eq $raw) { '' } else { $raw }
+}
+
+# 'user' / 'expert' / 'unreadable' / $null (nothing declared) for one config source.
+function Get-MergeAuthorityDeclaration {
+    param($Config)
+    if ($null -eq $Config -or $null -eq $Config['mergeAuthority']) { return $null }
+    $v = $Config['mergeAuthority']
+    $norm = if ($v -is [string]) { $v.Trim().ToLowerInvariant() } else { '' }
+    switch ($norm) {
+        'user'   { return 'user' }
+        'expert' { return 'expert' }
+        default  { return 'unreadable' }
+    }
+}
+
+function Get-MergeAuthority {
+    [CmdletBinding()]
+    param($Config, [string]$Root, [switch]$ConfigUnreadable, [string]$GitRef)
+
+    $agentRel = '.claude/agents/experto.md'
+    $res = [ordered]@{
+        authority = 'user'; source = 'default'; reason = 'the repo declares no expert'
+        expertAgent = ''; ficha = ''; fichaApproved = ''; warning = ''; ref = $GitRef
+    }
+    $where = if ($GitRef) { " on $GitRef" } else { '' }
+
+    # Opt-outs first, from every source: each can only make the flow ask more.
+    if ($ConfigUnreadable) {
+        $res.source = 'config'; $res.reason = 'the repo config cannot be read'
+        $res.warning = '.agentic-board/config.json exists but cannot be read, so it may hold an opt-out; the user confirms'
+        return [pscustomobject]$res
+    }
+    # The local config's own opt-out or unreadable value, before anything touches the ref: it is
+    # reported the same way whether or not the default branch resolves.
+    $local = Get-MergeAuthorityDeclaration $Config
+    if ($local -eq 'unreadable') {
+        $res.source = 'config'; $res.reason = 'the repo config holds a merge authority the tool cannot read'
+        $res.warning = "mergeAuthority in .agentic-board/config.json is not 'expert' or 'user'; the user confirms"
+        return [pscustomobject]$res
+    }
+    if ($local -eq 'user') {
+        $res.source = 'config'; $res.reason = 'the repo config says the user confirms every merge'
+        return [pscustomobject]$res
+    }
+    $base  = $null
+    if ($GitRef) {
+        if (-not $Root -or -not (git -C $Root rev-parse --verify --quiet "${GitRef}^{commit}" 2>$null)) {
+            # A repo that declares nothing - neither the FICHA + expert pair on disk nor a local
+            # 'expert' - has nothing the ref could confirm: it gets the plain default, with no
+            # warning it did not have before #797. One file alone is not a declaration.
+            $onDisk = $Root -and (Test-Path -LiteralPath (Join-Path $Root 'FICHA.md')) -and
+                                 (Test-Path -LiteralPath (Join-Path $Root $agentRel))
+            if (-not $onDisk -and $local -ne 'expert') { return [pscustomobject]$res }
+            $res.reason = 'the default branch cannot be read'
+            $res.warning = "could not read '$GitRef' to check the committed declaration; the user confirms"
+            return [pscustomobject]$res
+        }
+        $rawCfg = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath '.agentic-board/config.json'
+        if ($null -ne $rawCfg) {
+            # -NoEnumerate: without it a top-level `[{"mergeAuthority":"expert"}]` unrolls into one
+            # object and reads as a grant. Kept whole, a root array is not a config object.
+            $parsed = try { ConvertFrom-Json -InputObject $rawCfg -NoEnumerate -ErrorAction Stop } catch { $null }
+            # The array test is explicit: Test-IsJsonObject answers $true for an Object[] here.
+            if ($parsed -is [array] -or -not (Test-IsJsonObject $parsed)) {
+                $base = 'unparseable'
+            } else {
+                $prop = $parsed.PSObject.Properties['mergeAuthority']
+                # Plain assignment, not $(...): a subexpression unrolls arrays, so `[]` would read as
+                # "nothing declared" and `["expert"]` as a grant. Kept whole, an array is unreadable.
+                $val = $null
+                if ($prop) { $val = $prop.Value }
+                $base = Get-MergeAuthorityDeclaration @{ mergeAuthority = $val }
+            }
+        }
+    }
+    if ($base -eq 'unparseable') {
+        $res.source = 'config'; $res.reason = 'the committed repo config cannot be read'
+        $res.warning = ".agentic-board/config.json on $GitRef is not a readable JSON object, so it may hold an opt-out; the user confirms"
+        return [pscustomobject]$res
+    }
+    if ($base -eq 'unreadable') {
+        $res.source = 'config'; $res.reason = 'the committed repo config holds a merge authority the tool cannot read'
+        $res.warning = "mergeAuthority in .agentic-board/config.json on $GitRef is not 'expert' or 'user'; the user confirms"
+        return [pscustomobject]$res
+    }
+    if ($base -eq 'user') {
+        $res.source = 'config'; $res.reason = "the repo config on $GitRef says the user confirms every merge"
+        return [pscustomobject]$res
+    }
+
+    # An EMPTY agent file is no expert: there is nothing to run. Both read modes return '' for it.
+    $agentText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath $agentRel
+    if (-not [string]::IsNullOrWhiteSpace($agentText)) { $res.expertAgent = $agentRel }
+    $agentState = if ($res.expertAgent) { 'ok' } elseif ($null -ne $agentText) { 'is empty' } else { 'does not exist' }
+    $fichaText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath 'FICHA.md'
+    if ($null -ne $fichaText) {
+        $res.ficha = 'FICHA.md'
+        # ONE line: every gap is [ \t], never \s, which would cross a newline and read a blank
+        # `Aprobada:` followed by some dated line as an approval. (?!\d), not \b:
+        # `_Aprobada: 2026-10-02_` puts a word character right after the date.
+        $m = [regex]::Match([string]$fichaText, '(?im)^[ \t>*_-]*Aprobada[ \t]*[:*_]*[ \t]*[*_]*[ \t]*(\d{4}-\d{2}-\d{2})(?!\d)')
+        if ($m.Success) { $res.fichaApproved = $m.Groups[1].Value }
+    }
+
+    # The grant: from the ref when there is one, else from the local config.
+    $grant = if ($GitRef) { $base } else { $local }
+    if ($grant -eq 'expert') {
+        $res.source = 'config'
+        if ($res.expertAgent) {
+            $res.authority = 'expert'
+            $res.reason = "the repo config declares an expert ($agentRel)$where"
+        } else {
+            $res.warning = "the repo config declares an expert, but $agentRel $agentState$where; the user confirms"
+            $res.reason = 'declared expert is missing'
+        }
+        return [pscustomobject]$res
+    }
+
+    if ($res.ficha -and $res.fichaApproved -and $res.expertAgent) {
+        $res.authority = 'expert'; $res.source = 'files'
+        $res.reason = "FICHA.md approved $($res.fichaApproved) + $agentRel$where"
+        return [pscustomobject]$res
+    }
+    if ($local -eq 'expert' -and $GitRef) {
+        $res.warning = "mergeAuthority 'expert' is only in the local config; it counts once it is committed to $GitRef"
+    } elseif ($res.fichaApproved -and $agentState -eq 'is empty') {
+        $res.warning = "FICHA.md is approved but $agentRel is empty$where, so there is no expert to run; the user confirms"
+    } elseif ($res.ficha -and $res.expertAgent) {
+        $res.warning = "FICHA.md has no 'Aprobada: YYYY-MM-DD' line$where, so it is a draft; the user confirms"
+    }
+    [pscustomobject]$res
+}
+
+# One line for the menu and for `-MergeAuthority show`.
+function Format-MergeAuthorityLabel {
+    param($Authority)
+    $where = switch ($Authority.source) { 'config' { 'repo config' } 'files' { 'FICHA.md + expert' } default { 'default' } }
+    "$($Authority.authority) ($where)"
 }

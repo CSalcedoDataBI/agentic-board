@@ -71,6 +71,9 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      - someone should be able to approve or reject it separately from the others, or
      - the repo said so (`preferGroupedPRs: false`, below).
 
+     A repo that declares an expert merge authority (step 5, #797) groups by default: with no
+     recorded answer its setting reads `on (repo expert)`, so it needs no separate step for it.
+
      `Board-Work.ps1 -ProjectNum <n>` does this arithmetic for you: under the pending list it
      names the groups it found, **the evidence for each** (the same file of this repo named in
      both issues, or a shared board Area), and how many review rounds grouping would remove.
@@ -181,8 +184,61 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         is stamped with the head commit — so record LAST: anything you push afterwards invalidates
         it, correctly, because nobody reviewed those lines. Only when a review genuinely buys
         nothing (a typo, a regenerated file) use `-AllowUnreviewed`, and say so in your report.
+     **Who decides the merge (#797).** Before step d, run `scripts/Board-Work.ps1 -MergeAuthority
+     show` (no token, writes nothing), after a `git fetch origin`. **If that fetch fails, the
+     authority is `user`** whatever `show` says: a stale ref may still carry a grant the owner has
+     revoked. Its first line is `Merge authority: user (...)` or
+     `Merge authority: expert (...)`. The detection is deterministic, from files only: `expert` when
+     `.agentic-board/config.json` says `"mergeAuthority": "expert"`, or when the repo root has a
+     `FICHA.md` with an `Aprobada: YYYY-MM-DD` line AND `.claude/agents/experto.md` — and in both
+     cases only if that agent file exists and is not empty. `"mergeAuthority": "user"` is an opt-out that beats the
+     files; a FICHA with no approval date is a draft and counts for nothing. It fails closed: an
+     unrecognised `mergeAuthority` value or a `config.json` that cannot be parsed reads as `user`
+     (with a warning), because it may hold an opt-out and a merge cannot be undone. And the grant
+     is read from the **default branch as last fetched** (local `origin/HEAD`; `show` itself does
+     not fetch, which is why the fetch comes first: it makes a revocation on the remote count;
+     falling back to `origin/main` or `origin/master`. A repo created locally and pushed has no
+     `origin/HEAD` — `git remote set-head origin --auto` records it), never from
+     the checkout: at this step the checkout IS the PR, and a PR that adds an approved FICHA,
+     loosens `experto.md` or writes `"mergeAuthority": "expert"` must not be judged by its own
+     rules. An opt-out counts from anywhere, the local config included. Record it with
+     `-MergeAuthority expert|user`, or `auto` to let the files decide; `expert` takes effect once
+     that config change is merged to the default branch, `user` at once.
+     - **`user`** — a repo that declares nothing. Steps d and e below apply exactly as written:
+       today's flow, unchanged.
+     - **`expert`** — the review gate still runs (step c, same exits; exit 3 stops and goes to the
+       user). One rule is stricter: exit 2 is cleared by a real review recorded with
+       `-RecordReview` on the head commit. A gate passed with `-AllowUnreviewed` is allowed as in
+       step c, but it is `propose`, never `merge`: nobody reviewed it. Only on exit 0, hand the decision to
+       the repo's expert. **The judge and its plan come from the default branch, like the grant**
+       — `show` prints the two `git show <ref>:...` commands: read the expert's definition and
+       `FICHA.md` from there, never from the checkout, which is the PR and may have rewritten
+       them — and hand that `git show` output to the judge (the definition as its prompt, the
+       FICHA as its input), because a subagent left to open them itself reads the checkout. **A PR whose diff touches `FICHA.md`, `.claude/agents/experto.md` or
+       `.agentic-board/config.json` is `propose`, without asking the expert**: a change to the rules
+       of the merge is the owner's to accept. Otherwise run that definition as a subagent with
+       CLEAN context — the PR number, its issue(s), and nothing from this session's reasoning — and
+       ask for one verdict, `merge` or `propose`. The expert answers `merge` only when ALL hold: the
+       PR does what its issue planned; it keeps the plan in `FICHA.md` (no protected zone touched —
+       a repo declared by config alone, with no FICHA, has no protected zones and its plan is the
+       issue itself); nothing breaks
+       (CI green, tests); it meets the repo's skill/plugin standard; and the gate's clean review is
+       recorded on the last commit.
+       - **`merge`** → skip the confirmation question. Post the step-d summary (its first three
+         parts, plus the expert's verdict and why) ON THE PR with `gh pr comment <n> --body-file
+         <file>`, then run step e. Tell the user afterwards what was merged and link that comment.
+       - **`propose`** (the PR leaves the plan, or the expert is unsure) → step d exactly as
+         written: the summary, the question, wait for the answer.
+       - Something fails (a check, a finding) → fix it, push, re-run the gate, fetch and run `show`
+         again (a revocation may have landed meanwhile), and ask the expert again. That loop does
+         not need the user.
+       A declared expert also makes grouped PRs (step 3b) the default: with no recorded
+       `preferGroupedPRs`, the grouping setting reads `on (repo expert)`. A recorded answer,
+       `off` included, still wins — except an `auto` recorded before the expert existed, which
+       was stored as "no decision" (see step 3c: run `-PreferGroupedPRs auto` again).
      d. **Before asking to merge, present a merge-confirmation summary — MANDATORY (#630/#631).**
-        Merging is the one step in this flow you still confirm with the user each time (it is
+        Merging is the one step in this flow you still confirm with the user each time — unless
+        the repo's expert said `merge` above (it is
         `git push`'s harder-to-undo cousin), and "gate passed, ¿mergeo?" on its own forces them to
         either trust blindly or go re-read the diff themselves — the two outcomes this summary
         exists to avoid. Post it in the user's language, in plain terms (no script/file names, no
@@ -200,7 +256,8 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         report, always present, format fixed by a shared renderer) — this is specific to the
         moment right before an irreversible action, and its content is about THIS PR, not the
         whole session.
-     e. Only after the gate passes AND the user confirms: `scripts/Board-Merge.ps1 -PR <n>` — merges the PR (squash +
+     e. Only after the gate passes AND the user confirms (or, under `Merge authority: expert`, the
+        expert said `merge` and its summary is on the PR): `scripts/Board-Merge.ps1 -PR <n>` — merges the PR (squash +
         delete-branch by default) and, if the repo's own `pr-before-merge` ruleset marks the PR
         `blocked`, retries with the `--admin` bypass the ruleset grants admins (announced honestly);
         a non-admin gets a clear blocked message instead of a raw error. The merge closes the issue,
@@ -278,9 +335,9 @@ and wait for; never assume the account or the scope:
 | 4. Start it | `Board-Work.ps1 -ProjectNum <n> -Start <issueNum> -Branch` | Status → In Progress, assign owner, create + checkout branch `issue-<num>-<slug>`, print full issue context (body, labels, sub-issues) |
 | 3a. Read the state of play | (printed at the top of the same run) | **`State of work` (#660)** — what is in flight (board In Progress / In Review, open PRs, a run with an open queue) and what is stale or due: a run marker still `active` over a closed queue, an epic open with every sub-issue closed, worktrees of already-merged branches, open issues missing from the board, `[Unreleased]` waiting for a release. Read + offer only; on a yes the agent performs it through the owning verb (table in step 2b). A repo with nothing to report prints one `nothing new` line; an unreadable source is listed as `Could not check`, never as clean |
 | 3b. Choose the PR shape | (read the offer printed under the pending list) | **Grouped is the default when the issues overlap (#662)**: the listing names each group, the evidence behind it (same repo file named in both issues, or a shared board Area), what it saves in review rounds, and what it held back to keep the PR reviewable (cap 4). One PR per issue is the case that needs a reason — independent risk, or a separate approver |
-| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` (or `show` to read the current value and its source without changing anything) | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide. `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
+| 3c. Record the answer | `Board-Work.ps1 -PreferGroupedPRs on\|off\|auto` (or `show` to read the current value and its source without changing anything) | Writes `.agentic-board/config.json` (versioned, like `roles.json`; no GitHub token needed — it is a local decision). `on` = group what overlaps without asking · `off` = one PR per issue, offer suppressed · `auto` = default, propose and let the user decide (in a repo that declares an expert, #797, the default is `on`; an `auto` recorded while the expert is declared is stored as the word so it still wins, but one recorded BEFORE was stored as "no decision" and reads `on (repo expert)` - run `-PreferGroupedPRs auto` again to keep it). `on` never invents a group out of unrelated issues; when nothing overlaps it says so. Ask once, record it — never make the user restate it each session |
 | 4b. Start a batch | `Board-Work.ps1 -ProjectNum <n> -StartGroup <n1,n2,...> -Branch` | Same as step 4, for a group chosen at 3b (#633): the first issue gets the branch/worktree, the rest only get the board mechanics (Status/assignee/claim) on that SAME branch, so all of them close through ONE PR/gate/merge |
-| 5. Finish it | push branch → PR with `Closes #<num>` (or `New-BoardPR.ps1 -Issue <n1,n2,...>` for a batch — one `Closes #<n>` line per issue) → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → merge-confirmation summary → user confirms → `Board-Merge.ps1 -PR <n>` only on exit 0 AND confirmation | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. On exit 0, present the mandatory merge-confirmation summary (#630/#631, four parts, above) and WAIT for the user's answer before merging — gate green is a precondition for asking, never a reason to skip asking. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself for every closed issue |
+| 5. Finish it | push branch → PR with `Closes #<num>` (or `New-BoardPR.ps1 -Issue <n1,n2,...>` for a batch — one `Closes #<n>` line per issue) → `Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` → merge-confirmation summary → user confirms (or the repo's expert says `merge`, #797) → `Board-Merge.ps1 -PR <n>` only on exit 0 AND that confirmation | Review gate (GitHub flow: merge only after approval): requests Copilot review when available, waits for CI checks + review, reports decision/feedback/unresolved threads. **Exit 1 = blocked** → fix, push, re-run. **Exit 2 = nobody reviewed** (#510) → see below. On exit 0, present the mandatory merge-confirmation summary (#630/#631, four parts, above) and WAIT for the user's answer before merging — gate green is a precondition for asking, never a reason to skip asking (only an expert `merge` verdict skips it). Under `Board-Work.ps1 -MergeAuthority show` = `expert` (#797) the gate still runs and the repo's expert decides instead: `merge` = summary posted on the PR + merge without asking; `propose` = the confirmation above. Merge via `Board-Merge.ps1` (auto `--admin` when the `pr-before-merge` ruleset marks the PR blocked). Then GitHub fills **Linked pull requests** by itself for every closed issue |
 
 Notes:
 - Step 4 supports `-DryRun` (preview, no mutation). A CLOSED issue is refused with a reopen hint.
