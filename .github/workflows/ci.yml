@@ -17,7 +17,7 @@ on:
   # same two jobs already passed, so re-running them after the merge doubled
   # the cost of every change without ever catching anything new.
   pull_request:
-    branches: [main]
+    branches: [main, next]   # next = integration/beta channel while the directory reviews main
   workflow_dispatch:
 
 concurrency:

@@ -16,7 +16,10 @@
       wip-park        uncommitted changes         -> commit them as WIP on their branch, then park
       keep-review     PR open                     -> nothing: the PR already makes it visible
       delete-empty    clean, no commits           -> delete it: there is no work to lose
-      needs-decision  PR closed unmerged / unreadable state -> left alone, reported with the reason
+      delete-contained clean, and `git merge-tree --write-tree` proves its content is already on the
+                      default branch (squash-merged through another PR) -> delete it (#755)
+      needs-decision  PR closed unmerged / unreadable state / "likely superseded by #N"
+                                                  -> left alone, reported with the reason
       skip-open       a session is still working it -> left alone
 
     Then it decides, for each session of the host app (read from -HostSessionsFile, the JSON the
@@ -111,7 +114,11 @@ function Get-SweepItemAction {
         [int]   $CommitsAhead = 0,
         [string]$ForeignOwner = '',
         # commits on the local branch that its remote branch does not have; -1 = could not tell
-        [int]   $Unpushed = 0
+        [int]   $Unpushed = 0,
+        # Get-SweepContainment of the branch against the default branch ('' = not measured)
+        [string]$Containment = '',
+        # Get-SweepSupersededHint: the PR(s) that most likely already did this work ('' = none)
+        [string]$SupersededBy = ''
     )
     $mk = { param($a, $r, $why)
         if ($ForeignOwner -and $a -in @('park', 'wip-park')) {
@@ -124,6 +131,20 @@ function Get-SweepItemAction {
     }
     if ($Dirty -eq 'unknown') {
         return (& $mk 'needs-decision' $false 'could not read whether the worktree has uncommitted changes')
+    }
+    # Work that reached the default branch through ANOTHER PR (squash-merged, cherry-picked - the
+    # usual fate of a subagent's worktree-agent-* branch) looks like "commits with no PR" (#755).
+    # Parking it would open a draft PR that duplicates main. Its own PR, merged or open, still decides.
+    if ($Class -notin @('merged', 'in-review')) {
+        if ($Containment -eq 'contained' -and $Dirty -eq 'clean' -and $CommitsAhead -gt 0) {
+            return (& $mk 'delete-contained' $true 'its content is already on the default branch (merged through another PR) - branch and worktree removed')
+        }
+        # Only a hint, so a human decides: deleting on a heuristic could lose the one commit it missed.
+        # Never over uncommitted changes (they cannot be on main: wip-park saves them first), and
+        # never for merged-advanced: commits after its own PR merged are new work by definition.
+        if ($SupersededBy -and $Dirty -eq 'clean' -and $Class -ne 'merged-advanced') {
+            return (& $mk 'needs-decision' $false "likely superseded by $SupersededBy - its work seems to be on the default branch already; check that its newest commits are there too, then delete the branch instead of parking a duplicate PR")
+        }
     }
     if ($Class -eq 'closed-unmerged') {
         return (& $mk 'needs-decision' $false 'its PR was closed without merging - reopen it or discard the branch')
@@ -149,6 +170,79 @@ function Get-SweepItemAction {
         return (& $mk 'delete-empty' $true 'no commits and no changes - nothing to lose')
     }
     return (& $mk 'park' $true "$CommitsAhead commit(s) with no PR - parked as a draft PR")
+}
+
+# Is the branch's content already on the default branch? PURE: the result of
+# `git merge-tree --write-tree <default> <branch>` comes in as arguments (#755).
+#   contained - merges cleanly and the tree it writes IS the default branch's tree: it adds nothing
+#   adds      - merges cleanly and brings something new
+#   conflict  - the merge conflicts (exit 1): what work squashed into main and then edited further looks like
+#   unknown   - merge-tree could not run (git older than 2.38, a missing ref)
+function Get-SweepContainment {
+    param([int]$ExitCode, [string[]]$Output = @(), [string]$DefaultTree = '')
+    if ($ExitCode -eq 1) { return 'conflict' }
+    if ($ExitCode -ne 0 -or -not $DefaultTree) { return 'unknown' }
+    $tree = "$(@($Output)[0])".Trim()
+    if ($tree -notmatch '^[0-9a-f]{40,64}$') { return 'unknown' }
+    if ($tree -eq $DefaultTree.Trim()) { return 'contained' }
+    return 'adds'
+}
+
+# The paths `git check-attr -z merge` gives a custom merge driver. PURE. -z output, split on NUL, is
+# path / attribute / value triplets; set / unset / "" are git's own text and binary merges, and so is
+# unspecified - unless `merge.default` names a driver, which then merges every unspecified path.
+function Get-SweepDrivenPaths {
+    param([string[]]$CheckAttr = @(), [bool]$DefaultIsDriver = $false)
+    $own = @('set', 'unset', '')
+    if (-not $DefaultIsDriver) { $own += 'unspecified' }
+    $a = @($CheckAttr)
+    return @(for ($i = 0; $i + 2 -lt $a.Count; $i += 3) {
+        if ($a[$i + 2] -notin $own) { $a[$i] }
+    })
+}
+
+# The issue and PR numbers a branch talks about: its issue-NNN name and every #NNN of its commit subjects.
+# Not "owner/repo#12" (another repo's number) nor "C#12".
+function Get-SweepIssueRefs {
+    param([string]$Branch = '', [string[]]$Subjects = @())
+    # TryParse, not [int]: "#12345678901" would throw, and under Stop one stray subject would abort the sweep.
+    $n = @(); $v = 0
+    if ($Branch -match '^issue-(\d+)' -and [int]::TryParse($Matches[1], [ref]$v)) { $n += $v }
+    foreach ($s in $Subjects) {
+        foreach ($m in [regex]::Matches("$s", '(?<![\w/.-])#(\d+)\b')) { if ([int]::TryParse($m.Groups[1].Value, [ref]$v)) { $n += $v } }
+    }
+    return @($n | Select-Object -Unique)
+}
+
+# One referenced number, from GitHub's issueOrPullRequest node. PURE.
+# Returns { Number; Done; By }: Done = a merged PR already did it - the number IS that PR, or it is
+# an issue closed by one; By = that PR's number.
+function ConvertTo-SweepRefState {
+    param([int]$Number, $Node)
+    $mk = { param($done, $by) [pscustomobject]@{ Number = $Number; Done = $done; By = $by } }
+    if (-not $Node) { return (& $mk $false 0) }
+    if ("$($Node.__typename)" -eq 'PullRequest') { return (& $mk ([bool]$Node.merged) $Number) }
+    if ("$($Node.state)" -ne 'CLOSED') { return (& $mk $false 0) }
+    $pr = @($Node.closedByPullRequestsReferences.nodes | Where-Object { $_.merged }) | Select-Object -First 1
+    if ($pr) { return (& $mk $true ([int]$pr.number)) }
+    return (& $mk $false 0)
+}
+
+# Is this branch's work probably already on the default branch through another PR? PURE.
+# A HINT, never proof: the caller turns it into a decision, not a deletion. '#N' text, or ''.
+#   - its own PR was closed with "superseded by #N" (in the body or a comment); or
+#   - it no longer merges cleanly AND every issue/PR it references was done by a merged PR.
+# A clean merge that adds something is left alone: that is what new, unparked work looks like.
+function Get-SweepSupersededHint {
+    param([string]$Containment = '', [object[]]$Refs = @(), [string[]]$PrComments = @(), [string]$Repo = '')
+    # "#749" or the full PR URL - the comment that closed #748 in this repo used the URL. A URL counts
+    # only when it is THIS repo's PR: another repo's #749 says nothing about this branch.
+    $url = if ($Repo) { "https?://github\.com/$([regex]::Escape($Repo))/pull/" } else { '(?!)' }
+    foreach ($c in $PrComments) { if ("$c" -match "(?i)superseded\s+by\s+(?:(?<![\w/.-])#|$url)(\d+)\b") { return "#$($Matches[1])" } }
+    if ($Containment -ne 'conflict') { return '' }
+    $all = @($Refs | Where-Object { $_ })
+    if ($all.Count -eq 0 -or @($all | Where-Object { -not $_.Done }).Count -gt 0) { return '' }
+    return (@($all | ForEach-Object { "#$($_.By)" } | Select-Object -Unique) -join ', ')
 }
 
 # A timestamp as UTC, or $null. ConvertFrom-Json already turns an ISO string into a DateTime, and
@@ -270,6 +364,92 @@ function New-ParkedPrBody {
     return ($lines -join "`n")
 }
 
+# One git call for the containment proof. Output is read as UTF-8 and, with -z, split on NUL - so a
+# path comes back byte-exact: no C-quoting, no console code page, no CR. A git that fails to start
+# (a command line over the OS limit) throws instead of setting $LASTEXITCODE, which would otherwise
+# keep the PREVIOUS call's 0; here it is exit -1, and the proof turns it into 'unknown'.
+function Invoke-SweepGit {
+    param([string[]]$GitArgs, [switch]$Z)
+    $prevEnc = [Console]::OutputEncoding
+    try {
+        $ErrorActionPreference = 'Stop'
+        [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        $global:LASTEXITCODE = -1
+        $out = @(& git @GitArgs 2>$null)
+        $code = $LASTEXITCODE
+    } catch { return [pscustomobject]@{ Code = -1; Items = @() } }
+    finally { [Console]::OutputEncoding = $prevEnc }
+    # -z ends with a NUL terminator: drop only that last empty field. An empty field inside is data
+    # (check-attr prints "" for `merge=`), and dropping it would shift every triplet after it.
+    $items = @($out)
+    if ($Z) {
+        $items = @(($out -join "`n") -split "`0")
+        if ($items.Count -gt 0 -and $items[-1] -eq '') { $items = @($items | Select-Object -SkipLast 1) }
+        if ($items.Count -eq 1 -and $items[0] -eq '') { $items = @() }
+    }
+    # [string[]]: `if` unrolls a one-item array to a bare string, and Items[0] would be its first CHARACTER.
+    return [pscustomobject]@{ Code = $code; Items = [string[]]@($items) }
+}
+
+# Is this branch provably contained in origin's default branch? (#755) Defined above the dot-source
+# guard so the tests run it on a real repo; defining it touches nothing. Needs git 2.40+
+# (`check-attr --source`); an older git answers 'unknown' and the branch is parked as before.
+# Run inside the repo. `merge-tree --write-tree` merges in memory: no worktree, index or ref changes.
+# Fully qualified refs: a short name can resolve to a local branch called "origin/main" or to a tag
+# named like the branch, and the proof would then be about a different commit than `branch -D` deletes.
+function Get-BranchContainment([string]$Default, [string]$Branch) {
+    $base = "refs/remotes/origin/$Default"; $head = "refs/heads/$Branch"
+    $dt = Invoke-SweepGit @('rev-parse', '--verify', '--quiet', "$base^{tree}")
+    if ($dt.Code -ne 0 -or -not $dt.Items) { return 'unknown' }
+    # merge-tree also exits 1 on a ref it cannot read, which would read as "conflict".
+    if ((Invoke-SweepGit @('rev-parse', '--verify', '--quiet', "$head^{commit}")).Code -ne 0) { return 'unknown' }
+    $mt = Invoke-SweepGit @('merge-tree', '--write-tree', $base, $head)
+    $c = Get-SweepContainment -ExitCode $mt.Code -Output $mt.Items -DefaultTree "$($dt.Items[0])"
+    if ($c -ne 'contained') { return $c }
+    # merge-tree honours the repo's merge drivers: a `merge=ours` file merges "cleanly" to main's side
+    # and would look contained while the branch's change is on main nowhere. For the paths the branch
+    # changed that have a custom driver - and only those: main editing a file after the squash is the
+    # usual case and merges correctly - the deletion needs the plain proof that main has the same file.
+    $mb = Invoke-SweepGit @('merge-base', $base, $head)
+    if ($mb.Code -ne 0 -or -not $mb.Items) { return 'unknown' }
+    $mine = Invoke-SweepGit @('diff', '-z', '--no-renames', '--name-only', "$($mb.Items[0])", $head) -Z
+    if ($mine.Code -ne 0) { return 'unknown' }
+    $paths = @($mine.Items)
+    if ($paths.Count -eq 0) { return 'contained' }
+    # Attributes can come from the working tree, either side's tree, info/attributes or core.attributesFile.
+    # Paths go as arguments (piped into git on Windows each line gains a CR), in batches bounded by
+    # LENGTH so no command line nears the OS limit.
+    $batches = @(); $cur = [System.Collections.Generic.List[string]]::new(); $len = 0
+    foreach ($p in $paths) {
+        if ($cur.Count -gt 0 -and $len + $p.Length -gt 8000) { $batches += , @($cur); $cur = [System.Collections.Generic.List[string]]::new(); $len = 0 }
+        $cur.Add($p); $len += $p.Length + 3
+    }
+    if ($cur.Count -gt 0) { $batches += , @($cur) }
+    $md = Invoke-SweepGit @('config', '--get', 'merge.default')
+    if ($md.Code -notin 0, 1) { return 'unknown' }
+    $defaultIsDriver = ($md.Code -eq 0 -and "$($md.Items)".Trim() -notin @('', 'text'))
+    $driven = @()
+    foreach ($src in @('', $base, $head)) {
+        # Built as an array on purpose: `if` would unroll a one-item array to a string, and a string
+        # splatted into git does not arrive as one argument.
+        $sa = @(); if ($src) { $sa = @("--source=$src") }
+        foreach ($b in $batches) {
+            $attr = Invoke-SweepGit (@('check-attr', '-z') + $sa + @('merge', '--') + @($b)) -Z
+            if ($attr.Code -ne 0) { return 'unknown' }
+            $driven += @(Get-SweepDrivenPaths -CheckAttr $attr.Items -DefaultIsDriver $defaultIsDriver)
+        }
+    }
+    # Each driven path is compared blob by blob. A path neither side has means the name did not
+    # survive the round trip - never "nothing differs".
+    foreach ($p in @($driven | Select-Object -Unique)) {
+        $bo = Invoke-SweepGit @('rev-parse', '--verify', '--quiet', "${base}:$p")
+        $ho = Invoke-SweepGit @('rev-parse', '--verify', '--quiet', "${head}:$p")
+        if ($bo.Code -notin 0, 1 -or $ho.Code -notin 0, 1) { return 'unknown' }
+        if (-not $bo.Items -and -not $ho.Items) { return 'unknown' }
+        if ("$($bo.Items)" -ne "$($ho.Items)") { return 'adds' }
+    }
+    return 'contained'
+}
 # Dot-source guard: with $env:ABIOS_SWEEP_DOTSOURCE set, return after defining the pure helpers
 # WITHOUT touching disk, git, gh or the token.
 if ($env:ABIOS_SWEEP_DOTSOURCE) { return }
@@ -346,6 +526,36 @@ foreach ($s in @((Read-ClaudeSessions).Sessions)) {
 }
 $openPaths = @($openPaths | Where-Object { $_ } | Select-Object -Unique)
 
+# --- already on the default branch? (#755) ------------------------------------
+# The superseded hint of one branch. A hint that cannot be read is no hint: the branch then gets
+# the disposition it had before #755 (park), never a deletion.
+$refCache = @{}
+function Get-BranchSupersededHint([string]$Repo, [string]$Default, $Branch, [string]$Containment) {
+    try {
+        $texts = @()
+        if ($Branch.Class -eq 'closed-unmerged' -and $Branch.Pr) {
+            $pr = Invoke-Gh -GhArgs @('pr', 'view', "$($Branch.Pr)", '--repo', $Repo, '--json', 'body,comments') -Json -What "read PR #$($Branch.Pr)"
+            $texts = @("$($pr.body)") + @($pr.comments | ForEach-Object { "$($_.body)" })
+        }
+        $refs = @()
+        if ($Containment -eq 'conflict') {
+            $subjects = @(git log --format=%s "refs/remotes/origin/$Default..refs/heads/$($Branch.Branch)" 2>$null)
+            if ($LASTEXITCODE -ne 0) { return '' }   # a partial reference list would make a false hint
+            $o, $name = $Repo -split '/', 2
+            $q = 'query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issueOrPullRequest(number:$n){__typename ... on Issue{state closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number merged}}} ... on PullRequest{merged}}}}'
+            foreach ($n in (Get-SweepIssueRefs -Branch $Branch.Branch -Subjects $subjects)) {
+                $key = "$Repo#$n"
+                if (-not $refCache.ContainsKey($key)) {
+                    $resp = Invoke-Gh -GhArgs @('api', 'graphql', '-f', "query=$q", '-f', "o=$o", '-f', "r=$name", '-F', "n=$n") -Graphql -What "read #$n"
+                    $refCache[$key] = ConvertTo-SweepRefState -Number $n -Node $resp.data.repository.issueOrPullRequest
+                }
+                $refs += $refCache[$key]
+            }
+        }
+        return (Get-SweepSupersededHint -Containment $Containment -Refs $refs -PrComments $texts -Repo $Repo)
+    } catch { return '' }
+}
+
 # --- plan ---------------------------------------------------------------------
 $items = @(); $skippedRepos = @()
 foreach ($rr in $repoRoots) {
@@ -379,8 +589,16 @@ foreach ($rr in $repoRoots) {
             }
             $wt = "$($b.WorktreePath)"
             $open = [bool]($wt -and ($openPaths -contains (ConvertTo-SweepPath $wt)))
+            # Only a branch that would otherwise be parked or left as closed-unmerged is measured:
+            # the git and gh reads cost nothing on the rest.
+            $containment = ''; $superseded = ''
+            if ($ahead -gt 0 -and $b.Class -notin @('merged', 'in-review', 'active') -and -not $open -and -not $b.HasLiveSession) {
+                $containment = Get-BranchContainment -Default $default -Branch $b.Branch
+                if ($containment -ne 'contained') { $superseded = Get-BranchSupersededHint -Repo $repo -Default $default -Branch $b -Containment $containment }
+            }
             $a = Get-SweepItemAction -Class $b.Class -Dirty "$($b.Dirty)" -HasLiveSession ([bool]$b.HasLiveSession) `
-                -SessionOpen $open -CommitsAhead $ahead -ForeignOwner $foreign -Unpushed $unpushed
+                -SessionOpen $open -CommitsAhead $ahead -ForeignOwner $foreign -Unpushed $unpushed `
+                -Containment $containment -SupersededBy $superseded
             $items += [pscustomobject]@{
                 Repo = $repo; RepoRoot = $rr; DefaultBranch = $default; Branch = $b.Branch; Class = $b.Class
                 Pr = $b.Pr; WorktreePath = $wt; CommitsAhead = $ahead
@@ -431,9 +649,14 @@ if ($Force) {
                             $it.Pr = "$(@($url) | Select-Object -Last 1)".Trim()
                         }
                         $it.Outcome = 'done'
-                    } elseif ($it.Action -eq 'delete-empty') {
+                    } elseif ($it.Action -in @('delete-empty', 'delete-contained')) {
                         if ($it.WorktreePath -and (ConvertTo-SweepPath $it.WorktreePath) -eq (ConvertTo-SweepPath $grp.Name)) {
                             Set-Failed $it 'it is checked out in the main folder - switch it to the default branch first'; continue
+                        }
+                        # `branch -D` skips git's own merged check, so containment is proven again
+                        # right before it: a commit made since the plan must not go with the branch.
+                        if ($it.Action -eq 'delete-contained' -and (Get-BranchContainment -Default $it.DefaultBranch -Branch $it.Branch) -ne 'contained') {
+                            Set-Failed $it 'the branch is no longer contained in the default branch - re-run the plan'; continue
                         }
                         if ($it.WorktreePath -and (Test-Path -LiteralPath $it.WorktreePath)) {
                             git worktree remove $it.WorktreePath 2>&1 | Out-Null
@@ -487,7 +710,8 @@ if ($Json) {
 $labels = [ordered]@{
     'teardown' = 'Merged: branch and worktree deleted'; 'park' = 'Unmerged commits: push + draft PR (parked)'
     'wip-park' = 'Uncommitted changes: WIP commit + draft PR (parked)'; 'keep-review' = 'Open PR: left alone'
-    'delete-empty' = 'Empty: deleted (no work on them)'; 'needs-decision' = 'Need your decision'; 'skip-open' = 'A session is working: left alone'
+    'delete-empty' = 'Empty: deleted (no work on them)'
+    'delete-contained' = 'Already on the default branch (merged through another PR): deleted'; 'needs-decision' = 'Need your decision'; 'skip-open' = 'A session is working: left alone'
 }
 $mode = if ($Force) { 'EXECUTED' } else { 'PLAN - nothing changed' }
 Write-Host ""
