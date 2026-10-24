@@ -94,17 +94,28 @@ function Get-PluginMcpServers {
     return @($out)
 }
 
-# Every MCP server every installed plugin registers, one row per (plugin, server).
+# Plugins the user settings turn off (enabledPlugins["<plugin>@<marketplace>"] = false). Such a plugin
+# loads nowhere, so it is no duplicate and must never be the one kept.
+function Get-DisabledPluginKeys {
+    param([string]$ClaudeHome)
+    $r = Read-JsonFileSafe (Join-Path (Get-ClaudeHomeDir $ClaudeHome) 'settings.json')
+    if (-not $r.Ok -or $null -eq $r.Data.enabledPlugins) { return @() }
+    return @($r.Data.enabledPlugins.PSObject.Properties | Where-Object { $_.Value -eq $false } | ForEach-Object { $_.Name })
+}
+
+# Every MCP server every plugin installed at USER scope registers, one row per (plugin, server). Only
+# user scope loads in every project, and the disable is written to every project: a plugin installed for
+# one project only (or turned off in the user settings) is skipped, so the copy kept is never missing
+# from a project where the other one gets disabled.
 #   { Ok; Reason; Items = @{ Id; Plugin; Marketplace; Server; Transport; Kind } }
 function Get-PluginMcpRegistrations {
     param([string]$ClaudeHome)
     $inst = Get-InstalledPluginEntries -ClaudeHome $ClaudeHome
     if (-not $inst.Ok) { return [pscustomobject]@{ Ok = $false; Reason = $inst.Reason; Items = @() } }
+    $off = @(Get-DisabledPluginKeys -ClaudeHome $ClaudeHome)
     $rows = [System.Collections.Generic.List[object]]::new()
     $seen = @{}
-    # One build per plugin: the user-scope entry first (it is what a session loads by default).
-    $ordered = @($inst.Entries | Sort-Object @{ Expression = { if ($_.Scope -eq 'user') { 0 } else { 1 } } })
-    foreach ($e in $ordered) {
+    foreach ($e in @($inst.Entries | Where-Object { $_.Scope -eq 'user' -and $off -notcontains $_.Key })) {
         if ($seen.ContainsKey($e.Key)) { continue }
         $seen[$e.Key] = $true
         foreach ($s in @(Get-PluginMcpServers -Dir $e.InstallPath)) {
@@ -186,8 +197,10 @@ function Get-McpDisablePlan {
             $projects += $kv.Key
             $off = @(Get-JsonStringList $kv.Value['disabledMcpServers'])
             foreach ($g in $Groups) {
+                # A project that already turned the KEPT copy off has no duplicate: disabling the other
+                # one there would leave it without the server at all. Report it, change nothing.
+                if ($g.Keep -and $off -contains $g.Keep.Id) { $keptOff.Add([pscustomobject]@{ Project = $kv.Key; Id = $g.Keep.Id }); continue }
                 foreach ($d in $g.Disable) { if ($off -notcontains $d.Id) { $missing.Add([pscustomobject]@{ Project = $kv.Key; Id = $d.Id }) } }
-                if ($g.Keep -and $off -contains $g.Keep.Id) { $keptOff.Add([pscustomobject]@{ Project = $kv.Key; Id = $g.Keep.Id }) }
             }
         }
     }
@@ -204,6 +217,9 @@ function Get-McpDisablePlan {
 function Invoke-McpDisable {
     param([Parameter(Mandatory)][string]$ConfigPath, [object[]]$Groups, [Parameter(Mandatory)][string]$PlanId, [Parameter(Mandatory)][string]$BackupDir)
     $no = { param($why) [pscustomobject]@{ Ok = $false; Reason = $why; Backup = ''; Added = 0; Verified = $false } }
+    # A link (dotfile managers) would be replaced by a plain file and the real target left stale: refuse.
+    $item = Get-Item -LiteralPath $ConfigPath -Force -ErrorAction SilentlyContinue
+    if ($item -and (Test-IsLinkItem $item)) { return (& $no 'the config is a link; edit its target by hand or point -ConfigPath at it') }
     $cfg = Read-ClaudeConfig -Path $ConfigPath
     if (-not $cfg.Ok) { return (& $no "could not read the config ($($cfg.Reason))") }
     $plan = Get-McpDisablePlan -Config $cfg -Groups $Groups
@@ -230,6 +246,8 @@ function Invoke-McpDisable {
     $tmp = "$ConfigPath.$PID.tmp"
     try {
         [System.IO.File]::WriteAllText($tmp, $cfg.Node.ToJsonString($opts), [System.Text.UTF8Encoding]::new($false))
+        # The config can hold API keys: on Unix keep its mode (often 0600) instead of the umask default.
+        if (-not $IsWindows) { [System.IO.File]::SetUnixFileMode($tmp, [System.IO.File]::GetUnixFileMode($ConfigPath)) }
         [System.IO.File]::Move($tmp, $ConfigPath, $true)
     } catch {
         try { [System.IO.File]::Delete($tmp) } catch { }

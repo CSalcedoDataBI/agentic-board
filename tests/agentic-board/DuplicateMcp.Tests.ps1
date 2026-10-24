@@ -91,6 +91,20 @@ Describe 'Get-DuplicateMcpGroups - which one to keep' {
         (Get-DuplicateMcpGroups -Registrations $reg.Items -Keep 'plugin:local:model-mcp')[0].Keep.Id | Should -Be 'plugin:local:model-mcp'
     }
 
+    It 'ignores a plugin installed for one project only, or turned off in the user settings' {
+        $fx = New-Fx
+        $a = Add-FakeBuild $fx -Marketplace 'm' -Plugin 'hosted' -Version '1.0' -Installed -Scope 'project'
+        $b = Add-FakeBuild $fx -Marketplace 'm' -Plugin 'local' -Version '1.0' -Installed
+        $c = Add-FakeBuild $fx -Marketplace 'm' -Plugin 'other' -Version '1.0' -Installed
+        Set-Mcp $a '{"mcpServers":{"model-mcp":{"type":"http","url":"https://example.invalid/mcp"}}}'
+        Set-Mcp $b '{"model-mcp":{"command":"npx"}}'
+        Set-Mcp $c '{"model-mcp":{"url":"https://example.invalid/2"}}'
+        [System.IO.File]::WriteAllText((Join-Path $fx.Root 'settings.json'), '{"enabledPlugins":{"other@m":false}}')
+        $reg = Get-PluginMcpRegistrations -ClaudeHome $fx.Root
+        @($reg.Items.Plugin) | Should -Be @('local')
+        @(Get-DuplicateMcpGroups -Registrations $reg.Items).Count | Should -Be 0
+    }
+
     It 'decides nothing when both share a transport and the user did not choose' {
         $rows = @(
             [pscustomobject]@{ Id = 'plugin:a:s'; Plugin = 'a'; Marketplace = 'm'; Server = 's'; Transport = 'stdio'; Kind = 'local' }
@@ -141,6 +155,32 @@ Describe 'plan and apply on a fixture config' {
 
         # A second plan finds nothing left to do.
         (Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups).Missing.Count | Should -Be 0
+    }
+
+    It 'leaves alone a project that already turned off the copy to keep (it would lose the server)' {
+        [System.IO.File]::WriteAllText($script:Cfg, $script:CfgBody.Replace('"lastCost": 0.25', '"lastCost": 0.25, "disabledMcpServers": ["plugin:hosted:model-mcp"]'))
+        $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups
+        @($plan.Missing.Project) | Should -Be @('C:/work/a')
+        @($plan.KeptButDisabled.Project) | Should -Be @('C:/work/b')
+    }
+
+    It 'refuses a config that is a link' {
+        $link = Join-Path $TestDrive ("lnk" + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.json')
+        # Windows without developer mode or admin cannot create symlinks: nothing to prove there.
+        try { New-Item -ItemType SymbolicLink -Path $link -Target $script:Cfg -ErrorAction Stop | Out-Null }
+        catch { Set-ItResult -Skipped -Because 'this host cannot create symbolic links'; return }
+        $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $link) -Groups $script:Groups
+        $r = Invoke-McpDisable -ConfigPath $link -Groups $script:Groups -PlanId $plan.PlanId -BackupDir $script:Bk
+        $r.Ok | Should -BeFalse
+        $r.Reason | Should -Match 'link'
+        [System.IO.File]::ReadAllText($script:Cfg) | Should -Be $script:CfgBody
+    }
+
+    It 'keeps the Unix file mode of the config' -Skip:$IsWindows {
+        [System.IO.File]::SetUnixFileMode($script:Cfg, [System.IO.UnixFileMode]'UserRead, UserWrite')
+        $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups
+        (Invoke-McpDisable -ConfigPath $script:Cfg -Groups $script:Groups -PlanId $plan.PlanId -BackupDir $script:Bk).Ok | Should -BeTrue
+        [System.IO.File]::GetUnixFileMode($script:Cfg) | Should -Be ([System.IO.UnixFileMode]'UserRead, UserWrite')
     }
 
     It 'refuses a plan id the user did not see, and changes nothing' {

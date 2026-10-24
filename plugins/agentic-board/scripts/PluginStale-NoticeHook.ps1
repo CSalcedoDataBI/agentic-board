@@ -48,7 +48,8 @@ function Format-StaleNotice {
     $lines = foreach ($i in $Items) {
         $loaded = ($i.Loaded -join ', ')
         $head = "Plugin `"$($i.Plugin)`" was updated to version $($i.Installed) (this session is still on $loaded)."
-        if (@($i.Fixes).Count -gt 0) { $head += " Fixes: $(@($i.Fixes) -join ' ')." }
+        $fixes = @($i.Fixes | Where-Object { $_ })   # @($null) has one element: filter, never count it raw
+        if ($fixes.Count -gt 0) { $head += " Fixes: $($fixes -join ' ')." }
         if ($i.NeedsNewSession) { "$head It ships an MCP server (or I could not check): open a new session to use it." }
         else { "$head Type /reload-plugins to use it." }
     }
@@ -59,7 +60,7 @@ function Format-StaleNotice {
 # <claude home>/plugin-releases/<plugin>.json = { version, commit, publishedAt, fixes: ["#12", ...] }
 # so this one notice can say what the new build fixes, and the plugin needs no notice hook of its own.
 # The fixes are used only when the file describes the build now installed (its version, or its commit
-# matches the build folder name). Somebody else's text: short tokens only, at most 10. Never throws.
+# matches the build folder name). Somebody else's text: issue references only, at most 10. Never throws.
 function Get-ReleaseFixes {
     param([string]$ClaudeHomeDir, [string]$Plugin, [string]$Installed)
     try {
@@ -74,7 +75,9 @@ function Get-ReleaseFixes {
         $verMatch = [bool]$ver -and $ver -eq $Installed.TrimStart('v', 'V')
         $shaMatch = $sha.Length -ge 7 -and $Installed.Length -ge 7 -and ($sha.StartsWith($Installed, $ic) -or $Installed.StartsWith($sha, $ic))
         if (-not ($verMatch -or $shaMatch)) { return @() }
-        return @(@($doc.fixes) | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match '^[A-Za-z0-9#._/-]{1,40}$' } | Select-Object -First 10)
+        # Issue references only (#12, repo#12, owner/repo#12): free words would let the file put a
+        # sentence into a notice the model reads.
+        return @(@($doc.fixes) | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match '^([A-Za-z0-9._-]{1,40}(/[A-Za-z0-9._-]{1,60})?)?#\d{1,7}$' } | Select-Object -First 10)
     } catch { return @() }
 }
 

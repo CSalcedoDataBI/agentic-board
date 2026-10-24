@@ -116,17 +116,20 @@ each `plugin:<plugin>:<server>`; listing that id in `projects[<path>].disabledMc
 (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`) turns it off for that project only, and the other
 plugin keeps working.
 
-1. **Plan (default, writes nothing).** `Find-DuplicateMcpServers.ps1` reads every installed build
-   (`.mcp.json`, `mcpServers` in `plugin.json`), lists each repeated server with the transport of every
-   copy, says which one to KEEP and why, and lists every known project that does not disable the others
-   yet. It prints a **plan id**.
+1. **Plan (default, writes nothing).** `Find-DuplicateMcpServers.ps1` reads every build installed at
+   **user scope** and not turned off in `settings.json` `enabledPlugins` (`.mcp.json`, `mcpServers` in
+   `plugin.json`), lists each repeated server with the transport of every copy, says which one to KEEP
+   and why, and lists every known project that does not disable the others yet. A project that already
+   disables the copy to keep is reported and left alone (disabling the other would leave it with none).
+   A plugin installed for one project only is not considered. It prints a **plan id**.
 2. **Choose what to keep.** Default: the hosted one when exactly one is hosted. Ask the user whether the
    work needs desktop or project files; if so re-run with `-PreferLocal`. `-Keep <plugin>` (or the full
    `plugin:<p>:<s>` id) decides explicitly. A group with no clear choice is listed and left alone.
 3. **Apply only on the user's yes:** `-Execute -PlanId <id>` with the same `-Keep`/`-PreferLocal`. A plan id
    that no longer matches (a project was added, the config changed) is refused: plan again. The config is
    **copied to the backups folder first** (`~/.agentic-board/backups/claude.json.<time>.bak`), written
-   atomically with only `disabledMcpServers` touched, and read back to verify.
+   atomically with only `disabledMcpServers` touched (its Unix file mode kept), and read back to verify.
+   A config that is a link is refused.
 
 Say the limits when you report: the setting is **per project** (a project opened later needs this run
 again — the plan lists it); an open session keeps its servers until it restarts; the running app may
@@ -143,8 +146,9 @@ A plugin's deploy script may write `<claude home>/plugin-releases/<plugin>.json`
 
 When the in-session notice below fires for that plugin, it adds `Fixes: #123 #130.` — but only if the file
 describes the build now installed (`version` equals the build folder name, or `commit` matches a
-commit-named build folder). Fix entries are short tokens only (letters, digits, `#._/-`, at most 40
-characters, at most 10 of them); anything else is dropped. A plugin that writes this file can drop its own
+commit-named build folder). Fix entries must be **issue references** (`#12`, `repo#12`,
+`owner/repo#12`), at most 10; anything else is dropped, so the file can never put a sentence into a
+notice the model reads. A plugin that writes this file can drop its own
 notice hook: one notice per event, one state file. The known limit stays in the notice: skills, commands,
 agents and hooks → `/reload-plugins`; a plugin with an MCP server → a new session.
 
