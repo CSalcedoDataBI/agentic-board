@@ -49,14 +49,14 @@ function Get-HandoffSessionContext([string]$body) {
 # non-empty `saved:` AND `verified:` keys inside the LEADING --- frontmatter block, never the body.
 # Pure + testable.
 function Test-HandoffFrontmatter([string]$text) {
-    $lines = @(([string]$text) -split "`r?`n")
-    if ($lines.Count -eq 0 -or $lines[0].Trim() -ne '---') { return $false }
+    $lines = @(([string]$text).TrimStart([char]0xFEFF) -split "`r?`n")
+    if ($lines.Count -lt 2 -or $lines[0].Trim() -ne '---') { return $false }
     $seen = @{}
     for ($i = 1; $i -lt $lines.Count; $i++) {
-        if ($lines[$i].Trim() -eq '---') { break }
+        if ($lines[$i].Trim() -eq '---') { return [bool]($seen['saved'] -and $seen['verified']) }
         if ($lines[$i] -match '^\s*(saved|verified)\s*:\s*\S') { $seen[$Matches[1]] = $true }
     }
-    return [bool]($seen['saved'] -and $seen['verified'])
+    return $false   # an unterminated block is not frontmatter
 }
 
 # Build the SessionStart context line AFTER an auto-compaction (source == "compact"),
@@ -148,8 +148,8 @@ try {
                 }
             }
         }
-        if (-not (Test-Path $handoffPath)) { exit 0 }
-        $body = Get-Content $handoffPath -Raw
+        if (-not (Test-Path -LiteralPath $handoffPath)) { exit 0 }
+        $body = Get-Content -LiteralPath $handoffPath -Raw
         $ctx = Get-HandoffSessionContext $body
     }
     if (-not $ctx) { exit 0 }

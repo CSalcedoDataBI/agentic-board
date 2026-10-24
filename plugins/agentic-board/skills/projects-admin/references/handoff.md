@@ -77,7 +77,10 @@ frontmatter carries `saved:` and `verified:` is the tool's own handoff force-com
 `git add -f`, so it stays the mirror. `-MirrorPath <rel>` picks any other location and is
 remembered in the local git config (`abios.handoffMirror`), so a later `-Resume` and the SessionStart
 hook find it without the flag; a `-MirrorPath` that git tracks as a non-handoff file is refused.
-The SessionStart hook resolves the mirror the same way. `-Save -DryRun` emits the composed markdown on the
+The SessionStart hook resolves the mirror the same way. A `-MirrorPath` must be a file path inside
+the repo with no wildcard characters; a directory (or `.handoffs` itself) is refused. If an older
+version already overwrote a tracked guide on disk, the script keeps that handoff in the mirror and
+only then tells you to restore the guide with `git checkout -- HANDOFF.md`. `-Save -DryRun` emits the composed markdown on the
 success stream, so `$md = & Board-Handoff.ps1 -Save -DryRun ...` captures it.
 
 ## HANDOFF.md format

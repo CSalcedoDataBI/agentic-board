@@ -88,40 +88,41 @@ Describe 'Resolve-HandoffMirror (#795)' {
         { Resolve-HandoffMirror -MirrorPath ([System.IO.Path]::GetFullPath('x.md')) } | Should -Throw '*relative*'
         { Resolve-HandoffMirror -MirrorPath '../outside.md' } | Should -Throw "*'..'*"
     }
-}
-
-Describe 'Test-HandoffMirrorText (#795 review)' {
-    It 'recognises a handoff this script wrote (saved + verified frontmatter)' {
-        Test-HandoffMirrorText "---`nissue: 7`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7" | Should -BeTrue
-    }
-    It 'rejects a project guide, empty text, and frontmatter missing either field' {
-        Test-HandoffMirrorText "# Project guide`nRead me at session start." | Should -BeFalse
-        Test-HandoffMirrorText '' | Should -BeFalse
-        Test-HandoffMirrorText "---`nsaved: 2026-10-23T00:00:00Z`n---`n# x" | Should -BeFalse
-        Test-HandoffMirrorText "---`nverified: 1/1`n---`n# x" | Should -BeFalse
-    }
-    It 'ignores saved:/verified: lines in the body (a guide documenting the format)' {
-        Test-HandoffMirrorText "# Guide`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1" | Should -BeFalse
+    It 'refuses wildcard characters (a -Path cmdlet would hit other files than the guard judged)' {
+        foreach ($w in 'docs/*.md', 'h?.md', 'handoff[1].md') {
+            { Resolve-HandoffMirror -MirrorPath $w } | Should -Throw '*wildcard*' -Because $w
+        }
     }
 }
 
-Describe 'Test-HandoffFrontmatter in the SessionStart hook (#795 review)' {
+# One table, two detectors: Board-Handoff.ps1's Test-HandoffMirrorText and the hook's
+# Test-HandoffFrontmatter must both give the EXPECTED answer, not merely agree with each other.
+Describe 'Handoff frontmatter detection, script and hook (#795 review)' {
     BeforeAll {
         $env:ABIOS_HANDOFF_HOOK_DOTSOURCE = '1'
         . $script:Hook
         $env:ABIOS_HANDOFF_HOOK_DOTSOURCE = ''
-    }
-    It 'agrees with Test-HandoffMirrorText on every case' {
-        $cases = @(
-            "---`nissue: 7`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7"
-            "# Project guide`nRead me at session start."
-            "---`nsaved: 2026-10-23T00:00:00Z`n---`n# x"
-            "---`nverified: 1/1`n---`n# x"
-            "# Guide`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1"
-            "---`nsaved:`nverified: 1/1`n---"
-            ''
+        $fm = "---`nissue: 7`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7"
+        $script:Cases = @(
+            @{ Name = 'a handoff this script wrote';                  Text = $fm;                                  Expected = $true }
+            @{ Name = 'the same with CRLF line ends';                 Text = $fm -replace "`n", "`r`n";            Expected = $true }
+            @{ Name = 'the same behind a UTF-8 BOM';                 Text = [char]0xFEFF + $fm;                   Expected = $true }
+            @{ Name = 'a plain project guide';                       Text = "# Project guide`nRead me.";          Expected = $false }
+            @{ Name = 'empty text';                                  Text = '';                                   Expected = $false }
+            @{ Name = 'frontmatter with saved only';                 Text = "---`nsaved: x`n---`n# x";             Expected = $false }
+            @{ Name = 'frontmatter with verified only';              Text = "---`nverified: 1/1`n---`n# x";        Expected = $false }
+            @{ Name = 'an empty saved value';                        Text = "---`nsaved:`nverified: 1/1`n---";     Expected = $false }
+            @{ Name = 'the keys in the body, no frontmatter';        Text = "# Guide`nsaved: x`nverified: y";      Expected = $false }
+            @{ Name = 'ordinary frontmatter, then the keys in body'; Text = "---`ntitle: Guide`n---`nsaved: x`nverified: y"; Expected = $false }
+            @{ Name = 'frontmatter without the keys';                Text = "---`ntitle: x`n---";                  Expected = $false }
+            @{ Name = 'an unterminated block';                       Text = "---`nsaved: x`nverified: y";          Expected = $false }
         )
-        foreach ($c in $cases) { Test-HandoffFrontmatter $c | Should -Be (Test-HandoffMirrorText $c) -Because $c }
+    }
+    It 'Test-HandoffMirrorText (script) gives the expected answer for every case' {
+        foreach ($c in $script:Cases) { Test-HandoffMirrorText $c.Text | Should -Be $c.Expected -Because $c.Name }
+    }
+    It 'Test-HandoffFrontmatter (hook) gives the expected answer for every case' {
+        foreach ($c in $script:Cases) { Test-HandoffFrontmatter $c.Text | Should -Be $c.Expected -Because $c.Name }
     }
 }
 
@@ -211,15 +212,25 @@ exit /b 0
         git -C $repo status --porcelain | Should -BeNullOrEmpty
     }
 
-    It 'refuses an untracked directory or the archive dir as -MirrorPath' {
+    It 'refuses an untracked directory or the (populated) archive dir as -MirrorPath, writing nothing' {
         $repo = New-TrackedRepo 'dirmirror'
+        # A prior real -Save, so .handoffs/ holds active.md (and the next one an archive).
+        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] first'") $script:EmptyJson
+        $r.Code | Should -Be 0 -Because $r.Out
         New-Item -ItemType Directory -Path (Join-Path $repo 'scratch') | Out-Null
-        foreach ($spelling in 'scratch', '.handoffs') {
+        [System.IO.File]::WriteAllText((Join-Path $repo 'scratch/keep.txt'), 'k')
+        $giBefore     = Get-Bytes (Join-Path $repo '.gitignore')
+        $activeBefore = Get-Bytes (Join-Path $repo '.handoffs/active.md')
+        foreach ($spelling in 'scratch', '.handoffs', '.HANDOFFS') {
             $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', $spelling) $script:EmptyJson
             $r.Code | Should -Not -Be 0 -Because $spelling
             $r.Out  | Should -Match 'is a directory' -Because $r.Out
         }
-        Test-Path (Join-Path $repo 'scratch') -PathType Container | Should -BeTrue
+        Get-Bytes (Join-Path $repo '.gitignore') | Should -BeExactly $giBefore
+        Get-Bytes (Join-Path $repo '.handoffs/active.md') | Should -BeExactly $activeBefore
+        @(Get-ChildItem (Join-Path $repo '.handoffs')).Count | Should -Be 1
+        Get-Content -Raw (Join-Path $repo 'scratch/keep.txt') | Should -BeExactly 'k'
+        git -C $repo config --local --get abios.handoffMirror | Should -BeNullOrEmpty
     }
 
     It '-Resume -MirrorPath remembers the location on a machine with no local config' {
@@ -249,10 +260,16 @@ exit /b 0
         Get-Bytes (Join-Path $repo 'HANDOFF.md') | Should -BeExactly $before
     }
 
-    It 'a force-committed mirror (the tool''s own handoff, tracked) is still used as the mirror' {
+    It 'a force-committed mirror (the tool''s own -Save output, git add -f) is still used as the mirror' {
         $repo = New-TrackedRepo 'forced'
-        [System.IO.File]::WriteAllText((Join-Path $repo 'HANDOFF.md'), "---`nissue: 7`nsaved: 2026-10-01T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7`n## Next concrete step`n[V] old")
-        git -C $repo commit --quiet -am 'chore: force-committed handoff' 2>&1 | Out-Null
+        # Untrack the project guide so the first -Save writes the classic root mirror, exactly as the tool does.
+        git -C $repo rm --quiet HANDOFF.md 2>&1 | Out-Null
+        git -C $repo commit --quiet -m 'chore: drop guide' 2>&1 | Out-Null
+        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] old'") $script:EmptyJson
+        $r.Code | Should -Be 0 -Because $r.Out
+        git -C $repo add -f HANDOFF.md 2>&1 | Out-Null
+        git -C $repo commit --quiet -m 'chore: force-commit the handoff' 2>&1 | Out-Null
+
         $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] fresh'") $script:EmptyJson
         $r.Code | Should -Be 0 -Because $r.Out
         Get-Content -Raw (Join-Path $repo 'HANDOFF.md') | Should -Match 'fresh'
@@ -260,31 +277,41 @@ exit /b 0
         Invoke-Hook $repo | Should -Match 'fresh'
     }
 
-    It 'remembers -MirrorPath, so a later -Resume and the hook find it without the flag' {
+    It 'remembers -MirrorPath (non-ASCII too), so a later -Resume and the hook find it without the flag' {
         $repo = New-TrackedRepo 'custom'
-        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-MirrorPath', 'notes/h.md', '-NextStep', "'[V] custom spot'") $script:EmptyJson
+        $name = "notes/$([char]0xFC)bergabe.md"
+        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-MirrorPath', "'$name'", '-NextStep', "'[V] custom spot'") $script:EmptyJson
         $r.Code | Should -Be 0 -Because $r.Out
-        (git -C $repo config --local --get abios.handoffMirror) | Should -BeExactly 'notes/h.md'
-        Get-Content -Raw (Join-Path $repo '.gitignore') | Should -Match '(?m)^/notes/h\.md\s*$'
+        Test-Path -LiteralPath (Join-Path $repo $name) | Should -BeTrue
+        $prev = [Console]::OutputEncoding
+        try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); (git -C $repo config --local --get abios.handoffMirror) | Should -BeExactly $name }
+        finally { [Console]::OutputEncoding = $prev }
 
         # No [abios-handoff] comment on the issue: -Resume must fall back to the remembered mirror.
         $res = Invoke-Handoff $repo @('-Resume', '-Issue', '7', '-DryRun') $script:EmptyJson
         $res.Code | Should -Be 0 -Because $res.Out
         $res.Out  | Should -Match 'custom spot'
-        $res.Out  | Should -Match 'local mirror notes/h\.md'
-
-        $stdin = (@{ source = 'resume'; cwd = $repo } | ConvertTo-Json -Compress)
-        ($stdin | & pwsh -NoProfile -File $script:Hook | Out-String) | Should -Match 'custom spot'
+        Invoke-Hook $repo | Should -Match 'custom spot'
     }
 
-    It 'judges the COMMITTED copy: a guide already clobbered on disk by the old version is still the project''s' {
+    It 'judges the COMMITTED copy, and adopts a handoff the old version wrote over the guide before advising a restore' {
         $repo = New-TrackedRepo 'clobbered'
         $stale = "---`nissue: 7`nsaved: 2026-10-01T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7`n## Next concrete step`n[V] old"
         [System.IO.File]::WriteAllText((Join-Path $repo 'HANDOFF.md'), $stale)
+
+        # Offline -Resume (no comment) finds the clobbered handoff through the adopted mirror.
+        $res = Invoke-Handoff $repo @('-Resume', '-Issue', '7') $script:EmptyJson
+        $res.Code | Should -Be 0 -Because $res.Out
+        $res.Out  | Should -Match '\[V\] old'
+        $res.Out  | Should -Match 'kept in \.handoffs/active\.md'
+        $res.Out  | Should -Match 'git checkout -- HANDOFF\.md'
+
         $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] fresh'") $script:EmptyJson
         $r.Code | Should -Be 0 -Because $r.Out
-        $r.Out  | Should -Match 'git checkout -- HANDOFF\.md'
         Get-Content -Raw (Join-Path $repo '.handoffs/active.md') | Should -Match 'fresh'
+        $archives = @(Get-ChildItem (Join-Path $repo '.handoffs') -Filter '*-handoff.md')
+        $archives.Count | Should -Be 1
+        Get-Content -Raw $archives[0].FullName | Should -Match '\[V\] old'
         [System.IO.File]::ReadAllText((Join-Path $repo 'HANDOFF.md')) | Should -BeExactly $stale
         Get-Content -Raw (Join-Path $repo '.gitignore') | Should -Not -Match '(?m)^/HANDOFF\.md\s*$'
         # The hook judges the same committed copy: it surfaces the new mirror, not the stale file on disk.
