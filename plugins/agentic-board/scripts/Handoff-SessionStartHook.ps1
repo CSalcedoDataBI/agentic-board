@@ -45,6 +45,20 @@ function Get-HandoffSessionContext([string]$body) {
     return $ctx
 }
 
+# Is this text a handoff Board-Handoff.ps1 wrote? Same rule as its Test-HandoffMirrorText (#795):
+# non-empty `saved:` AND `verified:` keys inside the LEADING --- frontmatter block, never the body.
+# Pure + testable.
+function Test-HandoffFrontmatter([string]$text) {
+    $lines = @(([string]$text).TrimStart([char]0xFEFF) -split "`r?`n")
+    if ($lines.Count -lt 2 -or $lines[0].Trim() -ne '---') { return $false }
+    $seen = @{}
+    for ($i = 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim() -eq '---') { return [bool]($seen['saved'] -and $seen['verified']) }
+        if ($lines[$i] -match '^\s*(saved|verified)\s*:\s*\S') { $seen[$Matches[1]] = $true }
+    }
+    return $false   # an unterminated block is not frontmatter
+}
+
 # Build the SessionStart context line AFTER an auto-compaction (source == "compact"),
 # from the local active-run marker object (.agentic-board/active-run.json). Pure +
 # testable. Returns "" unless a run is genuinely active - so the compact case is a
@@ -117,9 +131,26 @@ try {
         try { $marker = Get-Content $markerPath -Raw | ConvertFrom-Json } catch { $marker = $null }
         $ctx = Get-CompactSessionContext $marker
     } else {
+        # Same mirror resolution as Board-Handoff.ps1 (#795): a -MirrorPath remembered in the local
+        # git config wins; else a TRACKED HANDOFF.md (any case) whose INDEX copy is not a handoff (no
+        # `saved:` + `verified:` frontmatter) is the project's own guide, and the mirror lives at
+        # .handoffs/active.md.
+        # Decoded as UTF-8: [Console]::OutputEncoding was switched above (#682), so a non-ASCII path survives.
+        $custom = [string](git -C $root config --local --get abios.handoffMirror 2>$null)
         $handoffPath = Join-Path $root 'HANDOFF.md'
-        if (-not (Test-Path $handoffPath)) { exit 0 }
-        $body = Get-Content $handoffPath -Raw
+        if ($custom) {
+            $handoffPath = Join-Path $root $custom
+        } else {
+            $hit = @(git -C $root ls-files -- ':(icase)HANDOFF.md' 2>$null) | Where-Object { $_ -ieq 'HANDOFF.md' } | Select-Object -First 1
+            if ($hit) {
+                $indexed = (@(git -C $root show ":$hit" 2>$null) -join "`n")
+                if (-not (Test-HandoffFrontmatter $indexed)) {
+                    $handoffPath = Join-Path (Join-Path $root '.handoffs') 'active.md'
+                }
+            }
+        }
+        if (-not (Test-Path -LiteralPath $handoffPath)) { exit 0 }
+        $body = Get-Content -LiteralPath $handoffPath -Raw
         $ctx = Get-HandoffSessionContext $body
     }
     if (-not $ctx) { exit 0 }

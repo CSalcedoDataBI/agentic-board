@@ -13,7 +13,8 @@
       2. Injects a "Verified git state" block gathered live this run (all [V]).
       3. Computes the verified ratio ([V] claims / total tagged claims).
       4. Assembles HANDOFF.md, writes it at the repo root, rotates the previous one to
-         .handoffs/<yyyyMMddTHHmmssZ>-handoff.md, and keeps both gitignored.
+         .handoffs/<yyyyMMddTHHmmssZ>-handoff.md, and keeps both gitignored. When the repo
+         tracks its own HANDOFF.md, the mirror goes to .handoffs/active.md instead (#795).
       5. When the session is board-linked, upserts an `[abios-handoff]` comment on the
          linked issue (the durable, cross-machine source of truth). The local file is a
          fast mirror; the issue comment is what survives a clean checkout on machine B.
@@ -95,8 +96,16 @@
 .PARAMETER ExcludeSessionId
     With -Recover: the session id to skip (the running one). Default $env:CLAUDE_CODE_SESSION_ID.
 
+.PARAMETER MirrorPath
+    Repo-relative path of the local mirror (#795). Default HANDOFF.md at the repo root - unless the
+    repo already TRACKS its own HANDOFF.md (a project-authored guide), in which case the mirror goes
+    to .handoffs/active.md and the project's file is never moved, overwritten or gitignored. A
+    -MirrorPath that is itself tracked by git is refused.
+
 .PARAMETER DryRun
-    Print the handoff and the intended comment action without writing or posting.
+    Print the handoff and the intended comment action without writing or posting. With -Save the
+    composed markdown goes to the success stream, so `$md = & Board-Handoff.ps1 -Save -DryRun ...`
+    captures it.
 
 .EXAMPLE
     .\Board-Handoff.ps1 -Save -NextStep "[V] Implement -Resume" -Done "[V] wrote save" -Traps "[V] docs/ is gitignored"
@@ -124,6 +133,9 @@ param(
     # Accept a machine-local, gitignored HANDOFF.md ON PURPOSE when no issue is linked (#304).
     # Without it, a -Save that resolves no issue REFUSES rather than degrading silently.
     [switch]  $Local,
+    # Where the local mirror lives (#795). Default: HANDOFF.md, or .handoffs/active.md when the
+    # repo tracks its own HANDOFF.md.
+    [string]  $MirrorPath = "",
     [switch]  $DryRun,
     [string]  $BodyFile = ""
 )
@@ -219,6 +231,58 @@ function Add-GitignoreEntries([string]$body, [string[]]$patterns) {
     $block = ($missing -join "`n")
     if ($trimmed) { return "$trimmed`n$block`n" }
     return "$block`n"
+}
+
+# Decide where the local mirror lives and what .gitignore must carry for it (#795). The repo-root
+# HANDOFF.md used to be assumed to be OUR gitignored mirror, but many repos keep a tracked,
+# project-authored HANDOFF.md ("read HANDOFF.md at session start"); -Save moved it into
+# .handoffs/, overwrote it and gitignored it - silently untracking the project's guide. So:
+#   -MirrorPath given          -> that path (repo-relative; no rooted path, no '..').
+#   root HANDOFF.md is tracked -> .handoffs/active.md, and HANDOFF.md is never ignored.
+#   otherwise                  -> HANDOFF.md, as before.
+# Ignore lists the .gitignore patterns to ensure; .handoffs/ is always one of them. Pure.
+function Resolve-HandoffMirror {
+    param([string]$MirrorPath = "", [bool]$RootHandoffTracked = $false)
+    if ($MirrorPath) {
+        if ([System.IO.Path]::IsPathRooted($MirrorPath)) { throw "Board-Handoff: -MirrorPath '$MirrorPath' must be relative to the repo root." }
+        # Wildcards would make a -Path cmdlet hit OTHER files than the one the tracked guard judged.
+        if ($MirrorPath -match '[*?\[\]]') { throw "Board-Handoff: -MirrorPath '$MirrorPath' must not contain wildcard characters (* ? [ ])." }
+        # Canonical form (no '.' segments, no empty ones): git prints tracked paths canonically, and a
+        # 'docs/./guide.md' that did not compare equal would slip past the tracked-file guard.
+        $segs = @(($MirrorPath -replace '\\', '/') -split '/' | Where-Object { $_ -and $_ -ne '.' })
+        if ($segs -contains '..') { throw "Board-Handoff: -MirrorPath '$MirrorPath' must stay inside the repo (no '..')." }
+        if (-not $segs.Count) { throw "Board-Handoff: -MirrorPath '$MirrorPath' names no file." }
+        # Win32 aliases: 'HANDOFF.md.' or 'HANDOFF.md ' open HANDOFF.md, an 8.3 short name ('HANDOF~1.MD')
+        # opens the long one, a ':' names a stream and CON/NUL/COM1... are devices - none would compare
+        # equal to the tracked path the guard looks up.
+        $win32Alias = { param($s) $s -match '[.\s]$' -or $s -match ':' -or $s -match '~\d' -or $s -match '^(?i:CON|PRN|AUX|NUL|COM\d|LPT\d)(\..*)?$' }
+        if (@($segs | Where-Object { & $win32Alias $_ }).Count) {
+            throw "Board-Handoff: -MirrorPath '$MirrorPath' has a segment Windows would open as a different file (trailing '.' or space, ':', an 8.3 '~N' short name, or a device name) than the one checked."
+        }
+        $rel = $segs -join '/'
+    } elseif ($RootHandoffTracked) {
+        $rel = '.handoffs/active.md'
+    } else {
+        $rel = 'HANDOFF.md'
+    }
+    $ignore = if ($rel -like '.handoffs/*') { @('/.handoffs/') } else { @("/$rel", '/.handoffs/') }
+    return [pscustomobject]@{ Rel = $rel; Ignore = $ignore }
+}
+
+# Is this text a handoff THIS script wrote? Its frontmatter always carries `saved:` and `verified:`.
+# A tracked file that passes is the tool's own mirror that someone force-committed ('git add -f',
+# which the -Local footer suggests) - keep using it. One that fails is a project file. Pure.
+# Only the LEADING, CLOSED --- block counts (never the body, never an unterminated block); a BOM and
+# CRLF line ends are tolerated. The SessionStart hook's Test-HandoffFrontmatter applies the same rule.
+function Test-HandoffMirrorText([string]$text) {
+    $lines = @(([string]$text).TrimStart([char]0xFEFF) -split "`r?`n")
+    if ($lines.Count -lt 2 -or $lines[0].Trim() -ne '---') { return $false }
+    $seen = @{}
+    for ($i = 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim() -eq '---') { return [bool]($seen['saved'] -and $seen['verified']) }
+        if ($lines[$i] -match '^\s*(saved|verified)\s*:\s*\S') { $seen[$Matches[1]] = $true }
+    }
+    return $false
 }
 
 # -- Resume-side pure helpers (parse a handoff back out) ------------------------
@@ -692,8 +756,88 @@ $saveMode = Get-HandoffSaveMode -Issue $Issue -Local:$Local
 
 $repoRoot = (git rev-parse --show-toplevel 2>$null)
 if (-not $repoRoot) { throw "Not inside a git working tree." }
-$handoffPath = Join-Path $repoRoot "HANDOFF.md"
+# A tracked root HANDOFF.md belongs to the project, not to us: the mirror moves aside (#795).
+# "Project-owned" = tracked AND not a handoff this script wrote (a force-committed mirror is still ours).
+# Two traps, both from review: the match is case-INsensitive (on NTFS a tracked Handoff.md IS the file
+# HANDOFF.md resolves to), and the content judged is the INDEX copy, not the working tree - a repo the
+# old version already clobbered has a tool handoff on disk over a committed project guide.
+# Paths come back NUL-separated and unquoted (core.quotePath would octal-escape a non-ASCII name, and
+# it would never compare equal), decoded as UTF-8. A pathspec naming a directory lists its children:
+# a directory that holds tracked files is owned too.
+function Invoke-GitUtf8([string[]]$GitArgs) {
+    $prev = [Console]::OutputEncoding
+    try {
+        try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+        return @(git -C $repoRoot -c core.quotePath=false @GitArgs 2>$null)
+    } finally { try { [Console]::OutputEncoding = $prev } catch { } }
+}
+function Test-ProjectOwned([string]$rel) {
+    $paths = @(((Invoke-GitUtf8 @('ls-files', '-z', '--', ":(icase)$rel")) -join "`n") -split "`0" |
+               ForEach-Object { $_.Trim("`n") } | Where-Object { $_ })
+    if (@($paths | Where-Object { $_.StartsWith("$rel/", [System.StringComparison]::OrdinalIgnoreCase) }).Count) { return $true }
+    $hit = $paths | Where-Object { $_ -ieq $rel } | Select-Object -First 1
+    if (-not $hit) { return $false }
+    $indexed = ((Invoke-GitUtf8 @('show', ":$hit")) -join "`n")
+    if (Test-HandoffMirrorText $indexed) { return $false }
+    # Clobbered by an older version: the working copy is a handoff over the committed file. Note it -
+    # that copy may be the only one of the latest handoff (-Local), so it is adopted below, not lost.
+    $p = Join-Path $repoRoot $hit
+    if (-not $script:ClobberedCopy -and (Test-Path -LiteralPath $p -PathType Leaf) -and (Test-HandoffMirrorText (Get-Content -LiteralPath $p -Raw))) {
+        $script:ClobberedCopy = $hit
+    }
+    return $true
+}
+# A custom -MirrorPath is remembered in the LOCAL git config (never committed), so a later -Resume
+# and the SessionStart hook find the mirror without the flag being repeated.
+$script:ClobberedCopy = $null
+function Save-HandoffMirrorLocation([string]$rel) {
+    git -C $repoRoot config --local abios.handoffMirror $rel 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  OK  Mirror location remembered (git config --local abios.handoffMirror = $rel)" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  WARN could not remember the mirror location (git config failed) - pass -MirrorPath $rel again next time; the SessionStart hook will not find it." -ForegroundColor DarkYellow
+    }
+}
+$mirrorFromParam = [bool]$MirrorPath
+if (-not $MirrorPath) { $MirrorPath = [string](Invoke-GitUtf8 @('config', '--local', '--get', 'abios.handoffMirror') | Select-Object -First 1) }
+$rootHandoffOwned = Test-ProjectOwned 'HANDOFF.md'
+$mirror = Resolve-HandoffMirror -MirrorPath $MirrorPath -RootHandoffTracked $rootHandoffOwned
+if (Test-ProjectOwned $mirror.Rel) {
+    throw "Board-Handoff: '$($mirror.Rel)' is tracked by git (or holds tracked files) and is not a handoff, so it is not a handoff mirror - writing there would overwrite and untrack project files. Pass -MirrorPath <an untracked file path>."
+}
+$handoffPath = Join-Path $repoRoot $mirror.Rel
+# The mirror is a FILE: rotation moves whatever sits at the path, so a directory there (or the archive
+# dir itself) would be moved wholesale into .handoffs/.
+if ($mirror.Rel -ieq '.handoffs' -or (Test-Path -LiteralPath $handoffPath -PathType Container)) {
+    throw "Board-Handoff: -MirrorPath '$($mirror.Rel)' is a directory - pass a file path, e.g. '$($mirror.Rel)/handoff.md'."
+}
 $archiveDir  = Join-Path $repoRoot ".handoffs"
+
+# Adopt a handoff an older version wrote over a tracked project file: copy it to the mirror (when the
+# mirror has none yet), so -Save archives it and -Resume finds it, BEFORE telling the user to restore
+# the project file - restoring first would discard what may be the only copy of the latest handoff.
+if ($script:ClobberedCopy) {
+    $clobbered = Join-Path $repoRoot $script:ClobberedCopy
+    if ($DryRun) {
+        Write-Host "  WARN $($script:ClobberedCopy) is tracked but its working copy is a handoff over the committed file (an older Board-Handoff overwrote it). A real run copies it to $($mirror.Rel) first." -ForegroundColor DarkYellow
+    } else {
+        Write-Host "  WARN $($script:ClobberedCopy) is tracked but its working copy is a handoff over the committed file (an older Board-Handoff overwrote it)." -ForegroundColor DarkYellow
+        if (-not (Test-Path -LiteralPath $handoffPath)) {
+            $mirrorParent = Split-Path -Parent $handoffPath
+            if (-not (Test-Path -LiteralPath $mirrorParent)) { New-Item -ItemType Directory -Force -Path $mirrorParent | Out-Null }
+            Copy-Item -LiteralPath $clobbered -Destination $handoffPath
+            $gitignorePath = Join-Path $repoRoot ".gitignore"
+            $giBody = if (Test-Path -LiteralPath $gitignorePath) { Get-Content -LiteralPath $gitignorePath -Raw } else { "" }
+            $giNew  = Add-GitignoreEntries $giBody $mirror.Ignore
+            if ($giNew -ne $giBody) { Set-Content -LiteralPath $gitignorePath -Value $giNew -Encoding UTF8 -NoNewline }
+            Write-Host "       That handoff is kept in $($mirror.Rel). Restore the project file: git checkout -- $($script:ClobberedCopy)" -ForegroundColor DarkYellow
+        } else {
+            # A mirror exists already (newer tool runs); never overwrite it - and never advise a restore
+            # that would silently drop a copy nothing else holds.
+            Write-Host "       $($mirror.Rel) already exists, so it was NOT replaced. Copy $($script:ClobberedCopy) aside if you still need it, then: git checkout -- $($script:ClobberedCopy)" -ForegroundColor DarkYellow
+        }
+    }
+}
 
 # -- Auto-memory pointer (best-effort, machine-local) --------------------------
 # Resolve the Claude Code auto-memory dir for THIS project. Returns $null when it
@@ -763,7 +907,7 @@ if ($Resume) {
     Write-Host ""
 
     # Source of truth = the [abios-handoff] comment on the linked issue (cross-machine).
-    $body = ""; $source = ""
+    $body = ""; $source = ""; $fromMirror = $false
     if ($Issue -gt 0) {
         try {
             $comments = Invoke-Gh -GhArgs @('api','--paginate',"repos/$Repo/issues/$Issue/comments?per_page=100") `
@@ -780,29 +924,47 @@ if ($Resume) {
         }
     }
     # Fallback: the local mirror (offline / no linked issue).
-    if (-not $body -and (Test-Path $handoffPath)) {
-        $body = Get-Content $handoffPath -Raw
-        $source = "local HANDOFF.md"
+    if (-not $body -and (Test-Path -LiteralPath $handoffPath)) {
+        $body = Get-Content -LiteralPath $handoffPath -Raw
+        $source = "local mirror $($mirror.Rel)"; $fromMirror = $true
     }
     if (-not $body) {
         # Point at -Recover (#730): a session that ended without -Save left its transcript on this
         # machine, and that is the only trail left.
-        throw "No handoff found$(if ($Issue -gt 0) { " for $Repo#$Issue" }) - no [abios-handoff] comment and no local HANDOFF.md. If the last session ended without -Save, rebuild it from its local transcript: Board-Handoff.ps1 -Recover"
+        throw "No handoff found$(if ($Issue -gt 0) { " for $Repo#$Issue" }) - no [abios-handoff] comment and no local mirror $($mirror.Rel). If the last session ended without -Save, rebuild it from its local transcript: Board-Handoff.ps1 -Recover"
     }
 
     # Regenerate the local mirror when the source was the remote comment (machine B).
-    if ($source -ne "local HANDOFF.md") {
+    if (-not $fromMirror) {
         if ($DryRun) {
-            Write-Host "DRY-RUN - would regenerate local HANDOFF.md from the $source." -ForegroundColor Yellow
+            Write-Host "DRY-RUN - would regenerate the local mirror $($mirror.Rel) from the $source." -ForegroundColor Yellow
         } else {
-            Set-Content -Path $handoffPath -Value $body -Encoding UTF8 -NoNewline
+            $mirrorDir = Split-Path -Parent $handoffPath
+            if (-not (Test-Path $mirrorDir)) { New-Item -ItemType Directory -Force $mirrorDir | Out-Null }
+            # A local mirror that differs from the comment (e.g. a -Local save, or a handoff adopted from
+            # a clobbered guide just above) may be the only copy of something: archive it, never overwrite.
+            if (Test-Path -LiteralPath $handoffPath -PathType Leaf) {
+                $existing = Get-Content -LiteralPath $handoffPath -Raw
+                # Line ends normalised: a force-committed mirror checked out with autocrlf is not "different".
+                if ($existing -and ($existing -replace "`r`n", "`n").TrimEnd() -cne ($body -replace "`r`n", "`n").TrimEnd()) {
+                    if (-not (Test-Path -LiteralPath $archiveDir)) { New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null }
+                    $archiveName = New-HandoffArchiveName (Get-Date)
+                    Move-Item -Force -LiteralPath $handoffPath -Destination (Join-Path $archiveDir $archiveName)
+                    Write-Host "  OK  The previous local mirror differed from the $source - archived -> .handoffs/$archiveName" -ForegroundColor DarkGray
+                }
+            }
+            Set-Content -LiteralPath $handoffPath -Value $body -Encoding UTF8 -NoNewline
             $gitignorePath = Join-Path $repoRoot ".gitignore"
             $giBody = if (Test-Path $gitignorePath) { Get-Content $gitignorePath -Raw } else { "" }
-            $giNew  = Add-GitignoreEntries $giBody @("/HANDOFF.md", "/.handoffs/")
+            $giNew  = Add-GitignoreEntries $giBody $mirror.Ignore
             if ($giNew -ne $giBody) { Set-Content -Path $gitignorePath -Value $giNew -Encoding UTF8 -NoNewline }
-            Write-Host "  OK  Local HANDOFF.md regenerated from the $source" -ForegroundColor DarkGray
+            Write-Host "  OK  Local mirror $($mirror.Rel) regenerated from the $source" -ForegroundColor DarkGray
         }
     }
+
+    # Machine B is where the local config is empty: remember an explicit -MirrorPath on resume too,
+    # whether the handoff came from the comment or from a mirror that was copied/force-committed there.
+    if ($mirrorFromParam -and -not $DryRun) { Save-HandoffMirrorLocation $mirror.Rel }
 
     Write-Host "  Source : $source" -ForegroundColor DarkCyan
     $savedAt = Get-HandoffFrontmatterField $body "saved"
@@ -917,12 +1079,13 @@ Write-Host ""
 if ($DryRun) {
     Write-Host "DRY-RUN - would write $handoffPath (verified $($fm.verified)):" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host $markdown
+    # Success stream, not Write-Host: a caller can capture the composed handoff (#795).
+    Write-Output $markdown
     Write-Host ""
     if ($saveMode -eq 'linked') {
         Write-Host "DRY-RUN - would upsert the [abios-handoff] comment on $Repo#$Issue." -ForegroundColor Yellow
     } elseif ($saveMode -eq 'local') {
-        Write-Host "DRY-RUN - -Local: would write a machine-local HANDOFF.md ONLY. Not portable (it is gitignored)" -ForegroundColor Yellow
+        Write-Host "DRY-RUN - -Local: would write a machine-local $($mirror.Rel) ONLY. Not portable (it is gitignored)" -ForegroundColor Yellow
         Write-Host "          and NO MEMORY.md pointer is written, so the next session will not surface it." -ForegroundColor Yellow
     } else {
         Write-Host "DRY-RUN - REFUSING: no linked issue (no -Issue, no active session, not on an issue-<n> branch)." -ForegroundColor Red
@@ -962,24 +1125,29 @@ if ($saveMode -eq 'refuse') {
 }
 
 # -- Rotate the previous handoff into .handoffs/ -------------------------------
-if (Test-Path $handoffPath) {
+if (Test-Path -LiteralPath $handoffPath) {
     if (-not (Test-Path $archiveDir)) { New-Item -ItemType Directory -Force $archiveDir | Out-Null }
     $archiveName = New-HandoffArchiveName $now
-    Move-Item -Force $handoffPath (Join-Path $archiveDir $archiveName)
+    Move-Item -Force -LiteralPath $handoffPath (Join-Path $archiveDir $archiveName)
     Write-Host "  OK  Previous handoff archived -> .handoffs/$archiveName" -ForegroundColor DarkGray
 }
 
-# -- Write the new HANDOFF.md --------------------------------------------------
-Set-Content -Path $handoffPath -Value $markdown -Encoding UTF8 -NoNewline
-Write-Host "  OK  HANDOFF.md written (verified $($fm.verified))" -ForegroundColor Green
+# -- Write the new mirror ------------------------------------------------------
+if (-not (Test-Path (Split-Path -Parent $handoffPath))) { New-Item -ItemType Directory -Force (Split-Path -Parent $handoffPath) | Out-Null }
+Set-Content -LiteralPath $handoffPath -Value $markdown -Encoding UTF8 -NoNewline
+Write-Host "  OK  $($mirror.Rel) written (verified $($fm.verified))" -ForegroundColor Green
+if ($rootHandoffOwned -and -not $MirrorPath) {
+    Write-Host "  (HANDOFF.md is tracked by this repo, so the mirror lives at $($mirror.Rel) and HANDOFF.md is left alone.)" -ForegroundColor DarkGray
+}
+if ($mirrorFromParam) { Save-HandoffMirrorLocation $mirror.Rel }
 
 # -- Keep the mirror + archive gitignored --------------------------------------
 $gitignorePath = Join-Path $repoRoot ".gitignore"
 $giBody = if (Test-Path $gitignorePath) { Get-Content $gitignorePath -Raw } else { "" }
-$giNew  = Add-GitignoreEntries $giBody @("/HANDOFF.md", "/.handoffs/")
+$giNew  = Add-GitignoreEntries $giBody $mirror.Ignore
 if ($giNew -ne $giBody) {
     Set-Content -Path $gitignorePath -Value $giNew -Encoding UTF8 -NoNewline
-    Write-Host "  OK  .gitignore updated (HANDOFF.md, .handoffs/)" -ForegroundColor DarkGray
+    Write-Host "  OK  .gitignore updated ($(($mirror.Ignore | ForEach-Object { $_.TrimStart('/') }) -join ', '))" -ForegroundColor DarkGray
 }
 
 # -- Upsert the durable [abios-handoff] comment on the linked issue -------------
@@ -1036,8 +1204,8 @@ _Last saved $($fm.saved)._
 } else {
     # Reached only under -Local now (a no-issue save without -Local is refused before any write).
     Write-Host ""
-    Write-Host "  -Local: wrote a machine-local HANDOFF.md only. It is gitignored and NOT portable -" -ForegroundColor DarkYellow
-    Write-Host "  to use it on another machine copy it out, or force-commit it with 'git add -f HANDOFF.md'." -ForegroundColor DarkYellow
+    Write-Host "  -Local: wrote a machine-local $($mirror.Rel) only. It is gitignored and NOT portable -" -ForegroundColor DarkYellow
+    Write-Host "  to use it on another machine copy it out, or force-commit it with 'git add -f $($mirror.Rel)'." -ForegroundColor DarkYellow
     Write-Host "  No MEMORY.md pointer was written (that needs a linked issue), so your next session will NOT" -ForegroundColor DarkYellow
     Write-Host "  surface it on its own - link an issue with -Issue <n> if you want that." -ForegroundColor DarkYellow
 }

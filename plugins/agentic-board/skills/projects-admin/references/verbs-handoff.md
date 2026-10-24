@@ -12,7 +12,10 @@ Loaded on demand by /board (#573). Design doc: references/handoff.md.
     `scripts/Board-Handoff.ps1 -Save -NextStep "..." -Done "...","..." -Traps "..." -KeyFiles "..."`.
     It autofills the frontmatter from git + `.agentic-board/sessions.json`, writes a gitignored
     `HANDOFF.md`, archives the previous one, upserts the durable `[abios-handoff]` comment on the
-    linked issue, and drops a MEMORY.md pointer (opt-out `-NoMemo`). `-DryRun` previews.
+    linked issue, and drops a MEMORY.md pointer (opt-out `-NoMemo`). `-DryRun` previews (the
+    markdown goes to the success stream, so it can be captured). If the repo **tracks** its own
+    `HANDOFF.md`, the mirror goes to `.handoffs/active.md` and the project's file is left alone
+    (#795); `-MirrorPath <rel>` picks another untracked spot.
     - **No linked issue?** The durability comes from the issue (the portable `[abios-handoff]`
       comment + the memo). With none resolved (no active session, not on an `issue-<n>` branch),
       `-Save` now **refuses** instead of silently degrading to a gitignored local-only file with no
