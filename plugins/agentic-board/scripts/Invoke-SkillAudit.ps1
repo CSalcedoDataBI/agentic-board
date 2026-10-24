@@ -194,26 +194,35 @@ if ($available.Count) {
         if ($src.Success) {
             try { $manifestName = (Get-Content -LiteralPath ($src.Groups[1].Value + '/.claude-plugin/plugin.json') -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable)['name'] } catch { }
         }
-        $ownPlugins = @($s.plugin, $src.Groups[2].Value, $manifestName) |
+        # The manifest name, when there is one, replaces the folder name: the tool prefix never uses the folder.
+        $ownPlugins = @($s.plugin, $(if ($manifestName) { $manifestName } else { $src.Groups[2].Value })) |
             Where-Object { $_ } | ForEach-Object { [string]$_ -replace '[^A-Za-z0-9_-]', '_' }
         # mcp__<prefix>__<tool>, mcp__<prefix>__* and the bare mcp__<prefix> (all of a server's tools,
         # as allowed-tools writes it). The prefix never holds `__`, so a half placeholder (mcp__srv__<tool>,
         # mcp__srv__…) still names srv; a full one (mcp__<server>__<tool>) does not match.
-        $refs = [ordered]@{}
+        # Ordinal keys: [ordered]@{} ignores case and would fold mcp__GitHub__x into mcp__github__x.
+        $refs = [System.Collections.Specialized.OrderedDictionary]::new([StringComparer]::Ordinal)
         foreach ($m in [regex]::Matches([string]$text, '(?<![A-Za-z0-9_])mcp__((?:[A-Za-z0-9-]|_(?!_))+)(?:__([A-Za-z0-9_-]+\*?|\*)|__|(?![A-Za-z0-9_-]))')) {
             if (-not $refs.Contains($m.Value)) { $refs[$m.Value] = [pscustomobject]@{ prefix = $m.Groups[1].Value; tool = $m.Groups[2].Value } }
         }
         # Every prefix this skill names, in any form: a skill that gives the working prefix anywhere
         # (another tool, __*, the bare allowed-tools form) already documents both install forms.
         $refPrefixes = [System.Collections.Generic.HashSet[string]]::new([string[]]@($refs.Values | ForEach-Object { $_.prefix }), [StringComparer]::Ordinal)
+        # A generic plugin-form placeholder (mcp__plugin_<plugin>_srv__…) documents every plugin prefix of srv.
+        $placeholderServers = [System.Collections.Generic.HashSet[string]]::new([string[]]@(
+            [regex]::Matches([string]$text, 'mcp__plugin_<[^>\s]+>_([A-Za-z0-9-]+)') | ForEach-Object { $_.Groups[1].Value }), [StringComparer]::OrdinalIgnoreCase)
         foreach ($ref in @($refs.Keys)) {
             $prefix = $refs[$ref].prefix; $tool = $refs[$ref].tool
             if ($availableSet.Contains($prefix)) { continue }
             # A plugin's skill naming its OWN plugin prefix is right wherever that plugin is enabled; it
             # is only missing here because this copy's plugin is not (a marketplace clone, a disabled one).
-            if (@($ownPlugins | Where-Object { $prefix.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
+            # Only while that plugin's servers are absent here: if any is loaded the plugin is enabled, and a
+            # missing own prefix is then a real defect (the server key spelled with another case, say).
+            $own = @($ownPlugins | Where-Object { $prefix.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) })
+            if ($own.Count -and -not @($available | Where-Object { $p = $_.prefix; @($own | Where-Object { $p.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) }).Count }).Count) { continue }
             $server = Resolve-RefServer $prefix
             if (-not $server) { continue }
+            if ($placeholderServers.Contains($server) -and $prefix -notmatch '^plugin_') { continue }
             $altPrefixes = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -cne $prefix } | ForEach-Object { $_.prefix } | Sort-Object -Unique)
             if (-not $altPrefixes.Count -or @($altPrefixes | Where-Object { $refPrefixes.Contains($_) }).Count) { continue }
             # One root cause per hardcoded PREFIX: its tools are listed in one finding, not one finding each.

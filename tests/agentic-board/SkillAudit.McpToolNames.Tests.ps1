@@ -56,7 +56,14 @@ BeforeAll {
     # glued: mcp__ inside a longer word is not a tool name.
     New-Skill '.claude/skills/proj/glued' 'glued' 'The variable xmcp__powerbi-modeling-mcp__a is unrelated.'
     # qself: a source-tree plugin whose manifest name differs from its folder name.
-    New-Skill 'plugins/pack-q/skills/qself' 'qself' 'Run `mcp__plugin_pack-qq_codegraph__codegraph_search`.'
+    # Its folder-name prefix is the control: the manifest name, not the folder, is its own.
+    New-Skill 'plugins/pack-q/skills/qself' 'qself' 'Run `mcp__plugin_pack-qq_codegraph__codegraph_search`, not `mcp__plugin_pack-q_codegraph__codegraph_node`.'
+    # eself: its own plugin IS loaded here, yet this own prefix is missing (wrong case): a real defect.
+    New-Skill 'plugins/pack-e/skills/eself' 'eself' 'Run `mcp__plugin_pack-e_CodeGraph__codegraph_search`.'
+    # mixedcase: the wrong case and the right one, in that order: the right one documents it.
+    New-Skill '.claude/skills/proj/mixedcase' 'mixedcase' 'Call `mcp__CodeGraph__codegraph_node`, i.e. `mcp__codegraph__codegraph_node`.'
+    # generic: the plugin form is given as a placeholder, which covers every plugin prefix.
+    New-Skill '.claude/skills/proj/generic' 'generic' 'Call `mcp__powerbi-modeling-mcp__model_operations` (or mcp__plugin_<plugin>_powerbi-modeling-mcp__model_operations).'
     Write-Json (Join-Path $script:Root 'plugins/pack-q/.claude-plugin/plugin.json') @{ name = 'pack-qq' }
     # half: the prefix is hardcoded even though the tool part is a placeholder.
     New-Skill '.claude/skills/proj/half' 'half' 'Call `mcp__powerbi-modeling-mcp__<operation>` for each step.'
@@ -87,7 +94,7 @@ BeforeAll {
     # It answers only for the audited root, so a test also proves the audit forwards -Root to discovery.
     $script:StubPluginOnly = "param([string]`$Root) if (`$Root -eq '$($script:Root)') { [pscustomobject]@{ prefix = 'plugin_fabric-skills_powerbi-modeling-mcp'; server = 'powerbi-modeling-mcp'; plugin = 'fabric-skills' } }"
 
-    $script:Servers = @('codegraph', 'plugin_fabric-skills_powerbi-modeling-mcp')
+    $script:Servers = @('codegraph', 'plugin_fabric-skills_powerbi-modeling-mcp', 'plugin_pack-e_codegraph')
     $script:Res = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers $script:Servers
     function Get-McpFinding { param([string]$Skill) @($script:Res.findings | Where-Object { $_.skill -eq $Skill -and $_.type -eq 'mcp-tool-name' }) }
 }
@@ -205,7 +212,19 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         (Get-McpFinding 'glued').Count | Should -Be 0
     }
     It 'reads the own plugin name from the source tree manifest' {
-        (Get-McpFinding 'qself').Count | Should -Be 0
+        $f = Get-McpFinding 'qself'
+        $f.Count | Should -Be 1                       # only the folder-name prefix
+        $f[0].detail | Should -Match 'plugin_pack-q_codegraph'
+        $f[0].detail | Should -Not -Match 'plugin_pack-qq_'
+    }
+    It 'flags a missing own prefix when its plugin is loaded here' {
+        (Get-McpFinding 'eself')[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_pack-e_codegraph__codegraph_search`'))
+    }
+    It 'keeps references that differ only in case apart' {
+        (Get-McpFinding 'mixedcase').Count | Should -Be 0
+    }
+    It 'takes a plugin-form placeholder as documenting the plugin install' {
+        (Get-McpFinding 'generic').Count | Should -Be 0
     }
     It 'does not read a README beside SKILL.md' {
         (Get-McpFinding 'readme').Count | Should -Be 0
@@ -258,15 +277,20 @@ Describe 'Get-McpServerNames' {
         Write-Json (Join-Path $pb 'servers.json') @{ mcpServers = @{ 'from-file' = @{}; 'second' = @{} } }
         Write-Json (Join-Path $pc '.mcp.json') @{ mcpServers = @{ 'disabled-one' = @{} } }
         $pw = Join-Path $script:Home2 'plugins/w'; Write-Json (Join-Path $pw '.mcp.json') @{ mcpServers = @{ 'wrapped-one' = @{} } }
+        # inline: plugin.json carries the server map itself, next to an .mcp.json - both are read.
+        $pi = Join-Path $script:Home2 'plugins/i'
+        Write-Json (Join-Path $pi '.claude-plugin/plugin.json') @{ name = 'pack-i'; mcpServers = @{ 'inline-one' = @{ command = 'x' } } }
+        Write-Json (Join-Path $pi '.mcp.json') @{ 'file-one' = @{} }
         $pu = Join-Path $script:Home2 'plugins/u'; Write-Json (Join-Path $pu '.mcp.json') @{ 'unnamed-one' = @{} }
         Write-Json (Join-Path $script:Home2 '.claude/plugins/installed_plugins.json') @{ version = 2; plugins = @{
             'fabric-skills@m' = @(@{ scope = 'user'; installPath = $pa; lastUpdated = '2026-01-01' })
             'pack-b@m'        = @(@{ scope = 'user'; installPath = $pb; lastUpdated = '2026-01-01' })
             'pack-c@m'        = @(@{ scope = 'user'; installPath = $pc; lastUpdated = '2026-01-01' })
             'pack-w@m'        = @(@{ scope = 'user'; installPath = $pw; lastUpdated = '2026-01-01' })
+            'pack-i@m'        = @(@{ scope = 'user'; installPath = $pi; lastUpdated = '2026-01-01' })
             'pack-u@m'        = @(@{ scope = 'user'; installPath = $pu; lastUpdated = '2026-01-01' })   # named in no enabledPlugins
         } }
-        Write-Json (Join-Path $script:Home2 '.claude/settings.json') @{ enabledPlugins = @{ 'fabric-skills@m' = $true; 'pack-b@m' = $true; 'pack-w@m' = $true; 'pack-c@m' = $false } }
+        Write-Json (Join-Path $script:Home2 '.claude/settings.json') @{ enabledPlugins = @{ 'fabric-skills@m' = $true; 'pack-b@m' = $true; 'pack-w@m' = $true; 'pack-i@m' = $true; 'pack-c@m' = $false } }
         $script:Names = @(& $script:Discover -Root $script:Repo2 -UserHome $script:Home2)
     }
     It 'lists direct servers by their bare name (user, local project entry, .mcp.json)' {
@@ -278,6 +302,8 @@ Describe 'Get-McpServerNames' {
     It 'lists plugin servers with the plugin prefix, from .mcp.json and from plugin.json' {
         $script:Names.prefix | Should -Contain 'plugin_fabric-skills_powerbi-modeling-mcp'
         $script:Names.prefix | Should -Contain 'plugin_pack-b_second'
+        $script:Names.prefix | Should -Contain 'plugin_pack-i_inline-one'     # inline map in plugin.json
+        $script:Names.prefix | Should -Contain 'plugin_pack-i_file-one'       # and its .mcp.json beside it
     }
     It 'leaves out servers switched off in the project, direct and plugin ones' {
         $script:Names.prefix | Should -Not -Contain 'switched-off'
@@ -431,7 +457,9 @@ Describe 'Get-McpServerNames' {
             'bad@m' = @(@{ scope = 'user'; installPath = $pbad; lastUpdated = '2026-01-01' })
             'ok@m'  = @(@{ scope = 'user'; installPath = $pok;  lastUpdated = '2026-01-01' }) } }
         Write-Json (Join-Path $h '.claude/settings.json') @{ enabledPlugins = @{ 'bad@m' = $true; 'ok@m' = $true } }
-        @(& $script:Discover -Root $r -UserHome $h -WarningAction SilentlyContinue).prefix | Should -Contain 'plugin_ok_ok-server'
+        $w = $null
+        @(& $script:Discover -Root $r -UserHome $h -WarningVariable w -WarningAction SilentlyContinue).prefix | Should -Contain 'plugin_ok_ok-server'
+        ($w -join ' ') | Should -Match 'cannot read'
     }
     It 'returns nothing on an empty home' {
         $empty = Join-Path $script:Root 'empty'; New-Item -ItemType Directory -Path $empty -Force | Out-Null
