@@ -252,10 +252,12 @@ function Resolve-HandoffMirror {
         $segs = @(($MirrorPath -replace '\\', '/') -split '/' | Where-Object { $_ -and $_ -ne '.' })
         if ($segs -contains '..') { throw "Board-Handoff: -MirrorPath '$MirrorPath' must stay inside the repo (no '..')." }
         if (-not $segs.Count) { throw "Board-Handoff: -MirrorPath '$MirrorPath' names no file." }
-        # Win32 aliases: 'HANDOFF.md.' or 'HANDOFF.md ' open HANDOFF.md, and a ':' names a stream - none
-        # would compare equal to the tracked path the guard looks up.
-        if (@($segs | Where-Object { $_ -match '[.\s]$' -or $_ -match ':' }).Count) {
-            throw "Board-Handoff: -MirrorPath '$MirrorPath' has a segment ending in '.' or a space, or a ':' - Windows would open a different file than the one checked."
+        # Win32 aliases: 'HANDOFF.md.' or 'HANDOFF.md ' open HANDOFF.md, an 8.3 short name ('HANDOF~1.MD')
+        # opens the long one, a ':' names a stream and CON/NUL/COM1... are devices - none would compare
+        # equal to the tracked path the guard looks up.
+        $win32Alias = { param($s) $s -match '[.\s]$' -or $s -match ':' -or $s -match '~\d' -or $s -match '^(?i:CON|PRN|AUX|NUL|COM\d|LPT\d)(\..*)?$' }
+        if (@($segs | Where-Object { & $win32Alias $_ }).Count) {
+            throw "Board-Handoff: -MirrorPath '$MirrorPath' has a segment Windows would open as a different file (trailing '.' or space, ':', an 8.3 '~N' short name, or a device name) than the one checked."
         }
         $rel = $segs -join '/'
     } elseif ($RootHandoffTracked) {
@@ -788,6 +790,14 @@ function Test-ProjectOwned([string]$rel) {
 # A custom -MirrorPath is remembered in the LOCAL git config (never committed), so a later -Resume
 # and the SessionStart hook find the mirror without the flag being repeated.
 $script:ClobberedCopy = $null
+function Save-HandoffMirrorLocation([string]$rel) {
+    git -C $repoRoot config --local abios.handoffMirror $rel 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  OK  Mirror location remembered (git config --local abios.handoffMirror = $rel)" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  WARN could not remember the mirror location (git config failed) - pass -MirrorPath $rel again next time; the SessionStart hook will not find it." -ForegroundColor DarkYellow
+    }
+}
 $mirrorFromParam = [bool]$MirrorPath
 if (-not $MirrorPath) { $MirrorPath = [string](Invoke-GitUtf8 @('config', '--local', '--get', 'abios.handoffMirror') | Select-Object -First 1) }
 $rootHandoffOwned = Test-ProjectOwned 'HANDOFF.md'
@@ -935,7 +945,8 @@ if ($Resume) {
             # a clobbered guide just above) may be the only copy of something: archive it, never overwrite.
             if (Test-Path -LiteralPath $handoffPath -PathType Leaf) {
                 $existing = Get-Content -LiteralPath $handoffPath -Raw
-                if ($existing -and $existing.TrimEnd() -cne $body.TrimEnd()) {
+                # Line ends normalised: a force-committed mirror checked out with autocrlf is not "different".
+                if ($existing -and ($existing -replace "`r`n", "`n").TrimEnd() -cne ($body -replace "`r`n", "`n").TrimEnd()) {
                     if (-not (Test-Path -LiteralPath $archiveDir)) { New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null }
                     $archiveName = New-HandoffArchiveName (Get-Date)
                     Move-Item -Force -LiteralPath $handoffPath -Destination (Join-Path $archiveDir $archiveName)
@@ -953,7 +964,7 @@ if ($Resume) {
 
     # Machine B is where the local config is empty: remember an explicit -MirrorPath on resume too,
     # whether the handoff came from the comment or from a mirror that was copied/force-committed there.
-    if ($mirrorFromParam -and -not $DryRun) { git -C $repoRoot config --local abios.handoffMirror $mirror.Rel 2>$null | Out-Null }
+    if ($mirrorFromParam -and -not $DryRun) { Save-HandoffMirrorLocation $mirror.Rel }
 
     Write-Host "  Source : $source" -ForegroundColor DarkCyan
     $savedAt = Get-HandoffFrontmatterField $body "saved"
@@ -1128,10 +1139,7 @@ Write-Host "  OK  $($mirror.Rel) written (verified $($fm.verified))" -Foreground
 if ($rootHandoffOwned -and -not $MirrorPath) {
     Write-Host "  (HANDOFF.md is tracked by this repo, so the mirror lives at $($mirror.Rel) and HANDOFF.md is left alone.)" -ForegroundColor DarkGray
 }
-if ($mirrorFromParam) {
-    git -C $repoRoot config --local abios.handoffMirror $mirror.Rel 2>$null | Out-Null
-    Write-Host "  OK  Mirror location remembered (git config --local abios.handoffMirror = $($mirror.Rel))" -ForegroundColor DarkGray
-}
+if ($mirrorFromParam) { Save-HandoffMirrorLocation $mirror.Rel }
 
 # -- Keep the mirror + archive gitignored --------------------------------------
 $gitignorePath = Join-Path $repoRoot ".gitignore"

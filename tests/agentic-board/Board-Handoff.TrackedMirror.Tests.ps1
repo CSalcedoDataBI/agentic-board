@@ -55,10 +55,13 @@ Describe 'Handoff-SessionStartHook end to end with a tracked HANDOFF.md (#795)' 
         Invoke-Hook $repo | Should -BeNullOrEmpty
 
         New-Item -ItemType Directory -Path (Join-Path $repo '.handoffs') | Out-Null
+        # A rotated archive sits next to the mirror, newer on disk: the hook must read active.md only.
         Set-Content -Path (Join-Path $repo '.handoffs/active.md') -Value "---`nissue: 7`n---`n## Next concrete step`n[V] hooked" -Encoding UTF8
+        Set-Content -Path (Join-Path $repo '.handoffs/20260101T000000Z-handoff.md') -Value "---`nissue: 7`n---`n## Next concrete step`n[V] stale archive" -Encoding UTF8
         $h = Invoke-Hook $repo
         $h | Should -Match 'hooked'
         $h | Should -Not -Match 'read the guide'
+        $h | Should -Not -Match 'stale archive'
     }
 }
 
@@ -89,7 +92,7 @@ Describe 'Resolve-HandoffMirror (#795)' {
         { Resolve-HandoffMirror -MirrorPath '../outside.md' } | Should -Throw "*'..'*"
     }
     It 'refuses Win32 aliases (trailing dot or space, a stream colon) that open a different file' {
-        foreach ($w in 'HANDOFF.md.', 'HANDOFF.md ', 'docs./x.md', 'x.md:stream') {
+        foreach ($w in 'HANDOFF.md.', 'HANDOFF.md ', 'docs./x.md', 'x.md:stream', 'HANDOF~1.MD', 'NUL', 'docs/com1.md') {
             { Resolve-HandoffMirror -MirrorPath $w } | Should -Throw "*Windows would open*" -Because "[$w]"
         }
     }
@@ -121,6 +124,8 @@ Describe 'Handoff frontmatter detection, script and hook (#795 review)' {
             @{ Name = 'ordinary frontmatter, then the keys in body'; Text = "---`ntitle: Guide`n---`nsaved: x`nverified: y"; Expected = $false }
             @{ Name = 'frontmatter without the keys';                Text = "---`ntitle: x`n---";                  Expected = $false }
             @{ Name = 'an unterminated block';                       Text = "---`nsaved: x`nverified: y";          Expected = $false }
+            @{ Name = 'a NON-leading --- block (horizontal rules)';  Text = "# Guide`n`n---`nsaved: x`nverified: y`n---"; Expected = $false }
+            @{ Name = 'a blank line before the block';               Text = "`n---`nsaved: x`nverified: y`n---";   Expected = $false }
         )
     }
     It 'Test-HandoffMirrorText (script) gives the expected answer for every case' {
@@ -140,6 +145,7 @@ Describe 'Board-Handoff.ps1 end to end with a tracked HANDOFF.md (#795)' -Skip:(
         New-Item -ItemType Directory -Path $script:FakeDir | Out-Null
         @'
 @echo off
+if defined FAKE_GH_LOG (echo gh %*>>"%FAKE_GH_LOG%")
 if defined FAKE_GH_OUTFILE (type "%FAKE_GH_OUTFILE%") else (echo [])
 exit /b 0
 '@ | Set-Content (Join-Path $script:FakeDir 'gh.cmd') -Encoding ASCII
@@ -152,8 +158,9 @@ exit /b 0
         ConvertTo-Json -InputObject @([pscustomobject]@{ id = 1; body = $vbody }) -Depth 5 | Set-Content -Path $script:ValidComments -Encoding UTF8
 
         # Run the real script in a child pwsh, fake gh first on PATH, inside $Repo.
-        function Invoke-Handoff([string]$Repo, [string[]]$ScriptArgs, [string]$OutFile) {
-            $cmd = "`$env:PATH='$($script:FakeDir);' + `$env:PATH; `$env:GH_TOKEN='fake'; `$env:FAKE_GH_OUTFILE='$OutFile'; " +
+        # -Log names a file where the fake gh appends every call it receives.
+        function Invoke-Handoff([string]$Repo, [string[]]$ScriptArgs, [string]$OutFile, [string]$Log = '') {
+            $cmd = "`$env:PATH='$($script:FakeDir);' + `$env:PATH; `$env:GH_TOKEN='fake'; `$env:FAKE_GH_OUTFILE='$OutFile'; `$env:FAKE_GH_LOG='$Log'; " +
                    "Set-Location -LiteralPath '$Repo'; & '$($script:Script)' $($ScriptArgs -join ' ')"
             $out = & pwsh -NoProfile -Command $cmd 2>&1 | Out-String
             [pscustomobject]@{ Out = $out; Code = $LASTEXITCODE }
@@ -206,11 +213,12 @@ exit /b 0
         $giBefore   = Get-Bytes (Join-Path $repo '.gitignore')
         $docsBefore = Get-Bytes (Join-Path $repo 'docs/a.md')
         $notaBefore = Get-Bytes (Join-Path $repo "notas-$([char]0xE9).md")
+        $ghLog = Join-Path $TestDrive 'gh-refuse.log'
         foreach ($spelling in '.gitignore', './/.gitignore', '.GITIGNORE', 'HANDOFF.md', 'handoff.md', 'docs', 'docs/', "notas-$([char]0xE9).md") {
             # -Resume runs WITH a valid comment, so the regenerate-from-comment write path is the one refused.
             foreach ($verb in '-Save', '-Resume') {
                 $src = if ($verb -eq '-Resume') { $script:ValidComments } else { $script:EmptyJson }
-                $r = Invoke-Handoff $repo @($verb, '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', "'$spelling'") $src
+                $r = Invoke-Handoff $repo @($verb, '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', "'$spelling'") $src $ghLog
                 $r.Code | Should -Not -Be 0 -Because "$verb $spelling"
                 $r.Out  | Should -Match 'is tracked by git \(or holds tracked files\) and is not a handoff' -Because "$verb $spelling -> $($r.Out)"
             }
@@ -222,6 +230,18 @@ exit /b 0
         Test-Path (Join-Path $repo '.handoffs') | Should -BeFalse
         git -C $repo config --local --get abios.handoffMirror | Should -BeNullOrEmpty
         git -C $repo status --porcelain | Should -BeNullOrEmpty
+        # Nothing reached the forge either: the refusal comes before any gh call, reads included.
+        if (Test-Path $ghLog) { Get-Content -Raw $ghLog | Should -BeNullOrEmpty }
+    }
+
+    It 'refuses .handoffs as -MirrorPath even before the archive dir exists' {
+        $repo = New-TrackedRepo 'handoffs-fresh'
+        foreach ($spelling in '.handoffs', '.HANDOFFS') {
+            $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', $spelling) $script:EmptyJson
+            $r.Code | Should -Not -Be 0 -Because $spelling
+            $r.Out  | Should -Match 'is a directory' -Because $r.Out
+            Test-Path (Join-Path $repo '.handoffs') | Should -BeFalse -Because $spelling
+        }
     }
 
     It 'refuses an untracked directory or the (populated) archive dir as -MirrorPath, writing nothing' {
@@ -304,6 +324,12 @@ exit /b 0
         $res.Code | Should -Be 0 -Because $res.Out
         $res.Out  | Should -Match 'custom spot'
         Invoke-Hook $repo | Should -Match 'custom spot'
+
+        # Write side: a real -Resume from a comment, no flag, regenerates the REMEMBERED path.
+        $res = Invoke-Handoff $repo @('-Resume', '-Issue', '7') $script:ValidComments
+        $res.Code | Should -Be 0 -Because $res.Out
+        Get-Content -Raw -LiteralPath (Join-Path $repo $name) | Should -Match 'valid comment'
+        Test-Path (Join-Path $repo '.handoffs/active.md') | Should -BeFalse
     }
 
     It 'judges the COMMITTED copy, and adopts a handoff the old version wrote over the guide before advising a restore' {
@@ -365,12 +391,19 @@ exit /b 0
 
     It '-Save -DryRun puts the composed markdown on the success stream' {
         $repo = New-TrackedRepo 'dryrun'
+        $before   = Get-Bytes (Join-Path $repo 'HANDOFF.md')
+        $giBefore = Get-Bytes (Join-Path $repo '.gitignore')
         $cmd = "`$env:PATH='$($script:FakeDir);' + `$env:PATH; `$env:GH_TOKEN='fake'; `$env:FAKE_GH_OUTFILE='$($script:EmptyJson)'; " +
-               "Set-Location -LiteralPath '$repo'; `$md = & '$($script:Script)' -Save -DryRun -Issue 7 -ProjectNum 1 -NoKnowledge -NextStep '[V] captured' 6>`$null; " +
-               "if (`"`$md`" -match 'captured' -and `"`$md`" -match '# Handoff - #7') { 'MD_ON_SUCCESS_STREAM' } else { 'MD_NOT_CAPTURED' }"
+               "Set-Location -LiteralPath '$repo'; `$md = & '$($script:Script)' -Save -DryRun -Issue 7 -ProjectNum 1 -NoMemo -NoKnowledge -NextStep '[V] captured' 6>`$null; " +
+               "if (`"`$md`" -match 'captured' -and `"`$md`" -match '# Handoff - #7') { 'MD_ON_SUCCESS_STREAM' } else { 'MD_NOT_CAPTURED' }; exit 0"
         $out = (& pwsh -NoProfile -Command $cmd 2>&1 | Out-String)
+        $LASTEXITCODE | Should -Be 0 -Because $out
         $out | Should -MatchExactly 'MD_ON_SUCCESS_STREAM'
         $out | Should -Not -Match 'MD_NOT_CAPTURED'
+        # And a dry run writes nothing.
+        Get-Bytes (Join-Path $repo 'HANDOFF.md') | Should -BeExactly $before
+        Get-Bytes (Join-Path $repo '.gitignore') | Should -BeExactly $giBefore
+        Test-Path (Join-Path $repo '.handoffs') | Should -BeFalse
     }
 
 }
