@@ -175,6 +175,12 @@ param(
     # a legacy `.agentic-bi-ops/` folder; it never touches config.json.
     [ValidateSet('on', 'off', 'auto', 'show')]
     [string] $PreferGroupedPRs = '',
+    # Who decides the merge at step 5d/5e (#797). 'show' READS it (no token, writes nothing) and is
+    # what step 5d runs before asking anything. 'expert' / 'user' record `mergeAuthority` in
+    # .agentic-board/config.json; 'auto' clears it, so the repo's files decide (an approved FICHA.md
+    # + .claude/agents/experto.md = expert, else user). The review gate runs either way.
+    [ValidateSet('expert', 'user', 'auto', 'show')]
+    [string] $MergeAuthority = '',
     [switch]$Launch,
     # Fleet launch surface (#710 P1): 'terminal' (default) is today's wt-tab/pwsh-window behaviour,
     # byte-for-byte. 'app' does everything -Parallel does today EXCEPT create a worktree and EXCEPT
@@ -607,8 +613,17 @@ function Get-RepoTrackedFiles {
 # a research task.
 function Format-GroupingSettingLabel {
     param($Setting)
-    $where = if ($Setting.source -eq 'config') { 'repo config' } else { 'default' }
+    $where = switch ($Setting.source) { 'config' { 'repo config' } 'expert' { 'repo expert' } default { 'default' } }
     return "$($Setting.value) ($where)"
+}
+
+# The checkout's own root - where FICHA.md and .claude/agents/ live for THIS branch (#797). Not the
+# state dir's root: that one is the main clone, shared by every worktree, while the expert and its
+# plan are versioned files a branch may add or change. $null outside a git repo.
+function Get-WorkingTreeRoot {
+    $top = git rev-parse --show-toplevel 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $top) { return $null }
+    "$top".Trim()
 }
 
 function Show-GroupingOffer {
@@ -2750,12 +2765,57 @@ if ($RegisterSession) {
 # answer about grouped PRs (#662) and stop. It is a decision, not a run: writing it
 # and then also listing the board would bury the confirmation the user needs to see.
 # =======================================================================
+# =======================================================================
+# MERGE AUTHORITY (#797): -MergeAuthority show|expert|user|auto. Who decides the merge at step
+# 5d/5e. Local, like the grouping preference above: no token, no GitHub call.
+# =======================================================================
+if ($MergeAuthority -eq 'show') {
+    $read = Read-BoardConfig -Path (Get-BoardConfigPath)
+    $auth = Get-MergeAuthority -Config $read.config -Root (Get-WorkingTreeRoot)
+    Write-Host ("Merge authority: " + (Format-MergeAuthorityLabel $auth))
+    Write-Host "  $($auth.reason)" -ForegroundColor DarkGray
+    if ($auth.warning)   { Write-Host "  $($auth.warning)" -ForegroundColor Yellow }
+    if (-not $read.ok)   { Write-Host "  Could not read the repo config ($($read.error)); deciding from the files." -ForegroundColor Yellow }
+    if ($auth.authority -eq 'expert') {
+        Write-Host "  Step 5d: the review gate still runs; then the expert decides - merge (summary posted on the PR) or propose (you confirm)." -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Step 5d: the review gate runs, then you confirm every merge." -ForegroundColor DarkGray
+    }
+    Write-Host "  Change it: /board work -MergeAuthority expert|user|auto" -ForegroundColor DarkGray
+    exit 0
+}
+if ($MergeAuthority) {
+    $cfgPath = Get-BoardConfigPath
+    if (-not $cfgPath) {
+        Write-Host "Not inside a git repo, so there is nowhere to save the merge authority." -ForegroundColor Red
+        exit 1
+    }
+    $value = if ($MergeAuthority -eq 'auto') { $null } else { $MergeAuthority }
+    Set-BoardConfigValue -Path $cfgPath -Key 'mergeAuthority' -Value $value | Out-Null
+
+    # Read it BACK, like the grouping preference: a write only claimed is not a write.
+    $check = Read-BoardConfig -Path $cfgPath
+    if (-not $check.ok -or $check.config['mergeAuthority'] -ne $value) {
+        Write-Host "Could not save the merge authority: I read it back and it does not say what I wrote." -ForegroundColor Red
+        if ($check.error) { Write-Host "  $($check.error)" -ForegroundColor DarkGray }
+        exit 1
+    }
+    $auth = Get-MergeAuthority -Config $check.config -Root (Get-WorkingTreeRoot)
+    Write-Host "=== Merge authority saved ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host ("  In force now: " + (Format-MergeAuthorityLabel $auth) + " - $($auth.reason).") -ForegroundColor Green
+    if ($auth.warning) { Write-Host "  $($auth.warning)" -ForegroundColor Yellow }
+    Write-Host ""
+    exit 0
+}
+
 if ($PreferGroupedPRs -eq 'show') {
     # Read-only. Outside a git repo there is no config to read, and that is a normal answer, not an
     # error: the default applies. An unreadable file is said out loud, never read as "no preference"
     # in silence - but the first line still carries the value the tool will actually use.
     $read    = Read-BoardConfig -Path (Get-BoardConfigPath)
-    $setting = Get-GroupingSetting $read.config
+    $expert  = (Get-MergeAuthority -Config $read.config -Root (Get-WorkingTreeRoot)).authority -eq 'expert'
+    $setting = Get-GroupingSetting $read.config -ExpertDeclared:$expert
     Write-Host ("Grouped PRs: " + (Format-GroupingSettingLabel $setting))
     if (-not $read.ok) {
         Write-Host "  Could not read the repo preference ($($read.error)); using the default." -ForegroundColor Yellow
@@ -2797,6 +2857,11 @@ if ($PreferGroupedPRs) {
     Write-Host ""
     Write-Host "  From now on: $said." -ForegroundColor Green
     Write-Host "  It stays with the repo, so you do not have to repeat it every session." -ForegroundColor DarkGray
+    # 'auto' is stored as "no decision", and a repo whose expert decides merges falls back to 'on'
+    # (#797) - say so, or the line above would promise a behaviour the next listing does not show.
+    if ($posture -eq 'auto' -and (Get-MergeAuthority -Config $check.config -Root (Get-WorkingTreeRoot)).authority -eq 'expert') {
+        Write-Host "  This repo declares an expert, so with no recorded answer grouping falls back to 'on'. Use 'off' to opt out." -ForegroundColor Yellow
+    }
     Write-Host ""
     exit 0
 }
@@ -3352,7 +3417,9 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         Write-Host "Could not read this repo's preference on grouping PRs ($($cfgRead.error))." -ForegroundColor Yellow
         Write-Host "Continuing with the default; I do not assume there is no preference." -ForegroundColor DarkGray
     }
-    $posture = Resolve-GroupingPosture $cfgRead.config
+    # A repo whose expert decides merges groups by default (#797); a recorded answer still wins.
+    $expertDeclared = (Get-MergeAuthority -Config $cfgRead.config -Root (Get-WorkingTreeRoot)).authority -eq 'expert'
+    $posture = Resolve-GroupingPosture $cfgRead.config -ExpertDeclared:$expertDeclared
     # Not being in a clone is a SUPPORTED way to run this listing - the contract's step 1 says so
     # ("outside a repo, skip the scope question"). Get-RepoFromOrigin throws there, so it is
     # guarded exactly like the CloseLoop call site: no repo just means no file evidence and no
@@ -3361,7 +3428,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
     $hereRepo = try { Get-RepoFromOrigin } catch { '' }
     $groups  = @(Get-GroupingSuggestions -Pending $pending -RepoFiles (Get-RepoTrackedFiles) -CurrentRepo $hereRepo)
     Show-GroupingOffer -Suggestions $groups -Posture $posture -CurrentRepo $hereRepo `
-                       -SettingLabel (Format-GroupingSettingLabel (Get-GroupingSetting $cfgRead.config))
+                       -SettingLabel (Format-GroupingSettingLabel (Get-GroupingSetting $cfgRead.config -ExpertDeclared:$expertDeclared))
 
     Write-Host ""
     $startable = if ($posture -ne 'never') { Select-StartableGroup -Suggestions $groups -CurrentRepo $hereRepo } else { $null }
