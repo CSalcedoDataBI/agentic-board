@@ -21,6 +21,10 @@ BeforeAll {
     $script:SavedToken        = $env:GH_TOKEN
     $env:ABIOS_ACCOUNTS_FILE  = Join-Path $TestDrive 'no-accounts.json'
     $env:GH_TOKEN             = 'dummy'
+    # ...nor the brake state of the directory Pester was started in (the resolver walks up from it).
+    $script:CleanCwd = Join-Path $TestDrive 'clean-cwd'
+    New-Item -ItemType Directory -Force $script:CleanCwd | Out-Null
+    Push-Location $script:CleanCwd
 
     # Run the real script, keep its return value apart from what it printed.
     function Invoke-Resolve {
@@ -32,6 +36,7 @@ BeforeAll {
     }
 }
 AfterAll {
+    Pop-Location
     $env:ABIOS_ACCOUNTS_FILE = $script:SavedAccountsFile
     $env:GH_TOKEN            = $script:SavedToken
 }

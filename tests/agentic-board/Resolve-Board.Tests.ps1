@@ -22,8 +22,15 @@ BeforeAll {
     $script:SavedToken        = $env:GH_TOKEN
     $env:ABIOS_ACCOUNTS_FILE  = Join-Path $TestDrive 'no-accounts.json'
     $env:GH_TOKEN             = 'dummy'
+    # ...nor the brake state of wherever Pester was started: the resolver looks for a brake marker
+    # from the current directory upwards, and a suite run inside an armed worktree would otherwise
+    # turn every "outside a braked run" test into an armed one. A clean TestDrive folder has none.
+    $script:CleanCwd = Join-Path $TestDrive 'clean-cwd'
+    New-Item -ItemType Directory -Force $script:CleanCwd | Out-Null
+    Push-Location $script:CleanCwd
 }
 AfterAll {
+    Pop-Location
     $env:ABIOS_ACCOUNTS_FILE = $script:SavedAccountsFile
     $env:GH_TOKEN            = $script:SavedToken
 }
@@ -125,6 +132,25 @@ Describe 'Resolve-Board picks its identity through the account map (#793)' {
     It 'gives it back on a THROW too' {
         Mock gh { $global:LASTEXITCODE = 1 }
         { & $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' 6>$null } | Should -Throw
+        $env:GH_TOKEN | Should -Be 'dummy'
+    }
+
+    It 'CREATES, links and applies the preset all under the chosen identity (no call slips to another)' {
+        # The nested Apply-FieldPreset gets no -TokenVar: it must run on the token lent through
+        # GH_TOKEN, not re-resolve the owner from the map (which here would say THIRD, not OTHER).
+        Mock gh {
+            $global:LASTEXITCODE = 0
+            $global:AbiosSeenTokens += "$env:GH_TOKEN"
+            $j = $args -join ' '
+            if     ($j -match 'project\s+create') { '{"number":42}' }
+            elseif ($j -match 'project\s+list')   { '{"projects":[]}' }
+            elseif ($j -match 'field-list')       { '{"fields":[]}' }
+            elseif ($j -match 'graphql')          { '{"data":{}}' }
+            else                                  { '' }
+        }
+        (& $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/new' -Title 'Nope' -TokenVar 'ABIOS_T793_OTHER' 6>$null) | Should -Be 42
+        Should -Invoke gh -ParameterFilter { $args -contains 'field-create' } -Times 1   # the preset did run
+        @($global:AbiosSeenTokens | Select-Object -Unique) | Should -Be @('tok-other')
         $env:GH_TOKEN | Should -Be 'dummy'
     }
 
