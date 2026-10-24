@@ -2793,7 +2793,8 @@ if ($MergeAuthority -eq 'show') {
         Write-Host "  Step 5d: the review gate still runs; then the expert decides - merge (summary posted on the PR) or propose (you confirm)." -ForegroundColor DarkGray
         # The judge and its plan come from the same ref as the grant, never from the PR (#797).
         if ($auth.ref) {
-            Write-Host "  Expert: git show $($auth.ref):.claude/agents/experto.md   Plan: git show $($auth.ref):FICHA.md" -ForegroundColor DarkGray
+            $plan = if ($auth.ficha) { "   Plan: git show $($auth.ref):FICHA.md" } else { '   Plan: no FICHA.md - the issue itself, no protected zones' }
+            Write-Host "  Expert: git show $($auth.ref):.claude/agents/experto.md$plan" -ForegroundColor DarkGray
             Write-Host "  Read from $($auth.ref) as last fetched: run 'git fetch origin' first, so a revocation on the remote counts." -ForegroundColor DarkGray
         }
     } else {

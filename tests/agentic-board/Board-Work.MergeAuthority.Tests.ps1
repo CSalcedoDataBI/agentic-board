@@ -197,9 +197,35 @@ Describe 'Get-MergeAuthority -GitRef: the PR under review cannot grant itself th
         New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '{ "mergeAuthority": "expert" }' -Encoding UTF8
         Publish-Main $root
+        foreach ($cfg in @($null, @{ mergeAuthority = 'expert' })) {
+            # $null and the local file Board-Work would read (it says the same) must agree.
+            $a = Get-MergeAuthority -Config $cfg -Root $root -GitRef 'origin/main'
+            $a.authority | Should -Be 'expert'
+            $a.source    | Should -Be 'config'
+            $a.warning   | Should -BeNullOrEmpty
+        }
+    }
+    It 'a committed config whose ROOT is an array is not a grant, even with one object inside' {
+        $root = New-ThrowawayRepo 'ref-rootarray'
+        Add-Expert $root
+        New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '[{ "mergeAuthority": "expert" }]' -Encoding UTF8
+        Publish-Main $root
         $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
-        $a.authority | Should -Be 'expert'
-        $a.source    | Should -Be 'config'
+        $a.authority | Should -Be 'user'
+        $a.warning   | Should -Match 'not a readable JSON object'
+    }
+    It 'an empty experto.md is named as empty, on the config route and the files route' {
+        $root = New-ThrowawayRepo 'ref-emptydiag'
+        New-Item -ItemType Directory -Path (Join-Path $root '.claude' 'agents') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $root '.claude' 'agents' 'experto.md') -Force | Out-Null
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        $files = Get-MergeAuthority -Config $null -Root $root
+        $files.authority | Should -Be 'user'
+        $files.warning   | Should -Match 'is empty'
+        $cfg = Get-MergeAuthority -Config @{ mergeAuthority = 'expert' } -Root $root
+        $cfg.warning     | Should -Match 'is empty'
+        $cfg.warning     | Should -Not -Match 'does not exist'
     }
     It 'a local opt-out wins over a committed grant' {
         $root = New-NorteRepo 'ref-optout'
@@ -225,7 +251,7 @@ Describe 'Get-MergeAuthority -GitRef: the PR under review cannot grant itself th
         (Get-MergeAuthority -Config $null -Root $root).authority                       | Should -Be 'user'
         (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main').authority | Should -Be 'user'
     }
-    It 'an unparseable committed config says so, not that a mergeAuthority value is bad' {
+    It 'a committed config that is JSON but not an object says so, not that a mergeAuthority value is bad' {
         $root = New-ThrowawayRepo 'ref-badjson'
         Add-Expert $root
         Add-Ficha $root "Aprobada: 2026-10-01"
@@ -235,6 +261,7 @@ Describe 'Get-MergeAuthority -GitRef: the PR under review cannot grant itself th
         $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
         $a.authority | Should -Be 'user'
         $a.warning   | Should -Match 'not a readable JSON object'
+        $a.warning   | Should -Not -Match "not 'expert' or 'user'"
     }
     It 'reads a real, multi-line FICHA.md from the ref (heading, prose, bold approval on a later line)' {
         foreach ($line in @('Aprobada: 2026-10-02', '**Aprobada:** 2026-10-02', '- Aprobada: 2026-10-02')) {
@@ -388,6 +415,18 @@ Describe '-MergeAuthority end to end (no token)' {
         $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
         $r.out | Should -Match 'Merge authority: user \(default\)'
         $r.out | Should -Not -Match 'could not read|cannot be read'
+    }
+    It 'show in a repo declared by a committed config alone -> expert (repo config), plan is the issue' {
+        $root = New-ThrowawayRepo 'e2e-cfgonly'
+        Add-Expert $root
+        New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '{ "mergeAuthority": "expert" }' -Encoding UTF8
+        Publish-Main $root
+        $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
+        $r.code | Should -Be 0
+        $r.out  | Should -Match 'Merge authority: expert \(repo config\)'
+        $r.out  | Should -Match 'Plan: no FICHA.md'
+        $r.out  | Should -Not -Match 'git show origin/main:FICHA.md'
     }
     It 'show follows origin/HEAD to a default branch that is not main' {
         $root = New-ThrowawayRepo 'e2e-master'

@@ -245,7 +245,9 @@ function Read-DeclarationFile {
     }
     $p = Join-Path $Root $RelPath
     if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return $null }
-    try { Get-Content -LiteralPath $p -Raw -ErrorAction Stop } catch { '' }
+    # An existing empty file reads as '' (not $null), like an empty blob in git mode.
+    $raw = try { Get-Content -LiteralPath $p -Raw -ErrorAction Stop } catch { '' }
+    if ($null -eq $raw) { '' } else { $raw }
 }
 
 # 'user' / 'expert' / 'unreadable' / $null (nothing declared) for one config source.
@@ -305,8 +307,11 @@ function Get-MergeAuthority {
         }
         $rawCfg = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath '.agentic-board/config.json'
         if ($null -ne $rawCfg) {
-            $parsed = try { $rawCfg | ConvertFrom-Json -ErrorAction Stop } catch { $null }
-            if (-not (Test-IsJsonObject $parsed)) {
+            # -NoEnumerate: without it a top-level `[{"mergeAuthority":"expert"}]` unrolls into one
+            # object and reads as a grant. Kept whole, a root array is not a config object.
+            $parsed = try { ConvertFrom-Json -InputObject $rawCfg -NoEnumerate -ErrorAction Stop } catch { $null }
+            # The array test is explicit: Test-IsJsonObject answers $true for an Object[] here.
+            if ($parsed -is [array] -or -not (Test-IsJsonObject $parsed)) {
                 $base = 'unparseable'
             } else {
                 $prop = $parsed.PSObject.Properties['mergeAuthority']
@@ -333,10 +338,10 @@ function Get-MergeAuthority {
         return [pscustomobject]$res
     }
 
-    # An EMPTY agent file is no expert: there is nothing to run. Checked on the text, so git mode
-    # (an empty blob reads as '') and disk mode (an empty file reads as $null) agree.
+    # An EMPTY agent file is no expert: there is nothing to run. Both read modes return '' for it.
     $agentText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath $agentRel
     if (-not [string]::IsNullOrWhiteSpace($agentText)) { $res.expertAgent = $agentRel }
+    $agentState = if ($res.expertAgent) { 'ok' } elseif ($null -ne $agentText) { 'is empty' } else { 'does not exist' }
     $fichaText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath 'FICHA.md'
     if ($null -ne $fichaText) {
         $res.ficha = 'FICHA.md'
@@ -355,19 +360,22 @@ function Get-MergeAuthority {
             $res.authority = 'expert'
             $res.reason = "the repo config declares an expert ($agentRel)$where"
         } else {
-            $res.warning = "the repo config declares an expert, but $agentRel does not exist$where; the user confirms"
+            $res.warning = "the repo config declares an expert, but $agentRel $agentState$where; the user confirms"
             $res.reason = 'declared expert is missing'
         }
         return [pscustomobject]$res
-    }
-    if ($local -eq 'expert' -and $GitRef) {
-        $res.warning = "mergeAuthority 'expert' is only in the local config; it counts once it is committed to $GitRef"
     }
 
     if ($res.ficha -and $res.fichaApproved -and $res.expertAgent) {
         $res.authority = 'expert'; $res.source = 'files'
         $res.reason = "FICHA.md approved $($res.fichaApproved) + $agentRel$where"
-    } elseif ($res.ficha -and $res.expertAgent -and -not $res.warning) {
+        return [pscustomobject]$res
+    }
+    if ($local -eq 'expert' -and $GitRef) {
+        $res.warning = "mergeAuthority 'expert' is only in the local config; it counts once it is committed to $GitRef"
+    } elseif ($res.fichaApproved -and $agentState -eq 'is empty') {
+        $res.warning = "FICHA.md is approved but $agentRel is empty$where, so there is no expert to run; the user confirms"
+    } elseif ($res.ficha -and $res.expertAgent) {
         $res.warning = "FICHA.md has no 'Aprobada: YYYY-MM-DD' line$where, so it is a draft; the user confirms"
     }
     [pscustomobject]$res

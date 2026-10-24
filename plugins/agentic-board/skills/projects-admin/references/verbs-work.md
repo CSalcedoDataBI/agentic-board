@@ -185,7 +185,9 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         it, correctly, because nobody reviewed those lines. Only when a review genuinely buys
         nothing (a typo, a regenerated file) use `-AllowUnreviewed`, and say so in your report.
      **Who decides the merge (#797).** Before step d, run `scripts/Board-Work.ps1 -MergeAuthority
-     show` (no token, writes nothing), after a `git fetch origin`. Its first line is `Merge authority: user (...)` or
+     show` (no token, writes nothing), after a `git fetch origin`. **If that fetch fails, the
+     authority is `user`** whatever `show` says: a stale ref may still carry a grant the owner has
+     revoked. Its first line is `Merge authority: user (...)` or
      `Merge authority: expert (...)`. The detection is deterministic, from files only: `expert` when
      `.agentic-board/config.json` says `"mergeAuthority": "expert"`, or when the repo root has a
      `FICHA.md` with an `Aprobada: YYYY-MM-DD` line AND `.claude/agents/experto.md` — and in both
@@ -227,8 +229,9 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
          <file>`, then run step e. Tell the user afterwards what was merged and link that comment.
        - **`propose`** (the PR leaves the plan, or the expert is unsure) → step d exactly as
          written: the summary, the question, wait for the answer.
-       - Something fails (a check, a finding) → fix it, push, re-run the gate and ask the expert
-         again. That loop does not need the user.
+       - Something fails (a check, a finding) → fix it, push, re-run the gate, fetch and run `show`
+         again (a revocation may have landed meanwhile), and ask the expert again. That loop does
+         not need the user.
        A declared expert also makes grouped PRs (step 3b) the default: with no recorded
        `preferGroupedPRs`, the grouping setting reads `on (repo expert)`. A recorded answer,
        `off` included, still wins — except an `auto` recorded before the expert existed, which
