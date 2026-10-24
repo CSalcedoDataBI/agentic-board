@@ -205,9 +205,12 @@ function Get-SweepDrivenPaths {
 # Not "owner/repo#12" (another repo's number) nor "C#12".
 function Get-SweepIssueRefs {
     param([string]$Branch = '', [string[]]$Subjects = @())
-    $n = @()
-    if ($Branch -match '^issue-(\d+)') { $n += [int]$Matches[1] }
-    foreach ($s in $Subjects) { foreach ($m in [regex]::Matches("$s", '(?<![\w/.-])#(\d+)\b')) { $n += [int]$m.Groups[1].Value } }
+    # TryParse, not [int]: "#12345678901" would throw, and under Stop one stray subject would abort the sweep.
+    $n = @(); $v = 0
+    if ($Branch -match '^issue-(\d+)' -and [int]::TryParse($Matches[1], [ref]$v)) { $n += $v }
+    foreach ($s in $Subjects) {
+        foreach ($m in [regex]::Matches("$s", '(?<![\w/.-])#(\d+)\b')) { if ([int]::TryParse($m.Groups[1].Value, [ref]$v)) { $n += $v } }
+    }
     return @($n | Select-Object -Unique)
 }
 

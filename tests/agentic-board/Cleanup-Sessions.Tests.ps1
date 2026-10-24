@@ -293,6 +293,9 @@ Describe 'Superseded hint - a heuristic that asks, it does not delete (#755)' {
     It 'does not read another repo''s number, or C#12, as one of this repo''s' {
         Get-SweepIssueRefs -Subjects @('fix: port other-org/other-repo#12', 'docs: C#12 sample', 'feat: x (#5)') | Should -Be @(5)
     }
+    It 'skips a number too long to be an issue instead of throwing' {
+        Get-SweepIssueRefs -Branch 'issue-99999999999-x' -Subjects @('chore: build #12345678901', 'fix: y (#7)') | Should -Be @(7)
+    }
     It 'reads GitHub''s node: a merged PR, an issue closed by a merged PR, and everything else' {
         $pr = ConvertTo-SweepRefState -Number 753 -Node ([pscustomobject]@{ __typename = 'PullRequest'; merged = $true })
         $pr.Done | Should -BeTrue; $pr.By | Should -Be 753
