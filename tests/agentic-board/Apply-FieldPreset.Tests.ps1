@@ -159,3 +159,58 @@ Describe 'Apply-FieldPreset never reports a field it failed to create (#649)' {
         } -Times 1
     }
 }
+
+Describe 'Apply-FieldPreset -Lang es gives the existing Status the canonical options (#794)' {
+
+    # The defect: the es preset's 'Estado' resolved to the board's 'Status' under another name and
+    # the whole field was SKIPPED, so a `-Lang es` board kept GitHub's Todo / In Progress / Done.
+    # gh is mocked at the executable seam: a fresh board (Title + Status on the template options).
+    # The option mutation is piped to `gh api graphql --input -`, so the mock keeps what it was fed:
+    # that body is the only place the new Status option list is visible.
+
+    BeforeAll {
+        $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Apply-FieldPreset.ps1' | Resolve-Path
+    }
+
+    BeforeEach {
+        $global:AbiosMutations = @()
+        Mock gh {
+            $global:LASTEXITCODE = 0
+            if ($args -contains 'field-list') { return '{"fields":[{"name":"Title"},{"name":"Status"}]}' }
+            if ($args -contains '--input') {
+                $global:AbiosMutations += "$_"   # a Pester mock sees piped input as $_, not $input
+                return '{"data":{"updateProjectV2Field":{"projectV2Field":{"id":"F1"}}}}'
+            }
+            if ($args -contains 'graphql') {
+                if ($args -contains 'field=Status') {
+                    return '{"data":{"user":{"projectV2":{"field":{"id":"F1","options":[{"id":"o1","name":"Todo","color":"GRAY","description":""},{"id":"o2","name":"In Progress","color":"YELLOW","description":""},{"id":"o3","name":"Done","color":"GREEN","description":""}]}}}}}'
+                }
+                return '{"data":{"user":{"projectV2":{"field":null}}}}'
+            }
+            return ''
+        }
+    }
+    AfterEach { Remove-Variable -Name AbiosMutations -Scope Global -ErrorAction SilentlyContinue }
+
+    It 'renames Todo -> Backlog in place and adds In Review and Blocked to Status' {
+        & $script:Script -Number 13 -Owner 'X' -Lang es -Yes *> (Join-Path $TestDrive 'es.log')
+        $statusBody = @($global:AbiosMutations | Where-Object { $_ -match '"F1"' }) | Select-Object -First 1
+        $statusBody | Should -Not -BeNullOrEmpty -Because 'the Status field must be reconciled, not skipped'
+        $opts = ($statusBody | ConvertFrom-Json).variables.opts
+        @($opts.name) | Should -Be @('Backlog', 'In Progress', 'In Review', 'Blocked', 'Done')
+        # Same option id as the old Todo: a rename keeps every item's assignment.
+        ($opts | Where-Object { $_.name -eq 'Backlog' }).id | Should -Be 'o1'
+        @($opts.name) | Should -Not -Contain 'Todo'
+    }
+
+    It 'never creates a second status field (Estado) beside Status' {
+        & $script:Script -Number 13 -Owner 'X' -Lang es -Yes *> (Join-Path $TestDrive 'es2.log')
+        Should -Invoke gh -ParameterFilter { ($args -contains 'field-create') -and ($args -contains 'Estado') } -Times 0 -Exactly
+        Get-Content (Join-Path $TestDrive 'es2.log') -Raw | Should -Not -Match "skip \(exists as 'Status'\): Estado"
+    }
+
+    It 'still creates the other Spanish fields (the es schema is otherwise unchanged)' {
+        & $script:Script -Number 13 -Owner 'X' -Lang es -Yes *> (Join-Path $TestDrive 'es3.log')
+        Should -Invoke gh -ParameterFilter { ($args -contains 'field-create') -and ($args -contains 'Prioridad') } -Times 1 -Exactly
+    }
+}

@@ -108,6 +108,34 @@ $existing = (Invoke-Gh -GhArgs @('project','field-list',"$Number",'--owner',$Own
 function Get-OptName($o)  { if ($o -is [string]) { $o } else { $o.name } }
 function Get-OptColor($o) { if ($o -is [string]) { $null } else { $o.color } }
 
+# A localized preset field the board already has under its CANONICAL name - the es preset's 'Estado'
+# against the 'Status' every board is born with - used to be skipped whole (#794). That left GitHub's
+# Todo / In Progress / Done on every `-Lang es` board, while Resolve-Board reported "no legacy
+# 'Todo'". The Status step must not hang on a name match: such a field is reconciled with the
+# canonical preset's own definition of the live field (Todo -> Backlog, + In Review, Blocked). Only
+# for fields with a canonical vocabulary (Status / Priority / Size); a localized field the suite has
+# no opinion about is still left alone.
+$canonicalPresetPath = Join-Path (Join-Path (Join-Path $PSScriptRoot '..') 'presets') 'fields.en.json'
+$canonicalPreset     = $null
+$preset.fields = @(foreach ($pf in $preset.fields) {
+  $liveName = Resolve-PresetFieldName $pf.name @($existing)
+  $useCanon = $null
+  if ($liveName -and $liveName -ne $pf.name -and @(Get-CanonicalOptionNames $liveName).Count -gt 0) {
+    if (-not $canonicalPreset -and (Test-Path $canonicalPresetPath)) {
+      $canonicalPreset = Get-Content $canonicalPresetPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    if ($canonicalPreset) {
+      $useCanon = @($canonicalPreset.fields | Where-Object { $_.name -eq $liveName }) | Select-Object -First 1
+    }
+  }
+  if ($useCanon) {
+    Write-Host "'$($pf.name)' exists as '$liveName': applying the canonical '$liveName' options ($((@($useCanon.options) | ForEach-Object { Get-OptName $_ }) -join ', '))"
+    $useCanon
+  } else {
+    $pf
+  }
+})
+
 # Read a single-select field's live id + options. Cached: the migration plan and the
 # reconcile pass both need it, and it cannot change in between (we hold the only writer).
 $script:FieldCache = @{}
@@ -372,6 +400,8 @@ foreach ($f in $preset.fields) {
     # The board already has this field under another accepted name. Left ENTIRELY alone - no create,
     # no colors, no renames: the preset's options belong to the preset's own field, and reconciling
     # them onto a differently-named one (Spanish options onto 'Status') would mint duplicates.
+    # A field with a canonical vocabulary never gets here: it was swapped above for the canonical
+    # definition of the live field (#794), so only fields the suite has no opinion about skip.
     Write-Host "skip (exists as '$liveName'): $($f.name)"
     continue
   }

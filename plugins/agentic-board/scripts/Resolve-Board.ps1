@@ -1,7 +1,13 @@
 ﻿<#  Resolve-Board.ps1 - find-or-reuse the board for a repo; create only if none exists.
     Prevents the "new duplicate board every time" bug. Returns the project NUMBER on stdout.
-    Requires $env:GH_TOKEN (via gh-account).
+    IDENTITY (#793). The token is decided by the one resolver every other script uses
+    (Resolve-GhTokenVar's Get-GhTokenForContext): the -Owner's account from your account map
+    (~/.agentic-board/accounts.json), the agent identity inside a brake-armed run, else the ambient
+    GH_TOKEN / `gh auth token`. -TokenVar names the variable explicitly - judged, not honoured
+    blindly: inside an armed run only the agent's is accepted. So a third account of yours is a
+    line in the map (or one -TokenVar), never a hand-set $env:GH_TOKEN.
     Usage: $num = & ./Resolve-Board.ps1 -Owner your-login -Repo CSalcedoDataBI/agentic-board
+           $num = & ./Resolve-Board.ps1 -Owner other-login -Repo other-login/app -TokenVar GITHUB_TOKEN_OTHER
 
     HOW THE BOARD IS FOUND (#498, #666). GitHub records which boards are linked to a repository
     (repository.projectsV2) - the same link Board-Work -ListBoards reads - so that is the lookup, not
@@ -30,10 +36,13 @@ param(
   # none, to CREATE. Omit it to mean "the board for this repo" (#666).
   [string]$Title,
   [bool]$CreateIfMissing = $true,
-  # Language of the preset applied to a NEWLY created board (en|es). Ignored when reusing.
+  # Language of the preset applied to a NEWLY created board (en|es). Ignored when reusing. Status
+  # is canonical (Backlog / In Progress / In Review / Blocked / Done) in both (#794).
   [ValidateSet('en','es')][string]$Lang = 'en',
   # Escape hatch: create the bare board without applying the canonical preset.
-  [switch]$SkipPreset
+  [switch]$SkipPreset,
+  # The env var holding the token to use (#793). Omitted, the account map decides from -Owner.
+  [string]$TokenVar = ''
 )
 $ErrorActionPreference = 'Stop'
 
@@ -51,6 +60,42 @@ $ConfirmPreference = 'High'
 # A gh failure must NOT read as "no boards exist" — that empty result is the exact premise
 # this script would then CREATE a board from, duplicating the one it could not read (#303/#86).
 . (Join-Path $PSScriptRoot 'Invoke-Gh.ps1')
+# Canonical Status vocabulary: what the post-preset check below compares the live options with.
+. (Join-Path $PSScriptRoot 'Get-BoardVocabulary.ps1')
+
+# Identity (#793): the owner's account from the map, or the agent's inside a braked run - the same
+# resolver as New-BoardPR / Board-Depend. Before, this script used whatever $env:GH_TOKEN held, so an
+# account the old hardcoded map did not know could only be reached by setting it by hand.
+# Which Status options a board really carries, against the canonical set (#794). Pure.
+# Returns @{ ok; legacy = names that MEAN a canonical option under an old name (Todo); missing;
+# extra = names the vocabulary does not know at all }. A newborn board has no business carrying
+# any of the three, so "born canonical" needs all of them empty.
+function Get-StatusVerdict {
+  param([string[]]$Options)
+  $legacy  = @($Options | Where-Object {
+    $canon = Get-CanonicalOptionName 'Status' $_
+    $canon -and $canon -cne $_
+  })
+  $extra   = @($Options | Where-Object { -not (Get-CanonicalOptionName 'Status' $_) })
+  $missing = @(Get-CanonicalOptionNames 'Status' | Where-Object { @($Options) -notcontains $_ })
+  @{ ok = ($legacy.Count -eq 0 -and $missing.Count -eq 0 -and $extra.Count -eq 0)
+     legacy = $legacy; missing = $missing; extra = $extra }
+}
+
+$prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
+$env:ABIOS_TOKENVAR_DOTSOURCE = '1'
+. (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
+$env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
+$ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $Owner -ExplicitVar $TokenVar
+Write-Verbose "identity: $($ctx.var) - $($ctx.reason)"
+# The chosen token is lent to gh (and to Apply-FieldPreset) for THIS run only. The script is
+# called in-process (`$num = & ./Resolve-Board.ps1 ...`), so leaving it in $env:GH_TOKEN would hand
+# the caller's next command - for any owner - the identity picked here. The rest of the script runs
+# inside this try (left at its original indentation to keep the diff readable); the finally at the
+# end restores the caller's value on every exit path: return, throw or a -WhatIf stop.
+$callerGhToken = $env:GH_TOKEN
+$env:GH_TOKEN  = $ctx.token
+try {
 
 $dash       = [char]0x2014                     # em-dash, built in code (no non-ASCII in source)
 # A bare repo name cannot be looked up through the link (that needs owner/name) and would fall back to
@@ -189,13 +234,48 @@ Write-Host ("CREATED board #{0}: '{1}' (linked to {2})" -f $num, $Title, $Repo) 
 # rename touches nothing and `-Yes` cannot be destructive. A preset failure must NOT fail the resolve:
 # the board already exists and is the return value; we warn and let the caller apply it by hand.
 if (-not $SkipPreset) {
+  $presetApplied = $false
   try {
     $applyPreset = Join-Path $PSScriptRoot 'Apply-FieldPreset.ps1'
     & $applyPreset -Number $num -Owner $Owner -Lang $Lang -Yes | Out-Null
-    Write-Host ("  preset '{0}' applied - board born on the canonical vocabulary (no legacy 'Todo')." -f $Lang) -ForegroundColor DarkGreen
+    $presetApplied = $true
   } catch {
     Write-Host ("  WARN could not apply the '{0}' preset to the new board #{1}: {2}" -f $Lang, $num, $_.Exception.Message) -ForegroundColor DarkYellow
     Write-Host ("        apply it by hand: /board field apply -Number {0} -Owner {1} -Lang {2}" -f $num, $Owner, $Lang) -ForegroundColor DarkGray
   }
+  if ($presetApplied) {
+    # "Born canonical" is a claim about the board, so it is READ from the board (#794): -Lang es once
+    # printed it over a Status still on Todo / In Progress / Done, because the localized 'Estado' did
+    # not match 'Status' and the step was skipped. The message now follows the live options.
+    try {
+      $fields = @((Invoke-Gh -GhArgs @('project','field-list',"$num",'--owner',$Owner,'--format','json') `
+                             -What "read the Status options of board #$num" -Json).fields)
+      $status = $fields | Where-Object { $_ -and $_.name -eq 'Status' } | Select-Object -First 1
+      $v = Get-StatusVerdict -Options @($status.options | ForEach-Object { "$($_.name)" })
+      if (-not $status) {
+        Write-Host ("  WARN preset '{0}' applied, but board #{1} has no 'Status' field to check." -f $Lang, $num) -ForegroundColor DarkYellow
+      } elseif ($v.ok) {
+        Write-Host ("  preset '{0}' applied - board born on the canonical vocabulary (no legacy 'Todo')." -f $Lang) -ForegroundColor DarkGreen
+      } else {
+        $why = @()
+        if ($v.legacy.Count)  { $why += "legacy: $($v.legacy -join ', ')" }
+        if ($v.missing.Count) { $why += "missing: $($v.missing -join ', ')" }
+        if ($v.extra.Count)   { $why += "unknown: $($v.extra -join ', ')" }
+        Write-Host ("  WARN preset '{0}' applied, but Status on board #{1} is NOT canonical ({2})." -f $Lang, $num, ($why -join '; ')) -ForegroundColor DarkYellow
+        Write-Host ("        fix it: /board field apply -Number {0} -Owner {1} -Lang en" -f $num, $Owner) -ForegroundColor DarkGray
+      }
+    } catch {
+      Write-Host ("  preset '{0}' applied; could not read board #{1} back to confirm its Status options: {2}" -f $Lang, $num, $_.Exception.Message) -ForegroundColor DarkYellow
+    }
+    if ($Lang -eq 'es') {
+      # The es preset names its OTHER fields in Spanish (Prioridad, Tamano, Tipo...). The suite reads
+      # both names, but a standard board uses the English ones - say so instead of letting it surprise.
+      Write-Host "  NOTE -Lang es names Priority/Size/Type/Area/Estimate/Target in Spanish; Status keeps the canonical English options. Standard boards use -Lang en." -ForegroundColor DarkGray
+    }
+  }
 }
 return $num
+} finally {
+  # Give the caller back its own token (#793 review): see the try above the lookup.
+  $env:GH_TOKEN = $callerGhToken
+}
