@@ -15,6 +15,17 @@
 
 BeforeAll {
     $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Resolve-Board.ps1' | Resolve-Path
+    # Resolve-Board picks its identity through the account map (#793). These tests must never read
+    # the developer's own map or token: no map file means "ambient token", and the ambient token is
+    # a dummy - gh is mocked, nothing leaves the process.
+    $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
+    $script:SavedToken        = $env:GH_TOKEN
+    $env:ABIOS_ACCOUNTS_FILE  = Join-Path $TestDrive 'no-accounts.json'
+    $env:GH_TOKEN             = 'dummy'
+}
+AfterAll {
+    $env:ABIOS_ACCOUNTS_FILE = $script:SavedAccountsFile
+    $env:GH_TOKEN            = $script:SavedToken
 }
 
 Describe 'Resolve-Board fails closed when the board-list read fails (#313)' {
@@ -55,12 +66,123 @@ Describe 'Resolve-Board applies the canonical preset to a NEWLY created board (#
     It 'creates the board AND applies the preset (field-list is the fingerprint)' {
         (& $script:Script -Owner 'X' -Repo 'X/new' -Title 'Nope') | Should -Be 42
         Should -Invoke gh -ParameterFilter { $args -contains 'create' }     -Times 1 -Exactly
-        Should -Invoke gh -ParameterFilter { $args -contains 'field-list' } -Times 1 -Exactly
+        # Two reads: the preset's own, then Resolve-Board reading Status back before it claims the
+        # board was born canonical (#794).
+        Should -Invoke gh -ParameterFilter { $args -contains 'field-list' } -Times 2 -Exactly
     }
 
     It '-SkipPreset creates the board but does NOT apply the preset' {
         (& $script:Script -Owner 'X' -Repo 'X/new' -Title 'Nope' -SkipPreset) | Should -Be 42
         Should -Invoke gh -ParameterFilter { $args -contains 'create' }     -Times 1 -Exactly
         Should -Invoke gh -ParameterFilter { $args -contains 'field-list' } -Times 0 -Exactly
+    }
+}
+
+Describe 'Resolve-Board picks its identity through the account map (#793)' {
+    # Before #793 this script used whatever $env:GH_TOKEN held, so an account the map knew could
+    # still not be reached through /board init. It now asks the one resolver. The script runs in
+    # this process, so $env:GH_TOKEN after the call IS the identity it worked with.
+
+    BeforeAll {
+        $script:MapFile = Join-Path $TestDrive 'accounts.third.json'
+        @{ defaultOwner = 'Me'; owners = @{ Me = 'ABIOS_T793_ME'; ThirdOrg = 'ABIOS_T793_THIRD' }
+           agentTokenVar = 'ABIOS_T793_AGENT' } | ConvertTo-Json | Set-Content $script:MapFile
+    }
+    BeforeEach {
+        $env:ABIOS_ACCOUNTS_FILE = $script:MapFile
+        $env:ABIOS_T793_ME       = 'tok-me'
+        $env:ABIOS_T793_THIRD    = 'tok-third'
+        $env:ABIOS_T793_OTHER    = 'tok-other'
+        $env:GH_TOKEN            = 'dummy'
+        Mock gh { $global:LASTEXITCODE = 0; '{"data":{"repository":{"projectsV2":{"pageInfo":{"hasNextPage":false},"nodes":[{"number":3,"title":"app - Roadmap","closed":false,"owner":{"login":"ThirdOrg"}}]}}}}' }
+    }
+    AfterEach {
+        $env:ABIOS_ACCOUNTS_FILE = Join-Path $TestDrive 'no-accounts.json'
+        $env:GH_TOKEN            = 'dummy'
+        foreach ($n in 'ABIOS_T793_ME', 'ABIOS_T793_THIRD', 'ABIOS_T793_OTHER') {
+            [Environment]::SetEnvironmentVariable($n, $null)
+        }
+    }
+
+    It 'uses the token of a THIRD account the map names - no plugin edit, no hand-set GH_TOKEN' {
+        (& $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -CreateIfMissing $false 6>$null) | Should -Be 3
+        $env:GH_TOKEN | Should -Be 'tok-third'
+    }
+
+    It 'honours an explicit -TokenVar outside a braked run' {
+        (& $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -TokenVar 'ABIOS_T793_OTHER' -CreateIfMissing $false 6>$null) | Should -Be 3
+        $env:GH_TOKEN | Should -Be 'tok-other'
+    }
+
+    It 'fails BEFORE any gh call when an explicit -TokenVar is unset (never a silent fallback)' {
+        { & $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -TokenVar 'ABIOS_T793_MISSING' 6>$null } |
+            Should -Throw -ExpectedMessage '*ABIOS_T793_MISSING is not set*'
+        Should -Invoke gh -Times 0 -Exactly
+    }
+
+    It 'inside a brake-armed run refuses any -TokenVar but the agent identity' {
+        $armed = Join-Path $TestDrive 'armed'
+        New-Item -ItemType Directory -Force (Join-Path $armed '.agentic-board') | Out-Null
+        '{}' | Set-Content (Join-Path (Join-Path $armed '.agentic-board') 'brake-armed.json')
+        Push-Location $armed
+        try {
+            { & $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -TokenVar 'ABIOS_T793_THIRD' 6>$null } |
+                Should -Throw -ExpectedMessage '*BRAKED run*'
+        } finally { Pop-Location }
+        Should -Invoke gh -Times 0 -Exactly
+    }
+}
+
+Describe 'Resolve-Board only claims "born canonical" after reading Status back (#794)' {
+    # The lie: "board born on the canonical vocabulary (no legacy 'Todo')" printed after ANY preset
+    # apply, including the -Lang es one that left Status on Todo / In Progress / Done. The claim is
+    # now decided by the live options. Apply-FieldPreset is replaced by a stub in a copy of the
+    # scripts folder, so the read-back is the only thing under test.
+
+    BeforeAll {
+        $script:Work = Join-Path $TestDrive 'rb794'
+        New-Item -ItemType Directory -Force $script:Work | Out-Null
+        $src = Split-Path $script:Script -Parent
+        Get-ChildItem $src -Filter '*.ps1' | Where-Object { $_.Name -ne 'Apply-FieldPreset.ps1' } |
+            Copy-Item -Destination $script:Work
+        'param([int]$Number, [string]$Owner, [string]$Lang, [switch]$Yes)' |
+            Set-Content (Join-Path $script:Work 'Apply-FieldPreset.ps1')
+        $script:Copy = Join-Path $script:Work 'Resolve-Board.ps1'
+
+        function script:Invoke-Create([string]$StatusJson, [string]$Lang = 'en') {
+            $global:AbiosStatusJson = $StatusJson
+            Mock gh {
+                $global:LASTEXITCODE = 0
+                $j = $args -join ' '
+                if     ($j -match 'project\s+create') { '{"number":42}' }
+                elseif ($j -match 'project\s+list')   { '{"projects":[]}' }
+                elseif ($j -match 'field-list')       { $global:AbiosStatusJson }
+                elseif ($j -match 'graphql')          { '{"data":{}}' }
+                else                                  { '' }
+            }
+            $all = & $script:Copy -Owner 'X' -Repo 'X/new' -Title 'Nope' -Lang $Lang 6>&1
+            (@($all | Where-Object { $_ -is [System.Management.Automation.InformationRecord] }) |
+                ForEach-Object { "$($_.MessageData)" }) -join "`n"
+        }
+    }
+    AfterAll { $global:AbiosStatusJson = $null }
+
+    It 'WARNS, naming the legacy option, when Status still carries Todo' {
+        $out = script:Invoke-Create '{"fields":[{"name":"Status","options":[{"name":"Todo"},{"name":"In Progress"},{"name":"Done"}]}]}' 'es'
+        $out | Should -Not -Match 'born on the canonical vocabulary'
+        $out | Should -Match 'NOT canonical'
+        $out | Should -Match 'legacy: Todo'
+        $out | Should -Match 'missing: Backlog, In Review, Blocked'
+    }
+
+    It 'claims "born canonical" only when the live Status is exactly the canonical set' {
+        $out = script:Invoke-Create '{"fields":[{"name":"Status","options":[{"name":"Backlog"},{"name":"In Progress"},{"name":"In Review"},{"name":"Blocked"},{"name":"Done"}]}]}'
+        $out | Should -Match "born on the canonical vocabulary \(no legacy 'Todo'\)"
+        $out | Should -Not -Match 'NOT canonical'
+    }
+
+    It '-Lang es says the other fields are named in Spanish' {
+        $out = script:Invoke-Create '{"fields":[{"name":"Status","options":[{"name":"Backlog"},{"name":"In Progress"},{"name":"In Review"},{"name":"Blocked"},{"name":"Done"}]}]}' 'es'
+        $out | Should -Match '-Lang es names Priority/Size'
     }
 }
