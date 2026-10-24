@@ -208,7 +208,10 @@ function Test-PluginOffInProject {
     param([string]$Project, [string]$Key)
     if (-not $Project -or -not $Key) { return $false }
     foreach ($name in 'settings.local.json', 'settings.json') {
-        $r = Read-JsonFileSafe (Join-Path (Join-Path $Project '.claude') $name)
+        # Path.Combine, not Join-Path: a project on a drive that is not mapped now (a USB disk, a network
+        # share) must read as "no settings", not abort the whole run with "Cannot find drive".
+        $path = try { [System.IO.Path]::Combine($Project, '.claude', $name) } catch { continue }
+        $r = Read-JsonFileSafe $path
         if (-not $r.Ok -or $null -eq $r.Data.enabledPlugins) { continue }
         $p = $r.Data.enabledPlugins.PSObject.Properties[$Key]
         if ($p) { return ($p.Value -eq $false) }

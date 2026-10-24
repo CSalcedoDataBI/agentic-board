@@ -219,6 +219,14 @@ Describe 'plan and apply on a fixture config' {
         @($plan.KeptButDisabled).Count | Should -Be 1
     }
 
+    It 'plans past a project on a drive that is not mapped now' -Skip:(-not $IsWindows) {
+        $free = @([char[]]([int][char]'D'..[int][char]'Z') | Where-Object { -not (Test-Path "$($_):\") }) | Select-Object -Last 1
+        if (-not $free) { Set-ItResult -Skipped -Because 'every drive letter is in use'; return }
+        [System.IO.File]::WriteAllText($script:Cfg, "{ `"projects`": { `"$($free):/old-usb-project`": {}, `"C:/work/z`": {} } }")
+        $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups
+        @($plan.Missing.Project) | Should -Be @("$($free):/old-usb-project", 'C:/work/z')
+    }
+
     It 'lets settings.local.json re-enable what the shared settings.json turned off' {
         $proj = Join-Path $TestDrive ("proj" + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Force -Path (Join-Path $proj '.claude') | Out-Null
