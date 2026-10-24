@@ -247,6 +247,15 @@ Describe 'Find-FilesPruned never enters an excluded directory (#609)' {
     It 'yields nothing for a root that does not exist' {
         @(Find-FilesPruned -Root (Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-dir-zz') -Filter '*.md').Count | Should -Be 0
     }
+    It 'sorts a listing case-insensitively with a case-sensitive tie-break, whatever order it arrives in' {
+        # Direct, because NTFS already lists in this order: on Windows the walk alone cannot show a sort that does nothing.
+        $names = @('c.md', 'README.md', 'B.md', 'readme.md', 'a.md')
+        $sorted = Sort-PrunedListing -Names $names -Items ([object[]]$names)
+        $sorted | Should -Be @('a.md', 'B.md', 'c.md', 'README.md', 'readme.md')
+        $frames = @(, @('/r/z', 1, $true)) + @(, @('/r/a', 1, $true))
+        $sorted = Sort-PrunedListing -Names @('/r/z', '/r/a') -Items $frames
+        @($sorted | ForEach-Object { $_[0] }) | Should -Be @('/r/a', '/r/z')
+    }
     It 'returns files in sorted pre-order - what Get-ChildItem -Recurse gives on NTFS - on every OS' {
         # The oracle is written out, not taken from Get-ChildItem: on ext4 that returns hash order,
         # which is the very nondeterminism the walker removes.
