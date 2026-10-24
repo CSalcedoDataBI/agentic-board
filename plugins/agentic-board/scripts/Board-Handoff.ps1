@@ -256,6 +256,14 @@ function Resolve-HandoffMirror {
     return [pscustomobject]@{ Rel = $rel; Ignore = $ignore }
 }
 
+# Is this text a handoff THIS script wrote? Its frontmatter always carries `saved:` and `verified:`.
+# A tracked file that passes is the tool's own mirror that someone force-committed ('git add -f',
+# which the -Local footer suggests) - keep using it. One that fails is a project file. Pure.
+function Test-HandoffMirrorText([string]$text) {
+    if (-not $text) { return $false }
+    return [bool](Get-HandoffFrontmatterField $text 'saved') -and [bool](Get-HandoffFrontmatterField $text 'verified')
+}
+
 # -- Resume-side pure helpers (parse a handoff back out) ------------------------
 
 # Extract the HANDOFF.md content from an issue comment body: the text between the
@@ -728,13 +736,21 @@ $saveMode = Get-HandoffSaveMode -Issue $Issue -Local:$Local
 $repoRoot = (git rev-parse --show-toplevel 2>$null)
 if (-not $repoRoot) { throw "Not inside a git working tree." }
 # A tracked root HANDOFF.md belongs to the project, not to us: the mirror moves aside (#795).
-function Test-GitTracked([string]$rel) {
+# "Project-owned" = tracked AND not a handoff this script wrote (a force-committed mirror is still ours).
+function Test-ProjectOwned([string]$rel) {
     git -C $repoRoot ls-files --error-unmatch -- $rel 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    if ($LASTEXITCODE -ne 0) { return $false }
+    $p = Join-Path $repoRoot $rel
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return $true }
+    return -not (Test-HandoffMirrorText (Get-Content -LiteralPath $p -Raw))
 }
-$mirror = Resolve-HandoffMirror -MirrorPath $MirrorPath -RootHandoffTracked (Test-GitTracked 'HANDOFF.md')
-if (Test-GitTracked $mirror.Rel) {
-    throw "Board-Handoff: '$($mirror.Rel)' is tracked by git, so it is not a handoff mirror - writing there would overwrite and untrack a project file. Pass -MirrorPath <an untracked path>."
+# A custom -MirrorPath is remembered in the LOCAL git config (never committed), so a later -Resume
+# and the SessionStart hook find the mirror without the flag being repeated.
+$mirrorFromParam = [bool]$MirrorPath
+if (-not $MirrorPath) { $MirrorPath = [string](git -C $repoRoot config --local --get abios.handoffMirror 2>$null) }
+$mirror = Resolve-HandoffMirror -MirrorPath $MirrorPath -RootHandoffTracked (Test-ProjectOwned 'HANDOFF.md')
+if (Test-ProjectOwned $mirror.Rel) {
+    throw "Board-Handoff: '$($mirror.Rel)' is tracked by git and is not a handoff, so it is not a handoff mirror - writing there would overwrite and untrack a project file. Pass -MirrorPath <an untracked path>."
 }
 $handoffPath = Join-Path $repoRoot $mirror.Rel
 $archiveDir  = Join-Path $repoRoot ".handoffs"
@@ -1022,6 +1038,10 @@ Set-Content -Path $handoffPath -Value $markdown -Encoding UTF8 -NoNewline
 Write-Host "  OK  $($mirror.Rel) written (verified $($fm.verified))" -ForegroundColor Green
 if ($mirror.Rel -ne 'HANDOFF.md' -and -not $MirrorPath) {
     Write-Host "  (HANDOFF.md is tracked by this repo, so the mirror lives at $($mirror.Rel) and HANDOFF.md is left alone.)" -ForegroundColor DarkGray
+}
+if ($mirrorFromParam) {
+    git -C $repoRoot config --local abios.handoffMirror $mirror.Rel 2>$null | Out-Null
+    Write-Host "  OK  Mirror location remembered (git config --local abios.handoffMirror = $($mirror.Rel))" -ForegroundColor DarkGray
 }
 
 # -- Keep the mirror + archive gitignored --------------------------------------

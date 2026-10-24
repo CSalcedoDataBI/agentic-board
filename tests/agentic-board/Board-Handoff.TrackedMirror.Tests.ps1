@@ -42,6 +42,17 @@ Describe 'Resolve-HandoffMirror (#795)' {
     }
 }
 
+Describe 'Test-HandoffMirrorText (#795 review)' {
+    It 'recognises a handoff this script wrote (saved + verified frontmatter)' {
+        Test-HandoffMirrorText "---`nissue: 7`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7" | Should -BeTrue
+    }
+    It 'rejects a project guide, empty text, and frontmatter missing either field' {
+        Test-HandoffMirrorText "# Project guide`nRead me at session start." | Should -BeFalse
+        Test-HandoffMirrorText '' | Should -BeFalse
+        Test-HandoffMirrorText "---`nsaved: 2026-10-23T00:00:00Z`n---`n# x" | Should -BeFalse
+    }
+}
+
 # NOT named $isWindows: that collides with PowerShell 7's read-only automatic $IsWindows.
 $onWindows = [System.Environment]::OSVersion.Platform -eq 'Win32NT'
 
@@ -126,6 +137,33 @@ exit /b 0
         $r.Out  | Should -Match 'tracked by git'
         Get-Bytes (Join-Path $repo 'HANDOFF.md') | Should -BeExactly $before
         Test-Path (Join-Path $repo '.handoffs') | Should -BeFalse
+    }
+
+    It 'a force-committed mirror (the tool''s own handoff, tracked) is still used as the mirror' {
+        $repo = New-TrackedRepo 'forced'
+        [System.IO.File]::WriteAllText((Join-Path $repo 'HANDOFF.md'), "---`nissue: 7`nsaved: 2026-10-01T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7`n## Next concrete step`n[V] old")
+        git -C $repo commit --quiet -am 'chore: force-committed handoff' 2>&1 | Out-Null
+        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] fresh'") $script:EmptyJson
+        $r.Code | Should -Be 0 -Because $r.Out
+        Get-Content -Raw (Join-Path $repo 'HANDOFF.md') | Should -Match 'fresh'
+        Test-Path (Join-Path $repo '.handoffs/active.md') | Should -BeFalse
+    }
+
+    It 'remembers -MirrorPath, so a later -Resume and the hook find it without the flag' {
+        $repo = New-TrackedRepo 'custom'
+        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-MirrorPath', 'notes/h.md', '-NextStep', "'[V] custom spot'") $script:EmptyJson
+        $r.Code | Should -Be 0 -Because $r.Out
+        (git -C $repo config --local --get abios.handoffMirror) | Should -BeExactly 'notes/h.md'
+        Get-Content -Raw (Join-Path $repo '.gitignore') | Should -Match '(?m)^/notes/h\.md\s*$'
+
+        # No [abios-handoff] comment on the issue: -Resume must fall back to the remembered mirror.
+        $res = Invoke-Handoff $repo @('-Resume', '-Issue', '7', '-DryRun') $script:EmptyJson
+        $res.Code | Should -Be 0 -Because $res.Out
+        $res.Out  | Should -Match 'custom spot'
+        $res.Out  | Should -Match 'local mirror notes/h\.md'
+
+        $stdin = (@{ source = 'resume'; cwd = $repo } | ConvertTo-Json -Compress)
+        ($stdin | & pwsh -NoProfile -File $script:Hook | Out-String) | Should -Match 'custom spot'
     }
 
     It '-Save -DryRun puts the composed markdown on the success stream' {

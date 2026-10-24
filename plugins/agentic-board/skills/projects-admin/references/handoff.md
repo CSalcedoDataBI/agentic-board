@@ -72,9 +72,12 @@ comment — not a committed file — is what makes it portable. (Note: this repo
 
 **A repo that tracks its own `HANDOFF.md`** (a project-authored guide, "read HANDOFF.md at session
 start") is never touched (#795): `save` and `resume` detect it with `git ls-files` and keep the
-mirror at `.handoffs/active.md` instead, gitignoring only `.handoffs/`. `-MirrorPath <rel>` picks
-any other untracked location; a `-MirrorPath` that git tracks is refused. The SessionStart hook
-reads `.handoffs/active.md` in that case too. `-Save -DryRun` emits the composed markdown on the
+mirror at `.handoffs/active.md` instead, gitignoring only `.handoffs/`. A tracked file whose
+frontmatter carries `saved:` and `verified:` is the tool's own handoff force-committed with
+`git add -f`, so it stays the mirror. `-MirrorPath <rel>` picks any other location and is
+remembered in the local git config (`abios.handoffMirror`), so a later `-Resume` and the SessionStart
+hook find it without the flag; a `-MirrorPath` that git tracks as a non-handoff file is refused.
+The SessionStart hook resolves the mirror the same way. `-Save -DryRun` emits the composed markdown on the
 success stream, so `$md = & Board-Handoff.ps1 -Save -DryRun ...` captures it.
 
 ## HANDOFF.md format

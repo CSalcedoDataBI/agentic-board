@@ -117,11 +117,22 @@ try {
         try { $marker = Get-Content $markerPath -Raw | ConvertFrom-Json } catch { $marker = $null }
         $ctx = Get-CompactSessionContext $marker
     } else {
-        # A TRACKED HANDOFF.md is the project's own guide, not a saved handoff: Board-Handoff.ps1
-        # keeps its mirror at .handoffs/active.md in that case (#795).
+        # Same mirror resolution as Board-Handoff.ps1 (#795): a -MirrorPath remembered in the local
+        # git config wins; else a TRACKED HANDOFF.md that is not a handoff (no `saved:` + `verified:`
+        # frontmatter) is the project's own guide, and the mirror lives at .handoffs/active.md.
+        $custom = [string](git -C $root config --local --get abios.handoffMirror 2>$null)
         $handoffPath = Join-Path $root 'HANDOFF.md'
-        git -C $root ls-files --error-unmatch -- 'HANDOFF.md' 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { $handoffPath = Join-Path (Join-Path $root '.handoffs') 'active.md' }
+        if ($custom) {
+            $handoffPath = Join-Path $root $custom
+        } else {
+            git -C $root ls-files --error-unmatch -- 'HANDOFF.md' 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $handoffPath)) {
+                $head = Get-Content -LiteralPath $handoffPath -Raw
+                if ($head -notmatch '(?m)^saved:\s*\S' -or $head -notmatch '(?m)^verified:\s*\S') {
+                    $handoffPath = Join-Path (Join-Path $root '.handoffs') 'active.md'
+                }
+            }
+        }
         if (-not (Test-Path $handoffPath)) { exit 0 }
         $body = Get-Content $handoffPath -Raw
         $ctx = Get-HandoffSessionContext $body
