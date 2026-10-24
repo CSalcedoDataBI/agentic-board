@@ -510,7 +510,7 @@ Describe 'Get-McpServerNames' {
         New-Item -ItemType Directory -Path $h -Force | Out-Null
         '{ not json' | Set-Content -LiteralPath (Join-Path $h '.claude.json') -Encoding utf8
         { & $script:Discover -Root $r -UserHome $h } | Should -Throw '*cannot read*'
-        Remove-Item (Join-Path $h '.claude.json')
+        Remove-Item (Join-Path $h '.claude.json') -Force     # a dot-file is hidden on Linux
         $pbad = Join-Path $h 'p/bad'; New-Item -ItemType Directory -Path $pbad -Force | Out-Null
         '{ not json' | Set-Content -LiteralPath (Join-Path $pbad '.mcp.json') -Encoding utf8
         $pok = Join-Path $h 'p/ok'; Write-Json (Join-Path $pok '.mcp.json') @{ 'ok-server' = @{} }
