@@ -283,6 +283,29 @@ Describe 'Get-MergeAuthority -GitRef: the PR under review cannot grant itself th
             }
         }
     }
+    It 'a lone experto.md (no FICHA) declares nothing: default, no warning, with or without the ref' {
+        $root = New-ThrowawayRepo 'ref-lone-expert'
+        Add-Expert $root
+        Publish-Main $root
+        foreach ($a in @((Get-MergeAuthority -Config $null -Root $root),
+                         (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'),
+                         (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/nope'))) {
+            $a.authority | Should -Be 'user'
+            $a.source    | Should -Be 'default'
+            $a.warning   | Should -BeNullOrEmpty
+        }
+    }
+    It 'a committed config that is not JSON at all says it cannot be read' {
+        $root = New-ThrowawayRepo 'ref-notjson'
+        Add-Expert $root
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '{ not json' -Encoding UTF8
+        Publish-Main $root
+        $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
+        $a.authority | Should -Be 'user'
+        $a.warning   | Should -Match 'not a readable JSON object'
+    }
     It 'a local opt-out reads as repo config even when the ref does not resolve' {
         $root = New-ThrowawayRepo 'ref-optout-noref'
         $a = Get-MergeAuthority -Config @{ mergeAuthority = 'user' } -Root $root -GitRef 'origin/nope'
@@ -338,6 +361,11 @@ Describe 'Grouped PRs default to on when the repo declares an expert' {
         Resolve-GroupingPosture @{ preferGroupedPRs = $false } -ExpertDeclared | Should -Be 'never'
         Resolve-GroupingPosture @{ preferGroupedPRs = 'auto' } -ExpertDeclared | Should -Be 'auto'
         (Get-GroupingSetting @{ preferGroupedPRs = $false } -ExpertDeclared).source | Should -Be 'config'
+    }
+    It 'the pending list computes the POSTURE with the expert switch, not just the label (script wiring)' {
+        $src = Get-Content -LiteralPath $script:Script -Raw
+        $src | Should -Match '\$posture = Resolve-GroupingPosture \$cfgRead\.config -ExpertDeclared:\$expertDeclared'
+        $src | Should -Match '\$expertDeclared = \(Get-RepoMergeAuthority \$cfgRead\)\.authority -eq ''expert'''
     }
     It 'without an expert nothing changes: auto, from the default' {
         Resolve-GroupingPosture (Get-BoardConfigDefaults) | Should -Be 'auto'

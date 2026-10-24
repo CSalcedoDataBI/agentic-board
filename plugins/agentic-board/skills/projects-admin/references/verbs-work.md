@@ -194,7 +194,9 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      unrecognised `mergeAuthority` value or a `config.json` that cannot be parsed reads as `user`
      (with a warning), because it may hold an opt-out and a merge cannot be undone. And the grant
      is read from the **default branch as last fetched** (local `origin/HEAD`; `show` itself does
-     not fetch, which is why the fetch comes first: it makes a revocation on the remote count), never from
+     not fetch, which is why the fetch comes first: it makes a revocation on the remote count;
+     falling back to `origin/main` or `origin/master`. A repo created locally and pushed has no
+     `origin/HEAD` — `git remote set-head origin --auto` records it), never from
      the checkout: at this step the checkout IS the PR, and a PR that adds an approved FICHA,
      loosens `experto.md` or writes `"mergeAuthority": "expert"` must not be judged by its own
      rules. An opt-out counts from anywhere, the local config included. Record it with
@@ -202,13 +204,15 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      that config change is merged to the default branch, `user` at once.
      - **`user`** — a repo that declares nothing. Steps d and e below apply exactly as written:
        today's flow, unchanged.
-     - **`expert`** — the review gate still runs (step c, same exits, same rules: exit 2 is cleared
-       by a real review recorded with `-RecordReview` on the head commit, never by
-       `-AllowUnreviewed`; exit 3 stops and goes to the user). Only on exit 0, hand the decision to
+     - **`expert`** — the review gate still runs (step c, same exits; exit 3 stops and goes to the
+       user). One rule is stricter: exit 2 is cleared by a real review recorded with
+       `-RecordReview` on the head commit. A gate passed with `-AllowUnreviewed` is allowed as in
+       step c, but it is `propose`, never `merge`: nobody reviewed it. Only on exit 0, hand the decision to
        the repo's expert. **The judge and its plan come from the default branch, like the grant**
        — `show` prints the two `git show <ref>:...` commands: read the expert's definition and
        `FICHA.md` from there, never from the checkout, which is the PR and may have rewritten
-       them. **A PR whose diff touches `FICHA.md`, `.claude/agents/experto.md` or
+       them — and hand that `git show` output to the judge (the definition as its prompt, the
+       FICHA as its input), because a subagent left to open them itself reads the checkout. **A PR whose diff touches `FICHA.md`, `.claude/agents/experto.md` or
        `.agentic-board/config.json` is `propose`, without asking the expert**: a change to the rules
        of the merge is the owner's to accept. Otherwise run that definition as a subagent with
        CLEAN context — the PR number, its issue(s), and nothing from this session's reasoning — and
@@ -227,7 +231,8 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
          again. That loop does not need the user.
        A declared expert also makes grouped PRs (step 3b) the default: with no recorded
        `preferGroupedPRs`, the grouping setting reads `on (repo expert)`. A recorded answer,
-       `off` included, still wins.
+       `off` included, still wins — except an `auto` recorded before the expert existed, which
+       was stored as "no decision" (see step 3c: run `-PreferGroupedPRs auto` again).
      d. **Before asking to merge, present a merge-confirmation summary — MANDATORY (#630/#631).**
         Merging is the one step in this flow you still confirm with the user each time — unless
         the repo's expert said `merge` above (it is
