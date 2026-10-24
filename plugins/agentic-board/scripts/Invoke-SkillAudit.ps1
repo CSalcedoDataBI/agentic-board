@@ -160,7 +160,9 @@ if ($PSBoundParameters.ContainsKey('McpServers')) {
 # Said in the summary, so "no findings" is never mistaken for "not checked".
 if (-not $mcpCheck) { $mcpCheck = if ($available.Count) { 'ran' } else { 'no-servers' } }
 if ($available.Count) {
-    $availableSet = [System.Collections.Generic.HashSet[string]]::new([string[]]@($available.prefix), [StringComparer]::OrdinalIgnoreCase)
+    # Exact case: a tool name keeps its server key's case and allowed-tools matches it exactly, so
+    # mcp__GitHub__x is not the tool of a server named github (the finding then gives the right case).
+    $availableSet = [System.Collections.Generic.HashSet[string]]::new([string[]]@($available.prefix), [StringComparer]::Ordinal)
     function Resolve-RefServer {
         # The server a referenced prefix names. A plugin prefix is split at the first `_` after plugin_
         # (plugin names are kebab-case). No guess beyond that: matching a known server as a suffix would
@@ -170,31 +172,40 @@ if ($available.Count) {
         $m = [regex]::Match($Prefix, '^plugin_[^_]+_(.+)$')
         if ($m.Success) { $m.Groups[1].Value } else { $null }
     }
+    # Repository docs that can sit beside a SKILL.md but are never loaded as part of the skill.
+    $repoDocs = 'SKILL.md', 'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md', 'CLAUDE.md', 'AGENTS.md',
+                 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'INSTALL.md'
     $mcpGroups = [ordered]@{}
     foreach ($s in $skills) {
         $dir = Split-Path $s.path -Parent
         $files = @($s.path)
         # The skill's own markdown: files beside SKILL.md (reference.md, forms.md…) and all of references/.
         $files += @(Get-ChildItem -LiteralPath $dir -File -Filter '*.md' -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -notin 'SKILL.md', 'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md' } | ForEach-Object { $_.FullName })
+            Where-Object { $_.Name -notin $repoDocs } | ForEach-Object { $_.FullName })
         $refDir = Join-Path $dir 'references'
         if (Test-Path -LiteralPath $refDir -PathType Container) {
             $files += @(Get-ChildItem -LiteralPath $refDir -Recurse -File -Filter '*.md' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
         }
         $text = ($files | ForEach-Object { Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue }) -join "`n"
-        # The plugin this copy belongs to: its manifest identity, or plugins/<x>/skills/ in a source tree.
-        $ownPlugins = @($s.plugin, [regex]::Match($s.path, '(?i)(?:^|/)plugins/([^/]+)/skills/').Groups[1].Value) |
-            Where-Object { $_ } | ForEach-Object { $_ -replace '[^A-Za-z0-9_-]', '_' }
+        # The plugin this copy belongs to: its manifest identity, or in a source tree plugins/<x>/skills/ -
+        # both the folder name and the name its .claude-plugin/plugin.json declares (the tool prefix uses that one).
+        $src = [regex]::Match($s.path, '(?i)^(.*(?:^|/)plugins/([^/]+))/skills/')
+        $manifestName = $null
+        if ($src.Success) {
+            try { $manifestName = (Get-Content -LiteralPath ($src.Groups[1].Value + '/.claude-plugin/plugin.json') -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable)['name'] } catch { }
+        }
+        $ownPlugins = @($s.plugin, $src.Groups[2].Value, $manifestName) |
+            Where-Object { $_ } | ForEach-Object { [string]$_ -replace '[^A-Za-z0-9_-]', '_' }
         # mcp__<prefix>__<tool>, mcp__<prefix>__* and the bare mcp__<prefix> (all of a server's tools,
         # as allowed-tools writes it). The prefix never holds `__`, so a half placeholder (mcp__srv__<tool>,
         # mcp__srv__…) still names srv; a full one (mcp__<server>__<tool>) does not match.
         $refs = [ordered]@{}
-        foreach ($m in [regex]::Matches([string]$text, 'mcp__((?:[A-Za-z0-9-]|_(?!_))+)(?:__([A-Za-z0-9_-]+|\*)|__|(?![A-Za-z0-9_-]))')) {
+        foreach ($m in [regex]::Matches([string]$text, '(?<![A-Za-z0-9_])mcp__((?:[A-Za-z0-9-]|_(?!_))+)(?:__([A-Za-z0-9_-]+\*?|\*)|__|(?![A-Za-z0-9_-]))')) {
             if (-not $refs.Contains($m.Value)) { $refs[$m.Value] = [pscustomobject]@{ prefix = $m.Groups[1].Value; tool = $m.Groups[2].Value } }
         }
         # Every prefix this skill names, in any form: a skill that gives the working prefix anywhere
         # (another tool, __*, the bare allowed-tools form) already documents both install forms.
-        $refPrefixes = [System.Collections.Generic.HashSet[string]]::new([string[]]@($refs.Values | ForEach-Object { $_.prefix }), [StringComparer]::OrdinalIgnoreCase)
+        $refPrefixes = [System.Collections.Generic.HashSet[string]]::new([string[]]@($refs.Values | ForEach-Object { $_.prefix }), [StringComparer]::Ordinal)
         foreach ($ref in @($refs.Keys)) {
             $prefix = $refs[$ref].prefix; $tool = $refs[$ref].tool
             if ($availableSet.Contains($prefix)) { continue }
@@ -203,7 +214,7 @@ if ($available.Count) {
             if (@($ownPlugins | Where-Object { $prefix.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
             $server = Resolve-RefServer $prefix
             if (-not $server) { continue }
-            $altPrefixes = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -ine $prefix } | ForEach-Object { $_.prefix } | Sort-Object -Unique)
+            $altPrefixes = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -cne $prefix } | ForEach-Object { $_.prefix } | Sort-Object -Unique)
             if (-not $altPrefixes.Count -or @($altPrefixes | Where-Object { $refPrefixes.Contains($_) }).Count) { continue }
             # One root cause per hardcoded PREFIX: its tools are listed in one finding, not one finding each.
             $o = Get-Owner $s
@@ -220,9 +231,11 @@ if ($available.Count) {
     foreach ($g in $mcpGroups.Values) {
         $members = @($g.members.Values | Sort-Object @{ e = { $_.copyRank } }, @{ e = { $_.path } })
         $rs = @($g.refs.Values)
+        # mcp__srv, mcp__srv__ and mcp__srv__* all mean the whole server: one name, not several.
+        if (@($rs | Where-Object { $_.tool -and $_.tool -ne '*' }).Count -eq 0) { $rs = @($rs[0]) }
         if ($rs.Count -eq 1) {
             $t = $rs[0].tool; $suffix = if ($t) { "__$t" } else { '' }
-            $op = if (-not $t -or $t -eq '*') { 'tools' } else { "``$t`` tool" }
+            $op = if (-not $t -or $t.Contains('*')) { 'tools' } else { "``$t`` tool" }
             $named = "``$($rs[0].ref)``, which is not in the agent's tool list"
         } else {
             $suffix = '__…'; $op = 'tools by operation'

@@ -40,11 +40,17 @@ $rootN = ($Root -replace '\\','/').TrimEnd('/')
 
 # Every file is read -AsHashtable: ~/.claude.json records one project under keys that differ only in
 # case (c:/… and C:/…), and a plain ConvertFrom-Json throws on that, which would drop the whole file.
+# A core config file (-Required: .claude.json, settings, installed_plugins, the project .mcp.json) that
+# exists but cannot be read THROWS: a partial server set would make a correct name look broken, so the
+# caller is told discovery failed instead. A plugin's own manifest only costs that plugin.
 function Read-Json {
-    param([string]$File)
+    param([string]$File, [switch]$Required)
     if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { return $null }
     try { Get-Content -LiteralPath $File -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
-    catch { Write-Warning "Get-McpServerNames: cannot read $File - its MCP servers are left out."; $null }
+    catch {
+        if ($Required) { throw "Get-McpServerNames: cannot read $File ($($_.Exception.Message))" }
+        Write-Warning "Get-McpServerNames: cannot read $File - its MCP servers are left out."; $null
+    }
 }
 function Test-Map { param($Value) $Value -is [System.Collections.IDictionary] }
 # An .mcp.json is either { "mcpServers": { ... } } or the server map itself. ~/.claude.json and its
@@ -59,7 +65,7 @@ function Get-ServerMapNames {
 }
 function Get-List { param($Map, [string]$Key) if ((Test-Map $Map) -and $Map.Contains($Key)) { @($Map[$Key] | Where-Object { $_ -is [string] }) } else { @() } }
 
-$cfg = Read-Json $claudeJson
+$cfg = Read-Json $claudeJson -Required
 # The project's own entries in ~/.claude.json: every key that names this root, whatever its case or slashes.
 $projEntries = @()
 if ((Test-Map $cfg) -and (Test-Map $cfg['projects'])) {
@@ -69,7 +75,7 @@ if ((Test-Map $cfg) -and (Test-Map $cfg['projects'])) {
 }
 # Settings merged user < project < local, the precedence Claude Code applies.
 $settingsFiles = @((Join-Path $configDir 'settings.json'), (Join-Path $Root '.claude/settings.json'), (Join-Path $Root '.claude/settings.local.json'))
-$settings = @($settingsFiles | ForEach-Object { Read-Json $_ } | Where-Object { Test-Map $_ })
+$settings = @($settingsFiles | ForEach-Object { Read-Json $_ -Required } | Where-Object { Test-Map $_ })
 
 # Servers switched off in this project (/mcp disable): bare names, and plugin:<plugin>:<server> for plugin ones.
 $disabled = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -105,7 +111,7 @@ foreach ($src in @($settings) + @($projEntries)) {
     foreach ($n in (Get-List $src 'enabledMcpjsonServers'))  { [void]$approved.Add($n) }
     foreach ($n in (Get-List $src 'disabledMcpjsonServers')) { [void]$rejected.Add($n) }
 }
-foreach ($n in (Get-ServerMapNames (Read-Json (Join-Path $Root '.mcp.json')))) {
+foreach ($n in (Get-ServerMapNames (Read-Json (Join-Path $Root '.mcp.json') -Required))) {
     if (-not $rejected.Contains($n) -and ($approveAll -or $approved.Contains($n))) { Add-Server $n $null 'project' }
 }
 
@@ -116,7 +122,7 @@ $enabled = @{}
 foreach ($st in $settings) {
     if (Test-Map $st['enabledPlugins']) { foreach ($e in $st['enabledPlugins'].GetEnumerator()) { $enabled[$e.Key] = $e.Value } }
 }
-$installed = Read-Json (Join-Path $configDir 'plugins/installed_plugins.json')
+$installed = Read-Json (Join-Path $configDir 'plugins/installed_plugins.json') -Required
 if ((Test-Map $installed) -and (Test-Map $installed['plugins'])) {
     foreach ($entry in $installed['plugins'].GetEnumerator()) {
         $key = [string]$entry.Key                           # <plugin>@<marketplace>

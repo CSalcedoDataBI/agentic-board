@@ -47,6 +47,17 @@ BeforeAll {
     New-Skill '.claude/skills/proj/multi' 'multi' 'Use `mcp__powerbi-modeling-mcp__table_operations`, `mcp__powerbi-modeling-mcp__column_operations` and `mcp__powerbi-modeling-mcp__measure_operations`.'
     # covers: hardcodes the bare form but also allows the working prefix in another form.
     New-Skill '.claude/skills/proj/covers' 'covers' 'allowed-tools: mcp__plugin_fabric-skills_powerbi-modeling-mcp. Then call `mcp__powerbi-modeling-mcp__dax_query_operations`.'
+    # wrongcase: the server exists, but not with this case - and tool names keep the key's case.
+    New-Skill '.claude/skills/proj/wrongcase' 'wrongcase' 'Call `mcp__CodeGraph__codegraph_node`.'
+    # wide: three spellings of "the whole server" are one name.
+    New-Skill '.claude/skills/proj/wide' 'wide' 'allowed-tools: mcp__powerbi-modeling-mcp, mcp__powerbi-modeling-mcp__* and mcp__powerbi-modeling-mcp__'
+    # partial: a partial wildcard keeps its star in the suggested name.
+    New-Skill '.claude/skills/proj/partial' 'partial' 'allowed-tools: mcp__powerbi-modeling-mcp__table_*'
+    # glued: mcp__ inside a longer word is not a tool name.
+    New-Skill '.claude/skills/proj/glued' 'glued' 'The variable xmcp__powerbi-modeling-mcp__a is unrelated.'
+    # qself: a source-tree plugin whose manifest name differs from its folder name.
+    New-Skill 'plugins/pack-q/skills/qself' 'qself' 'Run `mcp__plugin_pack-qq_codegraph__codegraph_search`.'
+    Write-Json (Join-Path $script:Root 'plugins/pack-q/.claude-plugin/plugin.json') @{ name = 'pack-qq' }
     # half: the prefix is hardcoded even though the tool part is a placeholder.
     New-Skill '.claude/skills/proj/half' 'half' 'Call `mcp__powerbi-modeling-mcp__<operation>` for each step.'
     # readme: a README beside SKILL.md is not loaded by the agent, so its names are not checked.
@@ -73,7 +84,8 @@ BeforeAll {
             Remove-Item $copy -Recurse -Force
         }
     }
-    $script:StubPluginOnly = "[pscustomobject]@{ prefix = 'plugin_fabric-skills_powerbi-modeling-mcp'; server = 'powerbi-modeling-mcp'; plugin = 'fabric-skills' }"
+    # It answers only for the audited root, so a test also proves the audit forwards -Root to discovery.
+    $script:StubPluginOnly = "param([string]`$Root) if (`$Root -eq '$($script:Root)') { [pscustomobject]@{ prefix = 'plugin_fabric-skills_powerbi-modeling-mcp'; server = 'powerbi-modeling-mcp'; plugin = 'fabric-skills' } }"
 
     $script:Servers = @('codegraph', 'plugin_fabric-skills_powerbi-modeling-mcp')
     $script:Res = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers $script:Servers
@@ -177,6 +189,23 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $f = Get-McpFinding 'half'
         $f.Count | Should -Be 1
         $f[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_fabric-skills_powerbi-modeling-mcp`'))
+    }
+    It 'flags a name whose server exists only with another case, giving the right case' {
+        (Get-McpFinding 'wrongcase')[0].detail | Should -Match ([regex]::Escape('`mcp__codegraph__codegraph_node`'))
+    }
+    It 'treats the bare, __ and __* spellings of one server as one name' {
+        $f = Get-McpFinding 'wide'
+        $f.Count | Should -Be 1
+        $f[0].detail | Should -Not -Match 'names under one prefix'
+    }
+    It 'keeps a partial wildcard whole in the suggested name' {
+        (Get-McpFinding 'partial')[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_fabric-skills_powerbi-modeling-mcp__table_*`'))
+    }
+    It 'ignores mcp__ glued to a longer word' {
+        (Get-McpFinding 'glued').Count | Should -Be 0
+    }
+    It 'reads the own plugin name from the source tree manifest' {
+        (Get-McpFinding 'qself').Count | Should -Be 0
     }
     It 'does not read a README beside SKILL.md' {
         (Get-McpFinding 'readme').Count | Should -Be 0
@@ -375,6 +404,34 @@ Describe 'Get-McpServerNames' {
         It 'honors a plugin disabled in the project settings' {
             $script:Names3 | Should -Not -Contain 'plugin_off_off-server'
         }
+    }
+    It 'matches the project entry whatever the case of its drive letter' {
+        $file = Join-Path $script:Home2 '.claude.json'
+        $saved = Get-Content -LiteralPath $file -Raw
+        $key = ($script:Repo2 -replace '\\','/')
+        $flipped = if ($key[0] -cmatch '[A-Z]') { $key.Substring(0,1).ToLower() + $key.Substring(1) } else { $key.Substring(0,1).ToUpper() + $key.Substring(1) }
+        Write-Json $file @{ projects = @{ $flipped = @{ mcpServers = @{ 'flipped-one' = @{} } } } }
+        try {
+            @(& $script:Discover -Root $script:Repo2 -UserHome $script:Home2).prefix | Should -Contain 'flipped-one'
+        } finally {
+            $saved | Set-Content -LiteralPath $file -Encoding utf8 -NoNewline
+        }
+    }
+    It 'throws on an unreadable core config, and only warns on a broken plugin manifest' {
+        $h = Join-Path $script:Root 'home-bad'; $r = Join-Path $script:Root 'repo-bad'
+        New-Item -ItemType Directory -Path $r -Force | Out-Null
+        New-Item -ItemType Directory -Path $h -Force | Out-Null
+        '{ not json' | Set-Content -LiteralPath (Join-Path $h '.claude.json') -Encoding utf8
+        { & $script:Discover -Root $r -UserHome $h } | Should -Throw '*cannot read*'
+        Remove-Item (Join-Path $h '.claude.json')
+        $pbad = Join-Path $h 'p/bad'; New-Item -ItemType Directory -Path $pbad -Force | Out-Null
+        '{ not json' | Set-Content -LiteralPath (Join-Path $pbad '.mcp.json') -Encoding utf8
+        $pok = Join-Path $h 'p/ok'; Write-Json (Join-Path $pok '.mcp.json') @{ 'ok-server' = @{} }
+        Write-Json (Join-Path $h '.claude/plugins/installed_plugins.json') @{ version = 2; plugins = @{
+            'bad@m' = @(@{ scope = 'user'; installPath = $pbad; lastUpdated = '2026-01-01' })
+            'ok@m'  = @(@{ scope = 'user'; installPath = $pok;  lastUpdated = '2026-01-01' }) } }
+        Write-Json (Join-Path $h '.claude/settings.json') @{ enabledPlugins = @{ 'bad@m' = $true; 'ok@m' = $true } }
+        @(& $script:Discover -Root $r -UserHome $h -WarningAction SilentlyContinue).prefix | Should -Contain 'plugin_ok_ok-server'
     }
     It 'returns nothing on an empty home' {
         $empty = Join-Path $script:Root 'empty'; New-Item -ItemType Directory -Path $empty -Force | Out-Null
