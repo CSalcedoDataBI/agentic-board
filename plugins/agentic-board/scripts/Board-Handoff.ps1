@@ -252,6 +252,11 @@ function Resolve-HandoffMirror {
         $segs = @(($MirrorPath -replace '\\', '/') -split '/' | Where-Object { $_ -and $_ -ne '.' })
         if ($segs -contains '..') { throw "Board-Handoff: -MirrorPath '$MirrorPath' must stay inside the repo (no '..')." }
         if (-not $segs.Count) { throw "Board-Handoff: -MirrorPath '$MirrorPath' names no file." }
+        # Win32 aliases: 'HANDOFF.md.' or 'HANDOFF.md ' open HANDOFF.md, and a ':' names a stream - none
+        # would compare equal to the tracked path the guard looks up.
+        if (@($segs | Where-Object { $_ -match '[.\s]$' -or $_ -match ':' }).Count) {
+            throw "Board-Handoff: -MirrorPath '$MirrorPath' has a segment ending in '.' or a space, or a ':' - Windows would open a different file than the one checked."
+        }
         $rel = $segs -join '/'
     } elseif ($RootHandoffTracked) {
         $rel = '.handoffs/active.md'
@@ -925,6 +930,17 @@ if ($Resume) {
         } else {
             $mirrorDir = Split-Path -Parent $handoffPath
             if (-not (Test-Path $mirrorDir)) { New-Item -ItemType Directory -Force $mirrorDir | Out-Null }
+            # A local mirror that differs from the comment (e.g. a -Local save, or a handoff adopted from
+            # a clobbered guide just above) may be the only copy of something: archive it, never overwrite.
+            if (Test-Path -LiteralPath $handoffPath -PathType Leaf) {
+                $existing = Get-Content -LiteralPath $handoffPath -Raw
+                if ($existing -and $existing.TrimEnd() -ne $body.TrimEnd()) {
+                    if (-not (Test-Path -LiteralPath $archiveDir)) { New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null }
+                    $archiveName = New-HandoffArchiveName (Get-Date)
+                    Move-Item -Force -LiteralPath $handoffPath -Destination (Join-Path $archiveDir $archiveName)
+                    Write-Host "  OK  The previous local mirror differed from the $source - archived -> .handoffs/$archiveName" -ForegroundColor DarkGray
+                }
+            }
             Set-Content -LiteralPath $handoffPath -Value $body -Encoding UTF8 -NoNewline
             $gitignorePath = Join-Path $repoRoot ".gitignore"
             $giBody = if (Test-Path $gitignorePath) { Get-Content $gitignorePath -Raw } else { "" }

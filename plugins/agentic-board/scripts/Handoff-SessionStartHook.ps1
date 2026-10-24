@@ -135,6 +135,7 @@ try {
         # git config wins; else a TRACKED HANDOFF.md (any case) whose INDEX copy is not a handoff (no
         # `saved:` + `verified:` frontmatter) is the project's own guide, and the mirror lives at
         # .handoffs/active.md.
+        # Decoded as UTF-8: [Console]::OutputEncoding was switched above (#682), so a non-ASCII path survives.
         $custom = [string](git -C $root config --local --get abios.handoffMirror 2>$null)
         $handoffPath = Join-Path $root 'HANDOFF.md'
         if ($custom) {

@@ -88,6 +88,11 @@ Describe 'Resolve-HandoffMirror (#795)' {
         { Resolve-HandoffMirror -MirrorPath ([System.IO.Path]::GetFullPath('x.md')) } | Should -Throw '*relative*'
         { Resolve-HandoffMirror -MirrorPath '../outside.md' } | Should -Throw "*'..'*"
     }
+    It 'refuses Win32 aliases (trailing dot or space, a stream colon) that open a different file' {
+        foreach ($w in 'HANDOFF.md.', 'HANDOFF.md ', 'docs./x.md', 'x.md:stream') {
+            { Resolve-HandoffMirror -MirrorPath $w } | Should -Throw "*Windows would open*" -Because "[$w]"
+        }
+    }
     It 'refuses wildcard characters (a -Path cmdlet would hit other files than the guard judged)' {
         foreach ($w in 'docs/*.md', 'h?.md', 'handoff[1].md') {
             { Resolve-HandoffMirror -MirrorPath $w } | Should -Throw '*wildcard*' -Because $w
@@ -318,6 +323,24 @@ exit /b 0
         $h = Invoke-Hook $repo
         $h | Should -Match 'fresh'
         $h | Should -Not -Match 'Next step: old'
+    }
+
+    It '-Resume from a comment archives an adopted clobbered handoff instead of overwriting it' {
+        $repo  = New-TrackedRepo 'clobbered-resume'
+        $stale = "---`nissue: 7`nsaved: 2026-10-01T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7`n## Next concrete step`n[V] local only"
+        [System.IO.File]::WriteAllText((Join-Path $repo 'HANDOFF.md'), $stale)
+        $md = "---`nissue: 7`nrepo: o/r`nbranch: issue-7-thing`npr: null`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7`n## Next concrete step`n[V] from the comment"
+        $body = "<!-- abios-handoff -->`n**[abios-handoff]**`n`n" + '```md' + "`n$md`n" + '```'
+        $comments = Join-Path $TestDrive 'comments-clobbered.json'
+        ConvertTo-Json -InputObject @([pscustomobject]@{ id = 1; body = $body }) -Depth 5 | Set-Content -Path $comments -Encoding UTF8
+
+        $r = Invoke-Handoff $repo @('-Resume', '-Issue', '7') $comments
+        $r.Code | Should -Be 0 -Because $r.Out
+        Get-Content -Raw (Join-Path $repo '.handoffs/active.md') | Should -Match 'from the comment'
+        $archives = @(Get-ChildItem (Join-Path $repo '.handoffs') -Filter '*-handoff.md')
+        $archives.Count | Should -Be 1
+        Get-Content -Raw $archives[0].FullName | Should -Match 'local only'
+        [System.IO.File]::ReadAllText((Join-Path $repo 'HANDOFF.md')) | Should -BeExactly $stale
     }
 
     It 'detects a tracked HANDOFF.md whatever its case (NTFS resolves both names to one file)' {
