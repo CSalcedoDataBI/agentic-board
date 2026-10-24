@@ -2791,6 +2791,10 @@ if ($MergeAuthority -eq 'show') {
     if (-not $read.ok)   { Write-Host "  ($($read.error))" -ForegroundColor DarkGray }
     if ($auth.authority -eq 'expert') {
         Write-Host "  Step 5d: the review gate still runs; then the expert decides - merge (summary posted on the PR) or propose (you confirm)." -ForegroundColor DarkGray
+        # The judge and its plan come from the same ref as the grant, never from the PR (#797).
+        if ($auth.ref) {
+            Write-Host "  Expert: git show $($auth.ref):.claude/agents/experto.md   Plan: git show $($auth.ref):FICHA.md" -ForegroundColor DarkGray
+        }
     } else {
         Write-Host "  Step 5d: the review gate runs, then you confirm every merge." -ForegroundColor DarkGray
     }

@@ -290,12 +290,17 @@ function Get-MergeAuthority {
         if ($null -ne $rawCfg) {
             $parsed = try { $rawCfg | ConvertFrom-Json -ErrorAction Stop } catch { $null }
             if (-not (Test-IsJsonObject $parsed)) {
-                $base = 'unreadable'
+                $base = 'unparseable'
             } else {
                 $prop = $parsed.PSObject.Properties['mergeAuthority']
                 $base = Get-MergeAuthorityDeclaration @{ mergeAuthority = $(if ($prop) { $prop.Value } else { $null }) }
             }
         }
+    }
+    if ($base -eq 'unparseable') {
+        $res.source = 'config'; $res.reason = 'the committed repo config cannot be read'
+        $res.warning = ".agentic-board/config.json on $GitRef is not a readable JSON object, so it may hold an opt-out; the user confirms"
+        return [pscustomobject]$res
     }
     foreach ($d in @($local, $base)) {
         if ($d -eq 'unreadable') {
@@ -309,8 +314,10 @@ function Get-MergeAuthority {
         }
     }
 
+    # An EMPTY agent file is no expert: there is nothing to run. Checked on the text, so git mode
+    # (an empty blob reads as '') and disk mode (an empty file reads as $null) agree.
     $agentText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath $agentRel
-    if ($null -ne $agentText) { $res.expertAgent = $agentRel }
+    if (-not [string]::IsNullOrWhiteSpace($agentText)) { $res.expertAgent = $agentRel }
     $fichaText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath 'FICHA.md'
     if ($null -ne $fichaText) {
         $res.ficha = 'FICHA.md'

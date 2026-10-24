@@ -204,10 +204,15 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      - **`expert`** — the review gate still runs (step c, same exits, same rules: exit 2 is cleared
        by a real review recorded with `-RecordReview` on the head commit, never by
        `-AllowUnreviewed`; exit 3 stops and goes to the user). Only on exit 0, hand the decision to
-       the repo's expert: run `.claude/agents/experto.md` as a subagent with CLEAN context — the PR
-       number, its issue(s), and nothing from this session's reasoning — and ask for one verdict,
-       `merge` or `propose`. The expert answers `merge` only when ALL hold: the PR does what its
-       issue planned; it keeps the plan in `FICHA.md` (no protected zone touched); nothing breaks
+       the repo's expert. **The judge and its plan come from the default branch, like the grant**
+       — `show` prints the two `git show <ref>:...` commands: read the expert's definition and
+       `FICHA.md` from there, never from the checkout, which is the PR and may have rewritten
+       them. **A PR whose diff touches `FICHA.md`, `.claude/agents/experto.md` or
+       `.agentic-board/config.json` is `propose`, without asking the expert**: a change to the rules
+       of the merge is the owner's to accept. Otherwise run that definition as a subagent with
+       CLEAN context — the PR number, its issue(s), and nothing from this session's reasoning — and
+       ask for one verdict, `merge` or `propose`. The expert answers `merge` only when ALL hold: the
+       PR does what its issue planned; it keeps the plan in `FICHA.md` (no protected zone touched); nothing breaks
        (CI green, tests); it meets the repo's skill/plugin standard; and the gate's clean review is
        recorded on the last commit.
        - **`merge`** → skip the confirmation question. Post the step-d summary (its first three

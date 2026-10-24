@@ -214,6 +214,26 @@ Describe 'Get-MergeAuthority -GitRef: the PR under review cannot grant itself th
             (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main').authority | Should -Be 'user' -Because "committed config '$body'"
         }
     }
+    It 'an EMPTY experto.md is no expert, on disk and on the ref alike' {
+        $root = New-ThrowawayRepo 'ref-empty'
+        New-Item -ItemType Directory -Path (Join-Path $root '.claude' 'agents') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $root '.claude' 'agents' 'experto.md') -Force | Out-Null
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        Publish-Main $root
+        (Get-MergeAuthority -Config $null -Root $root).authority                       | Should -Be 'user'
+        (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main').authority | Should -Be 'user'
+    }
+    It 'an unparseable committed config says so, not that a mergeAuthority value is bad' {
+        $root = New-ThrowawayRepo 'ref-badjson'
+        Add-Expert $root
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '[1, 2]' -Encoding UTF8
+        Publish-Main $root
+        $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
+        $a.authority | Should -Be 'user'
+        $a.warning   | Should -Match 'not a readable JSON object'
+    }
     It 'a ref that does not resolve -> user, with a warning' {
         $root = New-NorteRepo 'ref-missing'
         $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/nope'
@@ -255,6 +275,7 @@ Describe '-MergeAuthority end to end (no token)' {
         $r.code | Should -Be 0
         $r.out  | Should -Match 'Merge authority: expert \(FICHA.md \+ expert\)'
         $r.out  | Should -Match 'review gate still runs'
+        $r.out  | Should -Match 'git show origin/main:\.claude/agents/experto\.md'
     }
     It 'records user, reads it back, and auto clears it again' {
         $root = New-NorteRepo 'e2e-write'
@@ -315,5 +336,9 @@ Describe 'verbs-work.md step 5d documents the expert branch' {
     It 'says the review gate always runs and repos that declare nothing keep the user confirmation' {
         $script:Doc | Should -Match '(?s)declares nothing.{0,200}(today|unchanged)'
         $script:Doc | Should -Match '(?i)gate (still|always) runs'
+    }
+    It 'a PR that touches the rules of the merge is propose, and the judge comes from the default branch' {
+        $script:Doc | Should -Match '(?s)A PR whose diff touches `FICHA\.md`, `\.claude/agents/experto\.md` or\s+`\.agentic-board/config\.json` is `propose`'
+        $script:Doc | Should -Match 'The judge and its plan come from the default branch'
     }
 }
