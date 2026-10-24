@@ -80,8 +80,9 @@ Describe 'Resolve-Board applies the canonical preset to a NEWLY created board (#
 
 Describe 'Resolve-Board picks its identity through the account map (#793)' {
     # Before #793 this script used whatever $env:GH_TOKEN held, so an account the map knew could
-    # still not be reached through /board init. It now asks the one resolver. The script runs in
-    # this process, so $env:GH_TOKEN after the call IS the identity it worked with.
+    # still not be reached through /board init. It now asks the one resolver. The mocked gh records
+    # $env:GH_TOKEN at the moment it is called: that IS the identity the script worked with. After
+    # the call the caller's own value must be back (review: no identity leaks into the session).
 
     BeforeAll {
         $script:MapFile = Join-Path $TestDrive 'accounts.third.json'
@@ -94,24 +95,42 @@ Describe 'Resolve-Board picks its identity through the account map (#793)' {
         $env:ABIOS_T793_THIRD    = 'tok-third'
         $env:ABIOS_T793_OTHER    = 'tok-other'
         $env:GH_TOKEN            = 'dummy'
-        Mock gh { $global:LASTEXITCODE = 0; '{"data":{"repository":{"projectsV2":{"pageInfo":{"hasNextPage":false},"nodes":[{"number":3,"title":"app - Roadmap","closed":false,"owner":{"login":"ThirdOrg"}}]}}}}' }
+        $global:AbiosSeenTokens = @()
+        Mock gh {
+            $global:LASTEXITCODE = 0
+            $global:AbiosSeenTokens += "$env:GH_TOKEN"
+            '{"data":{"repository":{"projectsV2":{"pageInfo":{"hasNextPage":false},"nodes":[{"number":3,"title":"app - Roadmap","closed":false,"owner":{"login":"ThirdOrg"}}]}}}}'
+        }
     }
     AfterEach {
         $env:ABIOS_ACCOUNTS_FILE = Join-Path $TestDrive 'no-accounts.json'
         $env:GH_TOKEN            = 'dummy'
-        foreach ($n in 'ABIOS_T793_ME', 'ABIOS_T793_THIRD', 'ABIOS_T793_OTHER') {
+        foreach ($n in 'ABIOS_T793_ME', 'ABIOS_T793_THIRD', 'ABIOS_T793_OTHER', 'ABIOS_T793_AGENT') {
             [Environment]::SetEnvironmentVariable($n, $null)
         }
+        $global:AbiosSeenTokens = $null
     }
 
     It 'uses the token of a THIRD account the map names - no plugin edit, no hand-set GH_TOKEN' {
         (& $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -CreateIfMissing $false 6>$null) | Should -Be 3
-        $env:GH_TOKEN | Should -Be 'tok-third'
+        $global:AbiosSeenTokens | Should -Not -BeNullOrEmpty
+        $global:AbiosSeenTokens | Should -Be @('tok-third')
+    }
+
+    It "gives the caller's own GH_TOKEN back afterwards - the chosen identity does not leak into the session" {
+        & $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -CreateIfMissing $false 6>$null | Out-Null
+        $env:GH_TOKEN | Should -Be 'dummy'
+    }
+
+    It 'gives it back on a THROW too' {
+        Mock gh { $global:LASTEXITCODE = 1 }
+        { & $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' 6>$null } | Should -Throw
+        $env:GH_TOKEN | Should -Be 'dummy'
     }
 
     It 'honours an explicit -TokenVar outside a braked run' {
         (& $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -TokenVar 'ABIOS_T793_OTHER' -CreateIfMissing $false 6>$null) | Should -Be 3
-        $env:GH_TOKEN | Should -Be 'tok-other'
+        $global:AbiosSeenTokens | Should -Be @('tok-other')
     }
 
     It 'fails BEFORE any gh call when an explicit -TokenVar is unset (never a silent fallback)' {
@@ -130,6 +149,39 @@ Describe 'Resolve-Board picks its identity through the account map (#793)' {
                 Should -Throw -ExpectedMessage '*BRAKED run*'
         } finally { Pop-Location }
         Should -Invoke gh -Times 0 -Exactly
+    }
+
+    Context 'a brake-armed run with no -TokenVar' {
+        BeforeEach {
+            $script:Armed = Join-Path $TestDrive 'armed2'
+            New-Item -ItemType Directory -Force (Join-Path $script:Armed '.agentic-board') | Out-Null
+            '{}' | Set-Content (Join-Path (Join-Path $script:Armed '.agentic-board') 'brake-armed.json')
+        }
+
+        It 'works as the AGENT identity, not the mapped owner nor the ambient token' {
+            $env:ABIOS_T793_AGENT = 'tok-agent'
+            Push-Location $script:Armed
+            try { (& $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -CreateIfMissing $false 6>$null) | Should -Be 3 }
+            finally { Pop-Location }
+            $global:AbiosSeenTokens | Should -Be @('tok-agent')
+        }
+
+        It 'accepts the agent variable named explicitly' {
+            $env:ABIOS_T793_AGENT = 'tok-agent'
+            Push-Location $script:Armed
+            try { (& $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' -TokenVar 'ABIOS_T793_AGENT' -CreateIfMissing $false 6>$null) | Should -Be 3 }
+            finally { Pop-Location }
+            $global:AbiosSeenTokens | Should -Be @('tok-agent')
+        }
+
+        It 'STOPS before any gh call when the agent token is missing (never falls back to the owner)' {
+            Push-Location $script:Armed
+            try {
+                { & $script:Script -Owner 'ThirdOrg' -Repo 'ThirdOrg/app' 6>$null } |
+                    Should -Throw -ExpectedMessage '*BRAKED run*ABIOS_T793_AGENT*'
+            } finally { Pop-Location }
+            Should -Invoke gh -Times 0 -Exactly
+        }
     }
 }
 
@@ -179,6 +231,12 @@ Describe 'Resolve-Board only claims "born canonical" after reading Status back (
         $out = script:Invoke-Create '{"fields":[{"name":"Status","options":[{"name":"Backlog"},{"name":"In Progress"},{"name":"In Review"},{"name":"Blocked"},{"name":"Done"}]}]}'
         $out | Should -Match "born on the canonical vocabulary \(no legacy 'Todo'\)"
         $out | Should -Not -Match 'NOT canonical'
+    }
+
+    It 'does not claim it either when Status carries an option the vocabulary does not know' {
+        $out = script:Invoke-Create '{"fields":[{"name":"Status","options":[{"name":"Backlog"},{"name":"In Progress"},{"name":"In Review"},{"name":"Blocked"},{"name":"Done"},{"name":"Triage"}]}]}'
+        $out | Should -Not -Match 'born on the canonical vocabulary'
+        $out | Should -Match 'unknown: Triage'
     }
 
     It '-Lang es says the other fields are named in Spanish' {

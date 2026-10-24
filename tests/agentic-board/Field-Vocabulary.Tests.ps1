@@ -208,7 +208,8 @@ Describe 'Apply-FieldPreset creates only what the board lacks, by KEY (#671)' {
             else                                   { '' }
         }
         $out = script:Get-RunLog 'es'
-        $out | Should -Match "skip \(exists as 'Status'\): Estado"
+        # Not skipped any more (#794): the existing Status gets the canonical options instead.
+        $out | Should -Match "'Estado' exists as 'Status': applying the canonical 'Status' options"
         Should -Invoke gh -ParameterFilter { ($args -contains 'field-create') -and ($args -contains 'Estado') } -Times 0 -Exactly
         # ...and still builds the rest of the Spanish board.
         Should -Invoke gh -ParameterFilter { ($args -contains 'field-create') -and ($args -contains 'Tipo') } -Times 1 -Exactly

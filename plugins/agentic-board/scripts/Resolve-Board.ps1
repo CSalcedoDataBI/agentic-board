@@ -66,25 +66,36 @@ $ConfirmPreference = 'High'
 # Identity (#793): the owner's account from the map, or the agent's inside a braked run - the same
 # resolver as New-BoardPR / Board-Depend. Before, this script used whatever $env:GH_TOKEN held, so an
 # account the old hardcoded map did not know could only be reached by setting it by hand.
-$prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
-$env:ABIOS_TOKENVAR_DOTSOURCE = '1'
-. (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
-$env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
-$ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $Owner -ExplicitVar $TokenVar
-$env:GH_TOKEN = $ctx.token
-Write-Verbose "identity: $($ctx.var) - $($ctx.reason)"
-
 # Which Status options a board really carries, against the canonical set (#794). Pure.
-# Returns @{ ok; legacy = names that MEAN a canonical option under an old name (Todo); missing }.
+# Returns @{ ok; legacy = names that MEAN a canonical option under an old name (Todo); missing;
+# extra = names the vocabulary does not know at all }. A newborn board has no business carrying
+# any of the three, so "born canonical" needs all of them empty.
 function Get-StatusVerdict {
   param([string[]]$Options)
   $legacy  = @($Options | Where-Object {
     $canon = Get-CanonicalOptionName 'Status' $_
     $canon -and $canon -cne $_
   })
+  $extra   = @($Options | Where-Object { -not (Get-CanonicalOptionName 'Status' $_) })
   $missing = @(Get-CanonicalOptionNames 'Status' | Where-Object { @($Options) -notcontains $_ })
-  @{ ok = ($legacy.Count -eq 0 -and $missing.Count -eq 0); legacy = $legacy; missing = $missing }
+  @{ ok = ($legacy.Count -eq 0 -and $missing.Count -eq 0 -and $extra.Count -eq 0)
+     legacy = $legacy; missing = $missing; extra = $extra }
 }
+
+$prevT = $env:ABIOS_TOKENVAR_DOTSOURCE
+$env:ABIOS_TOKENVAR_DOTSOURCE = '1'
+. (Join-Path $PSScriptRoot 'Resolve-GhTokenVar.ps1')
+$env:ABIOS_TOKENVAR_DOTSOURCE = $prevT
+$ctx = Get-GhTokenForContext -StartDir (Get-Location).Path -Owner $Owner -ExplicitVar $TokenVar
+Write-Verbose "identity: $($ctx.var) - $($ctx.reason)"
+# The chosen token is lent to gh (and to Apply-FieldPreset) for THIS run only. The script is
+# called in-process (`$num = & ./Resolve-Board.ps1 ...`), so leaving it in $env:GH_TOKEN would hand
+# the caller's next command - for any owner - the identity picked here. The rest of the script runs
+# inside this try (left at its original indentation to keep the diff readable); the finally at the
+# end restores the caller's value on every exit path: return, throw or a -WhatIf stop.
+$callerGhToken = $env:GH_TOKEN
+$env:GH_TOKEN  = $ctx.token
+try {
 
 $dash       = [char]0x2014                     # em-dash, built in code (no non-ASCII in source)
 # A bare repo name cannot be looked up through the link (that needs owner/name) and would fall back to
@@ -249,6 +260,7 @@ if (-not $SkipPreset) {
         $why = @()
         if ($v.legacy.Count)  { $why += "legacy: $($v.legacy -join ', ')" }
         if ($v.missing.Count) { $why += "missing: $($v.missing -join ', ')" }
+        if ($v.extra.Count)   { $why += "unknown: $($v.extra -join ', ')" }
         Write-Host ("  WARN preset '{0}' applied, but Status on board #{1} is NOT canonical ({2})." -f $Lang, $num, ($why -join '; ')) -ForegroundColor DarkYellow
         Write-Host ("        fix it: /board field apply -Number {0} -Owner {1} -Lang en" -f $num, $Owner) -ForegroundColor DarkGray
       }
@@ -263,3 +275,7 @@ if (-not $SkipPreset) {
   }
 }
 return $num
+} finally {
+  # Give the caller back its own token (#793 review): see the try above the lookup.
+  $env:GH_TOKEN = $callerGhToken
+}
