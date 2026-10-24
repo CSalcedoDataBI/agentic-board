@@ -737,12 +737,19 @@ $repoRoot = (git rev-parse --show-toplevel 2>$null)
 if (-not $repoRoot) { throw "Not inside a git working tree." }
 # A tracked root HANDOFF.md belongs to the project, not to us: the mirror moves aside (#795).
 # "Project-owned" = tracked AND not a handoff this script wrote (a force-committed mirror is still ours).
+# Two traps, both from review: the match is case-INsensitive (on NTFS a tracked Handoff.md IS the file
+# HANDOFF.md resolves to), and the content judged is the INDEX copy, not the working tree - a repo the
+# old version already clobbered has a tool handoff on disk over a committed project guide.
 function Test-ProjectOwned([string]$rel) {
-    git -C $repoRoot ls-files --error-unmatch -- $rel 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { return $false }
+    $hit = @(git -C $repoRoot ls-files -- ":(icase)$rel" 2>$null) | Where-Object { $_ -ieq $rel } | Select-Object -First 1
+    if (-not $hit) { return $false }
+    $indexed = (@(git -C $repoRoot show ":$hit" 2>$null) -join "`n")
+    if (Test-HandoffMirrorText $indexed) { return $false }
     $p = Join-Path $repoRoot $rel
-    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return $true }
-    return -not (Test-HandoffMirrorText (Get-Content -LiteralPath $p -Raw))
+    if ((Test-Path -LiteralPath $p -PathType Leaf) -and (Test-HandoffMirrorText (Get-Content -LiteralPath $p -Raw))) {
+        Write-Host "  WARN $hit is tracked but its working copy is a handoff over the committed file - likely overwritten by an older Board-Handoff. Restore it: git checkout -- $hit" -ForegroundColor DarkYellow
+    }
+    return $true
 }
 # A custom -MirrorPath is remembered in the LOCAL git config (never committed), so a later -Resume
 # and the SessionStart hook find the mirror without the flag being repeated.

@@ -118,17 +118,18 @@ try {
         $ctx = Get-CompactSessionContext $marker
     } else {
         # Same mirror resolution as Board-Handoff.ps1 (#795): a -MirrorPath remembered in the local
-        # git config wins; else a TRACKED HANDOFF.md that is not a handoff (no `saved:` + `verified:`
-        # frontmatter) is the project's own guide, and the mirror lives at .handoffs/active.md.
+        # git config wins; else a TRACKED HANDOFF.md (any case) whose INDEX copy is not a handoff (no
+        # `saved:` + `verified:` frontmatter) is the project's own guide, and the mirror lives at
+        # .handoffs/active.md.
         $custom = [string](git -C $root config --local --get abios.handoffMirror 2>$null)
         $handoffPath = Join-Path $root 'HANDOFF.md'
         if ($custom) {
             $handoffPath = Join-Path $root $custom
         } else {
-            git -C $root ls-files --error-unmatch -- 'HANDOFF.md' 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $handoffPath)) {
-                $head = Get-Content -LiteralPath $handoffPath -Raw
-                if ($head -notmatch '(?m)^saved:\s*\S' -or $head -notmatch '(?m)^verified:\s*\S') {
+            $hit = @(git -C $root ls-files -- ':(icase)HANDOFF.md' 2>$null) | Where-Object { $_ -ieq 'HANDOFF.md' } | Select-Object -First 1
+            if ($hit) {
+                $indexed = (@(git -C $root show ":$hit" 2>$null) -join "`n")
+                if ($indexed -notmatch '(?m)^saved:\s*\S' -or $indexed -notmatch '(?m)^verified:\s*\S') {
                     $handoffPath = Join-Path (Join-Path $root '.handoffs') 'active.md'
                 }
             }

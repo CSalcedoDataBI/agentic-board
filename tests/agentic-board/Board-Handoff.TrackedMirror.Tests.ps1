@@ -166,6 +166,30 @@ exit /b 0
         ($stdin | & pwsh -NoProfile -File $script:Hook | Out-String) | Should -Match 'custom spot'
     }
 
+    It 'judges the COMMITTED copy: a guide already clobbered on disk by the old version is still the project''s' {
+        $repo = New-TrackedRepo 'clobbered'
+        $stale = "---`nissue: 7`nsaved: 2026-10-01T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7`n## Next concrete step`n[V] old"
+        [System.IO.File]::WriteAllText((Join-Path $repo 'HANDOFF.md'), $stale)
+        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] fresh'") $script:EmptyJson
+        $r.Code | Should -Be 0 -Because $r.Out
+        $r.Out  | Should -Match 'git checkout -- HANDOFF\.md'
+        Get-Content -Raw (Join-Path $repo '.handoffs/active.md') | Should -Match 'fresh'
+        [System.IO.File]::ReadAllText((Join-Path $repo 'HANDOFF.md')) | Should -BeExactly $stale
+        Get-Content -Raw (Join-Path $repo '.gitignore') | Should -Not -Match '(?m)^/HANDOFF\.md\s*$'
+    }
+
+    It 'detects a tracked HANDOFF.md whatever its case (NTFS resolves both names to one file)' {
+        $repo = New-TrackedRepo 'icase'
+        git -C $repo mv HANDOFF.md tmp.md 2>&1 | Out-Null
+        git -C $repo mv tmp.md Handoff.md 2>&1 | Out-Null
+        git -C $repo commit --quiet -m 'docs: rename guide' 2>&1 | Out-Null
+        $before = Get-Bytes (Join-Path $repo 'Handoff.md')
+        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'") $script:EmptyJson
+        $r.Code | Should -Be 0 -Because $r.Out
+        Get-Bytes (Join-Path $repo 'Handoff.md') | Should -BeExactly $before
+        Test-Path (Join-Path $repo '.handoffs/active.md') | Should -BeTrue
+    }
+
     It '-Save -DryRun puts the composed markdown on the success stream' {
         $repo = New-TrackedRepo 'dryrun'
         $cmd = "`$env:PATH='$($script:FakeDir);' + `$env:PATH; `$env:GH_TOKEN='fake'; `$env:FAKE_GH_OUTFILE='$($script:EmptyJson)'; " +
