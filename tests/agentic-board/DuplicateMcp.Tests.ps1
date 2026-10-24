@@ -236,6 +236,20 @@ Describe 'plan and apply on a fixture config' {
         (Invoke-McpDisable -ConfigPath $script:Cfg -Groups $script:Groups -PlanId $plan.PlanId -BackupDir $script:Bk).Ok | Should -BeFalse
     }
 
+    It 'refuses to replace a config a running session wrote while it was being edited' {
+        $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups
+        $sessionWrite = $script:CfgBody.Replace('"numStartups": 42', '"numStartups": 43')
+        $cfg = $script:Cfg
+        $r = Invoke-McpDisable -ConfigPath $cfg -Groups $script:Groups -PlanId $plan.PlanId -BackupDir $script:Bk -BeforeReplace {
+            [System.IO.File]::WriteAllText($cfg, $sessionWrite)
+            (Get-Item -LiteralPath $cfg).LastWriteTimeUtc = [datetime]::UtcNow.AddMinutes(1)
+        }.GetNewClosure()
+        $r.Ok | Should -BeFalse
+        $r.Reason | Should -Match 'changed while it was being edited'
+        [System.IO.File]::ReadAllText($script:Cfg) | Should -Be $sessionWrite
+        @(Get-ChildItem -LiteralPath (Split-Path $script:Cfg) -Filter '*.tmp').Count | Should -Be 0
+    }
+
     It 'never touches an unreadable config' {
         [System.IO.File]::WriteAllText($script:Cfg, '{ not json')
         $r = Invoke-McpDisable -ConfigPath $script:Cfg -Groups $script:Groups -PlanId 'x' -BackupDir $script:Bk
@@ -256,9 +270,23 @@ Describe 'the script end to end (fixtures only)' {
         $doc.planId | Should -Match '^[0-9a-f]{12}$'
         [System.IO.File]::ReadAllBytes($cfg) | Should -Be $before
 
-        & pwsh -NoProfile -File $script:Script -ClaudeHome $fx.Root -ConfigPath $cfg -Execute -BackupDir (Join-Path $TestDrive 'bk-e2e') *> $null
+        $msg = & pwsh -NoProfile -File $script:Script -ClaudeHome $fx.Root -ConfigPath $cfg -Execute -BackupDir (Join-Path $TestDrive 'bk-e2e') *>&1 | Out-String
         $LASTEXITCODE | Should -Be 1
+        $msg | Should -Match 'needs -PlanId'
         [System.IO.File]::ReadAllBytes($cfg) | Should -Be $before
+
+        # -ClaudeHome without -ConfigPath must refuse rather than fall back to the real ~/.claude.json. The
+        # child's home points into TestDrive too, so even a broken guard could not reach the real files.
+        $fakeHome = Join-Path $TestDrive 'fakehome'; New-Item -ItemType Directory -Force -Path $fakeHome | Out-Null
+        $saved = @{ HOME = $env:HOME; USERPROFILE = $env:USERPROFILE; CLAUDE_CONFIG_DIR = $env:CLAUDE_CONFIG_DIR }
+        try {
+            $env:HOME = $fakeHome; $env:USERPROFILE = $fakeHome; $env:CLAUDE_CONFIG_DIR = $fakeHome
+            $msg = & pwsh -NoProfile -File $script:Script -ClaudeHome $fx.Root -Execute -PlanId $doc.planId -BackupDir (Join-Path $TestDrive 'bk-e2e') *>&1 | Out-String
+            $code = $LASTEXITCODE
+        } finally { foreach ($k in $saved.Keys) { Set-Item -Path "env:$k" -Value $saved[$k] } }
+        $code | Should -Be 1
+        $msg | Should -Match 'also needs -ConfigPath and -BackupDir'
+        Test-Path (Join-Path $fakeHome '.claude.json') | Should -BeFalse
 
         & pwsh -NoProfile -File $script:Script -ClaudeHome $fx.Root -ConfigPath $cfg -Execute -PlanId $doc.planId -BackupDir (Join-Path $TestDrive 'bk-e2e') *> $null
         $LASTEXITCODE | Should -Be 0

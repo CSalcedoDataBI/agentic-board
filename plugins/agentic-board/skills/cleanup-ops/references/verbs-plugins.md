@@ -56,13 +56,18 @@ old builds could be removed. It never deletes on its own. Then three report-only
 silent when empty:
 
 - **Cache pressure** — every plugin whose cache holds more than `-CacheBuildLimit` builds (10) or
-  `-CacheMbLimit` MB (500), with its build count and size, and the suggestion to run `clean`.
+  `-CacheMbLimit` MB (500), with its build count, size and how many of those builds `clean` could free.
+  `clean` is suggested only when that number is above zero (an installed or in-use build is never freed).
 - **Running from a source folder** — every installed plugin whose marketplace is a `directory` source:
   sessions run unreleased code and `plugin update` has nothing to compare against. It prints the
-  `marketplace remove` / `marketplace add <git-repo>#<release-branch-or-tag>` / `install` commands; the
+  `marketplace remove` / `marketplace add <git-repo>#<release-branch-or-tag>` / `install` commands, with an
+  install line for EVERY install of that marketplace (removing it uninstalls them all, even under `-Only`),
+  each with its `--scope` (a project or local install is reinstalled from that project's folder); the
   repo and ref are the user's to fill in. Nothing is run.
-- **Auto-update off** — git marketplaces whose `autoUpdate` is off or not set, so their plugins update only
-  when someone runs this. Turning it on is the user's call in `/plugin`; this never flips it.
+- **Auto-update off** — git marketplaces whose `autoUpdate` is explicitly `false`, so their plugins update
+  only when someone runs this. An absent field is not listed: Claude Code applies its own default (on for
+  official marketplaces), which this cannot know. Turning it on is the user's call in `/plugin`; this never
+  flips it.
 
 ### sessions
 

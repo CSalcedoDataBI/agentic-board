@@ -230,9 +230,12 @@ function Get-McpDisablePlan {
 
 # Add the missing ids, back up first, write atomically, read back to verify. Touches nothing but
 # projects[<path>].disabledMcpServers. Refuses when the file no longer yields the plan the user confirmed.
+# -BeforeReplace is a test seam: it runs right before the last look at the file, where a running session
+# could write it.
 #   { Ok; Reason; Backup; Added; Verified }
 function Invoke-McpDisable {
-    param([Parameter(Mandatory)][string]$ConfigPath, [object[]]$Groups, [Parameter(Mandatory)][string]$PlanId, [Parameter(Mandatory)][string]$BackupDir)
+    param([Parameter(Mandatory)][string]$ConfigPath, [object[]]$Groups, [Parameter(Mandatory)][string]$PlanId, [Parameter(Mandatory)][string]$BackupDir,
+          [scriptblock]$BeforeReplace)
     $no = { param($why) [pscustomobject]@{ Ok = $false; Reason = $why; Backup = ''; Added = 0; Verified = $false } }
     # A link (dotfile managers) would be replaced by a plain file and the real target left stale: refuse.
     $item = Get-Item -LiteralPath $ConfigPath -Force -ErrorAction SilentlyContinue
@@ -274,6 +277,7 @@ function Invoke-McpDisable {
         if (-not $IsWindows) { $fo.UnixCreateMode = [System.IO.File]::GetUnixFileMode($ConfigPath) }
         $fs = [System.IO.FileStream]::new($tmp, $fo)
         try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
+        if ($BeforeReplace) { & $BeforeReplace }
         $now = [System.IO.FileInfo]::new($ConfigPath)
         if ("$($now.LastWriteTimeUtc.Ticks)/$($now.Length)" -ne $stamp) {
             try { [System.IO.File]::Delete($tmp) } catch { }

@@ -326,11 +326,20 @@ function Invoke-PluginUpdate {
     $dirMk = @($mkt.Items | Where-Object { $_.SourceKind -eq 'directory' } | ForEach-Object { $_.Name })
     # From EVERY installed entry, not the -Only targets: the advice removes the whole marketplace, so the
     # reinstall list must name every plugin it would take with it.
+    # One row per install (key AND scope): a project-scoped install must come back at its own scope.
     $result.DirectorySource = @($inst.Entries | Where-Object { $dirMk -contains $_.Marketplace } |
-        Sort-Object Key -Unique | ForEach-Object { [pscustomobject]@{ Key = $_.Key; Plugin = $_.Plugin; Marketplace = $_.Marketplace } })
+        Sort-Object Key, Scope -Unique | ForEach-Object { [pscustomobject]@{ Key = $_.Key; Plugin = $_.Plugin; Marketplace = $_.Marketplace; Scope = $_.Scope } })
     # Only an explicit false: an absent field takes Claude Code's own default, which this cannot know.
     $result.AutoUpdateOff = @($mkt.Items | Where-Object { $_.AutoUpdateSet -and -not $_.AutoUpdate -and $_.SourceKind -ne 'directory' } | ForEach-Object { $_.Name } | Sort-Object)
-    $result.CacheHeavy = @(Get-PluginCacheUsage -ClaudeHome $ClaudeHome | Where-Object { $_.Builds -gt $CacheBuildLimit -or $_.Bytes -gt ([long]$CacheMbLimit * 1MB) })
+    # How many builds of each plugin `clean` could actually free (none once it already ran): the advice
+    # is only given when this is above zero - an installed or in-use build is never freed.
+    $freeable = @{}
+    if ($plan.Ok -and -not $result.Cleanup.Ran) {
+        foreach ($it in @($plan.Items | Where-Object { $_.Action -eq 'remove' })) { $k = "$($it.Marketplace)/$($it.Plugin)"; $freeable[$k] = 1 + [int]$freeable[$k] }
+    }
+    $result.CacheHeavy = @(Get-PluginCacheUsage -ClaudeHome $ClaudeHome |
+        Where-Object { $_.Builds -gt $CacheBuildLimit -or $_.Bytes -gt ([long]$CacheMbLimit * 1MB) } |
+        ForEach-Object { $_ | Add-Member -NotePropertyName Freeable -NotePropertyValue ([int]$freeable["$($_.Marketplace)/$($_.Plugin)"]) -PassThru })
 
     $badMk = @($result.Marketplaces | Where-Object { $_.Status -eq 'failed' -and -not $_.Warning }).Count
     $badPl = @($result.Plugins | Where-Object { $_.Failure }).Count
@@ -449,19 +458,26 @@ function Format-PluginUpdateReport {
     if ($heavy.Count -gt 0) {
         & $add '' 'Gray'
         & $add 'Plugins piling up cached builds (Claude Code only prunes them after 14 days)' 'Yellow'
-        foreach ($h in $heavy) { & $add ("  {0}@{1}: {2} builds, {3}" -f $h.Plugin, $h.Marketplace, $h.Builds, (Format-Megabytes $h.Bytes)) 'Yellow' }
-        & $add '  To free the unused ones: /cleanup plugins clean (it keeps the installed build and any build an open session uses).' 'Gray'
+        foreach ($h in $heavy) { & $add ("  {0}@{1}: {2} builds, {3} ({4} could be freed now)" -f $h.Plugin, $h.Marketplace, $h.Builds, (Format-Megabytes $h.Bytes), [int]$h.Freeable) 'Yellow' }
+        if (@($heavy | Where-Object { $_.Freeable -gt 0 }).Count -gt 0) {
+            & $add '  To free the unused ones: /cleanup plugins clean (it keeps the installed build and any build an open session uses).' 'Gray'
+        } else {
+            & $add '  Nothing there can be freed now: what is left is installed, in use by an open session, or just written.' 'Gray'
+        }
     }
     $dirSrc = @($Result.DirectorySource)
     if ($dirSrc.Count -gt 0) {
         & $add '' 'Gray'
         & $add 'Running from a source folder, not a release (a directory marketplace = unreleased code; update has nothing to compare against)' 'Yellow'
-        foreach ($d in $dirSrc) { & $add ("  {0}" -f $d.Key) 'Yellow' }
-        & $add '  To run released builds instead, register the git dist branch or tag (fill in the repo and ref). Removing a marketplace uninstalls ALL its plugins, so every one is reinstalled below:' 'Gray'
+        foreach ($d in @($dirSrc | Sort-Object Key -Unique)) { & $add ("  {0}" -f $d.Key) 'Yellow' }
+        & $add '  To run released builds instead, register the git dist branch or tag (fill in the repo and ref). Removing a marketplace uninstalls ALL its plugins, so every install is restored below at its own scope:' 'Gray'
         foreach ($m in @($dirSrc | ForEach-Object { $_.Marketplace } | Select-Object -Unique)) {
             & $add ("    claude plugin marketplace remove {0}" -f $m) 'Gray'
             & $add  '    claude plugin marketplace add <git-repo>#<release-branch-or-tag>' 'Gray'
-            foreach ($d in @($dirSrc | Where-Object { $_.Marketplace -eq $m })) { & $add ("    claude plugin install {0}" -f $d.Key) 'Gray' }
+            foreach ($d in @($dirSrc | Where-Object { $_.Marketplace -eq $m })) {
+                $where = if ($d.Scope -and $d.Scope -ne 'user') { '   (run it from that project''s folder)' } else { '' }
+                & $add ("    claude plugin install {0} --scope {1}{2}" -f $d.Key, $(if ($d.Scope) { $d.Scope } else { 'user' }), $where) 'Gray'
+            }
         }
     }
     $off = @($Result.AutoUpdateOff)

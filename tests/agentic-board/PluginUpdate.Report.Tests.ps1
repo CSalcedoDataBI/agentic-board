@@ -95,6 +95,24 @@ Describe 'Invoke-PluginUpdate - what keeps the user on the manual loop' {
         $text | Should -Match '/cleanup plugins clean'
     }
 
+    It 'does not suggest clean when nothing over the limit can be freed (installed build only)' {
+        $r = Invoke-PluginUpdate -ClaudeHome $script:Fx.Root -Runner $script:OkRunner -GetProcess $script:NoProcess -CacheBuildLimit 0
+        ($r.CacheHeavy | Where-Object Plugin -eq 'pub').Freeable | Should -Be 0
+        ($r.CacheHeavy | Where-Object Plugin -eq 'churn').Freeable | Should -Be 3
+        $only = $r.PSObject.Copy(); $only.CacheHeavy = @($r.CacheHeavy | Where-Object Plugin -eq 'pub')
+        $text = (Format-PluginUpdateReport -Result $only).Text -join "`n"
+        $text | Should -Not -Match '/cleanup plugins clean \(it keeps'
+        $text | Should -Match 'Nothing there can be freed now'
+    }
+
+    It 'restores a project-scoped install at its own scope' {
+        [void](Add-FakeBuild $script:Fx -Marketplace 'devtree' -Plugin 'scoped' -Version '0.2' -Installed -Scope 'project')
+        $r = Invoke-PluginUpdate -ClaudeHome $script:Fx.Root -Runner $script:OkRunner -GetProcess $script:NoProcess
+        $text = (Format-PluginUpdateReport -Result $r).Text -join "`n"
+        $text | Should -Match 'claude plugin install scoped@devtree --scope project   \(run it from that project''s folder\)'
+        $text | Should -Match 'claude plugin install wip@devtree --scope user'
+    }
+
     It 'stays quiet about cache pressure under the limits' {
         $r = Invoke-PluginUpdate -ClaudeHome $script:Fx.Root -Runner $script:OkRunner -GetProcess $script:NoProcess
         @($r.CacheHeavy).Count | Should -Be 0
@@ -148,9 +166,35 @@ Describe 'the release-notice contract (one release file per plugin@marketplace)'
         foreach ($bad in '../p', '..\p') {
             @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin $bad -Marketplace 'm' -Installed '1.0').Count | Should -Be 0
         }
-        New-Item -ItemType Directory -Force -Path (Join-Path $script:Home_ 'x') | Out-Null
-        [System.IO.File]::WriteAllText((Join-Path $script:Home_ 'x' 'p@m.json'), '{"version":"1.0","fixes":["#667"]}')
-        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'p' -Marketplace '../x/m' -Installed '1.0').Count | Should -Be 0
+        # 'm/../../p@m' resolves to <home>/p@m.json: the decoy above. Only the marketplace check stops it.
+        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'p' -Marketplace 'm/../../p@m' -Installed '1.0').Count | Should -Be 0
+        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'p' -Marketplace 'm\..\..\p@m' -Installed '1.0').Count | Should -Be 0
+    }
+
+    It 'keeps at most 10 references' {
+        $refs = (1..12 | ForEach-Object { "`"#$_`"" }) -join ','
+        Set-Release 'n@m' "{`"version`":`"1.0`",`"fixes`":[$refs]}"
+        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'n' -Marketplace 'm' -Installed '1.0').Count | Should -Be 10
+    }
+
+    It 'never reads a file over 64 KB, a folder, or a link (the hook must never block)' {
+        Set-Release 'big@m' ('{"version":"1.0","fixes":["#1"],"pad":"' + ('x' * 70000) + '"}')
+        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'big' -Marketplace 'm' -Installed '1.0').Count | Should -Be 0
+        New-Item -ItemType Directory -Force -Path (Join-Path $script:Home_ 'plugin-releases' 'dir@m.json') | Out-Null
+        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'dir' -Marketplace 'm' -Installed '1.0').Count | Should -Be 0
+        $target = Join-Path $script:Home_ 'target.json'
+        [System.IO.File]::WriteAllText($target, '{"version":"1.0","fixes":["#1"]}')
+        try { New-Item -ItemType SymbolicLink -Path (Join-Path $script:Home_ 'plugin-releases' 'lnk@m.json') -Target $target -ErrorAction Stop | Out-Null }
+        catch { Set-ItResult -Skipped -Because 'this host cannot create symbolic links'; return }
+        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'lnk' -Marketplace 'm' -Installed '1.0').Count | Should -Be 0
+    }
+
+    It 'never opens a named pipe (it would block every prompt)' -Skip:$IsWindows {
+        $fifo = Join-Path $script:Home_ 'plugin-releases' 'pipe@m.json'
+        & mkfifo $fifo
+        $clock = [System.Diagnostics.Stopwatch]::StartNew()
+        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'pipe' -Marketplace 'm' -Installed '1.0').Count | Should -Be 0
+        $clock.ElapsedMilliseconds | Should -BeLessThan 5000
     }
 
     It 'keeps only issue references, so the file cannot put a sentence into the notice' {
