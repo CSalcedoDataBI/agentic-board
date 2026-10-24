@@ -77,7 +77,8 @@ function Get-ReleaseFixes {
         $fs = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
         try { $n = 0; while ($n -lt $buf.Length) { $r = $fs.Read($buf, $n, $buf.Length - $n); if ($r -le 0) { break }; $n += $r } } finally { $fs.Dispose() }
         if ($n -ge $buf.Length) { return @() }   # grew past the bound since the size check
-        $doc = [System.Text.Encoding]::UTF8.GetString($buf, 0, $n) | ConvertFrom-Json -ErrorAction Stop
+        # A BOM (Windows PowerShell's UTF8 writers add one) would make the JSON parser reject the file.
+        $doc = [System.Text.Encoding]::UTF8.GetString($buf, 0, $n).TrimStart([char]0xFEFF) | ConvertFrom-Json -ErrorAction Stop
         $ver = "$($doc.version)".Trim().TrimStart('v', 'V')
         $sha = "$($doc.commit)".Trim()
         $ic = [System.StringComparison]::OrdinalIgnoreCase

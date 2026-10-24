@@ -160,6 +160,11 @@ Describe 'the release-notice contract (one release file per plugin@marketplace)'
         @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'p' -Marketplace 'm' -Installed '2.0') | Should -Be @('#12', '#15')
     }
 
+    It 'reads a release file written with a UTF-8 BOM' {
+        [System.IO.File]::WriteAllText((Join-Path $script:Home_ 'plugin-releases' 'b@m.json'), '{"version":"2.0","fixes":["#8"]}', [System.Text.UTF8Encoding]::new($true))
+        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'b' -Marketplace 'm' -Installed '2.0') | Should -Be @('#8')
+    }
+
     It 'never lends the file to a same-named plugin of another marketplace' {
         Set-Release 'p@other' '{"version":"2.0","fixes":["#12"]}'
         @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'p' -Marketplace 'm' -Installed '2.0').Count | Should -Be 0
