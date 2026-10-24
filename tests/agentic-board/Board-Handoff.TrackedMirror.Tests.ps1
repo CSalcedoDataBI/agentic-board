@@ -36,6 +36,11 @@ Describe 'Resolve-HandoffMirror (#795)' {
         $m.Rel    | Should -BeExactly 'notes/handoff.md'
         $m.Ignore | Should -Be @('/notes/handoff.md', '/.handoffs/')
     }
+    It 'canonicalises inner "." and empty segments (git prints tracked paths canonically)' {
+        (Resolve-HandoffMirror -MirrorPath 'docs/./guide.md').Rel  | Should -BeExactly 'docs/guide.md'
+        (Resolve-HandoffMirror -MirrorPath 'docs//guide.md').Rel   | Should -BeExactly 'docs/guide.md'
+        (Resolve-HandoffMirror -MirrorPath 'docs\.\guide.md').Rel  | Should -BeExactly 'docs/guide.md'
+    }
     It 'refuses a rooted -MirrorPath or one that climbs out of the repo' {
         { Resolve-HandoffMirror -MirrorPath ([System.IO.Path]::GetFullPath('x.md')) } | Should -Throw '*relative*'
         { Resolve-HandoffMirror -MirrorPath '../outside.md' } | Should -Throw "*'..'*"
@@ -50,6 +55,30 @@ Describe 'Test-HandoffMirrorText (#795 review)' {
         Test-HandoffMirrorText "# Project guide`nRead me at session start." | Should -BeFalse
         Test-HandoffMirrorText '' | Should -BeFalse
         Test-HandoffMirrorText "---`nsaved: 2026-10-23T00:00:00Z`n---`n# x" | Should -BeFalse
+        Test-HandoffMirrorText "---`nverified: 1/1`n---`n# x" | Should -BeFalse
+    }
+    It 'ignores saved:/verified: lines in the body (a guide documenting the format)' {
+        Test-HandoffMirrorText "# Guide`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1" | Should -BeFalse
+    }
+}
+
+Describe 'Test-HandoffFrontmatter in the SessionStart hook (#795 review)' {
+    BeforeAll {
+        $env:ABIOS_HANDOFF_HOOK_DOTSOURCE = '1'
+        . $script:Hook
+        $env:ABIOS_HANDOFF_HOOK_DOTSOURCE = ''
+    }
+    It 'agrees with Test-HandoffMirrorText on every case' {
+        $cases = @(
+            "---`nissue: 7`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7"
+            "# Project guide`nRead me at session start."
+            "---`nsaved: 2026-10-23T00:00:00Z`n---`n# x"
+            "---`nverified: 1/1`n---`n# x"
+            "# Guide`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1"
+            "---`nsaved:`nverified: 1/1`n---"
+            ''
+        )
+        foreach ($c in $cases) { Test-HandoffFrontmatter $c | Should -Be (Test-HandoffMirrorText $c) -Because $c }
     }
 }
 
@@ -93,6 +122,11 @@ exit /b 0
             return $r
         }
         function Get-Bytes([string]$Path) { [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($Path)) }
+        # The SessionStart hook as Claude Code runs it: JSON on stdin, context JSON (or nothing) on stdout.
+        function Invoke-Hook([string]$Repo) {
+            $stdin = (@{ source = 'resume'; cwd = $Repo } | ConvertTo-Json -Compress)
+            return ($stdin | & pwsh -NoProfile -File $script:Hook 2>&1 | Out-String).Trim()
+        }
     }
 
     It '-Save leaves the tracked HANDOFF.md byte-identical and tracked, and writes .handoffs/active.md' {
@@ -129,14 +163,33 @@ exit /b 0
         Get-Content -Raw (Join-Path $repo '.gitignore') | Should -Not -Match '(?m)^/HANDOFF\.md\s*$'
     }
 
-    It 'refuses a -MirrorPath that points at a tracked file, and writes nothing' {
+    It 'refuses a -MirrorPath that points at a tracked file (any spelling), and writes nothing' {
         $repo   = New-TrackedRepo 'refuse'
         $before = Get-Bytes (Join-Path $repo 'HANDOFF.md')
-        $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-MirrorPath', 'HANDOFF.md') $script:EmptyJson
-        $r.Code | Should -Not -Be 0
-        $r.Out  | Should -Match 'tracked by git'
+        $giBefore = Get-Bytes (Join-Path $repo '.gitignore')
+        foreach ($spelling in '.gitignore', './/.gitignore') {
+            $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', "'$spelling'") $script:EmptyJson
+            $r.Code | Should -Not -Be 0 -Because $spelling
+            $r.Out  | Should -Match "'\.gitignore' is tracked by git and is not a handoff" -Because $r.Out
+        }
+        Get-Bytes (Join-Path $repo '.gitignore') | Should -BeExactly $giBefore
         Get-Bytes (Join-Path $repo 'HANDOFF.md') | Should -BeExactly $before
         Test-Path (Join-Path $repo '.handoffs') | Should -BeFalse
+        git -C $repo config --local --get abios.handoffMirror | Should -BeNullOrEmpty
+    }
+
+    It 'a second -Save rotates .handoffs/active.md into one archive and keeps the guide untouched' {
+        $repo   = New-TrackedRepo 'twice'
+        $before = Get-Bytes (Join-Path $repo 'HANDOFF.md')
+        foreach ($n in 'first', 'second') {
+            $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] $n'") $script:EmptyJson
+            $r.Code | Should -Be 0 -Because $r.Out
+        }
+        Get-Content -Raw (Join-Path $repo '.handoffs/active.md') | Should -Match 'second'
+        $archives = @(Get-ChildItem (Join-Path $repo '.handoffs') -Filter '*-handoff.md')
+        $archives.Count | Should -Be 1
+        Get-Content -Raw $archives[0].FullName | Should -Match 'first'
+        Get-Bytes (Join-Path $repo 'HANDOFF.md') | Should -BeExactly $before
     }
 
     It 'a force-committed mirror (the tool''s own handoff, tracked) is still used as the mirror' {
@@ -147,6 +200,7 @@ exit /b 0
         $r.Code | Should -Be 0 -Because $r.Out
         Get-Content -Raw (Join-Path $repo 'HANDOFF.md') | Should -Match 'fresh'
         Test-Path (Join-Path $repo '.handoffs/active.md') | Should -BeFalse
+        Invoke-Hook $repo | Should -Match 'fresh'
     }
 
     It 'remembers -MirrorPath, so a later -Resume and the hook find it without the flag' {
@@ -176,6 +230,10 @@ exit /b 0
         Get-Content -Raw (Join-Path $repo '.handoffs/active.md') | Should -Match 'fresh'
         [System.IO.File]::ReadAllText((Join-Path $repo 'HANDOFF.md')) | Should -BeExactly $stale
         Get-Content -Raw (Join-Path $repo '.gitignore') | Should -Not -Match '(?m)^/HANDOFF\.md\s*$'
+        # The hook judges the same committed copy: it surfaces the new mirror, not the stale file on disk.
+        $h = Invoke-Hook $repo
+        $h | Should -Match 'fresh'
+        $h | Should -Not -Match 'Next step: old'
     }
 
     It 'detects a tracked HANDOFF.md whatever its case (NTFS resolves both names to one file)' {
@@ -188,6 +246,7 @@ exit /b 0
         $r.Code | Should -Be 0 -Because $r.Out
         Get-Bytes (Join-Path $repo 'Handoff.md') | Should -BeExactly $before
         Test-Path (Join-Path $repo '.handoffs/active.md') | Should -BeTrue
+        Invoke-Hook $repo | Should -Match 'Next step: next'
     }
 
     It '-Save -DryRun puts the composed markdown on the success stream' {
@@ -200,11 +259,16 @@ exit /b 0
 
     It 'the SessionStart hook does not mistake a tracked HANDOFF.md for a saved handoff' {
         $repo = New-TrackedRepo 'hook'
-        $stdin = (@{ source = 'resume'; cwd = $repo } | ConvertTo-Json -Compress)
-        ($stdin | & pwsh -NoProfile -File $script:Hook | Out-String).Trim() | Should -BeNullOrEmpty
+        # A guide that LOOKS like a handoff to the old hook (it has the heading the hook quotes), and
+        # even mentions the keys in its body - but carries no handoff frontmatter.
+        [System.IO.File]::WriteAllText((Join-Path $repo 'HANDOFF.md'), "# Guide`nsaved: always`nverified: by hand`n## Next concrete step`nread the guide")
+        git -C $repo commit --quiet -am 'docs: guide' 2>&1 | Out-Null
+        Invoke-Hook $repo | Should -BeNullOrEmpty
 
         New-Item -ItemType Directory -Path (Join-Path $repo '.handoffs') | Out-Null
         Set-Content -Path (Join-Path $repo '.handoffs/active.md') -Value "---`nissue: 7`n---`n## Next concrete step`n[V] hooked" -Encoding UTF8
-        ($stdin | & pwsh -NoProfile -File $script:Hook | Out-String) | Should -Match 'hooked'
+        $h = Invoke-Hook $repo
+        $h | Should -Match 'hooked'
+        $h | Should -Not -Match 'read the guide'
     }
 }

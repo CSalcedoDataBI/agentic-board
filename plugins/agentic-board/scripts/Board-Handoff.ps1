@@ -245,8 +245,12 @@ function Resolve-HandoffMirror {
     param([string]$MirrorPath = "", [bool]$RootHandoffTracked = $false)
     if ($MirrorPath) {
         if ([System.IO.Path]::IsPathRooted($MirrorPath)) { throw "Board-Handoff: -MirrorPath '$MirrorPath' must be relative to the repo root." }
-        $rel = ($MirrorPath -replace '\\', '/') -replace '^(\./)+', ''
-        if ($rel -match '(^|/)\.\.(/|$)') { throw "Board-Handoff: -MirrorPath '$MirrorPath' must stay inside the repo (no '..')." }
+        # Canonical form (no '.' segments, no empty ones): git prints tracked paths canonically, and a
+        # 'docs/./guide.md' that did not compare equal would slip past the tracked-file guard.
+        $segs = @(($MirrorPath -replace '\\', '/') -split '/' | Where-Object { $_ -and $_ -ne '.' })
+        if ($segs -contains '..') { throw "Board-Handoff: -MirrorPath '$MirrorPath' must stay inside the repo (no '..')." }
+        if (-not $segs.Count) { throw "Board-Handoff: -MirrorPath '$MirrorPath' names no file." }
+        $rel = $segs -join '/'
     } elseif ($RootHandoffTracked) {
         $rel = '.handoffs/active.md'
     } else {
@@ -869,6 +873,8 @@ if ($Resume) {
             $giBody = if (Test-Path $gitignorePath) { Get-Content $gitignorePath -Raw } else { "" }
             $giNew  = Add-GitignoreEntries $giBody $mirror.Ignore
             if ($giNew -ne $giBody) { Set-Content -Path $gitignorePath -Value $giNew -Encoding UTF8 -NoNewline }
+            # Machine B is where the local config is empty: remember an explicit -MirrorPath here too.
+            if ($mirrorFromParam) { git -C $repoRoot config --local abios.handoffMirror $mirror.Rel 2>$null | Out-Null }
             Write-Host "  OK  Local mirror $($mirror.Rel) regenerated from the $source" -ForegroundColor DarkGray
         }
     }

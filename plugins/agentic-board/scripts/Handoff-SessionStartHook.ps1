@@ -45,6 +45,20 @@ function Get-HandoffSessionContext([string]$body) {
     return $ctx
 }
 
+# Is this text a handoff Board-Handoff.ps1 wrote? Same rule as its Test-HandoffMirrorText (#795):
+# non-empty `saved:` AND `verified:` keys inside the LEADING --- frontmatter block, never the body.
+# Pure + testable.
+function Test-HandoffFrontmatter([string]$text) {
+    $lines = @(([string]$text) -split "`r?`n")
+    if ($lines.Count -eq 0 -or $lines[0].Trim() -ne '---') { return $false }
+    $seen = @{}
+    for ($i = 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim() -eq '---') { break }
+        if ($lines[$i] -match '^\s*(saved|verified)\s*:\s*\S') { $seen[$Matches[1]] = $true }
+    }
+    return [bool]($seen['saved'] -and $seen['verified'])
+}
+
 # Build the SessionStart context line AFTER an auto-compaction (source == "compact"),
 # from the local active-run marker object (.agentic-board/active-run.json). Pure +
 # testable. Returns "" unless a run is genuinely active - so the compact case is a
@@ -129,7 +143,7 @@ try {
             $hit = @(git -C $root ls-files -- ':(icase)HANDOFF.md' 2>$null) | Where-Object { $_ -ieq 'HANDOFF.md' } | Select-Object -First 1
             if ($hit) {
                 $indexed = (@(git -C $root show ":$hit" 2>$null) -join "`n")
-                if ($indexed -notmatch '(?m)^saved:\s*\S' -or $indexed -notmatch '(?m)^verified:\s*\S') {
+                if (-not (Test-HandoffFrontmatter $indexed)) {
                     $handoffPath = Join-Path (Join-Path $root '.handoffs') 'active.md'
                 }
             }
