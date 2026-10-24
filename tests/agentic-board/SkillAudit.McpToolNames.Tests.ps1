@@ -255,9 +255,11 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
             foreach ($p in $script:Servers | Where-Object { $_ -match '^plugin_' }) {
                 # Neither the prefix nor the plugin's own name, unless the skill itself wrote them.
                 $plugin = ([regex]::Match($p, '^plugin_([^_]+)_')).Groups[1].Value
+                # What the skill itself wrote, read from its files - never inferred from the detail's formatting.
+                $skillText = (Get-ChildItem -LiteralPath (Split-Path $f.paths[0] -Parent) -Recurse -File -Filter '*.md' |
+                    ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join ' '
                 foreach ($needle in @($p, "plugin_$($plugin)_")) {
-                    $own = [regex]::Matches($f.detail, '`mcp__' + [regex]::Escape($needle)).Count
-                    [regex]::Matches($f.detail, [regex]::Escape($needle)).Count | Should -Be $own
+                    if (-not $skillText.Contains($needle)) { $f.detail.Contains($needle) | Should -BeFalse }
                 }
                 $f.detail | Should -Not -Match ('(installed|provided) by ' + [regex]::Escape($plugin))
             }
@@ -422,6 +424,11 @@ Describe 'Get-McpServerNames' {
             Write-Json (Join-Path $new '.mcp.json') @{ 'new-server' = @{} }
             $other = Join-Path $script:Home3 'p/other'; Write-Json (Join-Path $other '.mcp.json') @{ 'other-proj' = @{} }
             $mine  = Join-Path $script:Home3 'p/mine';  Write-Json (Join-Path $mine  '.mcp.json') @{ 'my.server' = @{} }
+            $back  = Join-Path $script:Home3 'p/back';  Write-Json (Join-Path $back  '.mcp.json') @{ 'back-server' = @{} }
+            $und   = Join-Path $script:Home3 'p/und';   Write-Json (Join-Path $und   '.mcp.json') @{ 'srv-u' = @{} }
+            # Native Windows form: backslashes and the other drive-letter case.
+            $native = ($script:Repo3 -replace '/','\')
+            $native = if ($native[0] -cmatch '[A-Z]') { $native.Substring(0,1).ToLower() + $native.Substring(1) } else { $native.Substring(0,1).ToUpper() + $native.Substring(1) }
             $arr   = Join-Path $script:Home3 'p/arr'
             Write-Json (Join-Path $arr '.claude-plugin/plugin.json') @{ name = 'arr'; mcpServers = @('./a.json', './b.json') }
             Write-Json (Join-Path $arr 'a.json') @{ mcpServers = @{ 'from-a' = @{} } }
@@ -439,10 +446,12 @@ Describe 'Get-McpServerNames' {
                 'projhere@m'  = @(@{ scope = 'project'; projectPath = $repoKey; installPath = $other; lastUpdated = '2026-01-01T00:00:00Z' })
                 'elsewhere@m' = @(@{ scope = 'project'; projectPath = 'C:/some/other/repo'; installPath = $other; lastUpdated = '2026-01-01T00:00:00Z' })
                 'mine@m'      = @(@{ scope = 'local'; projectPath = $repoKey; installPath = $mine; lastUpdated = '2026-01-01T00:00:00Z' })
+                'back@m'      = @(@{ scope = 'local'; projectPath = $native; installPath = $back; lastUpdated = '2026-01-01T00:00:00Z' })
+                'under_pack@m' = @(@{ scope = 'user'; installPath = $und; lastUpdated = '2026-01-01T00:00:00Z' })
                 'arr@m'       = @(@{ scope = 'user'; installPath = $arr; lastUpdated = '2026-01-01T00:00:00Z' })
                 'off@m'       = @(@{ scope = 'user'; installPath = $off; lastUpdated = '2026-01-01T00:00:00Z' })
             } }
-            Write-Json (Join-Path $script:Home3 '.claude/settings.json') @{ enabledPlugins = @{ 'dated@m' = $true; 'dated2@m' = $true; 'elsewhere@m' = $true; 'mine@m' = $true; 'arr@m' = $true; 'off@m' = $true } }
+            Write-Json (Join-Path $script:Home3 '.claude/settings.json') @{ enabledPlugins = @{ 'dated@m' = $true; 'dated2@m' = $true; 'elsewhere@m' = $true; 'mine@m' = $true; 'back@m' = $true; 'under_pack@m' = $true; 'arr@m' = $true; 'off@m' = $true } }
             # projhere is enabled only by the project's own settings; off is switched off by the local ones.
             Write-Json (Join-Path $script:Repo3 '.claude/settings.json') @{ enabledPlugins = @{ 'projhere@m' = $true } }
             Write-Json (Join-Path $script:Repo3 '.claude/settings.local.json') @{ enabledPlugins = @{ 'off@m' = $false } }
@@ -461,6 +470,18 @@ Describe 'Get-McpServerNames' {
         }
         It 'resolves a relative -Root against the PowerShell location and normalizes names' {
             $script:Names3 | Should -Contain 'plugin_mine_my_server'
+        }
+        It 'matches a projectPath written with backslashes and another drive-letter case' {
+            $script:Names3 | Should -Contain 'plugin_back_back-server'
+        }
+        It 'emits the server and plugin of each record, not just its prefix' {
+            $recs = @(& $script:Discover -Root $script:Repo3 -UserHome $script:Home3)
+            $my = $recs | Where-Object prefix -eq 'plugin_mine_my_server'
+            $my.server | Should -BeExactly 'my_server'
+            $my.plugin | Should -BeExactly 'mine'
+            $u = $recs | Where-Object prefix -eq 'plugin_under_pack_srv-u'    # a plugin name holding _
+            $u.server | Should -BeExactly 'srv-u'
+            $u.plugin | Should -BeExactly 'under_pack'
         }
         It 'reads every file of an array-valued mcpServers' {
             $script:Names3 | Should -Contain 'plugin_arr_from-a'
