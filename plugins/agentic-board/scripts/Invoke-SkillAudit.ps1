@@ -188,6 +188,9 @@ if ($available.Count) {
         foreach ($m in [regex]::Matches([string]$text, 'mcp__([A-Za-z0-9_-]+?)(?:__([A-Za-z0-9_-]+|\*)|(?![A-Za-z0-9_-]))')) {
             if (-not $refs.Contains($m.Value)) { $refs[$m.Value] = [pscustomobject]@{ prefix = $m.Groups[1].Value; tool = $m.Groups[2].Value } }
         }
+        # Every prefix this skill names, in any form: a skill that gives the working prefix anywhere
+        # (another tool, __*, the bare allowed-tools form) already documents both install forms.
+        $refPrefixes = [System.Collections.Generic.HashSet[string]]::new([string[]]@($refs.Values | ForEach-Object { $_.prefix }), [StringComparer]::OrdinalIgnoreCase)
         foreach ($ref in @($refs.Keys)) {
             $prefix = $refs[$ref].prefix; $tool = $refs[$ref].tool
             if ($availableSet.Contains($prefix)) { continue }
@@ -196,21 +199,35 @@ if ($available.Count) {
             if (@($ownPlugins | Where-Object { $prefix.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
             $server = Resolve-RefServer $prefix
             if (-not $server) { continue }
-            $suffix = if ($tool) { "__$tool" } else { '' }
-            $alt = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -ine $prefix } | ForEach-Object { "mcp__$($_.prefix)$suffix" })
-            # No working name, or the skill already gives it too (it documents both install forms).
-            if (-not $alt.Count -or @($alt | Where-Object { $refs.Contains($_) }).Count) { continue }
+            $altPrefixes = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -ine $prefix } | ForEach-Object { $_.prefix } | Sort-Object -Unique)
+            if (-not $altPrefixes.Count -or @($altPrefixes | Where-Object { $refPrefixes.Contains($_) }).Count) { continue }
+            # One root cause per hardcoded PREFIX: its tools are listed in one finding, not one finding each.
             $o = Get-Owner $s
-            $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)|$($ref.ToLowerInvariant())"
-            if (-not $mcpGroups.Contains($gk)) { $mcpGroups[$gk] = [pscustomobject]@{ ref = $ref; server = $server; tool = $tool; alt = $alt; members = [System.Collections.Generic.List[object]]::new() } }
-            $mcpGroups[$gk].members.Add($s)
+            $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)|$($prefix.ToLowerInvariant())"
+            if (-not $mcpGroups.Contains($gk)) {
+                $mcpGroups[$gk] = [pscustomobject]@{ prefix = $prefix; server = $server; alt = $altPrefixes
+                    refs = [ordered]@{}; members = [ordered]@{} }
+            }
+            $g = $mcpGroups[$gk]
+            if (-not $g.refs.Contains($ref.ToLowerInvariant())) { $g.refs[$ref.ToLowerInvariant()] = [pscustomobject]@{ ref = $ref; tool = $tool } }
+            if (-not $g.members.Contains($s.path)) { $g.members[$s.path] = $s }
         }
     }
     foreach ($g in $mcpGroups.Values) {
-        $members = @($g.members | Sort-Object @{ e = { $_.copyRank } }, @{ e = { $_.path } })
-        $op = if (-not $g.tool -or $g.tool -eq '*') { 'tools' } else { "``$($g.tool)`` tool" }
-        Add-Finding $members[0] 'med' 'mcp-tool-name' ("References ``$($g.ref)``, which is not in the agent's tool list: here that server is " +
-            "``$(($g.alt) -join '` or `')``. Name the server and the operation instead of a hardcoded prefix " +
+        $members = @($g.members.Values | Sort-Object @{ e = { $_.copyRank } }, @{ e = { $_.path } })
+        $rs = @($g.refs.Values)
+        if ($rs.Count -eq 1) {
+            $t = $rs[0].tool; $suffix = if ($t) { "__$t" } else { '' }
+            $op = if (-not $t -or $t -eq '*') { 'tools' } else { "``$t`` tool" }
+            $named = "``$($rs[0].ref)``, which is not in the agent's tool list"
+        } else {
+            $suffix = '__…'; $op = 'tools by operation'
+            $list = ($rs | ForEach-Object { '`' + $_.ref + '`' }) -join ', '
+            $named = "$list ($($rs.Count) names under one prefix), which are not in the agent's tool list"
+        }
+        $working = ($g.alt | ForEach-Object { '`mcp__' + $_ + $suffix + '`' }) -join ' or '
+        Add-Finding $members[0] 'med' 'mcp-tool-name' ("References $named`: here that server is " +
+            "$working. Name the server and the operation instead of a hardcoded prefix " +
             "(the $($g.server) $op), so the skill works however the server is installed.") $members
         $foldedFindings += $members.Count - 1
     }

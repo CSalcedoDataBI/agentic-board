@@ -6,8 +6,9 @@
     comes from an installed plugin (its .mcp.json, or the mcpServers of its plugin.json).
 
     The config files are read instead of shelling out to `claude mcp list`: that command health-checks
-    every server (seconds each) and does not show the plugin prefix. What is not loaded is left out:
-    plugins set to false in enabledPlugins (user < project < local settings), project- or local-scope
+    every server (seconds each) and does not show the plugin prefix. Config is read from
+    CLAUDE_CONFIG_DIR when it is set. What is not loaded is left out: plugins that enabledPlugins does
+    not set to true (user < project < local settings), project- or local-scope
     installs of another project, servers switched off in the project (disabledMcpServers), and project
     .mcp.json servers that were rejected or never approved.
 
@@ -24,7 +25,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if (-not $UserHome) { $UserHome = $env:USERPROFILE; if (-not $UserHome) { $UserHome = $HOME } }
+# Claude Code keeps .claude.json, settings.json and plugins/ under CLAUDE_CONFIG_DIR when it is set, and
+# otherwise .claude.json in the home and the rest in ~/.claude. -UserHome (fixtures) always wins.
+if (-not $UserHome -and $env:CLAUDE_CONFIG_DIR) {
+    $configDir = $env:CLAUDE_CONFIG_DIR; $claudeJson = Join-Path $configDir '.claude.json'
+} else {
+    if (-not $UserHome) { $UserHome = $env:USERPROFILE; if (-not $UserHome) { $UserHome = $HOME } }
+    $configDir = Join-Path $UserHome '.claude'; $claudeJson = Join-Path $UserHome '.claude.json'
+}
 # Resolved against the PowerShell location: [IO.Path]::GetFullPath would use the process CWD, which
 # Set-Location does not move, and the two lookups below would disagree on which project this is.
 $Root = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($Root)
@@ -51,7 +59,7 @@ function Get-ServerMapNames {
 }
 function Get-List { param($Map, [string]$Key) if ((Test-Map $Map) -and $Map.Contains($Key)) { @($Map[$Key] | Where-Object { $_ -is [string] }) } else { @() } }
 
-$cfg = Read-Json (Join-Path $UserHome '.claude.json')
+$cfg = Read-Json $claudeJson
 # The project's own entries in ~/.claude.json: every key that names this root, whatever its case or slashes.
 $projEntries = @()
 if ((Test-Map $cfg) -and (Test-Map $cfg['projects'])) {
@@ -60,7 +68,7 @@ if ((Test-Map $cfg) -and (Test-Map $cfg['projects'])) {
         ForEach-Object { $_.Value })
 }
 # Settings merged user < project < local, the precedence Claude Code applies.
-$settingsFiles = @((Join-Path $UserHome '.claude/settings.json'), (Join-Path $Root '.claude/settings.json'), (Join-Path $Root '.claude/settings.local.json'))
+$settingsFiles = @((Join-Path $configDir 'settings.json'), (Join-Path $Root '.claude/settings.json'), (Join-Path $Root '.claude/settings.local.json'))
 $settings = @($settingsFiles | ForEach-Object { Read-Json $_ } | Where-Object { Test-Map $_ })
 
 # Servers switched off in this project (/mcp disable): bare names, and plugin:<plugin>:<server> for plugin ones.
@@ -100,16 +108,17 @@ foreach ($n in (Get-ServerMapNames (Read-Json (Join-Path $Root '.mcp.json')))) {
 }
 
 # ── Plugin servers: every installed, enabled plugin ──────────────────────────────────
-# A plugin set to false at the most specific settings level that names it is not loaded.
+# Claude Code loads the plugins enabledPlugins sets to true; the most specific settings level that names
+# a plugin decides. A plugin installed but named nowhere is not counted: no prefix is guessed.
 $enabled = @{}
 foreach ($st in $settings) {
     if (Test-Map $st['enabledPlugins']) { foreach ($e in $st['enabledPlugins'].GetEnumerator()) { $enabled[$e.Key] = $e.Value } }
 }
-$installed = Read-Json (Join-Path $UserHome '.claude/plugins/installed_plugins.json')
+$installed = Read-Json (Join-Path $configDir 'plugins/installed_plugins.json')
 if ((Test-Map $installed) -and (Test-Map $installed['plugins'])) {
     foreach ($entry in $installed['plugins'].GetEnumerator()) {
         $key = [string]$entry.Key                           # <plugin>@<marketplace>
-        if ($enabled.ContainsKey($key) -and $enabled[$key] -eq $false) { continue }
+        if (-not ($enabled.ContainsKey($key) -and $enabled[$key] -eq $true)) { continue }
         $plugin = ($key -split '@')[0]
         # A project- or local-scope install only loads in its own project.
         $here = @(@($entry.Value) | Where-Object {
@@ -121,17 +130,22 @@ if ((Test-Map $installed) -and (Test-Map $installed['plugins'])) {
         # already turned the ISO timestamp into a DateTime; a string sort of it would be MM/dd/yyyy.
         $inst = $here | Sort-Object { $_['lastUpdated'] -as [datetime] } -Descending | Select-Object -First 1
         if (-not $inst) { continue }
-        $base = [string]$inst['installPath']
-        $names = @(Get-ServerMapNames (Read-Json (Join-Path $base '.mcp.json')))
-        $man = Read-Json (Join-Path $base '.claude-plugin/plugin.json')
-        if ((Test-Map $man) -and $man.Contains('mcpServers')) {
-            # mcpServers inlines the map, or points at one file or a list of files (relative to the plugin root).
-            foreach ($ms in @($man['mcpServers'])) {
-                if ($ms -is [string]) { $ms = Read-Json (Join-Path $base $ms) }
-                $names += @(Get-ServerMapNames $ms)
+        # One stale entry (an install path on a drive that is gone) costs that plugin only.
+        try {
+            $base = [string]$inst['installPath']
+            $names = @(Get-ServerMapNames (Read-Json ([IO.Path]::Combine($base, '.mcp.json'))))
+            $man = Read-Json ([IO.Path]::Combine($base, '.claude-plugin', 'plugin.json'))
+            if ((Test-Map $man) -and $man.Contains('mcpServers')) {
+                # mcpServers inlines the map, or points at one file or a list of files (relative to the plugin root).
+                foreach ($ms in @($man['mcpServers'])) {
+                    if ($ms -is [string]) { $ms = Read-Json ([IO.Path]::Combine($base, $ms)) }
+                    $names += @(Get-ServerMapNames $ms)
+                }
             }
+            foreach ($n in $names) { Add-Server $n $plugin "plugin:$key" }
+        } catch {
+            Write-Warning "Get-McpServerNames: cannot read plugin $key ($($_.Exception.Message)) - its MCP servers are left out."
         }
-        foreach ($n in $names) { Add-Server $n $plugin "plugin:$key" }
     }
 }
 

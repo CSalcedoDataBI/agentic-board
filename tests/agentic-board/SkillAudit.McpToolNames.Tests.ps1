@@ -43,6 +43,10 @@ BeforeAll {
     # both: documents both install forms, one of which works here.
     New-Skill '.claude/skills/proj/both' 'both' 'Use `mcp__powerbi-modeling-mcp__model_operations`, or `mcp__plugin_fabric-skills_powerbi-modeling-mcp__model_operations` when the plugin brings it.'
 
+    # multi: three tools under one hardcoded prefix - one root cause, one finding.
+    New-Skill '.claude/skills/proj/multi' 'multi' 'Use `mcp__powerbi-modeling-mcp__table_operations`, `mcp__powerbi-modeling-mcp__column_operations` and `mcp__powerbi-modeling-mcp__measure_operations`.'
+    # covers: hardcodes the bare form but also allows the working prefix in another form.
+    New-Skill '.claude/skills/proj/covers' 'covers' 'allowed-tools: mcp__plugin_fabric-skills_powerbi-modeling-mcp. Then call `mcp__powerbi-modeling-mcp__dax_query_operations`.'
     # allowed: the bare mcp__<server> form allowed-tools uses for all of a server's tools.
     New-Skill '.claude/skills/proj/allowed' 'allowed' "Frontmatter would say allowed-tools: mcp__powerbi-modeling-mcp, Read."
 
@@ -93,6 +97,23 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
     }
     It 'does not flag a skill that already gives the working name too' {
         (Get-McpFinding 'both').Count | Should -Be 0
+    }
+    It 'does not flag a skill that gives the working prefix in another form' {
+        (Get-McpFinding 'covers').Count | Should -Be 0
+    }
+    It 'reports one finding per hardcoded prefix, listing every name under it' {
+        $f = Get-McpFinding 'multi'
+        $f.Count | Should -Be 1
+        foreach ($t in 'table_operations', 'column_operations', 'measure_operations') {
+            $f[0].detail | Should -Match ([regex]::Escape("mcp__powerbi-modeling-mcp__$t"))
+        }
+        $f[0].detail | Should -Match '3 names under one prefix'
+        $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__…'))
+    }
+    It 'names each working prefix once even if it is listed twice' {
+        $r = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers ($script:Servers + 'plugin_fabric-skills_powerbi-modeling-mcp')
+        $d = @($r.findings | Where-Object { $_.skill -eq 'bare' -and $_.type -eq 'mcp-tool-name' })[0].detail
+        ([regex]::Matches($d, [regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__connection_operations'))).Count | Should -Be 1
     }
     It 'skips the check, and keeps the rest of the audit, when discovery fails' {
         $x = Invoke-StubbedAudit "throw 'discovery broke'"
@@ -157,6 +178,7 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         # The stub WOULD produce findings, so a fallback to discovery fails this test.
         $x = Invoke-StubbedAudit $script:StubPluginOnly @{ McpServers = @() }
         @($x.result.findings | Where-Object type -eq 'mcp-tool-name').Count | Should -Be 0
+        $x.result.summary.skillsAudited | Should -BeGreaterThan 0   # the audit did run
     }
 }
 
@@ -181,14 +203,15 @@ Describe 'Get-McpServerNames' {
         Write-Json (Join-Path $pb 'servers.json') @{ mcpServers = @{ 'from-file' = @{}; 'second' = @{} } }
         Write-Json (Join-Path $pc '.mcp.json') @{ mcpServers = @{ 'disabled-one' = @{} } }
         $pw = Join-Path $script:Home2 'plugins/w'; Write-Json (Join-Path $pw '.mcp.json') @{ mcpServers = @{ 'wrapped-one' = @{} } }
-        $pw = Join-Path $script:Home2 'plugins/w'; Write-Json (Join-Path $pw '.mcp.json') @{ mcpServers = @{ 'wrapped-one' = @{} } }
+        $pu = Join-Path $script:Home2 'plugins/u'; Write-Json (Join-Path $pu '.mcp.json') @{ 'unnamed-one' = @{} }
         Write-Json (Join-Path $script:Home2 '.claude/plugins/installed_plugins.json') @{ version = 2; plugins = @{
             'fabric-skills@m' = @(@{ scope = 'user'; installPath = $pa; lastUpdated = '2026-01-01' })
             'pack-b@m'        = @(@{ scope = 'user'; installPath = $pb; lastUpdated = '2026-01-01' })
             'pack-c@m'        = @(@{ scope = 'user'; installPath = $pc; lastUpdated = '2026-01-01' })
             'pack-w@m'        = @(@{ scope = 'user'; installPath = $pw; lastUpdated = '2026-01-01' })
+            'pack-u@m'        = @(@{ scope = 'user'; installPath = $pu; lastUpdated = '2026-01-01' })   # named in no enabledPlugins
         } }
-        Write-Json (Join-Path $script:Home2 '.claude/settings.json') @{ enabledPlugins = @{ 'pack-c@m' = $false } }
+        Write-Json (Join-Path $script:Home2 '.claude/settings.json') @{ enabledPlugins = @{ 'fabric-skills@m' = $true; 'pack-b@m' = $true; 'pack-w@m' = $true; 'pack-c@m' = $false } }
         $script:Names = @(& $script:Discover -Root $script:Repo2 -UserHome $script:Home2)
     }
     It 'lists direct servers by their bare name (user, local project entry, .mcp.json)' {
@@ -219,19 +242,36 @@ Describe 'Get-McpServerNames' {
         }
     }
     It 'never reads the other keys of ~/.claude.json or a project entry as servers' {
-        Write-Json (Join-Path $script:Home2 '.claude.json') @{ numStartups = 3; projects = @{ 'C:/x' = @{ allowedTools = @() } } }
+        $file = Join-Path $script:Home2 '.claude.json'
+        $saved = Get-Content -LiteralPath $file -Raw
+        Write-Json $file @{ numStartups = 3; mcpServers = @{ 'real-one' = @{} }; projects = @{ 'C:/x' = @{ allowedTools = @() } } }
         try {
             $n = @(& $script:Discover -Root 'C:/x' -UserHome $script:Home2).prefix
             $n | Should -Not -Contain 'numStartups'
             $n | Should -Not -Contain 'projects'
             $n | Should -Not -Contain 'allowedTools'
+            $n | Should -Contain 'real-one'                  # the file WAS read
         } finally {
-            Write-Json (Join-Path $script:Home2 '.claude.json') @{ mcpServers = @{ codegraph = @{} } }
+            $saved | Set-Content -LiteralPath $file -Encoding utf8 -NoNewline
         }
     }
     It 'leaves out disabled plugins' {
         $script:Names.prefix | Should -Contain 'plugin_pack-w_wrapped-one'     # the same wrapped shape IS read when enabled
         @($script:Names.prefix | Where-Object { $_ -like 'plugin_pack-c_*' }).Count | Should -Be 0
+    }
+    It 'leaves out an installed plugin that no enabledPlugins sets to true' {
+        @($script:Names.prefix | Where-Object { $_ -like 'plugin_pack-u_*' }).Count | Should -Be 0
+    }
+    It 'reads the config from CLAUDE_CONFIG_DIR when it is set and -UserHome is not' {
+        $cfgDir = Join-Path $script:Root 'cfgdir'
+        Write-Json (Join-Path $cfgDir '.claude.json') @{ mcpServers = @{ 'from-config-dir' = @{} } }
+        $saved = $env:CLAUDE_CONFIG_DIR
+        try {
+            $env:CLAUDE_CONFIG_DIR = $cfgDir
+            @(& $script:Discover -Root $script:Repo2).prefix | Should -Contain 'from-config-dir'
+        } finally {
+            $env:CLAUDE_CONFIG_DIR = $saved
+        }
     }
     Context 'installs, scopes and manifest shapes' {
         BeforeAll {
@@ -254,11 +294,19 @@ Describe 'Get-McpServerNames' {
                 'dated@m' = @(
                     @{ scope = 'user'; installPath = $old; lastUpdated = '2025-11-05T10:00:00.000Z' },
                     @{ scope = 'user'; installPath = $new; lastUpdated = '2026-02-10T10:00:00.000Z' })
+                # The same pair in the opposite order: neither 'first' nor 'last' passes both.
+                'dated2@m' = @(
+                    @{ scope = 'user'; installPath = $new; lastUpdated = '2026-02-10T10:00:00.000Z' },
+                    @{ scope = 'user'; installPath = $old; lastUpdated = '2025-11-05T10:00:00.000Z' })
+                'projhere@m'  = @(@{ scope = 'project'; projectPath = $repoKey; installPath = $other; lastUpdated = '2026-01-01T00:00:00Z' })
                 'elsewhere@m' = @(@{ scope = 'project'; projectPath = 'C:/some/other/repo'; installPath = $other; lastUpdated = '2026-01-01T00:00:00Z' })
                 'mine@m'      = @(@{ scope = 'local'; projectPath = $repoKey; installPath = $mine; lastUpdated = '2026-01-01T00:00:00Z' })
                 'arr@m'       = @(@{ scope = 'user'; installPath = $arr; lastUpdated = '2026-01-01T00:00:00Z' })
                 'off@m'       = @(@{ scope = 'user'; installPath = $off; lastUpdated = '2026-01-01T00:00:00Z' })
             } }
+            Write-Json (Join-Path $script:Home3 '.claude/settings.json') @{ enabledPlugins = @{ 'dated@m' = $true; 'dated2@m' = $true; 'elsewhere@m' = $true; 'mine@m' = $true; 'arr@m' = $true; 'off@m' = $true } }
+            # projhere is enabled only by the project's own settings; off is switched off by the local ones.
+            Write-Json (Join-Path $script:Repo3 '.claude/settings.json') @{ enabledPlugins = @{ 'projhere@m' = $true } }
             Write-Json (Join-Path $script:Repo3 '.claude/settings.local.json') @{ enabledPlugins = @{ 'off@m' = $false } }
             Push-Location $script:Repo3
             try { $script:Names3 = @(& $script:Discover -Root . -UserHome $script:Home3).prefix } finally { Pop-Location }
@@ -266,9 +314,12 @@ Describe 'Get-McpServerNames' {
         It 'picks the most recently updated install by date, not by its text' {
             $script:Names3 | Should -Contain 'plugin_dated_new-server'
             $script:Names3 | Should -Not -Contain 'plugin_dated_old-server'
+            $script:Names3 | Should -Contain 'plugin_dated2_new-server'
+            $script:Names3 | Should -Not -Contain 'plugin_dated2_old-server'
         }
         It 'counts a project-scope install only in its own project' {
             $script:Names3 | Should -Not -Contain 'plugin_elsewhere_other-proj'
+            $script:Names3 | Should -Contain 'plugin_projhere_other-proj'     # same scope, this project, enabled by project settings
         }
         It 'resolves a relative -Root against the PowerShell location and normalizes names' {
             $script:Names3 | Should -Contain 'plugin_mine_my_server'
