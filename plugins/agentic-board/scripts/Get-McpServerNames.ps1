@@ -98,7 +98,8 @@ foreach ($e in $projEntries) { foreach ($n in (Get-ServerMapNames $e -Wrapped)) 
 $approveAll = $false
 $approved = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $rejected = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-foreach ($src in @($projEntries) + @($settings)) {
+# The project's entry in ~/.claude.json is local-scope state: it ranks after the settings files.
+foreach ($src in @($settings) + @($projEntries)) {
     # The most specific level that sets it decides (user < project < local), like enabledPlugins.
     if ((Test-Map $src) -and $src.Contains('enableAllProjectMcpServers')) { $approveAll = $src['enableAllProjectMcpServers'] -eq $true }
     foreach ($n in (Get-List $src 'enabledMcpjsonServers'))  { [void]$approved.Add($n) }

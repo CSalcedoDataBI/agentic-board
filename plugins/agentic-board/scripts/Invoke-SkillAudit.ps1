@@ -145,6 +145,7 @@ foreach ($o in $inv.overlaps) {
 # available under a different prefix is reported, with the name that works here; a server that is not
 # installed at all says nothing (this machine cannot tell a typo from a server the user never added).
 # Copies of one skill are folded like the description lints: per variant, owner and reference.
+$mcpCheck = $null
 if ($PSBoundParameters.ContainsKey('McpServers')) {
     # Bare strings: a plugin prefix is split at the first underscore after plugin_ (the kebab-case norm).
     $available = @($McpServers | Where-Object { $_ } | ForEach-Object {
@@ -175,7 +176,7 @@ if ($available.Count) {
         $files = @($s.path)
         # The skill's own markdown: files beside SKILL.md (reference.md, forms.md…) and all of references/.
         $files += @(Get-ChildItem -LiteralPath $dir -File -Filter '*.md' -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -ne 'SKILL.md' } | ForEach-Object { $_.FullName })
+            Where-Object { $_.Name -notin 'SKILL.md', 'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md' } | ForEach-Object { $_.FullName })
         $refDir = Join-Path $dir 'references'
         if (Test-Path -LiteralPath $refDir -PathType Container) {
             $files += @(Get-ChildItem -LiteralPath $refDir -Recurse -File -Filter '*.md' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
@@ -185,9 +186,10 @@ if ($available.Count) {
         $ownPlugins = @($s.plugin, [regex]::Match($s.path, '(?i)(?:^|/)plugins/([^/]+)/skills/').Groups[1].Value) |
             Where-Object { $_ } | ForEach-Object { $_ -replace '[^A-Za-z0-9_-]', '_' }
         # mcp__<prefix>__<tool>, mcp__<prefix>__* and the bare mcp__<prefix> (all of a server's tools,
-        # as allowed-tools writes it). Placeholders such as mcp__<server>__<tool> do not match.
+        # as allowed-tools writes it). The prefix never holds `__`, so a half placeholder (mcp__srv__<tool>,
+        # mcp__srv__…) still names srv; a full one (mcp__<server>__<tool>) does not match.
         $refs = [ordered]@{}
-        foreach ($m in [regex]::Matches([string]$text, 'mcp__([A-Za-z0-9_-]+?)(?:__([A-Za-z0-9_-]+|\*)|(?![A-Za-z0-9_-]))')) {
+        foreach ($m in [regex]::Matches([string]$text, 'mcp__((?:[A-Za-z0-9-]|_(?!_))+)(?:__([A-Za-z0-9_-]+|\*)|__|(?![A-Za-z0-9_-]))')) {
             if (-not $refs.Contains($m.Value)) { $refs[$m.Value] = [pscustomobject]@{ prefix = $m.Groups[1].Value; tool = $m.Groups[2].Value } }
         }
         # Every prefix this skill names, in any form: a skill that gives the working prefix anywhere

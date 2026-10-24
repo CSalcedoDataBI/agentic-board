@@ -47,6 +47,11 @@ BeforeAll {
     New-Skill '.claude/skills/proj/multi' 'multi' 'Use `mcp__powerbi-modeling-mcp__table_operations`, `mcp__powerbi-modeling-mcp__column_operations` and `mcp__powerbi-modeling-mcp__measure_operations`.'
     # covers: hardcodes the bare form but also allows the working prefix in another form.
     New-Skill '.claude/skills/proj/covers' 'covers' 'allowed-tools: mcp__plugin_fabric-skills_powerbi-modeling-mcp. Then call `mcp__powerbi-modeling-mcp__dax_query_operations`.'
+    # half: the prefix is hardcoded even though the tool part is a placeholder.
+    New-Skill '.claude/skills/proj/half' 'half' 'Call `mcp__powerbi-modeling-mcp__<operation>` for each step.'
+    # readme: a README beside SKILL.md is not loaded by the agent, so its names are not checked.
+    New-Skill '.claude/skills/proj/readme' 'readme' 'Nothing hardcoded here.'
+    'Install docs mention `mcp__powerbi-modeling-mcp__connection_operations`.' | Set-Content -LiteralPath (Join-Path $script:Root '.claude/skills/proj/readme/README.md') -Encoding utf8
     # beside: the wrong name sits in a markdown file next to SKILL.md.
     New-Skill '.claude/skills/proj/beside' 'beside' 'See reference.md.'
     'Call `mcp__powerbi-modeling-mcp__partition_operations`.' | Set-Content -LiteralPath (Join-Path $script:Root '.claude/skills/proj/beside/reference.md') -Encoding utf8
@@ -167,6 +172,14 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
     It 'reads markdown files beside SKILL.md and says the check ran' {
         (Get-McpFinding 'beside').Count | Should -Be 1
         $script:Res.summary.mcpCheck | Should -Be 'ran'
+    }
+    It 'flags a hardcoded prefix whose tool part is a placeholder' {
+        $f = Get-McpFinding 'half'
+        $f.Count | Should -Be 1
+        $f[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_fabric-skills_powerbi-modeling-mcp`'))
+    }
+    It 'does not read a README beside SKILL.md' {
+        (Get-McpFinding 'readme').Count | Should -Be 0
     }
     It 'tells the owner how to fix a literal allowed-tools list' {
         (Get-McpFinding 'allowed')[0].detail | Should -Match 'list both install forms'
