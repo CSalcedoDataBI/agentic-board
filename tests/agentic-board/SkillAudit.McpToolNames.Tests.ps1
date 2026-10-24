@@ -62,6 +62,12 @@ BeforeAll {
     New-Skill 'plugins/pack-e/skills/eself' 'eself' 'Run `mcp__plugin_pack-e_CodeGraph__codegraph_search`.'
     # genunder: a bare name plus the plugin form as a placeholder, for a server whose key holds _.
     New-Skill '.claude/skills/proj/genunder' 'genunder' 'Call `mcp__brave_search__web` (or mcp__plugin_<plugin>_brave_search__web).'
+    # bareunder: the control for genunder - the same bare name without the placeholder.
+    New-Skill '.claude/skills/proj/bareunder' 'bareunder' 'Call `mcp__brave_search__web`.'
+    # otherplug: a hardcoded plugin prefix plus the placeholder, where only another plugin has the server.
+    New-Skill '.claude/skills/proj/otherplug' 'otherplug' 'Call `mcp__plugin_acme_brave_search__web` (generally mcp__plugin_<plugin>_brave_search__web).'
+    # wrongcaseplug: the wrong case, where the server only comes from a plugin.
+    New-Skill '.claude/skills/proj/wrongcaseplug' 'wrongcaseplug' 'Call `mcp__PowerBI-Modeling-MCP__model_operations`.'
     # mixedcase: the wrong case and the right one: the right one does not excuse the wrong one.
     New-Skill '.claude/skills/proj/mixedcase' 'mixedcase' 'Call `mcp__CodeGraph__codegraph_node`, i.e. `mcp__codegraph__codegraph_node`.'
     # generic: the plugin form is given as a placeholder, which covers every plugin prefix.
@@ -204,7 +210,9 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $f[0].working | Should -Contain 'mcp__plugin_fabric-skills_powerbi-modeling-mcp'
     }
     It 'flags a name whose server exists only with another case, giving the right case' {
-        (Get-McpFinding 'wrongcase')[0].working | Should -Contain 'mcp__codegraph__codegraph_node'
+        $f = Get-McpFinding 'wrongcase'
+        ($f[0].working -ccontains 'mcp__codegraph__codegraph_node') | Should -BeTrue      # exact case
+        $f[0].detail | Should -MatchExactly 'the codegraph `codegraph_node` tool'
     }
     It 'treats the bare, __ and __* spellings of one server as one name' {
         $f = Get-McpFinding 'wide'
@@ -224,21 +232,34 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $f[0].detail | Should -Not -Match 'plugin_pack-qq_'
     }
     It 'flags a missing own prefix when its plugin is loaded here' {
-        (Get-McpFinding 'eself')[0].working | Should -Contain 'mcp__plugin_pack-e_codegraph__codegraph_search'
+        (@(Get-McpFinding 'eself')[0].working -ccontains 'mcp__plugin_pack-e_codegraph__codegraph_search') | Should -BeTrue
     }
     It 'keeps references that differ only in case apart: the right case elsewhere does not excuse the wrong one' {
         $f = Get-McpFinding 'mixedcase'
         $f.Count | Should -Be 1
-        $f[0].detail | Should -Match ([regex]::Escape('mcp__CodeGraph__codegraph_node'))
+        $f[0].detail | Should -MatchExactly ([regex]::Escape('`mcp__CodeGraph__codegraph_node`'))
     }
     It 'reads a plugin-form placeholder up to the separator when the server name holds an underscore' {
         (Get-McpFinding 'genunder').Count | Should -Be 0
+        (Get-McpFinding 'bareunder').Count | Should -Be 1      # the same bare name alone IS flagged
+    }
+    It 'takes a placeholder as covering another plugin prefix too' {
+        (Get-McpFinding 'otherplug').Count | Should -Be 0
+    }
+    It 'spells the plugin form as the server is installed' {
+        $f = Get-McpFinding 'wrongcaseplug'
+        $f[0].detail | Should -MatchExactly ([regex]::Escape('`mcp__plugin_<plugin>_powerbi-modeling-mcp__model_operations`'))
     }
     It 'never names a plugin from this machine in a finding detail' {
         foreach ($f in @($script:Res.findings | Where-Object type -eq 'mcp-tool-name')) {
             foreach ($p in $script:Servers | Where-Object { $_ -match '^plugin_' }) {
-                # Only a name the skill itself wrote may appear.
-                if ($f.detail -notmatch ('`mcp__' + [regex]::Escape($p))) { $f.detail | Should -Not -Match ([regex]::Escape($p)) }
+                # Neither the prefix nor the plugin's own name, unless the skill itself wrote them.
+                $plugin = ([regex]::Match($p, '^plugin_([^_]+)_')).Groups[1].Value
+                foreach ($needle in @($p, "plugin_$($plugin)_")) {
+                    $own = [regex]::Matches($f.detail, '`mcp__' + [regex]::Escape($needle)).Count
+                    [regex]::Matches($f.detail, [regex]::Escape($needle)).Count | Should -Be $own
+                }
+                $f.detail | Should -Not -Match ('(installed|provided) by ' + [regex]::Escape($plugin))
             }
         }
     }

@@ -222,8 +222,13 @@ if ($available.Count) {
             if ($own.Count -and -not @($available | Where-Object { $p = $_.prefix; @($own | Where-Object { $p.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) }).Count }).Count) { continue }
             $server = Resolve-RefServer $prefix
             if (-not $server) { continue }
-            if ($placeholderServers.Contains($server) -and $prefix -notmatch '^plugin_') { continue }
             $altPrefixes = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -cne $prefix } | ForEach-Object { $_.prefix } | Sort-Object -Unique)
+            # The placeholder covers every plugin prefix: it excuses a bare name, and a plugin name whose
+            # alternatives are all plugin forms too (the skill already gives the form the finding would).
+            if ($placeholderServers.Contains($server) -and ($prefix -notmatch '^plugin_' -or
+                -not @($altPrefixes | Where-Object { $_ -notmatch '^plugin_' }).Count)) { continue }
+            # Spelled as installed, never as the skill wrote it: a wrong-case reference gets the right case.
+            $server = @($available | Where-Object { $_.server -ieq $server } | ForEach-Object { $_.server })[0]
             # Given elsewhere in the skill = both install forms documented. A spelling that differs only in
             # case is not another install form: mcp__GitHub__x stays broken even if mcp__github__y is right.
             if (-not $altPrefixes.Count -or @($altPrefixes | Where-Object { $refPrefixes.Contains($_) -and $_ -ine $prefix }).Count) { continue }
