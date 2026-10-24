@@ -168,7 +168,8 @@ function Read-ClaudeConfig {
 
 function Get-JsonStringList($Node) {
     if ($Node -isnot [System.Text.Json.Nodes.JsonArray]) { return @() }
-    return @(foreach ($x in $Node) { if ($x -is [System.Text.Json.Nodes.JsonValue]) { try { $x.GetValue[string]() } catch { } } })
+    # ToString() of a string JsonValue is the raw text (no quotes); other kinds are skipped.
+    return @(foreach ($x in $Node) { if ($x -is [System.Text.Json.Nodes.JsonValue] -and "$($x.GetValueKind())" -eq 'String') { $x.ToString() } })
 }
 
 # Every known project and what each one still lacks.
