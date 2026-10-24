@@ -48,10 +48,47 @@ function Format-StaleNotice {
     $lines = foreach ($i in $Items) {
         $loaded = ($i.Loaded -join ', ')
         $head = "Plugin `"$($i.Plugin)`" was updated to version $($i.Installed) (this session is still on $loaded)."
+        $fixes = @($i.Fixes | Where-Object { $_ })   # @($null) has one element: filter, never count it raw
+        if ($fixes.Count -gt 0) { $head += " Fixes: $($fixes -join ' ')." }
         if ($i.NeedsNewSession) { "$head It ships an MCP server (or I could not check): open a new session to use it." }
         else { "$head Type /reload-plugins to use it." }
     }
     return (@($lines) -join "`n")
+}
+
+# The release-notice contract (#798): a plugin's deploy script may write
+# <claude home>/plugin-releases/<plugin>@<marketplace>.json = { version, commit, publishedAt, fixes: ["#12", ...] }
+# so this one notice can say what the new build fixes, and the plugin needs no notice hook of its own.
+# Keyed like installed_plugins.json, so a same-named plugin of another marketplace never borrows it.
+# The fixes are used only when the file describes the build now installed (its version, or its commit
+# matches the build folder name). Somebody else's text: issue references only, at most 10. Never throws,
+# never blocks: a regular file only (no link, pipe or device), read through a 64 KB bound.
+function Get-ReleaseFixes {
+    param([string]$ClaudeHomeDir, [string]$Plugin, [string]$Marketplace, [string]$Installed)
+    try {
+        if ($Plugin -notmatch '^[A-Za-z0-9._-]{1,100}$' -or $Marketplace -notmatch '^[A-Za-z0-9._-]{1,100}$' -or -not $Installed) { return @() }
+        $path = [System.IO.Path]::Combine($ClaudeHomeDir, 'plugin-releases', "$Plugin@$Marketplace.json")
+        $fi = [System.IO.FileInfo]::new($path)
+        # Length 0 also rules out a pipe or a device (they report 0 and could block or never end); a link
+        # could point at one, so links are refused outright.
+        if (-not $fi.Exists -or $fi.Length -le 0 -or $fi.Length -gt 64KB) { return @() }
+        if (($fi.Attributes -band ([System.IO.FileAttributes]::ReparsePoint -bor [System.IO.FileAttributes]::Device)) -ne 0 -or $fi.LinkTarget) { return @() }
+        $buf = [byte[]]::new(64KB)
+        $fs = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try { $n = 0; while ($n -lt $buf.Length) { $r = $fs.Read($buf, $n, $buf.Length - $n); if ($r -le 0) { break }; $n += $r } } finally { $fs.Dispose() }
+        if ($n -ge $buf.Length) { return @() }   # grew past the bound since the size check
+        # A BOM (Windows PowerShell's UTF8 writers add one) would make the JSON parser reject the file.
+        $doc = [System.Text.Encoding]::UTF8.GetString($buf, 0, $n).TrimStart([char]0xFEFF) | ConvertFrom-Json -ErrorAction Stop
+        $ver = "$($doc.version)".Trim().TrimStart('v', 'V')
+        $sha = "$($doc.commit)".Trim()
+        $ic = [System.StringComparison]::OrdinalIgnoreCase
+        $verMatch = [bool]$ver -and $ver -eq $Installed.TrimStart('v', 'V')
+        $shaMatch = $sha.Length -ge 7 -and $Installed.Length -ge 7 -and ($sha.StartsWith($Installed, $ic) -or $Installed.StartsWith($sha, $ic))
+        if (-not ($verMatch -or $shaMatch)) { return @() }
+        # Issue references only (#12, repo#12, owner/repo#12): free words would let the file put a
+        # sentence into a notice the model reads.
+        return @(@($doc.fixes) | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match '^([A-Za-z0-9._-]{1,40}(/[A-Za-z0-9._-]{1,60})?)?#\d{1,7}$' } | Select-Object -First 10)
+    } catch { return @() }
 }
 
 function Get-HookClaudeHome([string]$ClaudeHome) {
@@ -217,7 +254,10 @@ function Invoke-StaleNotice {
     # Only now (the notice, if any, is recorded) and only for a CONCLUSIVE check may the shim skip next time.
     if ($definitive) { try { Write-ShimStamp -StateDir $StateDir -SessionId $sessionId -Installed $installedInfo -KeepIds $keepIds } catch { } }
     if ($fresh.Count -eq 0) { return '' }
-    return (Format-StaleNotice -Items $fresh)
+    $items = @($fresh | ForEach-Object {
+        $_ | Select-Object *, @{ Name = 'Fixes'; Expression = { @(Get-ReleaseFixes -ClaudeHomeDir $claudeDir -Plugin $_.Plugin -Marketplace $_.Marketplace -Installed "$($_.Installed)") } }
+    })
+    return (Format-StaleNotice -Items $items)
 }
 
 if ($env:ABIOS_PLUGINNOTICE_DOTSOURCE) { return }

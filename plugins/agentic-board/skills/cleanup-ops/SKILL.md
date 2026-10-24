@@ -20,7 +20,7 @@ has its own command. This skill is its engine. Every verb:
 | `/cleanup sessions` (this repo; `-Scope orphans` / `all`) | `references/verbs-sessions.md` | `Cleanup-Sessions.ps1` |
 | `/cleanup transcripts` (`find`, `restore`) | `references/verbs-transcripts.md` | `Cleanup-Transcripts.ps1` |
 | `/cleanup disk` | `references/verbs-disk.md` | `Cleanup-Disk.ps1` |
-| `/cleanup plugins` (`sessions`, `clean`) | `references/verbs-plugins.md` | `Update-AllPlugins.ps1`, `Get-PluginSessionMap.ps1`, `Remove-OldPluginVersions.ps1` |
+| `/cleanup plugins` (`sessions`, `clean`, `mcp`) | `references/verbs-plugins.md` | `Update-AllPlugins.ps1`, `Get-PluginSessionMap.ps1`, `Remove-OldPluginVersions.ps1`, `Find-DuplicateMcpServers.ps1` |
 
 A sensible order when the machine is full:
 1. `sessions` in each repo, and once with `-Scope orphans`. This archives what is resolved.

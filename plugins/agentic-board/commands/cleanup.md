@@ -17,7 +17,8 @@ What do you want to clean up?
                        (transcripts --force = compress · transcripts find <text> · transcripts restore <id>)
 3. disk              → one report of what fills the disk; --force cleans duplicate copies, old plugin builds, stale state
 4. plugins           → update EVERY installed plugin and see which open sessions still run an old build
-                       (plugins sessions = session map · plugins clean = remove old unused builds)
+                       (plugins sessions = session map · plugins clean = remove old unused builds
+                        · plugins mcp = MCP servers two plugins register twice)
 
 Suggested order when the machine is full: sessions (each repo) → sessions -Scope orphans → transcripts → disk
 ```
@@ -36,7 +37,7 @@ its `references/` directory and follow it exactly. Do not improvise the recipe f
 - **transcripts** — `references/verbs-transcripts.md` (`scripts/Cleanup-Transcripts.ps1`). No token.
 - **disk** — `references/verbs-disk.md` (`scripts/Cleanup-Disk.ps1`). No token.
 - **plugins** — `references/verbs-plugins.md` (`Update-AllPlugins.ps1`, `Get-PluginSessionMap.ps1`,
-  `Remove-OldPluginVersions.ps1`). No token.
+  `Remove-OldPluginVersions.ps1`, `Find-DuplicateMcpServers.ps1`). No token.
 
 Only `sessions` talks to GitHub: for it, first apply the `gh-account` skill to set `$env:GH_TOKEN` for
 the right account (your account map's default; honor an explicit `--account <alias>`). Never run

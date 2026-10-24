@@ -97,6 +97,7 @@ function Get-InstalledPluginEntries {
             $entries.Add([pscustomobject]@{
                 Key = $prop.Name; Plugin = $parts.Plugin; Marketplace = $parts.Marketplace; Scope = $scope
                 Version = "$($e.version)"; Sha = "$($e.gitCommitSha)"; InstallPath = "$($e.installPath)"
+                ProjectPath = "$($e.projectPath)"
             })
         }
     }
@@ -104,7 +105,7 @@ function Get-InstalledPluginEntries {
 }
 
 # Every registered marketplace, from known_marketplaces.json.
-#   { Ok; Reason; Items = @{ Name; SourceKind; InstallLocation; AutoUpdate } }
+#   { Ok; Reason; Items = @{ Name; SourceKind; InstallLocation; AutoUpdate; AutoUpdateSet } }
 function Get-KnownMarketplaces {
     param([string]$ClaudeHome)
     $path = Join-Path (Join-Path (Get-ClaudeHomeDir $ClaudeHome) 'plugins') 'known_marketplaces.json'
@@ -117,6 +118,8 @@ function Get-KnownMarketplaces {
         $items.Add([pscustomobject]@{
             Name = $prop.Name; SourceKind = $kind; InstallLocation = "$($prop.Value.installLocation)"
             AutoUpdate = [bool]$prop.Value.autoUpdate
+            # Absent is not "off": Claude Code applies a per-marketplace default (on for official ones).
+            AutoUpdateSet = ($null -ne $prop.Value.PSObject.Properties['autoUpdate'])
         })
     }
     return [pscustomobject]@{ Ok = $true; Reason = ''; Items = @($items) }
@@ -411,6 +414,21 @@ function Test-PathStrictlyInside {
 
 function Get-DirSizeBytes([string]$Path) {
     try { return [long](Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum } catch { return 0L }
+}
+
+# How much each plugin keeps in the cache (#798): every cached build, installed or not. Claude Code
+# prunes orphaned builds only after 14 days, so a plugin deployed several times a day piles them up.
+#   @{ Marketplace; Plugin; Builds; Bytes }  largest first
+function Get-PluginCacheUsage {
+    param([string]$ClaudeHome)
+    $rows = foreach ($g in (@(Get-CacheVersionDirs -ClaudeHome $ClaudeHome) | Group-Object { "$($_.Marketplace)/$($_.Plugin)" })) {
+        $first = $g.Group[0]
+        [pscustomobject]@{
+            Marketplace = $first.Marketplace; Plugin = $first.Plugin; Builds = $g.Count
+            Bytes = [long](($g.Group | ForEach-Object { Get-DirSizeBytes $_.Path } | Measure-Object -Sum).Sum)
+        }
+    }
+    return @($rows | Sort-Object Bytes -Descending)
 }
 
 # Does anything still hold this build, or make it not-removable, RIGHT NOW?  $null = nothing does;
