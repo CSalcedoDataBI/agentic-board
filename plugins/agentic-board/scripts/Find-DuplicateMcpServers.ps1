@@ -266,7 +266,8 @@ function Invoke-McpDisable {
     $cfg = Read-ClaudeConfig -Path $ConfigPath
     if (-not $cfg.Ok) { return (& $no "could not read the config ($($cfg.Reason))") }
     $plan = Get-McpDisablePlan -Config $cfg -Groups $Groups
-    if ($plan.PlanId -ne $PlanId) { return (& $no "the config changed since the plan you confirmed (plan $PlanId, now $($plan.PlanId)); run the plan again") }
+    # The new id is NOT printed: it belongs to a plan nobody has seen. Plan again, show it, confirm that one.
+    if ($plan.PlanId -ne $PlanId) { return (& $no "plan $PlanId no longer matches what would be written (the config, or the -Keep/-PreferLocal choice, is different); run the plan again without -Execute and confirm the new one") }
     if ($plan.Missing.Count -eq 0) { return [pscustomobject]@{ Ok = $true; Reason = 'nothing to change'; Backup = ''; Added = 0; Verified = $true } }
 
     [void][System.IO.Directory]::CreateDirectory($BackupDir)

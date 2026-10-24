@@ -201,6 +201,9 @@ Describe 'plan and apply on a fixture config' {
         $before = [System.IO.File]::ReadAllBytes($script:Cfg)
         $r = Invoke-McpDisable -ConfigPath $script:Cfg -Groups $other -PlanId $plan.PlanId -BackupDir $script:Bk
         $r.Ok | Should -BeFalse
+        # The id of the unseen plan is never handed out: it could be retried without anyone seeing it.
+        $unseen = (Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $other).PlanId
+        $r.Reason | Should -Not -Match $unseen
         [System.IO.File]::ReadAllBytes($script:Cfg) | Should -Be $before
         Test-Path $script:Bk | Should -BeFalse
     }
@@ -242,7 +245,8 @@ Describe 'plan and apply on a fixture config' {
         $before = [System.IO.File]::ReadAllBytes($script:Cfg)
         $r = Invoke-McpDisable -ConfigPath $script:Cfg -Groups $script:Groups -PlanId 'deadbeef0000' -BackupDir $script:Bk
         $r.Ok | Should -BeFalse
-        $r.Reason | Should -Match 'changed since the plan'
+        $r.Reason | Should -Match 'no longer matches'
+        $r.Reason | Should -Not -Match '[0-9a-f]{12}.*[0-9a-f]{12}'
         [System.IO.File]::ReadAllBytes($script:Cfg) | Should -Be $before
         Test-Path $script:Bk | Should -BeFalse
     }
