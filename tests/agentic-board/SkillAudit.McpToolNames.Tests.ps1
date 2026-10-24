@@ -60,7 +60,9 @@ BeforeAll {
     New-Skill 'plugins/pack-q/skills/qself' 'qself' 'Run `mcp__plugin_pack-qq_codegraph__codegraph_search`, not `mcp__plugin_pack-q_codegraph__codegraph_node`.'
     # eself: its own plugin IS loaded here, yet this own prefix is missing (wrong case): a real defect.
     New-Skill 'plugins/pack-e/skills/eself' 'eself' 'Run `mcp__plugin_pack-e_CodeGraph__codegraph_search`.'
-    # mixedcase: the wrong case and the right one, in that order: the right one documents it.
+    # genunder: a bare name plus the plugin form as a placeholder, for a server whose key holds _.
+    New-Skill '.claude/skills/proj/genunder' 'genunder' 'Call `mcp__brave_search__web` (or mcp__plugin_<plugin>_brave_search__web).'
+    # mixedcase: the wrong case and the right one: the right one does not excuse the wrong one.
     New-Skill '.claude/skills/proj/mixedcase' 'mixedcase' 'Call `mcp__CodeGraph__codegraph_node`, i.e. `mcp__codegraph__codegraph_node`.'
     # generic: the plugin form is given as a placeholder, which covers every plugin prefix.
     New-Skill '.claude/skills/proj/generic' 'generic' 'Call `mcp__powerbi-modeling-mcp__model_operations` (or mcp__plugin_<plugin>_powerbi-modeling-mcp__model_operations).'
@@ -92,9 +94,9 @@ BeforeAll {
         }
     }
     # It answers only for the audited root, so a test also proves the audit forwards -Root to discovery.
-    $script:StubPluginOnly = "param([string]`$Root) if (`$Root -eq '$($script:Root)') { [pscustomobject]@{ prefix = 'plugin_fabric-skills_powerbi-modeling-mcp'; server = 'powerbi-modeling-mcp'; plugin = 'fabric-skills' } }"
+    $script:StubPluginOnly = "param([string]`$Root) if (`$Root -eq '$($script:Root -replace "'", "''")') { [pscustomobject]@{ prefix = 'plugin_fabric-skills_powerbi-modeling-mcp'; server = 'powerbi-modeling-mcp'; plugin = 'fabric-skills' } }"
 
-    $script:Servers = @('codegraph', 'plugin_fabric-skills_powerbi-modeling-mcp', 'plugin_pack-e_codegraph')
+    $script:Servers = @('codegraph', 'plugin_fabric-skills_powerbi-modeling-mcp', 'plugin_pack-e_codegraph', 'plugin_web_brave_search')
     $script:Res = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers $script:Servers
     function Get-McpFinding { param([string]$Skill) @($script:Res.findings | Where-Object { $_.skill -eq $Skill -and $_.type -eq 'mcp-tool-name' }) }
 }
@@ -108,11 +110,14 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $f = Get-McpFinding 'bare'
         $f.Count | Should -Be 1
         $f[0].severity | Should -Be 'med'
-        $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__connection_operations'))
+        $f[0].working | Should -Contain 'mcp__plugin_fabric-skills_powerbi-modeling-mcp__connection_operations'
         $f[0].detail | Should -Match ([regex]::Escape('the powerbi-modeling-mcp `connection_operations` tool'))
+        $f[0].detail | Should -Match ([regex]::Escape('through a plugin, as `mcp__plugin_<plugin>_powerbi-modeling-mcp__connection_operations`'))
     }
     It 'flags a plugin prefix when the server is configured directly' {
-        (Get-McpFinding 'plugged')[0].detail | Should -Match ([regex]::Escape('mcp__codegraph__codegraph_search'))
+        $f = Get-McpFinding 'plugged'
+        $f[0].working | Should -Contain 'mcp__codegraph__codegraph_search'
+        $f[0].detail | Should -Match ([regex]::Escape('directly, as `mcp__codegraph__codegraph_search`'))
     }
     It 'does not flag names that exist, nor placeholder patterns' {
         (Get-McpFinding 'fine').Count | Should -Be 0
@@ -136,12 +141,12 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
             $f[0].detail | Should -Match ([regex]::Escape("mcp__powerbi-modeling-mcp__$t"))
         }
         $f[0].detail | Should -Match '3 names under one prefix'
-        $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__…'))
+        $f[0].working | Should -Contain 'mcp__plugin_fabric-skills_powerbi-modeling-mcp__…'
     }
     It 'names each working prefix once even if it is listed twice' {
         $r = & $script:Audit -Root $script:Root -Scope project -CurrentRepo 'me/proj' -McpServers ($script:Servers + 'plugin_fabric-skills_powerbi-modeling-mcp')
-        $d = @($r.findings | Where-Object { $_.skill -eq 'bare' -and $_.type -eq 'mcp-tool-name' })[0].detail
-        ([regex]::Matches($d, [regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__connection_operations'))).Count | Should -Be 1
+        $w = @(@($r.findings | Where-Object { $_.skill -eq 'bare' -and $_.type -eq 'mcp-tool-name' })[0].working)
+        @($w | Where-Object { $_ -eq 'mcp__plugin_fabric-skills_powerbi-modeling-mcp__connection_operations' }).Count | Should -Be 1
     }
     It 'skips the check, and keeps the rest of the audit, when discovery fails' {
         $x = Invoke-StubbedAudit "throw 'discovery broke'"
@@ -154,7 +159,7 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $x = Invoke-StubbedAudit $script:StubPluginOnly
         $f = @($x.result.findings | Where-Object { $_.skill -eq 'bare' -and $_.type -eq 'mcp-tool-name' })
         $f.Count | Should -Be 1
-        $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__connection_operations'))
+        $f[0].working | Should -Contain 'mcp__plugin_fabric-skills_powerbi-modeling-mcp__connection_operations'
     }
     It 'takes the server name from the record when the plugin name holds an underscore' {
         New-Skill '.claude/skills/proj/gh' 'gh' 'Call `mcp__github__create_issue`.'
@@ -162,7 +167,8 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
             $x = Invoke-StubbedAudit "[pscustomobject]@{ prefix = 'plugin_acme_tools_github'; server = 'github'; plugin = 'acme_tools' }"
             $f = @($x.result.findings | Where-Object { $_.skill -eq 'gh' -and $_.type -eq 'mcp-tool-name' })
             $f.Count | Should -Be 1
-            $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_acme_tools_github__create_issue'))
+            $f[0].working | Should -Contain 'mcp__plugin_acme_tools_github__create_issue'
+            $f[0].detail | Should -Not -Match 'acme'          # the plugin's name stays local
         } finally {
             Remove-Item (Join-Path $script:Root '.claude/skills/proj/gh') -Recurse -Force
         }
@@ -170,7 +176,7 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
     It 'flags the bare server-only form that allowed-tools uses' {
         $f = Get-McpFinding 'allowed'
         $f.Count | Should -Be 1
-        $f[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_fabric-skills_powerbi-modeling-mcp`'))
+        $f[0].working | Should -Contain 'mcp__plugin_fabric-skills_powerbi-modeling-mcp'
         $f[0].detail | Should -Match 'the powerbi-modeling-mcp tools'
     }
     It 'never puts a local path in a finding detail (they may be filed publicly)' {
@@ -186,7 +192,7 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
     It 'reads the references folder and handles a wildcard tool' {
         $f = Get-McpFinding 'inref'
         $f.Count | Should -Be 1
-        $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__*'))
+        $f[0].working | Should -Contain 'mcp__plugin_fabric-skills_powerbi-modeling-mcp__*'
     }
     It 'reads markdown files beside SKILL.md and says the check ran' {
         (Get-McpFinding 'beside').Count | Should -Be 1
@@ -195,10 +201,10 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
     It 'flags a hardcoded prefix whose tool part is a placeholder' {
         $f = Get-McpFinding 'half'
         $f.Count | Should -Be 1
-        $f[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_fabric-skills_powerbi-modeling-mcp`'))
+        $f[0].working | Should -Contain 'mcp__plugin_fabric-skills_powerbi-modeling-mcp'
     }
     It 'flags a name whose server exists only with another case, giving the right case' {
-        (Get-McpFinding 'wrongcase')[0].detail | Should -Match ([regex]::Escape('`mcp__codegraph__codegraph_node`'))
+        (Get-McpFinding 'wrongcase')[0].working | Should -Contain 'mcp__codegraph__codegraph_node'
     }
     It 'treats the bare, __ and __* spellings of one server as one name' {
         $f = Get-McpFinding 'wide'
@@ -206,7 +212,7 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $f[0].detail | Should -Not -Match 'names under one prefix'
     }
     It 'keeps a partial wildcard whole in the suggested name' {
-        (Get-McpFinding 'partial')[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_fabric-skills_powerbi-modeling-mcp__table_*`'))
+        (Get-McpFinding 'partial')[0].working | Should -Contain 'mcp__plugin_fabric-skills_powerbi-modeling-mcp__table_*'
     }
     It 'ignores mcp__ glued to a longer word' {
         (Get-McpFinding 'glued').Count | Should -Be 0
@@ -218,10 +224,23 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $f[0].detail | Should -Not -Match 'plugin_pack-qq_'
     }
     It 'flags a missing own prefix when its plugin is loaded here' {
-        (Get-McpFinding 'eself')[0].detail | Should -Match ([regex]::Escape('`mcp__plugin_pack-e_codegraph__codegraph_search`'))
+        (Get-McpFinding 'eself')[0].working | Should -Contain 'mcp__plugin_pack-e_codegraph__codegraph_search'
     }
-    It 'keeps references that differ only in case apart' {
-        (Get-McpFinding 'mixedcase').Count | Should -Be 0
+    It 'keeps references that differ only in case apart: the right case elsewhere does not excuse the wrong one' {
+        $f = Get-McpFinding 'mixedcase'
+        $f.Count | Should -Be 1
+        $f[0].detail | Should -Match ([regex]::Escape('mcp__CodeGraph__codegraph_node'))
+    }
+    It 'reads a plugin-form placeholder up to the separator when the server name holds an underscore' {
+        (Get-McpFinding 'genunder').Count | Should -Be 0
+    }
+    It 'never names a plugin from this machine in a finding detail' {
+        foreach ($f in @($script:Res.findings | Where-Object type -eq 'mcp-tool-name')) {
+            foreach ($p in $script:Servers | Where-Object { $_ -match '^plugin_' }) {
+                # Only a name the skill itself wrote may appear.
+                if ($f.detail -notmatch ('`mcp__' + [regex]::Escape($p))) { $f.detail | Should -Not -Match ([regex]::Escape($p)) }
+            }
+        }
     }
     It 'takes a plugin-form placeholder as documenting the plugin install' {
         (Get-McpFinding 'generic').Count | Should -Be 0

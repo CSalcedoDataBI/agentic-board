@@ -210,7 +210,7 @@ if ($available.Count) {
         $refPrefixes = [System.Collections.Generic.HashSet[string]]::new([string[]]@($refs.Values | ForEach-Object { $_.prefix }), [StringComparer]::Ordinal)
         # A generic plugin-form placeholder (mcp__plugin_<plugin>_srv__…) documents every plugin prefix of srv.
         $placeholderServers = [System.Collections.Generic.HashSet[string]]::new([string[]]@(
-            [regex]::Matches([string]$text, 'mcp__plugin_<[^>\s]+>_([A-Za-z0-9-]+)') | ForEach-Object { $_.Groups[1].Value }), [StringComparer]::OrdinalIgnoreCase)
+            [regex]::Matches([string]$text, 'mcp__plugin_<[^>\s]+>_((?:[A-Za-z0-9-]|_(?!_))+)') | ForEach-Object { $_.Groups[1].Value }), [StringComparer]::OrdinalIgnoreCase)
         foreach ($ref in @($refs.Keys)) {
             $prefix = $refs[$ref].prefix; $tool = $refs[$ref].tool
             if ($availableSet.Contains($prefix)) { continue }
@@ -224,7 +224,9 @@ if ($available.Count) {
             if (-not $server) { continue }
             if ($placeholderServers.Contains($server) -and $prefix -notmatch '^plugin_') { continue }
             $altPrefixes = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -cne $prefix } | ForEach-Object { $_.prefix } | Sort-Object -Unique)
-            if (-not $altPrefixes.Count -or @($altPrefixes | Where-Object { $refPrefixes.Contains($_) }).Count) { continue }
+            # Given elsewhere in the skill = both install forms documented. A spelling that differs only in
+            # case is not another install form: mcp__GitHub__x stays broken even if mcp__github__y is right.
+            if (-not $altPrefixes.Count -or @($altPrefixes | Where-Object { $refPrefixes.Contains($_) -and $_ -ine $prefix }).Count) { continue }
             # One root cause per hardcoded PREFIX: its tools are listed in one finding, not one finding each.
             $o = Get-Owner $s
             $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)|$($prefix.ToLowerInvariant())"
@@ -251,11 +253,21 @@ if ($available.Count) {
             $list = ($rs | ForEach-Object { '`' + $_.ref + '`' }) -join ', '
             $named = "$list ($($rs.Count) names under one prefix), which are not in the agent's tool list"
         }
-        $working = ($g.alt | ForEach-Object { '`mcp__' + $_ + $suffix + '`' }) -join ' or '
-        Add-Finding $members[0] 'med' 'mcp-tool-name' ("References $named`: here that server is " +
-            "$working. Name the server and the operation instead of a hardcoded prefix " +
+        # The detail may be filed upstream, so it never names this machine's plugins: a plugin-provided
+        # alternative is described by its form only. The exact working names go to `working`, which is
+        # LOCAL evidence like `paths` (a private plugin's name must not reach a public issue).
+        $forms = @()
+        if (@($g.alt | Where-Object { $_ -notmatch '^plugin_' }).Count) {
+            $forms += 'directly, as ' + ((@($g.alt | Where-Object { $_ -notmatch '^plugin_' }) | ForEach-Object { '`mcp__' + $_ + $suffix + '`' }) -join ' or ')
+        }
+        if (@($g.alt | Where-Object { $_ -match '^plugin_' }).Count) {
+            $forms += 'through a plugin, as `mcp__plugin_<plugin>_' + $g.server + $suffix + '`'
+        }
+        Add-Finding $members[0] 'med' 'mcp-tool-name' ("References $named`: the server is installed " +
+            ($forms -join ', and ') + " where the audit ran. Name the server and the operation instead of a hardcoded prefix " +
             "(the $($g.server) $op), so the skill works however the server is installed; where a literal " +
             "name is required (allowed-tools), list both install forms.") $members
+        $findings[$findings.Count - 1] | Add-Member -NotePropertyName working -NotePropertyValue @($g.alt | ForEach-Object { "mcp__$_$suffix" })
         $foldedFindings += $members.Count - 1
     }
 }

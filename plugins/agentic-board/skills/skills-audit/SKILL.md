@@ -39,8 +39,9 @@ that IS available under another prefix is reported, with the working name; all t
 hardcoded prefix are one finding, and `summary.mcpCheck` says whether the check ran (`ran`, `no-servers`,
 `discovery-failed`). The fix to suggest is the server-agnostic form: name the server and the operation
 ("the powerbi-modeling-mcp `connection_operations` tool") instead of a prefix; where a literal name is
-required (`allowed-tools`), list both install forms. The working name in the detail comes from this
-machine's config: before filing, keep it only if the plugin is public (the sanitize step in `references/filing.md`).
+required (`allowed-tools`), list both install forms. The `detail` describes a plugin-provided
+alternative by its form only (`mcp__plugin_<plugin>_<server>…`); the exact names this machine has go
+in the finding's `working` field, which is LOCAL evidence like `paths`: never paste it into a filed issue.
 
 Ownership comes from the plugin's OWN manifest (`.claude-plugin/plugin.json`, else the marketplace
 entry), never from a path segment (that segment is the marketplace name in the installed cache
