@@ -22,6 +22,9 @@ param(
     [ValidateSet('all','plugin','personal','project')][string]$Scope = 'all',
     [string]$Name,
     [string]$CurrentRepo,
+    # MCP server prefixes the agent sees (bare `server` or `plugin_<plugin>_<server>`). Omitted, they
+    # are read from this machine's config by Get-McpServerNames.ps1; tests pass them explicitly.
+    [string[]]$McpServers,
     [switch]$Json
 )
 
@@ -29,6 +32,7 @@ $ErrorActionPreference = 'Stop'
 $here     = $PSScriptRoot
 $engine   = Join-Path $here 'Get-SkillInventory.ps1'
 $resolver = Join-Path $here 'Resolve-SkillOwner.ps1'
+$mcpNames = Join-Path $here 'Get-McpServerNames.ps1'
 
 $inv = & $engine -Root $Root -Scope $Scope
 $skills = $inv.skills
@@ -135,6 +139,144 @@ foreach ($o in $inv.overlaps) {
     }
 }
 
+# MCP tool names (a defect of the BODY): a skill that hardcodes mcp__<server>__<tool> points the agent
+# at a tool that is not in its list when the same server is installed under another prefix — through a
+# plugin it is mcp__plugin_<plugin>_<server>__<tool>, and the reverse. Only a reference whose server IS
+# available under a different prefix is reported, with the name that works here; a server that is not
+# installed at all says nothing (this machine cannot tell a typo from a server the user never added).
+# Copies of one skill are folded like the description lints: per variant, owner and reference.
+$mcpCheck = $null
+if ($PSBoundParameters.ContainsKey('McpServers')) {
+    # Bare strings: a plugin prefix is split at the first underscore after plugin_ (the kebab-case norm).
+    $available = @($McpServers | Where-Object { $_ } | ForEach-Object {
+        $m = [regex]::Match($_, '^plugin_([^_]+)_(.+)$')
+        [pscustomobject]@{ prefix = $_; server = $(if ($m.Success) { $m.Groups[2].Value } else { $_ }) } })
+} else {
+    # Discovered records carry their server name, so a plugin whose name holds `_` is not split wrongly.
+    # An optional check: a discovery failure costs this check only, never the rest of the audit.
+    try   { $available = @(& $mcpNames -Root $Root | Where-Object { $_.prefix } | ForEach-Object { [pscustomobject]@{ prefix = [string]$_.prefix; server = [string]$_.server } }) }
+    catch { Write-Warning "MCP server discovery failed ($($_.Exception.Message)) - the mcp-tool-name check is skipped."; $available = @(); $mcpCheck = 'discovery-failed' }
+}
+# Said in the summary, so "no findings" is never mistaken for "not checked".
+if (-not $mcpCheck) { $mcpCheck = if ($available.Count) { 'ran' } else { 'no-servers' } }
+if ($available.Count) {
+    # Exact case: a tool name keeps its server key's case and allowed-tools matches it exactly, so
+    # mcp__GitHub__x is not the tool of a server named github (the finding then gives the right case).
+    $availableSet = [System.Collections.Generic.HashSet[string]]::new([string[]]@($available.prefix), [StringComparer]::Ordinal)
+    function Resolve-RefServer {
+        # The server a referenced prefix names. A plugin prefix is split at the first `_` after plugin_
+        # (plugin names are kebab-case). No guess beyond that: matching a known server as a suffix would
+        # read plugin_acme_brave_search as server `search` and report a server that is not installed.
+        param([string]$Prefix)
+        if ($Prefix -notmatch '^plugin_') { return $Prefix }
+        $m = [regex]::Match($Prefix, '^plugin_[^_]+_(.+)$')
+        if ($m.Success) { $m.Groups[1].Value } else { $null }
+    }
+    # Repository docs that can sit beside a SKILL.md but are never loaded as part of the skill.
+    $repoDocs = 'SKILL.md', 'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md', 'CLAUDE.md', 'AGENTS.md',
+                 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'INSTALL.md'
+    $mcpGroups = [ordered]@{}
+    foreach ($s in $skills) {
+        $dir = Split-Path $s.path -Parent
+        $files = @($s.path)
+        # The skill's own markdown: files beside SKILL.md (reference.md, forms.md…) and all of references/.
+        $files += @(Get-ChildItem -LiteralPath $dir -File -Filter '*.md' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin $repoDocs } | ForEach-Object { $_.FullName })
+        $refDir = Join-Path $dir 'references'
+        if (Test-Path -LiteralPath $refDir -PathType Container) {
+            $files += @(Get-ChildItem -LiteralPath $refDir -Recurse -File -Filter '*.md' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        }
+        $text = ($files | ForEach-Object { Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue }) -join "`n"
+        # The plugin this copy belongs to: its manifest identity, or in a source tree plugins/<x>/skills/ -
+        # both the folder name and the name its .claude-plugin/plugin.json declares (the tool prefix uses that one).
+        $src = [regex]::Match($s.path, '(?i)^(.*(?:^|/)plugins/([^/]+))/skills/')
+        $manifestName = $null
+        if ($src.Success) {
+            try { $manifestName = (Get-Content -LiteralPath ($src.Groups[1].Value + '/.claude-plugin/plugin.json') -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable)['name'] } catch { }
+        }
+        # The manifest name, when there is one, replaces the folder name: the tool prefix never uses the folder.
+        $ownPlugins = @($s.plugin, $(if ($manifestName) { $manifestName } else { $src.Groups[2].Value })) |
+            Where-Object { $_ } | ForEach-Object { [string]$_ -replace '[^A-Za-z0-9_-]', '_' }
+        # mcp__<prefix>__<tool>, mcp__<prefix>__* and the bare mcp__<prefix> (all of a server's tools,
+        # as allowed-tools writes it). The prefix never holds `__`, so a half placeholder (mcp__srv__<tool>,
+        # mcp__srv__…) still names srv; a full one (mcp__<server>__<tool>) does not match.
+        # Ordinal keys: [ordered]@{} ignores case and would fold mcp__GitHub__x into mcp__github__x.
+        $refs = [System.Collections.Specialized.OrderedDictionary]::new([StringComparer]::Ordinal)
+        foreach ($m in [regex]::Matches([string]$text, '(?<![A-Za-z0-9_])mcp__((?:[A-Za-z0-9-]|_(?!_))+)(?:__([A-Za-z0-9_-]+\*?|\*)|__|(?![A-Za-z0-9_-]))')) {
+            if (-not $refs.Contains($m.Value)) { $refs[$m.Value] = [pscustomobject]@{ prefix = $m.Groups[1].Value; tool = $m.Groups[2].Value } }
+        }
+        # Every prefix this skill names, in any form: a skill that gives the working prefix anywhere
+        # (another tool, __*, the bare allowed-tools form) already documents both install forms.
+        $refPrefixes = [System.Collections.Generic.HashSet[string]]::new([string[]]@($refs.Values | ForEach-Object { $_.prefix }), [StringComparer]::Ordinal)
+        # A generic plugin-form placeholder (mcp__plugin_<plugin>_srv__…) documents every plugin prefix of srv.
+        $placeholderServers = [System.Collections.Generic.HashSet[string]]::new([string[]]@(
+            [regex]::Matches([string]$text, 'mcp__plugin_<[^>\s]+>_((?:[A-Za-z0-9-]|_(?!_))+)') | ForEach-Object { $_.Groups[1].Value }), [StringComparer]::OrdinalIgnoreCase)
+        foreach ($ref in @($refs.Keys)) {
+            $prefix = $refs[$ref].prefix; $tool = $refs[$ref].tool
+            if ($availableSet.Contains($prefix)) { continue }
+            # A plugin's skill naming its OWN plugin prefix is right wherever that plugin is enabled; it
+            # is only missing here because this copy's plugin is not (a marketplace clone, a disabled one).
+            # Only while that plugin's servers are absent here: if any is loaded the plugin is enabled, and a
+            # missing own prefix is then a real defect (the server key spelled with another case, say).
+            $own = @($ownPlugins | Where-Object { $prefix.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) })
+            if ($own.Count -and -not @($available | Where-Object { $p = $_.prefix; @($own | Where-Object { $p.StartsWith("plugin_$($_)_", [StringComparison]::OrdinalIgnoreCase) }).Count }).Count) { continue }
+            $server = Resolve-RefServer $prefix
+            if (-not $server) { continue }
+            $altPrefixes = @($available | Where-Object { $_.server -ieq $server -and $_.prefix -cne $prefix } | ForEach-Object { $_.prefix } | Sort-Object -Unique)
+            # The placeholder covers every plugin prefix: it excuses a bare name, and a plugin name whose
+            # alternatives are all plugin forms too (the skill already gives the form the finding would).
+            if ($placeholderServers.Contains($server) -and ($prefix -notmatch '^plugin_' -or
+                -not @($altPrefixes | Where-Object { $_ -notmatch '^plugin_' }).Count)) { continue }
+            # Spelled as installed, never as the skill wrote it: a wrong-case reference gets the right case.
+            $server = @($available | Where-Object { $_.server -ieq $server } | ForEach-Object { $_.server })[0]
+            # Given elsewhere in the skill = both install forms documented. A spelling that differs only in
+            # case is not another install form: mcp__GitHub__x stays broken even if mcp__github__y is right.
+            if (-not $altPrefixes.Count -or @($altPrefixes | Where-Object { $refPrefixes.Contains($_) -and $_ -ine $prefix }).Count) { continue }
+            # One root cause per hardcoded PREFIX: its tools are listed in one finding, not one finding each.
+            $o = Get-Owner $s
+            $gk = "$($s.variantId)|$($o.ownerRepo)|$($o.filing)|$($prefix.ToLowerInvariant())"
+            if (-not $mcpGroups.Contains($gk)) {
+                $mcpGroups[$gk] = [pscustomobject]@{ prefix = $prefix; server = $server; alt = $altPrefixes
+                    refs = [ordered]@{}; members = [ordered]@{} }
+            }
+            $g = $mcpGroups[$gk]
+            if (-not $g.refs.Contains($ref.ToLowerInvariant())) { $g.refs[$ref.ToLowerInvariant()] = [pscustomobject]@{ ref = $ref; tool = $tool } }
+            if (-not $g.members.Contains($s.path)) { $g.members[$s.path] = $s }
+        }
+    }
+    foreach ($g in $mcpGroups.Values) {
+        $members = @($g.members.Values | Sort-Object @{ e = { $_.copyRank } }, @{ e = { $_.path } })
+        $rs = @($g.refs.Values)
+        # mcp__srv, mcp__srv__ and mcp__srv__* all mean the whole server: one name, not several.
+        if (@($rs | Where-Object { $_.tool -and $_.tool -ne '*' }).Count -eq 0) { $rs = @($rs[0]) }
+        if ($rs.Count -eq 1) {
+            $t = $rs[0].tool; $suffix = if ($t) { "__$t" } else { '' }
+            $op = if (-not $t -or $t.Contains('*')) { 'tools' } else { "``$t`` tool" }
+            $named = "``$($rs[0].ref)``, which is not in the agent's tool list"
+        } else {
+            $suffix = '__…'; $op = 'tools by operation'
+            $list = ($rs | ForEach-Object { '`' + $_.ref + '`' }) -join ', '
+            $named = "$list ($($rs.Count) names under one prefix), which are not in the agent's tool list"
+        }
+        # The detail may be filed upstream, so it never names this machine's plugins: a plugin-provided
+        # alternative is described by its form only. The exact working names go to `working`, which is
+        # LOCAL evidence like `paths` (a private plugin's name must not reach a public issue).
+        $forms = @()
+        if (@($g.alt | Where-Object { $_ -notmatch '^plugin_' }).Count) {
+            $forms += 'directly, as ' + ((@($g.alt | Where-Object { $_ -notmatch '^plugin_' }) | ForEach-Object { '`mcp__' + $_ + $suffix + '`' }) -join ' or ')
+        }
+        if (@($g.alt | Where-Object { $_ -match '^plugin_' }).Count) {
+            $forms += 'through a plugin, as `mcp__plugin_<plugin>_' + $g.server + $suffix + '`'
+        }
+        Add-Finding $members[0] 'med' 'mcp-tool-name' ("References $named`: the server is installed " +
+            ($forms -join ', and ') + " where the audit ran. Name the server and the operation instead of a hardcoded prefix " +
+            "(the $($g.server) $op), so the skill works however the server is installed; where a literal " +
+            "name is required (allowed-tools), list both install forms.") $members
+        $findings[$findings.Count - 1] | Add-Member -NotePropertyName working -NotePropertyValue @($g.alt | ForEach-Object { "mcp__$_$suffix" })
+        $foldedFindings += $members.Count - 1
+    }
+}
+
 $order  = @{ high=0; med=1; low=2 }
 $sorted = $findings | Sort-Object @{e={$order[$_.severity]}}, skill
 
@@ -143,8 +285,10 @@ $result = [pscustomobject]@{
         skillsAudited = @($skills).Count
         # Copies of one skill folded before the overlap pass (whole inventory, not filtered by -Name).
         copiesCollapsed = $inv.summary.collapsedCopies
-        # Description-lint findings NOT emitted because the same skill (same name, description and
-        # owner) was already reported through another copy: findings + this = the per-copy count.
+        # ran | no-servers (none known, nothing to compare) | discovery-failed (see the warning).
+        mcpCheck      = $mcpCheck
+        # Description-lint and mcp-tool-name findings NOT emitted because the same skill (same name,
+        # description and owner) was already reported through another copy: findings + this = the per-copy count.
         perCopyFindingsFolded = $foldedFindings
         findings      = $sorted.Count
         high          = @($sorted | Where-Object severity -eq 'high').Count
