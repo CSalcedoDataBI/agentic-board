@@ -97,6 +97,7 @@ function Get-InstalledPluginEntries {
             $entries.Add([pscustomobject]@{
                 Key = $prop.Name; Plugin = $parts.Plugin; Marketplace = $parts.Marketplace; Scope = $scope
                 Version = "$($e.version)"; Sha = "$($e.gitCommitSha)"; InstallPath = "$($e.installPath)"
+                ProjectPath = "$($e.projectPath)"
             })
         }
     }

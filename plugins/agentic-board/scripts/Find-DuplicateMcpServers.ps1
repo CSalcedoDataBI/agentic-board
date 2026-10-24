@@ -131,6 +131,22 @@ function Get-PluginMcpRegistrations {
 # ---------------------------------------------------------------------------- the decision (pure)
 
 # Servers whose short name repeats across plugins, each with what to keep and what to disable.
+# -Keep names a plugin as `plugin`, `plugin@marketplace` or the full `plugin:<plugin>:<server>` id.
+function Test-KeepMatches($Row, [string[]]$Wanted) {
+    return ($Wanted -contains $Row.Plugin.ToLowerInvariant() -or $Wanted -contains $Row.Id.ToLowerInvariant() -or
+            ($Row.Key -and $Wanted -contains "$($Row.Key)".ToLowerInvariant()))
+}
+
+# -Keep values that name no registered copy (a typo, a plugin with no server): a silent miss would let
+# the automatic choice disable exactly the plugin the user meant to keep, so the caller refuses to plan.
+function Get-UnmatchedKeep {
+    param([object[]]$Registrations, [string[]]$Keep = @())
+    return @($Keep | Where-Object { $_ } | Where-Object {
+        $w = @($_.Trim().ToLowerInvariant())
+        @($Registrations | Where-Object { Test-KeepMatches $_ $w }).Count -eq 0
+    })
+}
+
 #   @{ Server; Members (rows); Keep (row or $null); Disable (rows); Reason }
 function Get-DuplicateMcpGroups {
     param([object[]]$Registrations, [string[]]$Keep = @(), [switch]$PreferLocal)
@@ -140,7 +156,7 @@ function Get-DuplicateMcpGroups {
         $members = @($g.Group | Sort-Object Plugin)
         if (@($members | ForEach-Object { $_.Plugin } | Select-Object -Unique).Count -lt 2) { continue }
         $pick = $null; $why = ''
-        $byUser = @($members | Where-Object { $wanted -contains $_.Plugin.ToLowerInvariant() -or $wanted -contains $_.Id.ToLowerInvariant() })
+        $byUser = @($members | Where-Object { Test-KeepMatches $_ $wanted })
         if ($byUser.Count -eq 1) {
             $pick = $byUser[0]; $why = 'you chose it'
         } elseif ($byUser.Count -gt 1) {
@@ -183,16 +199,16 @@ function Get-JsonStringList($Node) {
     return @(foreach ($x in $Node) { if ($x -is [System.Text.Json.Nodes.JsonValue] -and "$($x.GetValueKind())" -eq 'String') { $x.ToString() } })
 }
 
-# Does the project's own settings (.claude/settings.json or settings.local.json, as written by
-# `claude plugin disable --scope project|local`) turn this plugin off?
+# Does the project's own settings (as written by `claude plugin disable --scope project|local`) turn
+# this plugin off? settings.local.json wins over settings.json: the first file that names the key decides.
 function Test-PluginOffInProject {
     param([string]$Project, [string]$Key)
     if (-not $Project -or -not $Key) { return $false }
-    foreach ($name in 'settings.json', 'settings.local.json') {
+    foreach ($name in 'settings.local.json', 'settings.json') {
         $r = Read-JsonFileSafe (Join-Path (Join-Path $Project '.claude') $name)
         if (-not $r.Ok -or $null -eq $r.Data.enabledPlugins) { continue }
         $p = $r.Data.enabledPlugins.PSObject.Properties[$Key]
-        if ($p -and $p.Value -eq $false) { return $true }
+        if ($p) { return ($p.Value -eq $false) }
     }
     return $false
 }
@@ -363,6 +379,11 @@ trap {
 
 $reg = Get-PluginMcpRegistrations -ClaudeHome $ClaudeHome
 if (-not $reg.Ok) { Write-Host "Could not read the installed plugins ($($reg.Reason))." -ForegroundColor Red; exit 1 }
+$unmatched = @(Get-UnmatchedKeep -Registrations $reg.Items -Keep $Keep)
+if ($unmatched.Count -gt 0) {
+    Write-Host ("Refusing: -Keep names no plugin that registers an MCP server: {0}. Use the plugin name, plugin@marketplace or plugin:<plugin>:<server>." -f ($unmatched -join ', ')) -ForegroundColor Red
+    exit 1
+}
 $groups = @(Get-DuplicateMcpGroups -Registrations $reg.Items -Keep $Keep -PreferLocal:$PreferLocal)
 $cfgPath = Get-ClaudeConfigPath -ConfigPath $ConfigPath
 $cfg = Read-ClaudeConfig -Path $cfgPath

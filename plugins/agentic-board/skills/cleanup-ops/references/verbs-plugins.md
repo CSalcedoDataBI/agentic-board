@@ -130,7 +130,8 @@ plugin keeps working.
    A plugin installed for one project only is not considered. It prints a **plan id**.
 2. **Choose what to keep.** Default: the hosted one when exactly one is hosted. Ask the user whether the
    work needs desktop or project files; if so re-run with `-PreferLocal`. `-Keep <plugin>` (or the full
-   `plugin:<p>:<s>` id) decides explicitly. A group with no clear choice is listed and left alone.
+   `plugin:<p>:<s>` id, or `plugin@marketplace`) decides explicitly; a `-Keep` that matches no plugin with
+   an MCP server is refused, never silently ignored. A group with no clear choice is listed and left alone.
 3. **Apply only on the user's yes:** `-Execute -PlanId <id>` with the same `-Keep`/`-PreferLocal`. A plan id
    that no longer matches (a project was added, the config changed) is refused: plan again. The config is
    **copied to the backups folder first** (`~/.agentic-board/backups/claude.json.<time>.bak`), written

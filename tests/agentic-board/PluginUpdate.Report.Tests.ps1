@@ -60,6 +60,7 @@ Describe 'Invoke-PluginUpdate - what keeps the user on the manual loop' {
         # Last: every fake install rewrites the registries. 'unset' keeps no autoUpdate field at all.
         Set-AutoUpdate $script:Fx 'auto' $true
         Set-AutoUpdate $script:Fx 'released' $false
+        Set-AutoUpdate $script:Fx 'devtree' $false   # a directory source: never listed, updating it means nothing
     }
 
     It 'names the plugins that run from a directory marketplace, with the commands to move them to a release' {
@@ -92,7 +93,7 @@ Describe 'Invoke-PluginUpdate - what keeps the user on the manual loop' {
         @($r.CacheHeavy.Plugin) | Should -Be @('churn')
         $text = (Format-PluginUpdateReport -Result $r).Text -join "`n"
         $text | Should -Match 'churn@auto: 4 builds'
-        $text | Should -Match '/cleanup plugins clean'
+        $text | Should -Match '/cleanup plugins clean \(it keeps'   # the cache section's own advice
     }
 
     It 'does not suggest clean when nothing over the limit can be freed (installed build only)' {
@@ -103,6 +104,26 @@ Describe 'Invoke-PluginUpdate - what keeps the user on the manual loop' {
         $text = (Format-PluginUpdateReport -Result $only).Text -join "`n"
         $text | Should -Not -Match '/cleanup plugins clean \(it keeps'
         $text | Should -Match 'Nothing there can be freed now'
+    }
+
+    It 'says it could not tell, never "nothing to free", when the cleanup plan could not be built' {
+        $r = Invoke-PluginUpdate -ClaudeHome $script:Fx.Root -Runner $script:OkRunner -GetProcess $script:NoProcess -CacheBuildLimit 3
+        $r.CacheHeavy[0].Freeable = $null
+        $r.Cleanup = [pscustomobject]@{ Available = $false; Candidates = 0; Bytes = 0L; Ran = $false; Removed = 0; Failed = 0; Reason = 'cannot list processes' }
+        $text = (Format-PluginUpdateReport -Result $r).Text -join "`n"
+        $text | Should -Match 'could not tell how many can be freed'
+        $text | Should -Match 'cannot list processes'
+        $text | Should -Not -Match 'Nothing there can be freed'
+    }
+
+    It 'names the folder of every project-scoped install it restores' {
+        $r = Invoke-PluginUpdate -ClaudeHome $script:Fx.Root -Runner $script:OkRunner -GetProcess $script:NoProcess
+        $r.DirectorySource = @($r.DirectorySource) + @(
+            [pscustomobject]@{ Key = 'x@devtree'; Plugin = 'x'; Marketplace = 'devtree'; Scope = 'project'; ProjectPath = 'C:/a' }
+            [pscustomobject]@{ Key = 'x@devtree'; Plugin = 'x'; Marketplace = 'devtree'; Scope = 'project'; ProjectPath = 'C:/b' })
+        $text = (Format-PluginUpdateReport -Result $r).Text -join "`n"
+        $text | Should -Match 'install x@devtree --scope project   \(run it from C:/a\)'
+        $text | Should -Match 'install x@devtree --scope project   \(run it from C:/b\)'
     }
 
     It 'restores a project-scoped install at its own scope' {
@@ -192,9 +213,14 @@ Describe 'the release-notice contract (one release file per plugin@marketplace)'
     It 'never opens a named pipe (it would block every prompt)' -Skip:$IsWindows {
         $fifo = Join-Path $script:Home_ 'plugin-releases' 'pipe@m.json'
         & mkfifo $fifo
-        $clock = [System.Diagnostics.Stopwatch]::StartNew()
-        @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'pipe' -Marketplace 'm' -Installed '1.0').Count | Should -Be 0
-        $clock.ElapsedMilliseconds | Should -BeLessThan 5000
+        # A writer opens and closes the pipe after 3 s (bounded by timeout), so a regression that opens
+        # it shows up as a slow call that then FAILS the assertion - never as a hung test run.
+        $writer = Start-Process -FilePath 'timeout' -ArgumentList '8', 'sh', '-c', "sleep 3; : > '$fifo'" -PassThru
+        try {
+            $clock = [System.Diagnostics.Stopwatch]::StartNew()
+            @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'pipe' -Marketplace 'm' -Installed '1.0').Count | Should -Be 0
+            $clock.ElapsedMilliseconds | Should -BeLessThan 2500
+        } finally { try { $writer.Kill($true) } catch { } }
     }
 
     It 'keeps only issue references, so the file cannot put a sentence into the notice' {

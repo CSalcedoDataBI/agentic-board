@@ -328,7 +328,7 @@ function Invoke-PluginUpdate {
     # reinstall list must name every plugin it would take with it.
     # One row per install (key AND scope): a project-scoped install must come back at its own scope.
     $result.DirectorySource = @($inst.Entries | Where-Object { $dirMk -contains $_.Marketplace } |
-        Sort-Object Key, Scope -Unique | ForEach-Object { [pscustomobject]@{ Key = $_.Key; Plugin = $_.Plugin; Marketplace = $_.Marketplace; Scope = $_.Scope } })
+        Sort-Object Key, Scope, ProjectPath -Unique | ForEach-Object { [pscustomobject]@{ Key = $_.Key; Plugin = $_.Plugin; Marketplace = $_.Marketplace; Scope = $_.Scope; ProjectPath = $_.ProjectPath } })
     # Only an explicit false: an absent field takes Claude Code's own default, which this cannot know.
     $result.AutoUpdateOff = @($mkt.Items | Where-Object { $_.AutoUpdateSet -and -not $_.AutoUpdate -and $_.SourceKind -ne 'directory' } | ForEach-Object { $_.Name } | Sort-Object)
     # How many builds of each plugin `clean` could actually free (none once it already ran): the advice
@@ -339,7 +339,11 @@ function Invoke-PluginUpdate {
     }
     $result.CacheHeavy = @(Get-PluginCacheUsage -ClaudeHome $ClaudeHome |
         Where-Object { $_.Builds -gt $CacheBuildLimit -or $_.Bytes -gt ([long]$CacheMbLimit * 1MB) } |
-        ForEach-Object { $_ | Add-Member -NotePropertyName Freeable -NotePropertyValue ([int]$freeable["$($_.Marketplace)/$($_.Plugin)"]) -PassThru })
+        ForEach-Object {
+            # $null = unknown (the cleanup plan could not be built): never reported as "nothing to free".
+            $n = if ($plan.Ok) { [int]$freeable["$($_.Marketplace)/$($_.Plugin)"] } else { $null }
+            $_ | Add-Member -NotePropertyName Freeable -NotePropertyValue $n -PassThru
+        })
 
     $badMk = @($result.Marketplaces | Where-Object { $_.Status -eq 'failed' -and -not $_.Warning }).Count
     $badPl = @($result.Plugins | Where-Object { $_.Failure }).Count
@@ -458,8 +462,14 @@ function Format-PluginUpdateReport {
     if ($heavy.Count -gt 0) {
         & $add '' 'Gray'
         & $add 'Plugins piling up cached builds (Claude Code only prunes them after 14 days)' 'Yellow'
-        foreach ($h in $heavy) { & $add ("  {0}@{1}: {2} builds, {3} ({4} could be freed now)" -f $h.Plugin, $h.Marketplace, $h.Builds, (Format-Megabytes $h.Bytes), [int]$h.Freeable) 'Yellow' }
-        if (@($heavy | Where-Object { $_.Freeable -gt 0 }).Count -gt 0) {
+        foreach ($h in $heavy) {
+            $free = if ($null -eq $h.Freeable) { 'could not tell how many can be freed' } else { "$($h.Freeable) could be freed now" }
+            & $add ("  {0}@{1}: {2} builds, {3} ({4})" -f $h.Plugin, $h.Marketplace, $h.Builds, (Format-Megabytes $h.Bytes), $free) 'Yellow'
+        }
+        if (@($heavy | Where-Object { $null -eq $_.Freeable }).Count -gt 0) {
+            $why = if ($Result.Cleanup -and $Result.Cleanup.Reason) { " ($($Result.Cleanup.Reason))" } else { '' }
+            & $add "  Could not check which builds are unused$why; /cleanup plugins clean will say what it can free." 'Gray'
+        } elseif (@($heavy | Where-Object { $_.Freeable -gt 0 }).Count -gt 0) {
             & $add '  To free the unused ones: /cleanup plugins clean (it keeps the installed build and any build an open session uses).' 'Gray'
         } else {
             & $add '  Nothing there can be freed now: what is left is installed, in use by an open session, or just written.' 'Gray'
@@ -475,7 +485,9 @@ function Format-PluginUpdateReport {
             & $add ("    claude plugin marketplace remove {0}" -f $m) 'Gray'
             & $add  '    claude plugin marketplace add <git-repo>#<release-branch-or-tag>' 'Gray'
             foreach ($d in @($dirSrc | Where-Object { $_.Marketplace -eq $m })) {
-                $where = if ($d.Scope -and $d.Scope -ne 'user') { '   (run it from that project''s folder)' } else { '' }
+                $where = if ($d.Scope -and $d.Scope -ne 'user') {
+                    if ($d.ProjectPath) { "   (run it from $(ConvertTo-PlainText $d.ProjectPath))" } else { '   (run it from that project''s folder)' }
+                } else { '' }
                 & $add ("    claude plugin install {0} --scope {1}{2}" -f $d.Key, $(if ($d.Scope) { $d.Scope } else { 'user' }), $where) 'Gray'
             }
         }

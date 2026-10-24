@@ -105,6 +105,13 @@ Describe 'Get-DuplicateMcpGroups - which one to keep' {
         @(Get-DuplicateMcpGroups -Registrations $reg.Items).Count | Should -Be 0
     }
 
+    It 'accepts plugin@marketplace for -Keep, and reports a -Keep that names nothing' {
+        $reg = Get-PluginMcpRegistrations -ClaudeHome (New-DupScenario).Root
+        (Get-DuplicateMcpGroups -Registrations $reg.Items -Keep 'local@m')[0].Keep.Id | Should -Be 'plugin:local:model-mcp'
+        @(Get-UnmatchedKeep -Registrations $reg.Items -Keep 'local@m', 'plugin:hosted:model-mcp', 'hosted').Count | Should -Be 0
+        @(Get-UnmatchedKeep -Registrations $reg.Items -Keep 'lcoal', 'local@other') | Should -Be @('lcoal', 'local@other')
+    }
+
     It 'decides nothing when both share a transport and the user did not choose' {
         $rows = @(
             [pscustomobject]@{ Id = 'plugin:a:s'; Plugin = 'a'; Marketplace = 'm'; Server = 's'; Transport = 'stdio'; Kind = 'local' }
@@ -182,10 +189,10 @@ Describe 'plan and apply on a fixture config' {
     }
 
     It 'keeps the Unix file mode of the config' -Skip:$IsWindows {
-        [System.IO.File]::SetUnixFileMode($script:Cfg, [System.IO.UnixFileMode]'UserRead, UserWrite')
+        [System.IO.File]::SetUnixFileMode($script:Cfg, [System.IO.UnixFileMode]'UserRead, UserWrite, GroupRead')
         $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups
         (Invoke-McpDisable -ConfigPath $script:Cfg -Groups $script:Groups -PlanId $plan.PlanId -BackupDir $script:Bk).Ok | Should -BeTrue
-        [System.IO.File]::GetUnixFileMode($script:Cfg) | Should -Be ([System.IO.UnixFileMode]'UserRead, UserWrite')
+        [System.IO.File]::GetUnixFileMode($script:Cfg) | Should -Be ([System.IO.UnixFileMode]'UserRead, UserWrite, GroupRead')
     }
 
     It 'refuses a plan id confirmed for a different keep choice, and changes nothing' {
@@ -207,6 +214,16 @@ Describe 'plan and apply on a fixture config' {
         $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups
         @($plan.Missing.Project) | Should -Be @('C:/work/z')
         @($plan.KeptButDisabled).Count | Should -Be 1
+    }
+
+    It 'lets settings.local.json re-enable what the shared settings.json turned off' {
+        $proj = Join-Path $TestDrive ("proj" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Force -Path (Join-Path $proj '.claude') | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $proj '.claude' 'settings.json'), '{"enabledPlugins":{"hosted@m":false}}')
+        [System.IO.File]::WriteAllText((Join-Path $proj '.claude' 'settings.local.json'), '{"enabledPlugins":{"hosted@m":true}}')
+        Test-PluginOffInProject -Project $proj -Key 'hosted@m' | Should -BeFalse
+        Remove-Item (Join-Path $proj '.claude' 'settings.local.json')
+        Test-PluginOffInProject -Project $proj -Key 'hosted@m' | Should -BeTrue
     }
 
     It 'never calls undecided servers handled' {
@@ -283,10 +300,18 @@ Describe 'the script end to end (fixtures only)' {
             $env:HOME = $fakeHome; $env:USERPROFILE = $fakeHome; $env:CLAUDE_CONFIG_DIR = $fakeHome
             $msg = & pwsh -NoProfile -File $script:Script -ClaudeHome $fx.Root -Execute -PlanId $doc.planId -BackupDir (Join-Path $TestDrive 'bk-e2e') *>&1 | Out-String
             $code = $LASTEXITCODE
+            # ...and without -BackupDir (it would otherwise fall back to the real backups folder).
+            $msg2 = & pwsh -NoProfile -File $script:Script -ClaudeHome $fx.Root -ConfigPath $cfg -Execute -PlanId $doc.planId *>&1 | Out-String
+            $code2 = $LASTEXITCODE
         } finally { foreach ($k in $saved.Keys) { Set-Item -Path "env:$k" -Value $saved[$k] } }
         $code | Should -Be 1
         $msg | Should -Match 'also needs -ConfigPath and -BackupDir'
+        $code2 | Should -Be 1
+        $msg2 | Should -Match 'also needs -ConfigPath and -BackupDir'
+        [System.IO.File]::ReadAllBytes($cfg) | Should -Be $before
+        # (pwsh itself creates cache folders under a fresh home; what matters is no config and no backup.)
         Test-Path (Join-Path $fakeHome '.claude.json') | Should -BeFalse
+        @(Get-ChildItem -LiteralPath $fakeHome -Recurse -Force -Filter 'claude.json.*.bak').Count | Should -Be 0
 
         & pwsh -NoProfile -File $script:Script -ClaudeHome $fx.Root -ConfigPath $cfg -Execute -PlanId $doc.planId -BackupDir (Join-Path $TestDrive 'bk-e2e') *> $null
         $LASTEXITCODE | Should -Be 0
