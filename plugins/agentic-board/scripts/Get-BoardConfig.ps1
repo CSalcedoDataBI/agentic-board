@@ -223,11 +223,14 @@ function Get-GroupingSetting {
 #   3. Either way the expert agent file must exist. A declaration with no expert to run is reported
 #      (`warning`) and falls back to 'user' - merging on a declaration nobody can carry out would be
 #      the tool answering for an expert that is not there.
-# An unrecognised `mergeAuthority` value is ignored (warning) and detection continues from files,
-# the same posture as an unreadable grouping value: a hand edit the tool cannot read is not a decision.
+#   4. It fails CLOSED. Merging is irreversible, so anything the tool cannot read - an unrecognised
+#      `mergeAuthority` value (`false`, "none", a typo: most likely an attempted opt-out), or a
+#      config.json that exists but cannot be parsed (-ConfigUnreadable) - resolves to 'user' with a
+#      warning, never to "let the files decide". The grouping preference can fall back to a default;
+#      the right to merge without asking cannot.
 function Get-MergeAuthority {
     [CmdletBinding()]
-    param($Config, [string]$Root)
+    param($Config, [string]$Root, [switch]$ConfigUnreadable)
 
     $agentRel = '.claude/agents/experto.md'
     $res = [ordered]@{
@@ -243,9 +246,16 @@ function Get-MergeAuthority {
         if (Test-Path -LiteralPath $f -PathType Leaf) {
             $fichaPath = $f; $res.ficha = $f
             $text = try { Get-Content -LiteralPath $f -Raw -ErrorAction Stop } catch { '' }
-            $m = [regex]::Match([string]$text, '(?im)^[\s>*_-]*Aprobada\s*[:*_]*\s*[*_]*\s*(\d{4}-\d{2}-\d{2})\b')
+            # (?!\d), not \b: `_Aprobada: 2026-10-02_` puts a word character right after the date.
+            $m = [regex]::Match([string]$text, '(?im)^[\s>*_-]*Aprobada\s*[:*_]*\s*[*_]*\s*(\d{4}-\d{2}-\d{2})(?!\d)')
             if ($m.Success) { $res.fichaApproved = $m.Groups[1].Value }
         }
+    }
+
+    if ($ConfigUnreadable) {
+        $res.source = 'config'; $res.reason = 'the repo config cannot be read'
+        $res.warning = '.agentic-board/config.json exists but cannot be read, so it may hold an opt-out; the user confirms'
+        return [pscustomobject]$res
     }
 
     $declared = $null
@@ -255,7 +265,11 @@ function Get-MergeAuthority {
         switch ($norm) {
             'user'   { $declared = 'user' }
             'expert' { $declared = 'expert' }
-            default  { $res.warning = "mergeAuthority '$v' in .agentic-board/config.json is not 'expert' or 'user'; ignored" }
+            default {
+                $res.source = 'config'; $res.reason = 'the repo config holds a merge authority the tool cannot read'
+                $res.warning = "mergeAuthority '$v' in .agentic-board/config.json is not 'expert' or 'user'; the user confirms"
+                return [pscustomobject]$res
+            }
         }
     }
 

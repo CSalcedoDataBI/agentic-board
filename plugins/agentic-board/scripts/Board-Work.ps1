@@ -2771,11 +2771,11 @@ if ($RegisterSession) {
 # =======================================================================
 if ($MergeAuthority -eq 'show') {
     $read = Read-BoardConfig -Path (Get-BoardConfigPath)
-    $auth = Get-MergeAuthority -Config $read.config -Root (Get-WorkingTreeRoot)
+    $auth = Get-MergeAuthority -Config $read.config -Root (Get-WorkingTreeRoot) -ConfigUnreadable:(-not $read.ok)
     Write-Host ("Merge authority: " + (Format-MergeAuthorityLabel $auth))
     Write-Host "  $($auth.reason)" -ForegroundColor DarkGray
     if ($auth.warning)   { Write-Host "  $($auth.warning)" -ForegroundColor Yellow }
-    if (-not $read.ok)   { Write-Host "  Could not read the repo config ($($read.error)); deciding from the files." -ForegroundColor Yellow }
+    if (-not $read.ok)   { Write-Host "  ($($read.error))" -ForegroundColor DarkGray }
     if ($auth.authority -eq 'expert') {
         Write-Host "  Step 5d: the review gate still runs; then the expert decides - merge (summary posted on the PR) or propose (you confirm)." -ForegroundColor DarkGray
     } else {
@@ -2814,7 +2814,7 @@ if ($PreferGroupedPRs -eq 'show') {
     # error: the default applies. An unreadable file is said out loud, never read as "no preference"
     # in silence - but the first line still carries the value the tool will actually use.
     $read    = Read-BoardConfig -Path (Get-BoardConfigPath)
-    $expert  = (Get-MergeAuthority -Config $read.config -Root (Get-WorkingTreeRoot)).authority -eq 'expert'
+    $expert  = (Get-MergeAuthority -Config $read.config -Root (Get-WorkingTreeRoot) -ConfigUnreadable:(-not $read.ok)).authority -eq 'expert'
     $setting = Get-GroupingSetting $read.config -ExpertDeclared:$expert
     Write-Host ("Grouped PRs: " + (Format-GroupingSettingLabel $setting))
     if (-not $read.ok) {
@@ -2834,6 +2834,13 @@ if ($PreferGroupedPRs) {
         'on'   { $true }
         'off'  { $false }
         'auto' { $null }
+    }
+    # 'auto' is normally stored as "no decision" (null). In a repo whose expert decides merges, no
+    # decision falls back to 'on' (#797), so null would silently NOT mean auto there: record the
+    # word itself, which the resolver reads as an explicit auto that beats the expert default.
+    if ($PreferGroupedPRs -eq 'auto') {
+        $pre = Read-BoardConfig -Path $cfgPath
+        if ((Get-MergeAuthority -Config $pre.config -Root (Get-WorkingTreeRoot) -ConfigUnreadable:(-not $pre.ok)).authority -eq 'expert') { $value = 'auto' }
     }
     Set-BoardConfigValue -Path $cfgPath -Key 'preferGroupedPRs' -Value $value | Out-Null
 
@@ -2857,11 +2864,6 @@ if ($PreferGroupedPRs) {
     Write-Host ""
     Write-Host "  From now on: $said." -ForegroundColor Green
     Write-Host "  It stays with the repo, so you do not have to repeat it every session." -ForegroundColor DarkGray
-    # 'auto' is stored as "no decision", and a repo whose expert decides merges falls back to 'on'
-    # (#797) - say so, or the line above would promise a behaviour the next listing does not show.
-    if ($posture -eq 'auto' -and (Get-MergeAuthority -Config $check.config -Root (Get-WorkingTreeRoot)).authority -eq 'expert') {
-        Write-Host "  This repo declares an expert, so with no recorded answer grouping falls back to 'on'. Use 'off' to opt out." -ForegroundColor Yellow
-    }
     Write-Host ""
     exit 0
 }
@@ -3418,7 +3420,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         Write-Host "Continuing with the default; I do not assume there is no preference." -ForegroundColor DarkGray
     }
     # A repo whose expert decides merges groups by default (#797); a recorded answer still wins.
-    $expertDeclared = (Get-MergeAuthority -Config $cfgRead.config -Root (Get-WorkingTreeRoot)).authority -eq 'expert'
+    $expertDeclared = (Get-MergeAuthority -Config $cfgRead.config -Root (Get-WorkingTreeRoot) -ConfigUnreadable:(-not $cfgRead.ok)).authority -eq 'expert'
     $posture = Resolve-GroupingPosture $cfgRead.config -ExpertDeclared:$expertDeclared
     # Not being in a clone is a SUPPORTED way to run this listing - the contract's step 1 says so
     # ("outside a repo, skip the scope question"). Get-RepoFromOrigin throws there, so it is

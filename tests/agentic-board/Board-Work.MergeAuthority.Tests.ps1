@@ -109,14 +109,30 @@ Describe 'Get-MergeAuthority: deterministic detection' {
         $a.authority | Should -Be 'user'
         $a.source    | Should -Be 'config'
     }
-    It 'an unrecognised mergeAuthority is ignored with a warning, and the files decide' {
+    It 'an unrecognised mergeAuthority fails CLOSED to user, even over an approved FICHA' {
         $root = New-ThrowawayRepo 'garbage'
         Add-Expert $root
         Add-Ficha $root "Aprobada: 2026-10-01"
-        foreach ($garbage in @('maybe', 42, $true)) {
+        foreach ($garbage in @('maybe', 'none', 'usr', 42, $false, $true)) {
             $a = Get-MergeAuthority -Config @{ mergeAuthority = $garbage } -Root $root
-            $a.authority | Should -Be 'expert' -Because "'$garbage' is not a decision"
-            $a.warning   | Should -Match 'ignored'
+            $a.authority | Should -Be 'user' -Because "'$garbage' may be an attempted opt-out, and merging cannot be undone"
+            $a.warning   | Should -Match 'user confirms'
+        }
+    }
+    It 'a config.json that cannot be read fails CLOSED to user, even over an approved FICHA' {
+        $root = New-ThrowawayRepo 'unreadable'
+        Add-Expert $root
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        $a = Get-MergeAuthority -Config (Get-BoardConfigDefaults) -Root $root -ConfigUnreadable
+        $a.authority | Should -Be 'user'
+        $a.warning   | Should -Match 'cannot be read'
+    }
+    It 'reads an approval line wrapped in underscore emphasis' {
+        foreach ($line in @('_Aprobada: 2026-10-02_', '__Aprobada:__ 2026-10-02')) {
+            $root = New-ThrowawayRepo ('und' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+            Add-Expert $root
+            Add-Ficha $root $line
+            (Get-MergeAuthority -Config $null -Root $root).fichaApproved | Should -Be '2026-10-02' -Because "'$line' is an approval line"
         }
     }
     It 'the same inputs give the same answer every time' {
@@ -186,6 +202,32 @@ Describe '-MergeAuthority end to end (no token)' {
         $r.code | Should -Be 0
         $r.out  | Should -Match 'Grouped PRs: on \(repo expert\)'
     }
+    It 'show with an unreadable config.json in a NORTE repo -> user' {
+        $root = New-ThrowawayRepo 'e2e-corrupt'
+        Add-Expert $root
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '{ "mergeAuthority": "user", }' -Encoding UTF8
+        $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
+        $r.code | Should -Be 0
+        $r.out  | Should -Match 'Merge authority: user \(repo config\)'
+    }
+    It '-PreferGroupedPRs auto in a NORTE repo is honoured as auto, not the expert default' {
+        $root = New-ThrowawayRepo 'e2e-auto'
+        Add-Expert $root
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        $w = Invoke-BoardWork $root @{ PreferGroupedPRs = 'auto' }
+        $w.code | Should -Be 0
+        $r = Invoke-BoardWork $root @{ PreferGroupedPRs = 'show' }
+        $r.out  | Should -Match 'Grouped PRs: auto \(repo config\)'
+    }
+    It '-PreferGroupedPRs auto in a repo that declares nothing still stores no decision' {
+        $root = New-ThrowawayRepo 'e2e-auto-none'
+        $w = Invoke-BoardWork $root @{ PreferGroupedPRs = 'auto' }
+        $w.code | Should -Be 0
+        $cfg = Get-Content (Join-Path $root '.agentic-board' 'config.json') -Raw | ConvertFrom-Json
+        $cfg.preferGroupedPRs | Should -BeNullOrEmpty
+    }
     It 'the grouped-PR setting is unchanged in a repo that declares nothing' {
         $root = New-ThrowawayRepo 'e2e-group-none'
         $r = Invoke-BoardWork $root @{ PreferGroupedPRs = 'show' }
@@ -198,7 +240,8 @@ Describe 'verbs-work.md step 5d documents the expert branch' {
         $script:Doc = Get-Content (Join-Path $script:Plugin 'skills' 'projects-admin' 'references' 'verbs-work.md') -Raw
     }
     It 'step 5d reads the merge authority first' {
-        $script:Doc | Should -Match 'MergeAuthority show'
+        # Anchored on the step-5d block itself, not the summary table further down.
+        $script:Doc | Should -Match '(?s)\*\*Who decides the merge \(#797\)\.\*\*\s+Before step d, run `scripts/Board-Work\.ps1 -MergeAuthority\s+show`'
     }
     It 'says the review gate always runs and repos that declare nothing keep the user confirmation' {
         $script:Doc | Should -Match '(?s)declares nothing.{0,200}(today|unchanged)'
