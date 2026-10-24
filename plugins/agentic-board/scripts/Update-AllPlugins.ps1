@@ -21,6 +21,7 @@
     -Only     one or more plugin names (or plugin@marketplace) to limit the run to.
     -Clean    afterwards, delete old builds nobody uses (same guards as the cleanup verb). Without it the
               run only counts them; it never deletes on its own.
+    -CacheBuildLimit / -CacheMbLimit   flag a plugin whose cache holds more builds / MB than this (10 / 500).
     -AcceptMarketplaceCommands   pass --yes to `claude plugin update`. OFF by default: it accepts, without
               asking, a command a marketplace declares for its install. Only for marketplaces you trust.
 
@@ -35,7 +36,9 @@ param(
     [switch]$DryRun,
     [switch]$Clean,
     [switch]$AcceptMarketplaceCommands,
-    [int]$TimeoutSec = 300
+    [int]$TimeoutSec = 300,
+    [int]$CacheBuildLimit = 10,
+    [int]$CacheMbLimit = 500
 )
 
 . (Join-Path $PSScriptRoot 'PluginState.ps1')
@@ -185,13 +188,16 @@ function Invoke-PluginUpdate {
         [scriptblock]$GetProcess,
         [scriptblock]$OnProgress,
         [int]$TimeoutSec = 300,
-        [int]$GraceMinutes = 60
+        [int]$GraceMinutes = 60,
+        [int]$CacheBuildLimit = 10,
+        [int]$CacheMbLimit = 500
     )
     if (-not $Runner) { $Runner = { param($cliArgs) Invoke-ClaudeCli -Arguments $cliArgs -TimeoutSec $TimeoutSec } }
     $say = { param($m) if ($OnProgress) { & $OnProgress $m } }
     $result = [pscustomobject]@{
         Fatal = ''; DryRun = [bool]$DryRun; Marketplaces = @(); Plugins = @(); Commands = @()
         Sessions = $null; Cleanup = $null; ExitCode = 0
+        DirectorySource = @(); AutoUpdateOff = @(); CacheHeavy = @()
     }
     $fatal = { param($why) $result.Fatal = $why; $result.ExitCode = 1; return $result }
 
@@ -315,6 +321,14 @@ function Invoke-PluginUpdate {
         $result.Cleanup = [pscustomobject]@{ Available = $false; Candidates = 0; Bytes = 0L; Ran = $false; Removed = 0; Failed = 0; Reason = $plan.Reason }
     }
 
+    # #798: what keeps the user on the "update, restart, clean by hand" loop - plugins that run from a
+    # source tree, cache that piles up, and marketplaces that never update on their own. Report only.
+    $dirMk = @($mkt.Items | Where-Object { $_.SourceKind -eq 'directory' } | ForEach-Object { $_.Name })
+    $result.DirectorySource = @($targets | Where-Object { $dirMk -contains $_.Marketplace } |
+        Sort-Object Key -Unique | ForEach-Object { [pscustomobject]@{ Key = $_.Key; Plugin = $_.Plugin; Marketplace = $_.Marketplace } })
+    $result.AutoUpdateOff = @($mkt.Items | Where-Object { -not $_.AutoUpdate -and $_.SourceKind -ne 'directory' } | ForEach-Object { $_.Name } | Sort-Object)
+    $result.CacheHeavy = @(Get-PluginCacheUsage -ClaudeHome $ClaudeHome | Where-Object { $_.Builds -gt $CacheBuildLimit -or $_.Bytes -gt ([long]$CacheMbLimit * 1MB) })
+
     $badMk = @($result.Marketplaces | Where-Object { $_.Status -eq 'failed' -and -not $_.Warning }).Count
     $badPl = @($result.Plugins | Where-Object { $_.Failure }).Count
     $badCl = if ($result.Cleanup.Available) { $result.Cleanup.Failed } else { 0 }
@@ -427,6 +441,32 @@ function Format-PluginUpdateReport {
             & $add ("Unused old versions: {0} (about {1}). Nothing is deleted on its own: to clean them use /cleanup plugins clean (or repeat this with -Clean)." -f $c.Candidates, (Format-Megabytes $c.Bytes)) 'Gray'
         }
     }
+
+    $heavy = @($Result.CacheHeavy)
+    if ($heavy.Count -gt 0) {
+        & $add '' 'Gray'
+        & $add 'Plugins piling up cached builds (Claude Code only prunes them after 14 days)' 'Yellow'
+        foreach ($h in $heavy) { & $add ("  {0}@{1}: {2} builds, {3}" -f $h.Plugin, $h.Marketplace, $h.Builds, (Format-Megabytes $h.Bytes)) 'Yellow' }
+        & $add '  To free the unused ones: /cleanup plugins clean (it keeps the installed build and any build an open session uses).' 'Gray'
+    }
+    $dirSrc = @($Result.DirectorySource)
+    if ($dirSrc.Count -gt 0) {
+        & $add '' 'Gray'
+        & $add 'Running from a source folder, not a release (a directory marketplace = unreleased code; update has nothing to compare against)' 'Yellow'
+        foreach ($d in $dirSrc) { & $add ("  {0}" -f $d.Key) 'Yellow' }
+        & $add '  To run released builds instead, register the git dist branch or tag (fill in the repo and ref):' 'Gray'
+        foreach ($m in @($dirSrc | ForEach-Object { $_.Marketplace } | Select-Object -Unique)) {
+            & $add ("    claude plugin marketplace remove {0}" -f $m) 'Gray'
+            & $add  '    claude plugin marketplace add <git-repo>#<release-branch-or-tag>' 'Gray'
+            foreach ($d in @($dirSrc | Where-Object { $_.Marketplace -eq $m })) { & $add ("    claude plugin install {0}" -f $d.Key) 'Gray' }
+        }
+    }
+    $off = @($Result.AutoUpdateOff)
+    if ($off.Count -gt 0) {
+        & $add '' 'Gray'
+        & $add ("Marketplaces with auto-update off (or not set): {0}" -f ($off -join ', ')) 'Gray'
+        & $add '  Their plugins update only when someone runs /cleanup plugins. Turning it on is your call (in /plugin, open the marketplace and enable auto-update); nothing here changes it.' 'Gray'
+    }
     return @($acc)
 }
 
@@ -451,6 +491,7 @@ trap {
 
 $run = Invoke-PluginUpdate -ClaudeHome $ClaudeHome -Only $Only -DryRun:$DryRun -Clean:$Clean `
     -AcceptMarketplaceCommands:$AcceptMarketplaceCommands -TimeoutSec $TimeoutSec `
+    -CacheBuildLimit $CacheBuildLimit -CacheMbLimit $CacheMbLimit `
     -OnProgress { param($m) Write-Host $m -ForegroundColor DarkGray }
 foreach ($line in (Format-PluginUpdateReport -Result $run)) {
     Write-Host $line.Text -ForegroundColor $line.Color

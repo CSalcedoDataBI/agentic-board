@@ -413,6 +413,21 @@ function Get-DirSizeBytes([string]$Path) {
     try { return [long](Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum } catch { return 0L }
 }
 
+# How much each plugin keeps in the cache (#798): every cached build, installed or not. Claude Code
+# prunes orphaned builds only after 14 days, so a plugin deployed several times a day piles them up.
+#   @{ Marketplace; Plugin; Builds; Bytes }  largest first
+function Get-PluginCacheUsage {
+    param([string]$ClaudeHome)
+    $rows = foreach ($g in (@(Get-CacheVersionDirs -ClaudeHome $ClaudeHome) | Group-Object { "$($_.Marketplace)/$($_.Plugin)" })) {
+        $first = $g.Group[0]
+        [pscustomobject]@{
+            Marketplace = $first.Marketplace; Plugin = $first.Plugin; Builds = $g.Count
+            Bytes = [long](($g.Group | ForEach-Object { Get-DirSizeBytes $_.Path } | Measure-Object -Sum).Sum)
+        }
+    }
+    return @($rows | Sort-Object Bytes -Descending)
+}
+
 # Does anything still hold this build, or make it not-removable, RIGHT NOW?  $null = nothing does;
 # otherwise { Category; Reason }. The three conditions that can change between a plan and a delete:
 #   installed  it is the installed build of some entry (by real path, or plugin@marketplace + version)

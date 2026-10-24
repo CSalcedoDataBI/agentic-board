@@ -10,15 +10,20 @@ loaded at startup**. A fix gets published, the user updates, and the problem "pe
 never saw it. Claude Code has no `plugin update --all`, does not say which open sessions are behind, and
 deletes superseded builds only after 14 days.
 
-## Three actions
+## Four actions
 
 | Typed | Runs | What it does |
 |---|---|---|
 | `/cleanup plugins` (or `plugins update`) | `scripts/Update-AllPlugins.ps1` | refresh every marketplace, update every installed plugin, report what changed |
 | `/cleanup plugins sessions` | `scripts/Get-PluginSessionMap.ps1` | list open sessions and the plugins each still runs on an old build |
 | `/cleanup plugins clean` | `scripts/Remove-OldPluginVersions.ps1` | list (or with `-Execute` delete) old cached builds nobody uses |
+| `/cleanup plugins mcp` | `scripts/Find-DuplicateMcpServers.ps1` | find MCP servers two plugins register under one name; on confirmation disable the redundant one per project |
 
 Run the script for the action; pass the user's flags through. Never improvise the recipe from this table.
+
+This verb is **the single plugin-update path** (#798): a plugin should not ship its own "a newer build is
+out" hook, its own update script or its own cache cleaner. It writes a release file (below) and relies on
+these actions.
 
 ### update
 
@@ -47,7 +52,17 @@ the confirmation fails with that reason instead of hanging (the CLI runs with st
 timeout). Offer the flag only for a marketplace the user trusts.
 
 The report ends with how many **open sessions still run old builds** (the session map data) and how many
-old builds could be removed. It never deletes on its own.
+old builds could be removed. It never deletes on its own. Then three report-only sections (#798), each
+silent when empty:
+
+- **Cache pressure** — every plugin whose cache holds more than `-CacheBuildLimit` builds (10) or
+  `-CacheMbLimit` MB (500), with its build count and size, and the suggestion to run `clean`.
+- **Running from a source folder** — every installed plugin whose marketplace is a `directory` source:
+  sessions run unreleased code and `plugin update` has nothing to compare against. It prints the
+  `marketplace remove` / `marketplace add <git-repo>#<release-branch-or-tag>` / `install` commands; the
+  repo and ref are the user's to fill in. Nothing is run.
+- **Auto-update off** — git marketplaces whose `autoUpdate` is off or not set, so their plugins update only
+  when someone runs this. Turning it on is the user's call in `/plugin`; this never flips it.
 
 ### sessions
 
@@ -92,6 +107,46 @@ Honesty rules (each is tested):
 If `installed_plugins.json` cannot be read, or is empty, nothing is removed. The deleting function
 re-verifies location and links right before it acts; it does not trust the plan. `-ShowKept` prints the
 reason for every build that stays.
+
+### mcp
+
+Two plugins can bundle the same MCP server under one short name (one hosted over HTTP, one a local stdio
+process). Both connect, the session sees two overlapping tool sets and pays both schemas. Claude Code names
+each `plugin:<plugin>:<server>`; listing that id in `projects[<path>].disabledMcpServers` of the user config
+(`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`) turns it off for that project only, and the other
+plugin keeps working.
+
+1. **Plan (default, writes nothing).** `Find-DuplicateMcpServers.ps1` reads every installed build
+   (`.mcp.json`, `mcpServers` in `plugin.json`), lists each repeated server with the transport of every
+   copy, says which one to KEEP and why, and lists every known project that does not disable the others
+   yet. It prints a **plan id**.
+2. **Choose what to keep.** Default: the hosted one when exactly one is hosted. Ask the user whether the
+   work needs desktop or project files; if so re-run with `-PreferLocal`. `-Keep <plugin>` (or the full
+   `plugin:<p>:<s>` id) decides explicitly. A group with no clear choice is listed and left alone.
+3. **Apply only on the user's yes:** `-Execute -PlanId <id>` with the same `-Keep`/`-PreferLocal`. A plan id
+   that no longer matches (a project was added, the config changed) is refused: plan again. The config is
+   **copied to the backups folder first** (`~/.agentic-board/backups/claude.json.<time>.bak`), written
+   atomically with only `disabledMcpServers` touched, and read back to verify.
+
+Say the limits when you report: the setting is **per project** (a project opened later needs this run
+again — the plan lists it); an open session keeps its servers until it restarts; the running app may
+rewrite the config, so check with `claude mcp list` afterwards. Never run `-Execute` against the real
+config while developing or testing (`-ConfigPath` / `-ClaudeHome` / `-BackupDir` take fixtures).
+
+## The release-notice contract (one notice for every plugin)
+
+A plugin's deploy script may write `<claude home>/plugin-releases/<plugin>.json`:
+
+```json
+{ "version": "1.4.0", "commit": "abc1234…", "publishedAt": "2026-10-23T12:00:00Z", "fixes": ["#123", "#130"] }
+```
+
+When the in-session notice below fires for that plugin, it adds `Fixes: #123 #130.` — but only if the file
+describes the build now installed (`version` equals the build folder name, or `commit` matches a
+commit-named build folder). Fix entries are short tokens only (letters, digits, `#._/-`, at most 40
+characters, at most 10 of them); anything else is dropped. A plugin that writes this file can drop its own
+notice hook: one notice per event, one state file. The known limit stays in the notice: skills, commands,
+agents and hooks → `/reload-plugins`; a plugin with an MCP server → a new session.
 
 ## The in-session notice (automatic, not typed)
 
