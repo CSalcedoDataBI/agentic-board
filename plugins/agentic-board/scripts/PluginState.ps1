@@ -104,7 +104,7 @@ function Get-InstalledPluginEntries {
 }
 
 # Every registered marketplace, from known_marketplaces.json.
-#   { Ok; Reason; Items = @{ Name; SourceKind; InstallLocation; AutoUpdate } }
+#   { Ok; Reason; Items = @{ Name; SourceKind; InstallLocation; AutoUpdate; AutoUpdateSet } }
 function Get-KnownMarketplaces {
     param([string]$ClaudeHome)
     $path = Join-Path (Join-Path (Get-ClaudeHomeDir $ClaudeHome) 'plugins') 'known_marketplaces.json'
@@ -117,6 +117,8 @@ function Get-KnownMarketplaces {
         $items.Add([pscustomobject]@{
             Name = $prop.Name; SourceKind = $kind; InstallLocation = "$($prop.Value.installLocation)"
             AutoUpdate = [bool]$prop.Value.autoUpdate
+            # Absent is not "off": Claude Code applies a per-marketplace default (on for official ones).
+            AutoUpdateSet = ($null -ne $prop.Value.PSObject.Properties['autoUpdate'])
         })
     }
     return [pscustomobject]@{ Ok = $true; Reason = ''; Items = @($items) }

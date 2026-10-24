@@ -324,9 +324,12 @@ function Invoke-PluginUpdate {
     # #798: what keeps the user on the "update, restart, clean by hand" loop - plugins that run from a
     # source tree, cache that piles up, and marketplaces that never update on their own. Report only.
     $dirMk = @($mkt.Items | Where-Object { $_.SourceKind -eq 'directory' } | ForEach-Object { $_.Name })
-    $result.DirectorySource = @($targets | Where-Object { $dirMk -contains $_.Marketplace } |
+    # From EVERY installed entry, not the -Only targets: the advice removes the whole marketplace, so the
+    # reinstall list must name every plugin it would take with it.
+    $result.DirectorySource = @($inst.Entries | Where-Object { $dirMk -contains $_.Marketplace } |
         Sort-Object Key -Unique | ForEach-Object { [pscustomobject]@{ Key = $_.Key; Plugin = $_.Plugin; Marketplace = $_.Marketplace } })
-    $result.AutoUpdateOff = @($mkt.Items | Where-Object { -not $_.AutoUpdate -and $_.SourceKind -ne 'directory' } | ForEach-Object { $_.Name } | Sort-Object)
+    # Only an explicit false: an absent field takes Claude Code's own default, which this cannot know.
+    $result.AutoUpdateOff = @($mkt.Items | Where-Object { $_.AutoUpdateSet -and -not $_.AutoUpdate -and $_.SourceKind -ne 'directory' } | ForEach-Object { $_.Name } | Sort-Object)
     $result.CacheHeavy = @(Get-PluginCacheUsage -ClaudeHome $ClaudeHome | Where-Object { $_.Builds -gt $CacheBuildLimit -or $_.Bytes -gt ([long]$CacheMbLimit * 1MB) })
 
     $badMk = @($result.Marketplaces | Where-Object { $_.Status -eq 'failed' -and -not $_.Warning }).Count
@@ -454,7 +457,7 @@ function Format-PluginUpdateReport {
         & $add '' 'Gray'
         & $add 'Running from a source folder, not a release (a directory marketplace = unreleased code; update has nothing to compare against)' 'Yellow'
         foreach ($d in $dirSrc) { & $add ("  {0}" -f $d.Key) 'Yellow' }
-        & $add '  To run released builds instead, register the git dist branch or tag (fill in the repo and ref):' 'Gray'
+        & $add '  To run released builds instead, register the git dist branch or tag (fill in the repo and ref). Removing a marketplace uninstalls ALL its plugins, so every one is reinstalled below:' 'Gray'
         foreach ($m in @($dirSrc | ForEach-Object { $_.Marketplace } | Select-Object -Unique)) {
             & $add ("    claude plugin marketplace remove {0}" -f $m) 'Gray'
             & $add  '    claude plugin marketplace add <git-repo>#<release-branch-or-tag>' 'Gray'
@@ -464,7 +467,7 @@ function Format-PluginUpdateReport {
     $off = @($Result.AutoUpdateOff)
     if ($off.Count -gt 0) {
         & $add '' 'Gray'
-        & $add ("Marketplaces with auto-update off (or not set): {0}" -f ($off -join ', ')) 'Gray'
+        & $add ("Marketplaces with auto-update turned off: {0}" -f ($off -join ', ')) 'Gray'
         & $add '  Their plugins update only when someone runs /cleanup plugins. Turning it on is your call (in /plugin, open the marketplace and enable auto-update); nothing here changes it.' 'Gray'
     }
     return @($acc)

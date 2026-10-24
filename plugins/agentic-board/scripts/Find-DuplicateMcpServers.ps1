@@ -120,7 +120,7 @@ function Get-PluginMcpRegistrations {
         $seen[$e.Key] = $true
         foreach ($s in @(Get-PluginMcpServers -Dir $e.InstallPath)) {
             $rows.Add([pscustomobject]@{
-                Id = "plugin:$($e.Plugin):$($s.Server)"; Plugin = $e.Plugin; Marketplace = $e.Marketplace
+                Id = "plugin:$($e.Plugin):$($s.Server)"; Key = $e.Key; Plugin = $e.Plugin; Marketplace = $e.Marketplace
                 Server = $s.Server; Transport = $s.Transport; Kind = $s.Kind
             })
         }
@@ -183,6 +183,20 @@ function Get-JsonStringList($Node) {
     return @(foreach ($x in $Node) { if ($x -is [System.Text.Json.Nodes.JsonValue] -and "$($x.GetValueKind())" -eq 'String') { $x.ToString() } })
 }
 
+# Does the project's own settings (.claude/settings.json or settings.local.json, as written by
+# `claude plugin disable --scope project|local`) turn this plugin off?
+function Test-PluginOffInProject {
+    param([string]$Project, [string]$Key)
+    if (-not $Project -or -not $Key) { return $false }
+    foreach ($name in 'settings.json', 'settings.local.json') {
+        $r = Read-JsonFileSafe (Join-Path (Join-Path $Project '.claude') $name)
+        if (-not $r.Ok -or $null -eq $r.Data.enabledPlugins) { continue }
+        $p = $r.Data.enabledPlugins.PSObject.Properties[$Key]
+        if ($p -and $p.Value -eq $false) { return $true }
+    }
+    return $false
+}
+
 # Every known project and what each one still lacks.
 #   { Projects; Missing = @{ Project; Id }; KeptButDisabled = @{ Project; Id }; PlanId }
 function Get-McpDisablePlan {
@@ -197,9 +211,12 @@ function Get-McpDisablePlan {
             $projects += $kv.Key
             $off = @(Get-JsonStringList $kv.Value['disabledMcpServers'])
             foreach ($g in $Groups) {
-                # A project that already turned the KEPT copy off has no duplicate: disabling the other
-                # one there would leave it without the server at all. Report it, change nothing.
-                if ($g.Keep -and $off -contains $g.Keep.Id) { $keptOff.Add([pscustomobject]@{ Project = $kv.Key; Id = $g.Keep.Id }); continue }
+                # A project that already turned the KEPT copy off (its server, or the whole plugin in the
+                # project's own settings) has no duplicate: disabling the other one there would leave it
+                # without the server at all. Report it, change nothing.
+                if ($g.Keep -and ($off -contains $g.Keep.Id -or (Test-PluginOffInProject -Project $kv.Key -Key $g.Keep.Key))) {
+                    $keptOff.Add([pscustomobject]@{ Project = $kv.Key; Id = $g.Keep.Id }); continue
+                }
                 foreach ($d in $g.Disable) { if ($off -notcontains $d.Id) { $missing.Add([pscustomobject]@{ Project = $kv.Key; Id = $d.Id }) } }
             }
         }
@@ -220,6 +237,10 @@ function Invoke-McpDisable {
     # A link (dotfile managers) would be replaced by a plain file and the real target left stale: refuse.
     $item = Get-Item -LiteralPath $ConfigPath -Force -ErrorAction SilentlyContinue
     if ($item -and (Test-IsLinkItem $item)) { return (& $no 'the config is a link; edit its target by hand or point -ConfigPath at it') }
+    # What the file was when it was read: re-checked right before the replace, so a write by a running
+    # session in between is never overwritten with this older snapshot.
+    $seen = [System.IO.FileInfo]::new($ConfigPath)
+    $stamp = if ($seen.Exists) { "$($seen.LastWriteTimeUtc.Ticks)/$($seen.Length)" } else { '' }
     $cfg = Read-ClaudeConfig -Path $ConfigPath
     if (-not $cfg.Ok) { return (& $no "could not read the config ($($cfg.Reason))") }
     $plan = Get-McpDisablePlan -Config $cfg -Groups $Groups
@@ -245,9 +266,19 @@ function Invoke-McpDisable {
     $opts.Encoder = [System.Text.Encodings.Web.JavaScriptEncoder]::UnsafeRelaxedJsonEscaping
     $tmp = "$ConfigPath.$PID.tmp"
     try {
-        [System.IO.File]::WriteAllText($tmp, $cfg.Node.ToJsonString($opts), [System.Text.UTF8Encoding]::new($false))
-        # The config can hold API keys: on Unix keep its mode (often 0600) instead of the umask default.
-        if (-not $IsWindows) { [System.IO.File]::SetUnixFileMode($tmp, [System.IO.File]::GetUnixFileMode($ConfigPath)) }
+        $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($cfg.Node.ToJsonString($opts))
+        # The config can hold API keys: on Unix the temp file is CREATED with the config's mode (often
+        # 0600), never with the umask default, not even for a moment.
+        $fo = [System.IO.FileStreamOptions]::new()
+        $fo.Mode = [System.IO.FileMode]::CreateNew; $fo.Access = [System.IO.FileAccess]::Write
+        if (-not $IsWindows) { $fo.UnixCreateMode = [System.IO.File]::GetUnixFileMode($ConfigPath) }
+        $fs = [System.IO.FileStream]::new($tmp, $fo)
+        try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
+        $now = [System.IO.FileInfo]::new($ConfigPath)
+        if ("$($now.LastWriteTimeUtc.Ticks)/$($now.Length)" -ne $stamp) {
+            try { [System.IO.File]::Delete($tmp) } catch { }
+            return [pscustomobject]@{ Ok = $false; Reason = 'the config changed while it was being edited (a running session wrote it); nothing was written - run the plan again'; Backup = $backup; Added = 0; Verified = $false }
+        }
         [System.IO.File]::Move($tmp, $ConfigPath, $true)
     } catch {
         try { [System.IO.File]::Delete($tmp) } catch { }
@@ -283,10 +314,18 @@ function Format-DuplicateMcpReport {
         & $add "Could not read the user config ($ConfigReason); nothing can be planned." 'Red'
         return @($acc)
     }
+    $undecided = @($Groups | Where-Object { -not $_.Keep })
+    if ($undecided.Count -gt 0) {
+        & $add ("{0} server(s) need a choice before anything is planned for them: {1}. Re-run with -Keep <plugin> (or -PreferLocal)." -f $undecided.Count, (($undecided | ForEach-Object Server) -join ', ')) 'Yellow'
+    }
     if ($Plan) {
         $projects = @($Plan.Missing | ForEach-Object { $_.Project } | Select-Object -Unique)
         if ($Plan.Missing.Count -eq 0) {
-            & $add ("All {0} known project(s) already disable the redundant server(s)." -f @($Plan.Projects).Count) 'Green'
+            if ($undecided.Count -eq 0 -and @($Plan.KeptButDisabled).Count -eq 0) {
+                & $add ("All {0} known project(s) already disable the redundant server(s)." -f @($Plan.Projects).Count) 'Green'
+            } else {
+                & $add 'Nothing to disable for the servers with a choice.' 'Gray'
+            }
         } elseif (-not $Applied) {
             & $add ("To disable: {0} entr(ies) in {1} of {2} known project(s). Plan id: {3}" -f $Plan.Missing.Count, $projects.Count, @($Plan.Projects).Count, $Plan.PlanId) 'Cyan'
             foreach ($p in $projects) {
@@ -298,7 +337,9 @@ function Format-DuplicateMcpReport {
         foreach ($k in $Plan.KeptButDisabled) { & $add ("  Note: {0} disables the one to KEEP ({1}); left as it is." -f $k.Project, $k.Id) 'Yellow' }
     }
     if ($Applied) {
-        if ($Applied.Ok) {
+        if ($Applied.Ok -and $Applied.Added -eq 0) {
+            & $add 'Nothing was written: there was nothing to disable.' 'Gray'
+        } elseif ($Applied.Ok) {
             & $add ("Disabled {0} entr(ies). Backup: {1}" -f $Applied.Added, $Applied.Backup) 'Green'
         } else {
             & $add ("NOT applied: {0}{1}" -f $Applied.Reason, $(if ($Applied.Backup) { ". Backup: $($Applied.Backup)" } else { '' })) 'Red'
@@ -325,6 +366,11 @@ $plan = if ($cfg.Ok -and $groups.Count -gt 0) { Get-McpDisablePlan -Config $cfg 
 $applied = $null
 if ($Execute -and $groups.Count -gt 0) {
     if (-not $PlanId) { Write-Host 'Refusing: -Execute needs -PlanId, the id the plan printed.' -ForegroundColor Red; exit 1 }
+    # An alternate home (a fixture, another profile) must not read its plugins from one place and write
+    # the real ~/.claude.json and the real backups folder: name both explicitly.
+    if ($ClaudeHome -and (-not $ConfigPath -or -not $BackupDir)) {
+        Write-Host 'Refusing: with -ClaudeHome, -Execute also needs -ConfigPath and -BackupDir.' -ForegroundColor Red; exit 1
+    }
     if (-not $BackupDir) {
         . (Join-Path $PSScriptRoot 'Get-AbiosStateDir.ps1')
         $BackupDir = Join-Path (Get-AbiosStateDir -Root $HOME) 'backups'

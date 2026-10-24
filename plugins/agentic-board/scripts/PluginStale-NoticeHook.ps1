@@ -57,18 +57,27 @@ function Format-StaleNotice {
 }
 
 # The release-notice contract (#798): a plugin's deploy script may write
-# <claude home>/plugin-releases/<plugin>.json = { version, commit, publishedAt, fixes: ["#12", ...] }
+# <claude home>/plugin-releases/<plugin>@<marketplace>.json = { version, commit, publishedAt, fixes: ["#12", ...] }
 # so this one notice can say what the new build fixes, and the plugin needs no notice hook of its own.
+# Keyed like installed_plugins.json, so a same-named plugin of another marketplace never borrows it.
 # The fixes are used only when the file describes the build now installed (its version, or its commit
-# matches the build folder name). Somebody else's text: issue references only, at most 10. Never throws.
+# matches the build folder name). Somebody else's text: issue references only, at most 10. Never throws,
+# never blocks: a regular file only (no link, pipe or device), read through a 64 KB bound.
 function Get-ReleaseFixes {
-    param([string]$ClaudeHomeDir, [string]$Plugin, [string]$Installed)
+    param([string]$ClaudeHomeDir, [string]$Plugin, [string]$Marketplace, [string]$Installed)
     try {
-        if ($Plugin -notmatch '^[A-Za-z0-9._-]{1,100}$' -or -not $Installed) { return @() }
-        $path = [System.IO.Path]::Combine($ClaudeHomeDir, 'plugin-releases', "$Plugin.json")
+        if ($Plugin -notmatch '^[A-Za-z0-9._-]{1,100}$' -or $Marketplace -notmatch '^[A-Za-z0-9._-]{1,100}$' -or -not $Installed) { return @() }
+        $path = [System.IO.Path]::Combine($ClaudeHomeDir, 'plugin-releases', "$Plugin@$Marketplace.json")
         $fi = [System.IO.FileInfo]::new($path)
-        if (-not $fi.Exists -or $fi.Length -gt 64KB) { return @() }
-        $doc = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -ErrorAction Stop
+        # Length 0 also rules out a pipe or a device (they report 0 and could block or never end); a link
+        # could point at one, so links are refused outright.
+        if (-not $fi.Exists -or $fi.Length -le 0 -or $fi.Length -gt 64KB) { return @() }
+        if (($fi.Attributes -band ([System.IO.FileAttributes]::ReparsePoint -bor [System.IO.FileAttributes]::Device)) -ne 0 -or $fi.LinkTarget) { return @() }
+        $buf = [byte[]]::new(64KB)
+        $fs = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try { $n = 0; while ($n -lt $buf.Length) { $r = $fs.Read($buf, $n, $buf.Length - $n); if ($r -le 0) { break }; $n += $r } } finally { $fs.Dispose() }
+        if ($n -ge $buf.Length) { return @() }   # grew past the bound since the size check
+        $doc = [System.Text.Encoding]::UTF8.GetString($buf, 0, $n) | ConvertFrom-Json -ErrorAction Stop
         $ver = "$($doc.version)".Trim().TrimStart('v', 'V')
         $sha = "$($doc.commit)".Trim()
         $ic = [System.StringComparison]::OrdinalIgnoreCase
@@ -245,7 +254,7 @@ function Invoke-StaleNotice {
     if ($definitive) { try { Write-ShimStamp -StateDir $StateDir -SessionId $sessionId -Installed $installedInfo -KeepIds $keepIds } catch { } }
     if ($fresh.Count -eq 0) { return '' }
     $items = @($fresh | ForEach-Object {
-        $_ | Select-Object *, @{ Name = 'Fixes'; Expression = { @(Get-ReleaseFixes -ClaudeHomeDir $claudeDir -Plugin $_.Plugin -Installed "$($_.Installed)") } }
+        $_ | Select-Object *, @{ Name = 'Fixes'; Expression = { @(Get-ReleaseFixes -ClaudeHomeDir $claudeDir -Plugin $_.Plugin -Marketplace $_.Marketplace -Installed "$($_.Installed)") } }
     })
     return (Format-StaleNotice -Items $items)
 }

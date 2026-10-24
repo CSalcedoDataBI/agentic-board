@@ -140,10 +140,15 @@ Describe 'plan and apply on a fixture config' {
         $r.Ok | Should -BeTrue
         $r.Verified | Should -BeTrue
         $r.Added | Should -Be 2
+        # The backup lands where -BackupDir says (never in the real home), and holds the old bytes.
+        $r.Backup | Should -BeLike "$($script:Bk)*"
+        @(Get-ChildItem -LiteralPath $script:Bk).Count | Should -Be 1
         [System.IO.File]::ReadAllText($r.Backup) | Should -Be $script:CfgBody
+        [System.IO.File]::ReadAllText($script:Cfg) | Should -Match '"firstStartTime": "2026-01-02T03:04:05.678Z"'
 
-        $after = [System.IO.File]::ReadAllText($script:Cfg) | ConvertFrom-Json -AsHashtable -DateKind String
-        $orig  = $script:CfgBody | ConvertFrom-Json -AsHashtable -DateKind String
+        # Both sides parsed the same way, so dates compare like for like on any PowerShell 7.
+        $after = [System.IO.File]::ReadAllText($script:Cfg) | ConvertFrom-Json -AsHashtable
+        $orig  = $script:CfgBody | ConvertFrom-Json -AsHashtable
         $after.projects['C:/work/a'].disabledMcpServers | Should -Be @('plugin:x:y', 'plugin:local:model-mcp')
         $after.projects['C:/work/b'].disabledMcpServers | Should -Be @('plugin:local:model-mcp')
         $after.projects['C:/work/c'].disabledMcpServers | Should -Be @('plugin:local:model-mcp')
@@ -181,6 +186,39 @@ Describe 'plan and apply on a fixture config' {
         $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups
         (Invoke-McpDisable -ConfigPath $script:Cfg -Groups $script:Groups -PlanId $plan.PlanId -BackupDir $script:Bk).Ok | Should -BeTrue
         [System.IO.File]::GetUnixFileMode($script:Cfg) | Should -Be ([System.IO.UnixFileMode]'UserRead, UserWrite')
+    }
+
+    It 'refuses a plan id confirmed for a different keep choice, and changes nothing' {
+        $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups   # keeps hosted
+        $other = @(Get-DuplicateMcpGroups -Registrations (Get-PluginMcpRegistrations -ClaudeHome $script:Fx.Root).Items -PreferLocal)
+        $before = [System.IO.File]::ReadAllBytes($script:Cfg)
+        $r = Invoke-McpDisable -ConfigPath $script:Cfg -Groups $other -PlanId $plan.PlanId -BackupDir $script:Bk
+        $r.Ok | Should -BeFalse
+        [System.IO.File]::ReadAllBytes($script:Cfg) | Should -Be $before
+        Test-Path $script:Bk | Should -BeFalse
+    }
+
+    It 'leaves alone a project whose own settings turn the plugin to keep off' {
+        $proj = Join-Path $TestDrive ("proj" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Force -Path (Join-Path $proj '.claude') | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $proj '.claude' 'settings.local.json'), '{"enabledPlugins":{"hosted@m":false}}')
+        $key = ($proj -replace '\\', '/') | ConvertTo-Json
+        [System.IO.File]::WriteAllText($script:Cfg, "{ `"projects`": { $key : {}, `"C:/work/z`": {} } }")
+        $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $script:Groups
+        @($plan.Missing.Project) | Should -Be @('C:/work/z')
+        @($plan.KeptButDisabled).Count | Should -Be 1
+    }
+
+    It 'never calls undecided servers handled' {
+        $rows = @(
+            [pscustomobject]@{ Id = 'plugin:a:s'; Key = 'a@m'; Plugin = 'a'; Marketplace = 'm'; Server = 's'; Transport = 'stdio'; Kind = 'local' }
+            [pscustomobject]@{ Id = 'plugin:b:s'; Key = 'b@m'; Plugin = 'b'; Marketplace = 'm'; Server = 's'; Transport = 'stdio'; Kind = 'local' }
+        )
+        $g = @(Get-DuplicateMcpGroups -Registrations $rows)
+        $plan = Get-McpDisablePlan -Config (Read-ClaudeConfig -Path $script:Cfg) -Groups $g
+        $text = (Format-DuplicateMcpReport -Groups $g -Plan $plan -Applied $null).Text -join "`n"
+        $text | Should -Not -Match 'already disable'
+        $text | Should -Match 'need a choice'
     }
 
     It 'refuses a plan id the user did not see, and changes nothing' {
