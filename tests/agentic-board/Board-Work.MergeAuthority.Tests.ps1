@@ -46,13 +46,15 @@ BeforeAll {
     function Invoke-BoardWork([string]$Dir, [hashtable]$Params) {
         $saved = $env:GH_TOKEN
         $env:GH_TOKEN = ''
+        Push-Location $Dir
         try {
-            Push-Location $Dir
+            # Reset first: a path that returned without `exit` would otherwise report whatever the
+            # last git call in the fixture left behind.
+            $global:LASTEXITCODE = -1
             $out = & $script:Script @Params -TokenVar 'ABIOS_TEST_TOKEN_THAT_DOES_NOT_EXIST' 6>&1 2>&1 | Out-String
             $code = $LASTEXITCODE
-            Pop-Location
             [pscustomobject]@{ out = $out; code = $code }
-        } finally { $env:GH_TOKEN = $saved }
+        } finally { Pop-Location; $env:GH_TOKEN = $saved }
     }
 }
 
@@ -234,6 +236,61 @@ Describe 'Get-MergeAuthority -GitRef: the PR under review cannot grant itself th
         $a.authority | Should -Be 'user'
         $a.warning   | Should -Match 'not a readable JSON object'
     }
+    It 'reads a real, multi-line FICHA.md from the ref (heading, prose, bold approval on a later line)' {
+        foreach ($line in @('Aprobada: 2026-10-02', '**Aprobada:** 2026-10-02', '- Aprobada: 2026-10-02')) {
+            $root = New-ThrowawayRepo ('ref-multi' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+            Add-Expert $root
+            Add-Ficha $root "# Ficha de la herramienta`n`nQue hace y que no toca.`n`n## Zonas protegidas`n- scripts/`n`n$line`n"
+            Publish-Main $root
+            $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
+            $a.authority     | Should -Be 'expert' -Because "'$line' on a later line of a real FICHA is an approval"
+            $a.fichaApproved | Should -Be '2026-10-02'
+        }
+    }
+    It 'a blank Aprobada field followed by a dated line is a draft, not an approval (one line only)' {
+        foreach ($body in @("# Ficha`nAprobada:`n* 2026-01-15 borrador inicial`n", "# Ficha`nAprobada:`n`n2026-01-15 kickoff`n")) {
+            $root = New-ThrowawayRepo ('ref-blank' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+            Add-Expert $root
+            Add-Ficha $root $body
+            Publish-Main $root
+            (Get-MergeAuthority -Config $null -Root $root).authority                       | Should -Be 'user'
+            (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main').authority | Should -Be 'user'
+        }
+    }
+    It 'reads a pretty-printed, multi-line committed config.json (what Set-BoardConfigValue writes)' {
+        $root = New-ThrowawayRepo 'ref-prettycfg'
+        Add-Expert $root
+        $cfgPath = Join-Path $root '.agentic-board' 'config.json'
+        Set-BoardConfigValue -Path $cfgPath -Key 'preferGroupedPRs' -Value $null | Out-Null
+        Set-BoardConfigValue -Path $cfgPath -Key 'mergeAuthority' -Value 'expert' | Out-Null
+        (Get-Content $cfgPath).Count | Should -BeGreaterThan 1
+        Publish-Main $root
+        $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
+        $a.authority | Should -Be 'expert'
+        $a.source    | Should -Be 'config'
+    }
+    It 'a lone FICHA.md (no expert) declares nothing: default, no warning, with or without the ref' {
+        foreach ($body in @('Aprobada: 2026-10-01', '# Ficha sin aprobar')) {
+            $root = New-ThrowawayRepo ('ref-lone' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+            Add-Ficha $root $body
+            Publish-Main $root
+            foreach ($a in @((Get-MergeAuthority -Config $null -Root $root),
+                             (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'),
+                             (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/nope'))) {
+                $a.authority | Should -Be 'user'
+                $a.source    | Should -Be 'default'
+                $a.warning   | Should -BeNullOrEmpty
+            }
+        }
+    }
+    It 'a local opt-out reads as repo config even when the ref does not resolve' {
+        $root = New-ThrowawayRepo 'ref-optout-noref'
+        $a = Get-MergeAuthority -Config @{ mergeAuthority = 'user' } -Root $root -GitRef 'origin/nope'
+        $a.source | Should -Be 'config'
+        $g = Get-MergeAuthority -Config @{ mergeAuthority = 'none' } -Root $root -GitRef 'origin/nope'
+        $g.warning | Should -Match 'user confirms'
+        $g.warning | Should -Not -Match 'origin/nope' -Because 'the bad value is in the local config, not on the ref'
+    }
     It 'a committed JSON array for mergeAuthority fails closed (no unrolling into a grant)' {
         foreach ($body in @('{ "mergeAuthority": [] }', '{ "mergeAuthority": ["expert"] }')) {
             $root = New-ThrowawayRepo ('ref-arr' + [guid]::NewGuid().ToString('N').Substring(0, 6))
@@ -303,6 +360,19 @@ Describe '-MergeAuthority end to end (no token)' {
         $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
         $r.out | Should -Match 'Merge authority: user \(default\)'
         $r.out | Should -Not -Match 'could not read|cannot be read'
+    }
+    It 'show follows origin/HEAD to a default branch that is not main' {
+        $root = New-ThrowawayRepo 'e2e-master'
+        Add-Expert $root
+        Add-Ficha $root "# Ficha`n`nAprobada: 2026-10-01`n"
+        git -C $root add -A 2>&1 | Out-Null
+        git -C $root -c user.name=t -c user.email=t@example.com commit -q -m base 2>&1 | Out-Null
+        git -C $root update-ref refs/remotes/origin/master HEAD 2>&1 | Out-Null
+        git -C $root symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master 2>&1 | Out-Null
+        $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
+        $r.code | Should -Be 0
+        $r.out  | Should -Match 'Merge authority: expert \(FICHA.md \+ expert\)'
+        $r.out  | Should -Match 'git show origin/master:'
     }
     It 'show on a PR branch that ADDS an approved FICHA + expert -> user (Board-Work reads the default branch)' {
         $root = New-ThrowawayRepo 'e2e-attack'

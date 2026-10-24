@@ -278,14 +278,26 @@ function Get-MergeAuthority {
         $res.warning = '.agentic-board/config.json exists but cannot be read, so it may hold an opt-out; the user confirms'
         return [pscustomobject]$res
     }
+    # The local config's own opt-out or unreadable value, before anything touches the ref: it is
+    # reported the same way whether or not the default branch resolves.
     $local = Get-MergeAuthorityDeclaration $Config
+    if ($local -eq 'unreadable') {
+        $res.source = 'config'; $res.reason = 'the repo config holds a merge authority the tool cannot read'
+        $res.warning = "mergeAuthority in .agentic-board/config.json is not 'expert' or 'user'; the user confirms"
+        return [pscustomobject]$res
+    }
+    if ($local -eq 'user') {
+        $res.source = 'config'; $res.reason = 'the repo config says the user confirms every merge'
+        return [pscustomobject]$res
+    }
     $base  = $null
     if ($GitRef) {
         if (-not $Root -or -not (git -C $Root rev-parse --verify --quiet "${GitRef}^{commit}" 2>$null)) {
-            # A repo that declares nothing - not locally, not on disk - has nothing the ref could
-            # confirm: it gets the plain default, with no warning it did not have before #797.
-            $onDisk = $Root -and ((Test-Path -LiteralPath (Join-Path $Root 'FICHA.md')) -or
-                                  (Test-Path -LiteralPath (Join-Path $Root $agentRel)))
+            # A repo that declares nothing - neither the FICHA + expert pair on disk nor a local
+            # 'expert' - has nothing the ref could confirm: it gets the plain default, with no
+            # warning it did not have before #797. One file alone is not a declaration.
+            $onDisk = $Root -and (Test-Path -LiteralPath (Join-Path $Root 'FICHA.md')) -and
+                                 (Test-Path -LiteralPath (Join-Path $Root $agentRel))
             if (-not $onDisk -and $local -ne 'expert') { return [pscustomobject]$res }
             $res.reason = 'the default branch cannot be read'
             $res.warning = "could not read '$GitRef' to check the committed declaration; the user confirms"
@@ -311,16 +323,14 @@ function Get-MergeAuthority {
         $res.warning = ".agentic-board/config.json on $GitRef is not a readable JSON object, so it may hold an opt-out; the user confirms"
         return [pscustomobject]$res
     }
-    foreach ($d in @($local, $base)) {
-        if ($d -eq 'unreadable') {
-            $res.source = 'config'; $res.reason = 'the repo config holds a merge authority the tool cannot read'
-            $res.warning = "mergeAuthority in .agentic-board/config.json is not 'expert' or 'user'$where; the user confirms"
-            return [pscustomobject]$res
-        }
-        if ($d -eq 'user') {
-            $res.source = 'config'; $res.reason = 'the repo config says the user confirms every merge'
-            return [pscustomobject]$res
-        }
+    if ($base -eq 'unreadable') {
+        $res.source = 'config'; $res.reason = 'the committed repo config holds a merge authority the tool cannot read'
+        $res.warning = "mergeAuthority in .agentic-board/config.json on $GitRef is not 'expert' or 'user'; the user confirms"
+        return [pscustomobject]$res
+    }
+    if ($base -eq 'user') {
+        $res.source = 'config'; $res.reason = "the repo config on $GitRef says the user confirms every merge"
+        return [pscustomobject]$res
     }
 
     # An EMPTY agent file is no expert: there is nothing to run. Checked on the text, so git mode
@@ -330,8 +340,10 @@ function Get-MergeAuthority {
     $fichaText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath 'FICHA.md'
     if ($null -ne $fichaText) {
         $res.ficha = 'FICHA.md'
-        # (?!\d), not \b: `_Aprobada: 2026-10-02_` puts a word character right after the date.
-        $m = [regex]::Match([string]$fichaText, '(?im)^[\s>*_-]*Aprobada\s*[:*_]*\s*[*_]*\s*(\d{4}-\d{2}-\d{2})(?!\d)')
+        # ONE line: every gap is [ \t], never \s, which would cross a newline and read a blank
+        # `Aprobada:` followed by some dated line as an approval. (?!\d), not \b:
+        # `_Aprobada: 2026-10-02_` puts a word character right after the date.
+        $m = [regex]::Match([string]$fichaText, '(?im)^[ \t>*_-]*Aprobada[ \t]*[:*_]*[ \t]*[*_]*[ \t]*(\d{4}-\d{2}-\d{2})(?!\d)')
         if ($m.Success) { $res.fichaApproved = $m.Groups[1].Value }
     }
 

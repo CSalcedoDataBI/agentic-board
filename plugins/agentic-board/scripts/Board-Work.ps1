@@ -2794,6 +2794,7 @@ if ($MergeAuthority -eq 'show') {
         # The judge and its plan come from the same ref as the grant, never from the PR (#797).
         if ($auth.ref) {
             Write-Host "  Expert: git show $($auth.ref):.claude/agents/experto.md   Plan: git show $($auth.ref):FICHA.md" -ForegroundColor DarkGray
+            Write-Host "  Read from $($auth.ref) as last fetched: run 'git fetch origin' first, so a revocation on the remote counts." -ForegroundColor DarkGray
         }
     } else {
         Write-Host "  Step 5d: the review gate runs, then you confirm every merge." -ForegroundColor DarkGray
