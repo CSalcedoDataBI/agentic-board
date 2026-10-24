@@ -282,6 +282,11 @@ function Get-MergeAuthority {
     $base  = $null
     if ($GitRef) {
         if (-not $Root -or -not (git -C $Root rev-parse --verify --quiet "${GitRef}^{commit}" 2>$null)) {
+            # A repo that declares nothing - not locally, not on disk - has nothing the ref could
+            # confirm: it gets the plain default, with no warning it did not have before #797.
+            $onDisk = $Root -and ((Test-Path -LiteralPath (Join-Path $Root 'FICHA.md')) -or
+                                  (Test-Path -LiteralPath (Join-Path $Root $agentRel)))
+            if (-not $onDisk -and $local -ne 'expert') { return [pscustomobject]$res }
             $res.reason = 'the default branch cannot be read'
             $res.warning = "could not read '$GitRef' to check the committed declaration; the user confirms"
             return [pscustomobject]$res
@@ -293,7 +298,11 @@ function Get-MergeAuthority {
                 $base = 'unparseable'
             } else {
                 $prop = $parsed.PSObject.Properties['mergeAuthority']
-                $base = Get-MergeAuthorityDeclaration @{ mergeAuthority = $(if ($prop) { $prop.Value } else { $null }) }
+                # Plain assignment, not $(...): a subexpression unrolls arrays, so `[]` would read as
+                # "nothing declared" and `["expert"]` as a grant. Kept whole, an array is unreadable.
+                $val = $null
+                if ($prop) { $val = $prop.Value }
+                $base = Get-MergeAuthorityDeclaration @{ mergeAuthority = $val }
             }
         }
     }

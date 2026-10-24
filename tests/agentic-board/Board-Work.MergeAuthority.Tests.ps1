@@ -234,6 +234,33 @@ Describe 'Get-MergeAuthority -GitRef: the PR under review cannot grant itself th
         $a.authority | Should -Be 'user'
         $a.warning   | Should -Match 'not a readable JSON object'
     }
+    It 'a committed JSON array for mergeAuthority fails closed (no unrolling into a grant)' {
+        foreach ($body in @('{ "mergeAuthority": [] }', '{ "mergeAuthority": ["expert"] }')) {
+            $root = New-ThrowawayRepo ('ref-arr' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+            Add-Expert $root
+            Add-Ficha $root "Aprobada: 2026-10-01"
+            New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value $body -Encoding UTF8
+            Publish-Main $root
+            $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
+            $a.authority | Should -Be 'user' -Because "committed config '$body'"
+            $a.warning   | Should -Match 'user confirms'
+        }
+    }
+    It 'a resolvable ref in a repo that declares nothing -> user (default), no warning' {
+        $root = New-ThrowawayRepo 'ref-nothing'
+        Publish-Main $root
+        $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
+        $a.authority | Should -Be 'user'
+        $a.source    | Should -Be 'default'
+        $a.warning   | Should -BeNullOrEmpty
+    }
+    It 'an unresolvable ref in a repo that declares nothing -> user (default), no new warning' {
+        $root = New-ThrowawayRepo 'ref-nothing-noref'
+        $a = Get-MergeAuthority -Config (Get-BoardConfigDefaults) -Root $root -GitRef 'origin/main'
+        $a.source  | Should -Be 'default'
+        $a.warning | Should -BeNullOrEmpty
+    }
     It 'a ref that does not resolve -> user, with a warning' {
         $root = New-NorteRepo 'ref-missing'
         $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/nope'
@@ -268,6 +295,26 @@ Describe '-MergeAuthority end to end (no token)' {
         $r.code | Should -Be 0
         $r.out  | Should -Match 'Merge authority: user \(default\)'
         $r.out  | Should -Match 'you confirm every merge'
+        $r.out  | Should -Not -Match 'could not read'
+    }
+    It 'show in a repo with a default branch that declares nothing -> user (default), no warning' {
+        $root = New-ThrowawayRepo 'e2e-none-main'
+        Publish-Main $root
+        $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
+        $r.out | Should -Match 'Merge authority: user \(default\)'
+        $r.out | Should -Not -Match 'could not read|cannot be read'
+    }
+    It 'show on a PR branch that ADDS an approved FICHA + expert -> user (Board-Work reads the default branch)' {
+        $root = New-ThrowawayRepo 'e2e-attack'
+        Publish-Main $root
+        git -C $root checkout -q -b issue-1-grant 2>&1 | Out-Null
+        Add-Expert $root
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        git -C $root add -A 2>&1 | Out-Null
+        git -C $root -c user.name=t -c user.email=t@example.com commit -q -m grant 2>&1 | Out-Null
+        $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
+        $r.code | Should -Be 0
+        $r.out  | Should -Match 'Merge authority: user \(default\)'
     }
     It 'show in a NORTE repo -> expert, and the gate still runs' {
         $root = New-NorteRepo 'e2e-norte'
