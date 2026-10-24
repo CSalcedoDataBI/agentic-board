@@ -92,6 +92,241 @@ Describe 'Get-SweepItemAction - one disposition per branch' {
     }
 }
 
+Describe 'Get-SweepItemAction - work already on main through another PR is not parked (#755)' {
+    <#  Measured on this repo, 2026-09-29: 4 of 5 `park` rows were subagent worktree branches whose
+        work had been squash-merged by another PR - each would have opened a duplicate draft PR. #>
+    It 'deletes a clean branch whose content is proven to be on the default branch, as resolved' {
+        $a = Get-SweepItemAction -Class 'working' -CommitsAhead 8 -Containment 'contained'
+        $a.Action | Should -Be 'delete-contained'
+        $a.Resolved | Should -BeTrue
+        $a.Reason | Should -Match 'already on the default branch'
+        (Get-SweepItemAction -Class 'stale' -CommitsAhead 2 -Containment 'contained').Action | Should -Be 'delete-contained'
+        (Get-SweepItemAction -Class 'closed-unmerged' -CommitsAhead 2 -Containment 'contained').Action | Should -Be 'delete-contained'
+        (Get-SweepItemAction -Class 'merged-advanced' -CommitsAhead 1 -Containment 'contained').Action | Should -Be 'delete-contained'
+    }
+    It 'never deletes a contained branch that has uncommitted changes - those are saved first' {
+        (Get-SweepItemAction -Class 'dirty' -Dirty 'dirty' -CommitsAhead 3 -Containment 'contained').Action | Should -Be 'wip-park'
+    }
+    It 'leaves its own PR in charge: merged tears down, open stays in review' {
+        (Get-SweepItemAction -Class 'merged' -CommitsAhead 1 -Containment 'contained').Action | Should -Be 'teardown'
+        (Get-SweepItemAction -Class 'in-review' -CommitsAhead 1 -Containment 'contained').Action | Should -Be 'keep-review'
+    }
+    It 'a working session still vetoes it' {
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'contained' -SessionOpen $true).Action | Should -Be 'skip-open'
+    }
+    It 'still parks a branch that adds something new, or whose containment is unknown' {
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'adds').Action | Should -Be 'park'
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'unknown').Action | Should -Be 'park'
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'conflict').Action | Should -Be 'park'
+    }
+    It 'turns a superseded hint into a decision naming the PR - never a deletion, never a park' {
+        $a = Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'conflict' -SupersededBy '#749'
+        $a.Action | Should -Be 'needs-decision'
+        $a.Resolved | Should -BeFalse
+        $a.Reason | Should -Match 'likely superseded by #749'
+        (Get-SweepItemAction -Class 'closed-unmerged' -CommitsAhead 3 -SupersededBy '#749').Reason | Should -Match 'superseded by #749'
+    }
+    It 'still saves uncommitted changes first - they cannot be on main, whatever the hint says' {
+        (Get-SweepItemAction -Class 'dirty' -Dirty 'dirty' -CommitsAhead 3 -SupersededBy '#749').Action | Should -Be 'wip-park'
+    }
+    It 'ignores the hint on commits made after its own PR merged - that is new work by definition' {
+        # Its squashed originals conflict with main and reference a done issue, exactly like superseded work.
+        (Get-SweepItemAction -Class 'merged-advanced' -CommitsAhead 2 -Containment 'conflict' -SupersededBy '#753').Action | Should -Be 'park'
+    }
+    It 'deletes locally even in another account''s repo - nothing is published' {
+        (Get-SweepItemAction -Class 'working' -CommitsAhead 3 -Containment 'contained' -ForeignOwner 'SomeCompany').Action | Should -Be 'delete-contained'
+    }
+}
+
+Describe 'Get-SweepContainment - reading git merge-tree --write-tree' {
+    It 'contained when the merged tree is the default branch''s own tree' {
+        Get-SweepContainment -ExitCode 0 -Output @('22aab2744eb36eb6cb42dda8859f62dd5a3a140d') -DefaultTree '22aab2744eb36eb6cb42dda8859f62dd5a3a140d' | Should -Be 'contained'
+    }
+    It 'adds when it merges cleanly into a different tree' {
+        Get-SweepContainment -ExitCode 0 -Output @('1111111111111111111111111111111111111111') -DefaultTree '22aab2744eb36eb6cb42dda8859f62dd5a3a140d' | Should -Be 'adds'
+    }
+    It 'conflict on exit 1, unknown on any other failure or an unreadable answer' {
+        Get-SweepContainment -ExitCode 1 -Output @('1111111111111111111111111111111111111111', 'CONFLICT') -DefaultTree 'x' | Should -Be 'conflict'
+        Get-SweepContainment -ExitCode 128 -Output @() -DefaultTree '22aab2744eb36eb6cb42dda8859f62dd5a3a140d' | Should -Be 'unknown'
+        Get-SweepContainment -ExitCode 0 -Output @('usage: git merge-tree') -DefaultTree '22aab2744eb36eb6cb42dda8859f62dd5a3a140d' | Should -Be 'unknown'
+        Get-SweepContainment -ExitCode 0 -Output @('22aab2744eb36eb6cb42dda8859f62dd5a3a140d') -DefaultTree '' | Should -Be 'unknown'
+    }
+    It 'proves a squash-merged branch contained on a real repository' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            # No param block: git's own -q / -b reach $args instead of binding as PowerShell parameters.
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            & $g init -q -b main
+            Set-Content -LiteralPath (Join-Path $r 'a.txt') -Value 'base'; & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b worktree-agent-x
+            Set-Content -LiteralPath (Join-Path $r 'b.txt') -Value 'one'; & $g add -A; & $g commit -q -m 'feat: one (#751)'
+            Set-Content -LiteralPath (Join-Path $r 'b.txt') -Value 'two'; & $g add -A; & $g commit -q -m 'fix: two (#751)'
+            & $g checkout -q main
+            & $g merge -q --squash worktree-agent-x; & $g commit -q -m 'feat: squashed (#753)'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            [int]"$(& $g rev-list --count main..worktree-agent-x)" | Should -Be 2 -Because 'it still looks like 2 commits with no PR'
+            Push-Location -LiteralPath $r
+            try {
+                Get-BranchContainment -Default 'main' -Branch 'worktree-agent-x' | Should -Be 'contained'
+                # A local branch literally named "origin/main" must not stand in for the real one.
+                & $g branch origin/main HEAD~1
+                Get-BranchContainment -Default 'main' -Branch 'worktree-agent-x' | Should -Be 'contained'
+
+                # One more commit on the branch: no longer contained, so it is parked as before.
+                & $g checkout -q worktree-agent-x
+                Set-Content -LiteralPath (Join-Path $r 'c.txt') -Value 'new'; & $g add -A; & $g commit -q -m 'feat: more'
+                Get-BranchContainment -Default 'main' -Branch 'worktree-agent-x' | Should -Be 'adds'
+                Get-BranchContainment -Default 'main' -Branch 'no-such-branch' | Should -Be 'unknown'
+            } finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'is not fooled by a merge=ours driver that keeps main''s side of the branch''s only change' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            & $g init -q -b main
+            & $g config merge.ours.driver true
+            Set-Content -LiteralPath (Join-Path $r '.gitattributes') -Value 'cfg.txt merge=ours'
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'base'; & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b feature
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'the branch''s own change'; & $g add -A; & $g commit -q -m 'feat: change cfg'
+            & $g checkout -q main
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'main moved on'; & $g add -A; & $g commit -q -m 'main edit'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            # merge-tree alone says "merges to main's own tree" here - the driver kept main's side.
+            $out = @(& $g merge-tree --write-tree refs/remotes/origin/main refs/heads/feature)
+            Get-SweepContainment -ExitCode $LASTEXITCODE -Output $out -DefaultTree "$(& $g rev-parse 'main^{tree}')".Trim() | Should -Be 'contained'
+            Push-Location -LiteralPath $r
+            try { Get-BranchContainment -Default 'main' -Branch 'feature' | Should -Be 'adds' }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'reads a non-ASCII driven file name byte-exact - a mangled name must not prove "nothing differs"' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            $f = Join-Path $r "caf$([char]0xE9) a$([char]0x00F1)o.lock"
+            & $g init -q -b main
+            & $g config merge.ours.driver true
+            Set-Content -LiteralPath (Join-Path $r '.gitattributes') -Value '*.lock merge=ours'
+            Set-Content -LiteralPath $f -Value 'base'; & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b feature
+            Set-Content -LiteralPath $f -Value 'branch only'; & $g add -A; & $g commit -q -m 'feat: lock'
+            & $g checkout -q main
+            Set-Content -LiteralPath $f -Value 'main moved on'; & $g add -A; & $g commit -q -m 'main edit'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            Push-Location -LiteralPath $r
+            try { Get-BranchContainment -Default 'main' -Branch 'feature' | Should -Be 'adds' }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'still proves it contained when main edited the same file after the squash - the usual case' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            $f = Join-Path $r 'f.txt'
+            & $g init -q -b main
+            Set-Content -LiteralPath $f -Value (1..12 | ForEach-Object { "line $_" }); & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b worktree-agent-y
+            Set-Content -LiteralPath $f -Value (@('line 1 by the subagent') + (2..12 | ForEach-Object { "line $_" })); & $g add -A; & $g commit -q -m 'feat: subagent (#751)'
+            & $g checkout -q main
+            & $g merge -q --squash worktree-agent-y; & $g commit -q -m 'feat: parent PR (#753)'
+            Set-Content -LiteralPath $f -Value (@('line 1 by the subagent') + (2..11 | ForEach-Object { "line $_" }) + 'line 12 edited on main'); & $g add -A; & $g commit -q -m 'later edit'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            Push-Location -LiteralPath $r
+            try { Get-BranchContainment -Default 'main' -Branch 'worktree-agent-y' | Should -Be 'contained' }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'reads which paths git check-attr gives a custom merge driver' {
+        # check-attr -z, split on NUL: path / attribute / value. A name with ": merge: " in it stays one path.
+        Get-SweepDrivenPaths -CheckAttr @('a.txt', 'merge', 'unspecified', 'b.bin', 'merge', 'unset', 'c.txt', 'merge', 'set',
+            'cfg.txt', 'merge', 'ours', 'dir/x: merge: y.lock', 'merge', 'union') |
+            Should -Be @('cfg.txt', 'dir/x: merge: y.lock')
+        # `merge=` prints an empty value: it is git's text merge, and it must not shift the next triplet.
+        Get-SweepDrivenPaths -CheckAttr @('p1', 'merge', '', 'p2', 'merge', 'ours') | Should -Be @('p2')
+        # merge.default names a driver: every unspecified path goes through it.
+        Get-SweepDrivenPaths -CheckAttr @('a.txt', 'merge', 'unspecified', 'c.txt', 'merge', 'set') -DefaultIsDriver $true | Should -Be @('a.txt')
+    }
+    It 'is not fooled by merge.default naming a driver, with no attribute at all' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            $g = { & git -C $r -c user.name=t -c user.email=t@t -c commit.gpgsign=false @args 2>$null }
+            & $g init -q -b main
+            & $g config merge.ours.driver true
+            & $g config merge.default ours
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'base'; & $g add -A; & $g commit -q -m base
+            & $g checkout -q -b feature
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'branch only'; & $g add -A; & $g commit -q -m 'feat: cfg'
+            & $g checkout -q main
+            Set-Content -LiteralPath (Join-Path $r 'cfg.txt') -Value 'main moved on'; & $g add -A; & $g commit -q -m 'main edit'
+            & $g update-ref refs/remotes/origin/main refs/heads/main
+            Push-Location -LiteralPath $r
+            try { Get-BranchContainment -Default 'main' -Branch 'feature' | Should -Be 'adds' }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'keeps an empty field inside git -z output, drops only the terminator' {
+        $r = Join-Path ([System.IO.Path]::GetTempPath()) "sweep-755-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $r | Out-Null
+        try {
+            & git -C $r init -q -b main 2>$null
+            Set-Content -LiteralPath (Join-Path $r '.gitattributes') -Value @('p1 merge=', 'p2 merge=ours')
+            Push-Location -LiteralPath $r
+            try { (Invoke-SweepGit @('check-attr', '-z', 'merge', '--', 'p1', 'p2') -Z).Items | Should -Be @('p1', 'merge', '', 'p2', 'merge', 'ours') }
+            finally { Pop-Location }
+        } finally { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'Superseded hint - a heuristic that asks, it does not delete (#755)' {
+    It 'collects the branch''s issue and every #NNN of its commit subjects, once each' {
+        $r = Get-SweepIssueRefs -Branch 'issue-737-disk' -Subjects @('feat(disk): x (#737)', 'fix: y #751 and #752', 'chore: no ref')
+        $r | Should -Be @(737, 751, 752)
+        Get-SweepIssueRefs -Branch 'worktree-agent-af205' -Subjects @('wip') | Should -BeNullOrEmpty
+    }
+    It 'does not read another repo''s number, or C#12, as one of this repo''s' {
+        Get-SweepIssueRefs -Subjects @('fix: port other-org/other-repo#12', 'docs: C#12 sample', 'feat: x (#5)') | Should -Be @(5)
+    }
+    It 'skips a number too long to be an issue instead of throwing' {
+        Get-SweepIssueRefs -Branch 'issue-99999999999-x' -Subjects @('chore: build #12345678901', 'fix: y (#7)') | Should -Be @(7)
+    }
+    It 'reads GitHub''s node: a merged PR, an issue closed by a merged PR, and everything else' {
+        $pr = ConvertTo-SweepRefState -Number 753 -Node ([pscustomobject]@{ __typename = 'PullRequest'; merged = $true })
+        $pr.Done | Should -BeTrue; $pr.By | Should -Be 753
+        $iss = ConvertTo-SweepRefState -Number 737 -Node ([pscustomobject]@{ __typename = 'Issue'; state = 'CLOSED'
+            closedByPullRequestsReferences = [pscustomobject]@{ nodes = @([pscustomobject]@{ number = 748; merged = $false }, [pscustomobject]@{ number = 749; merged = $true }) } })
+        $iss.Done | Should -BeTrue; $iss.By | Should -Be 749
+        (ConvertTo-SweepRefState -Number 1 -Node ([pscustomobject]@{ __typename = 'Issue'; state = 'OPEN' })).Done | Should -BeFalse
+        (ConvertTo-SweepRefState -Number 1 -Node ([pscustomobject]@{ __typename = 'Issue'; state = 'CLOSED'; closedByPullRequestsReferences = [pscustomobject]@{ nodes = @() } })).Done | Should -BeFalse -Because 'closed as not planned is not "done by a PR"'
+        (ConvertTo-SweepRefState -Number 1 -Node ([pscustomobject]@{ __typename = 'PullRequest'; merged = $false })).Done | Should -BeFalse
+        (ConvertTo-SweepRefState -Number 1 -Node $null).Done | Should -BeFalse
+    }
+    It 'names the PR from a "Superseded by #N" comment on the branch''s own closed PR' {
+        Get-SweepSupersededHint -PrComments @('Closing.', 'Superseded by #749.') | Should -Be '#749'
+        # The real comment that closed #748 here links the PR by URL.
+        Get-SweepSupersededHint -Repo 'CSalcedoDataBI/agentic-board' -PrComments @('Superseded by https://github.com/CSalcedoDataBI/agentic-board/pull/749 - transcripts moved') | Should -Be '#749'
+        Get-SweepSupersededHint -Repo 'CSalcedoDataBI/agentic-board' -PrComments @('Superseded by https://github.com/other/repo/pull/749') | Should -Be '' -Because 'another repo''s PR says nothing about this branch'
+        Get-SweepSupersededHint -Repo 'CSalcedoDataBI/agentic-board' -PrComments @('superseded by other/repo#749') | Should -Be ''
+        Get-SweepSupersededHint -PrComments @('Looks good, merging soon.') | Should -Be ''
+    }
+    It 'names the merged PRs when the merge conflicts and every reference is done' {
+        $refs = @([pscustomobject]@{ Number = 751; Done = $true; By = 753 }, [pscustomobject]@{ Number = 753; Done = $true; By = 753 })
+        Get-SweepSupersededHint -Containment 'conflict' -Refs $refs | Should -Be '#753'
+    }
+    It 'gives no hint when one reference is still open, when there are none, or when it merges cleanly' {
+        $mixed = @([pscustomobject]@{ Number = 751; Done = $true; By = 753 }, [pscustomobject]@{ Number = 760; Done = $false; By = 0 })
+        Get-SweepSupersededHint -Containment 'conflict' -Refs $mixed | Should -Be ''
+        Get-SweepSupersededHint -Containment 'conflict' -Refs @() | Should -Be ''
+        Get-SweepSupersededHint -Containment 'adds' -Refs @([pscustomobject]@{ Number = 751; Done = $true; By = 753 }) | Should -Be '' -Because 'a clean merge that adds something is new work'
+    }
+}
+
 Describe 'Get-SweepArchiveVerdict - archive a session only when nothing is left behind it' {
     BeforeAll {
         $script:Now = [datetime]'2026-09-29T12:00:00Z'
