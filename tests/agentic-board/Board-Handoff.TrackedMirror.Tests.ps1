@@ -9,7 +9,8 @@
     The end-to-end half runs the REAL script in a child pwsh against a throwaway git repo, with a
     fake `gh.cmd` first on PATH (same seam as Backup-Board.Tests.ps1): it prints the file named by
     %FAKE_GH_OUTFILE% for every call, which is all -Save (pr list, comment read, comment post) and
-    -Resume (comment read) need. A .cmd is Windows-only; CI runs Pester on Windows. #>
+    -Resume (comment read) need. A .cmd is Windows-only, so that half runs on the Windows CI leg
+    and is skipped on Linux; the gh-free hook test runs on both. #>
 
 BeforeAll {
     $script:Script = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Handoff.ps1' | Resolve-Path).Path
@@ -17,6 +18,48 @@ BeforeAll {
     $env:ABIOS_HANDOFF_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_HANDOFF_DOTSOURCE = ''
+
+    # A throwaway repo that tracks a project-authored HANDOFF.md, on an issue-<n> branch.
+    function New-TrackedRepo([string]$Name) {
+        $r = Join-Path $TestDrive $Name
+        New-Item -ItemType Directory -Path $r | Out-Null
+        git -C $r init --quiet 2>&1 | Out-Null
+        git -C $r config user.email 't@example.com'
+        git -C $r config user.name 't'
+        git -C $r config commit.gpgsign false
+        git -C $r remote add origin 'https://github.com/o/r.git'
+        # CRLF and no trailing newline on purpose: any rewrite would show up byte-wise.
+        [System.IO.File]::WriteAllText((Join-Path $r 'HANDOFF.md'), "# Project guide`r`nRead me at session start.")
+        [System.IO.File]::WriteAllText((Join-Path $r '.gitignore'), "bin/`n")
+        git -C $r add HANDOFF.md .gitignore 2>&1 | Out-Null
+        git -C $r commit --quiet -m 'docs: project handoff guide' 2>&1 | Out-Null
+        git -C $r checkout --quiet -b issue-7-thing 2>&1 | Out-Null
+        return $r
+    }
+    function Get-Bytes([string]$Path) { [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($Path)) }
+    # The SessionStart hook as Claude Code runs it: JSON on stdin, context JSON (or nothing) on stdout.
+    function Invoke-Hook([string]$Repo) {
+        $stdin = (@{ source = 'resume'; cwd = $Repo } | ConvertTo-Json -Compress)
+        return ($stdin | & pwsh -NoProfile -File $script:Hook 2>&1 | Out-String).Trim()
+    }
+}
+
+# Needs no gh, so it runs on every platform (the Linux CI leg included).
+Describe 'Handoff-SessionStartHook end to end with a tracked HANDOFF.md (#795)' {
+    It 'does not mistake a tracked HANDOFF.md for a saved handoff, and reads .handoffs/active.md instead' {
+        $repo = New-TrackedRepo 'hook'
+        # A guide that LOOKS like a handoff to the old hook (it has the heading the hook quotes), and
+        # even mentions the keys in its body - but carries no handoff frontmatter.
+        [System.IO.File]::WriteAllText((Join-Path $repo 'HANDOFF.md'), "# Guide`nsaved: always`nverified: by hand`n## Next concrete step`nread the guide")
+        git -C $repo commit --quiet -am 'docs: guide' 2>&1 | Out-Null
+        Invoke-Hook $repo | Should -BeNullOrEmpty
+
+        New-Item -ItemType Directory -Path (Join-Path $repo '.handoffs') | Out-Null
+        Set-Content -Path (Join-Path $repo '.handoffs/active.md') -Value "---`nissue: 7`n---`n## Next concrete step`n[V] hooked" -Encoding UTF8
+        $h = Invoke-Hook $repo
+        $h | Should -Match 'hooked'
+        $h | Should -Not -Match 'read the guide'
+    }
 }
 
 Describe 'Resolve-HandoffMirror (#795)' {
@@ -104,29 +147,6 @@ exit /b 0
             $out = & pwsh -NoProfile -Command $cmd 2>&1 | Out-String
             [pscustomobject]@{ Out = $out; Code = $LASTEXITCODE }
         }
-
-        function New-TrackedRepo([string]$Name) {
-            $r = Join-Path $TestDrive $Name
-            New-Item -ItemType Directory -Path $r | Out-Null
-            git -C $r init --quiet 2>&1 | Out-Null
-            git -C $r config user.email 't@example.com'
-            git -C $r config user.name 't'
-            git -C $r config commit.gpgsign false
-            git -C $r remote add origin 'https://github.com/o/r.git'
-            # CRLF and no trailing newline on purpose: any rewrite would show up byte-wise.
-            [System.IO.File]::WriteAllText((Join-Path $r 'HANDOFF.md'), "# Project guide`r`nRead me at session start.")
-            [System.IO.File]::WriteAllText((Join-Path $r '.gitignore'), "bin/`n")
-            git -C $r add HANDOFF.md .gitignore 2>&1 | Out-Null
-            git -C $r commit --quiet -m 'docs: project handoff guide' 2>&1 | Out-Null
-            git -C $r checkout --quiet -b issue-7-thing 2>&1 | Out-Null
-            return $r
-        }
-        function Get-Bytes([string]$Path) { [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($Path)) }
-        # The SessionStart hook as Claude Code runs it: JSON on stdin, context JSON (or nothing) on stdout.
-        function Invoke-Hook([string]$Repo) {
-            $stdin = (@{ source = 'resume'; cwd = $Repo } | ConvertTo-Json -Compress)
-            return ($stdin | & pwsh -NoProfile -File $script:Hook 2>&1 | Out-String).Trim()
-        }
     }
 
     It '-Save leaves the tracked HANDOFF.md byte-identical and tracked, and writes .handoffs/active.md' {
@@ -166,16 +186,53 @@ exit /b 0
     It 'refuses a -MirrorPath that points at a tracked file (any spelling), and writes nothing' {
         $repo   = New-TrackedRepo 'refuse'
         $before = Get-Bytes (Join-Path $repo 'HANDOFF.md')
-        $giBefore = Get-Bytes (Join-Path $repo '.gitignore')
-        foreach ($spelling in '.gitignore', './/.gitignore') {
-            $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', "'$spelling'") $script:EmptyJson
-            $r.Code | Should -Not -Be 0 -Because $spelling
-            $r.Out  | Should -Match "'\.gitignore' is tracked by git and is not a handoff" -Because $r.Out
+        # A tracked directory and a tracked non-ASCII name (ls-files would octal-quote it by default).
+        New-Item -ItemType Directory -Path (Join-Path $repo 'docs') | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $repo 'docs/a.md'), 'a')
+        [System.IO.File]::WriteAllText((Join-Path $repo "notas-$([char]0xE9).md"), 'n')
+        git -C $repo add -A 2>&1 | Out-Null
+        git -C $repo commit --quiet -m 'docs: more tracked files' 2>&1 | Out-Null
+        $giBefore   = Get-Bytes (Join-Path $repo '.gitignore')
+        $docsBefore = Get-Bytes (Join-Path $repo 'docs/a.md')
+        $notaBefore = Get-Bytes (Join-Path $repo "notas-$([char]0xE9).md")
+        foreach ($spelling in '.gitignore', './/.gitignore', '.GITIGNORE', 'HANDOFF.md', 'handoff.md', 'docs', 'docs/', "notas-$([char]0xE9).md") {
+            foreach ($verb in '-Save', '-Resume') {
+                $r = Invoke-Handoff $repo @($verb, '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', "'$spelling'") $script:EmptyJson
+                $r.Code | Should -Not -Be 0 -Because "$verb $spelling"
+                $r.Out  | Should -Match 'is tracked by git \(or holds tracked files\) and is not a handoff' -Because "$verb $spelling -> $($r.Out)"
+            }
         }
         Get-Bytes (Join-Path $repo '.gitignore') | Should -BeExactly $giBefore
         Get-Bytes (Join-Path $repo 'HANDOFF.md') | Should -BeExactly $before
+        Get-Bytes (Join-Path $repo 'docs/a.md') | Should -BeExactly $docsBefore
+        Get-Bytes (Join-Path $repo "notas-$([char]0xE9).md") | Should -BeExactly $notaBefore
         Test-Path (Join-Path $repo '.handoffs') | Should -BeFalse
         git -C $repo config --local --get abios.handoffMirror | Should -BeNullOrEmpty
+        git -C $repo status --porcelain | Should -BeNullOrEmpty
+    }
+
+    It 'refuses an untracked directory or the archive dir as -MirrorPath' {
+        $repo = New-TrackedRepo 'dirmirror'
+        New-Item -ItemType Directory -Path (Join-Path $repo 'scratch') | Out-Null
+        foreach ($spelling in 'scratch', '.handoffs') {
+            $r = Invoke-Handoff $repo @('-Save', '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', $spelling) $script:EmptyJson
+            $r.Code | Should -Not -Be 0 -Because $spelling
+            $r.Out  | Should -Match 'is a directory' -Because $r.Out
+        }
+        Test-Path (Join-Path $repo 'scratch') -PathType Container | Should -BeTrue
+    }
+
+    It '-Resume -MirrorPath remembers the location on a machine with no local config' {
+        $repo = New-TrackedRepo 'resume-custom'
+        $md = "---`nissue: 7`nrepo: o/r`nbranch: issue-7-thing`npr: null`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7`n## Next concrete step`n[V] from machine A"
+        $body = "<!-- abios-handoff -->`n**[abios-handoff]**`n`n" + '```md' + "`n$md`n" + '```'
+        $comments = Join-Path $TestDrive 'comments-custom.json'
+        ConvertTo-Json -InputObject @([pscustomobject]@{ id = 1; body = $body }) -Depth 5 | Set-Content -Path $comments -Encoding UTF8
+        $r = Invoke-Handoff $repo @('-Resume', '-Issue', '7', '-MirrorPath', 'notes/r.md') $comments
+        $r.Code | Should -Be 0 -Because $r.Out
+        Get-Content -Raw (Join-Path $repo 'notes/r.md') | Should -Match 'from machine A'
+        (git -C $repo config --local --get abios.handoffMirror) | Should -BeExactly 'notes/r.md'
+        Invoke-Hook $repo | Should -Match 'from machine A'
     }
 
     It 'a second -Save rotates .handoffs/active.md into one archive and keeps the guide untouched' {
@@ -253,22 +310,10 @@ exit /b 0
         $repo = New-TrackedRepo 'dryrun'
         $cmd = "`$env:PATH='$($script:FakeDir);' + `$env:PATH; `$env:GH_TOKEN='fake'; `$env:FAKE_GH_OUTFILE='$($script:EmptyJson)'; " +
                "Set-Location -LiteralPath '$repo'; `$md = & '$($script:Script)' -Save -DryRun -Issue 7 -ProjectNum 1 -NoKnowledge -NextStep '[V] captured' 6>`$null; " +
-               "if (`"`$md`" -match 'captured' -and `"`$md`" -match '# Handoff - #7') { 'CAPTURED' } else { 'MISSING' }"
-        (& pwsh -NoProfile -Command $cmd 2>&1 | Out-String) | Should -Match 'CAPTURED'
+               "if (`"`$md`" -match 'captured' -and `"`$md`" -match '# Handoff - #7') { 'MD_ON_SUCCESS_STREAM' } else { 'MD_NOT_CAPTURED' }"
+        $out = (& pwsh -NoProfile -Command $cmd 2>&1 | Out-String)
+        $out | Should -MatchExactly 'MD_ON_SUCCESS_STREAM'
+        $out | Should -Not -Match 'MD_NOT_CAPTURED'
     }
 
-    It 'the SessionStart hook does not mistake a tracked HANDOFF.md for a saved handoff' {
-        $repo = New-TrackedRepo 'hook'
-        # A guide that LOOKS like a handoff to the old hook (it has the heading the hook quotes), and
-        # even mentions the keys in its body - but carries no handoff frontmatter.
-        [System.IO.File]::WriteAllText((Join-Path $repo 'HANDOFF.md'), "# Guide`nsaved: always`nverified: by hand`n## Next concrete step`nread the guide")
-        git -C $repo commit --quiet -am 'docs: guide' 2>&1 | Out-Null
-        Invoke-Hook $repo | Should -BeNullOrEmpty
-
-        New-Item -ItemType Directory -Path (Join-Path $repo '.handoffs') | Out-Null
-        Set-Content -Path (Join-Path $repo '.handoffs/active.md') -Value "---`nissue: 7`n---`n## Next concrete step`n[V] hooked" -Encoding UTF8
-        $h = Invoke-Hook $repo
-        $h | Should -Match 'hooked'
-        $h | Should -Not -Match 'read the guide'
-    }
 }

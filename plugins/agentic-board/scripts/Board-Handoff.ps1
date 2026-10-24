@@ -744,10 +744,23 @@ if (-not $repoRoot) { throw "Not inside a git working tree." }
 # Two traps, both from review: the match is case-INsensitive (on NTFS a tracked Handoff.md IS the file
 # HANDOFF.md resolves to), and the content judged is the INDEX copy, not the working tree - a repo the
 # old version already clobbered has a tool handoff on disk over a committed project guide.
+# Paths come back NUL-separated and unquoted (core.quotePath would octal-escape a non-ASCII name, and
+# it would never compare equal), decoded as UTF-8. A pathspec naming a directory lists its children:
+# a directory that holds tracked files is owned too.
+function Invoke-GitUtf8([string[]]$GitArgs) {
+    $prev = [Console]::OutputEncoding
+    try {
+        try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+        return @(git -C $repoRoot -c core.quotePath=false @GitArgs 2>$null)
+    } finally { try { [Console]::OutputEncoding = $prev } catch { } }
+}
 function Test-ProjectOwned([string]$rel) {
-    $hit = @(git -C $repoRoot ls-files -- ":(icase)$rel" 2>$null) | Where-Object { $_ -ieq $rel } | Select-Object -First 1
+    $paths = @(((Invoke-GitUtf8 @('ls-files', '-z', '--', ":(icase)$rel")) -join "`n") -split "`0" |
+               ForEach-Object { $_.Trim("`n") } | Where-Object { $_ })
+    if (@($paths | Where-Object { $_.StartsWith("$rel/", [System.StringComparison]::OrdinalIgnoreCase) }).Count) { return $true }
+    $hit = $paths | Where-Object { $_ -ieq $rel } | Select-Object -First 1
     if (-not $hit) { return $false }
-    $indexed = (@(git -C $repoRoot show ":$hit" 2>$null) -join "`n")
+    $indexed = ((Invoke-GitUtf8 @('show', ":$hit")) -join "`n")
     if (Test-HandoffMirrorText $indexed) { return $false }
     $p = Join-Path $repoRoot $rel
     if ((Test-Path -LiteralPath $p -PathType Leaf) -and (Test-HandoffMirrorText (Get-Content -LiteralPath $p -Raw))) {
@@ -761,9 +774,14 @@ $mirrorFromParam = [bool]$MirrorPath
 if (-not $MirrorPath) { $MirrorPath = [string](git -C $repoRoot config --local --get abios.handoffMirror 2>$null) }
 $mirror = Resolve-HandoffMirror -MirrorPath $MirrorPath -RootHandoffTracked (Test-ProjectOwned 'HANDOFF.md')
 if (Test-ProjectOwned $mirror.Rel) {
-    throw "Board-Handoff: '$($mirror.Rel)' is tracked by git and is not a handoff, so it is not a handoff mirror - writing there would overwrite and untrack a project file. Pass -MirrorPath <an untracked path>."
+    throw "Board-Handoff: '$($mirror.Rel)' is tracked by git (or holds tracked files) and is not a handoff, so it is not a handoff mirror - writing there would overwrite and untrack project files. Pass -MirrorPath <an untracked file path>."
 }
 $handoffPath = Join-Path $repoRoot $mirror.Rel
+# The mirror is a FILE: rotation moves whatever sits at the path, so a directory there (or the archive
+# dir itself) would be moved wholesale into .handoffs/.
+if ($mirror.Rel -ieq '.handoffs' -or (Test-Path -LiteralPath $handoffPath -PathType Container)) {
+    throw "Board-Handoff: -MirrorPath '$($mirror.Rel)' is a directory - pass a file path, e.g. '$($mirror.Rel)/handoff.md'."
+}
 $archiveDir  = Join-Path $repoRoot ".handoffs"
 
 # -- Auto-memory pointer (best-effort, machine-local) --------------------------
@@ -873,11 +891,13 @@ if ($Resume) {
             $giBody = if (Test-Path $gitignorePath) { Get-Content $gitignorePath -Raw } else { "" }
             $giNew  = Add-GitignoreEntries $giBody $mirror.Ignore
             if ($giNew -ne $giBody) { Set-Content -Path $gitignorePath -Value $giNew -Encoding UTF8 -NoNewline }
-            # Machine B is where the local config is empty: remember an explicit -MirrorPath here too.
-            if ($mirrorFromParam) { git -C $repoRoot config --local abios.handoffMirror $mirror.Rel 2>$null | Out-Null }
             Write-Host "  OK  Local mirror $($mirror.Rel) regenerated from the $source" -ForegroundColor DarkGray
         }
     }
+
+    # Machine B is where the local config is empty: remember an explicit -MirrorPath on resume too,
+    # whether the handoff came from the comment or from a mirror that was copied/force-committed there.
+    if ($mirrorFromParam -and -not $DryRun) { git -C $repoRoot config --local abios.handoffMirror $mirror.Rel 2>$null | Out-Null }
 
     Write-Host "  Source : $source" -ForegroundColor DarkCyan
     $savedAt = Get-HandoffFrontmatterField $body "saved"
