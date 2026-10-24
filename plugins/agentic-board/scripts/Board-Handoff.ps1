@@ -790,7 +790,8 @@ function Test-ProjectOwned([string]$rel) {
 $script:ClobberedCopy = $null
 $mirrorFromParam = [bool]$MirrorPath
 if (-not $MirrorPath) { $MirrorPath = [string](Invoke-GitUtf8 @('config', '--local', '--get', 'abios.handoffMirror') | Select-Object -First 1) }
-$mirror = Resolve-HandoffMirror -MirrorPath $MirrorPath -RootHandoffTracked (Test-ProjectOwned 'HANDOFF.md')
+$rootHandoffOwned = Test-ProjectOwned 'HANDOFF.md'
+$mirror = Resolve-HandoffMirror -MirrorPath $MirrorPath -RootHandoffTracked $rootHandoffOwned
 if (Test-ProjectOwned $mirror.Rel) {
     throw "Board-Handoff: '$($mirror.Rel)' is tracked by git (or holds tracked files) and is not a handoff, so it is not a handoff mirror - writing there would overwrite and untrack project files. Pass -MirrorPath <an untracked file path>."
 }
@@ -934,7 +935,7 @@ if ($Resume) {
             # a clobbered guide just above) may be the only copy of something: archive it, never overwrite.
             if (Test-Path -LiteralPath $handoffPath -PathType Leaf) {
                 $existing = Get-Content -LiteralPath $handoffPath -Raw
-                if ($existing -and $existing.TrimEnd() -ne $body.TrimEnd()) {
+                if ($existing -and $existing.TrimEnd() -cne $body.TrimEnd()) {
                     if (-not (Test-Path -LiteralPath $archiveDir)) { New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null }
                     $archiveName = New-HandoffArchiveName (Get-Date)
                     Move-Item -Force -LiteralPath $handoffPath -Destination (Join-Path $archiveDir $archiveName)
@@ -1124,7 +1125,7 @@ if (Test-Path -LiteralPath $handoffPath) {
 if (-not (Test-Path (Split-Path -Parent $handoffPath))) { New-Item -ItemType Directory -Force (Split-Path -Parent $handoffPath) | Out-Null }
 Set-Content -LiteralPath $handoffPath -Value $markdown -Encoding UTF8 -NoNewline
 Write-Host "  OK  $($mirror.Rel) written (verified $($fm.verified))" -ForegroundColor Green
-if ($mirror.Rel -ne 'HANDOFF.md' -and -not $MirrorPath) {
+if ($rootHandoffOwned -and -not $MirrorPath) {
     Write-Host "  (HANDOFF.md is tracked by this repo, so the mirror lives at $($mirror.Rel) and HANDOFF.md is left alone.)" -ForegroundColor DarkGray
 }
 if ($mirrorFromParam) {

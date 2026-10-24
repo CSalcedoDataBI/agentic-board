@@ -111,7 +111,7 @@ Describe 'Handoff frontmatter detection, script and hook (#795 review)' {
         $script:Cases = @(
             @{ Name = 'a handoff this script wrote';                  Text = $fm;                                  Expected = $true }
             @{ Name = 'the same with CRLF line ends';                 Text = $fm -replace "`n", "`r`n";            Expected = $true }
-            @{ Name = 'the same behind a UTF-8 BOM';                 Text = [char]0xFEFF + $fm;                   Expected = $true }
+            @{ Name = 'the same behind a UTF-8 BOM';                 Text = "$([char]0xFEFF)$fm";                 Expected = $true }
             @{ Name = 'a plain project guide';                       Text = "# Project guide`nRead me.";          Expected = $false }
             @{ Name = 'empty text';                                  Text = '';                                   Expected = $false }
             @{ Name = 'frontmatter with saved only';                 Text = "---`nsaved: x`n---`n# x";             Expected = $false }
@@ -145,6 +145,11 @@ exit /b 0
 '@ | Set-Content (Join-Path $script:FakeDir 'gh.cmd') -Encoding ASCII
         $script:EmptyJson = Join-Path $TestDrive 'empty.json'
         Set-Content -Path $script:EmptyJson -Value '[]' -Encoding ASCII
+        # An issue whose [abios-handoff] comment holds a valid handoff (for -Resume write paths).
+        $vmd = "---`nissue: 7`nrepo: o/r`nbranch: issue-7-thing`npr: null`nsaved: 2026-10-23T00:00:00Z`nverified: 1/1`n---`n# Handoff - #7`n## Next concrete step`n[V] valid comment"
+        $vbody = "<!-- abios-handoff -->`n**[abios-handoff]**`n`n" + '```md' + "`n$vmd`n" + '```'
+        $script:ValidComments = Join-Path $TestDrive 'comments-valid.json'
+        ConvertTo-Json -InputObject @([pscustomobject]@{ id = 1; body = $vbody }) -Depth 5 | Set-Content -Path $script:ValidComments -Encoding UTF8
 
         # Run the real script in a child pwsh, fake gh first on PATH, inside $Repo.
         function Invoke-Handoff([string]$Repo, [string[]]$ScriptArgs, [string]$OutFile) {
@@ -202,8 +207,10 @@ exit /b 0
         $docsBefore = Get-Bytes (Join-Path $repo 'docs/a.md')
         $notaBefore = Get-Bytes (Join-Path $repo "notas-$([char]0xE9).md")
         foreach ($spelling in '.gitignore', './/.gitignore', '.GITIGNORE', 'HANDOFF.md', 'handoff.md', 'docs', 'docs/', "notas-$([char]0xE9).md") {
+            # -Resume runs WITH a valid comment, so the regenerate-from-comment write path is the one refused.
             foreach ($verb in '-Save', '-Resume') {
-                $r = Invoke-Handoff $repo @($verb, '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', "'$spelling'") $script:EmptyJson
+                $src = if ($verb -eq '-Resume') { $script:ValidComments } else { $script:EmptyJson }
+                $r = Invoke-Handoff $repo @($verb, '-Issue', '7', '-ProjectNum', '1', '-NoMemo', '-NoKnowledge', '-NextStep', "'[V] next'", '-MirrorPath', "'$spelling'") $src
                 $r.Code | Should -Not -Be 0 -Because "$verb $spelling"
                 $r.Out  | Should -Match 'is tracked by git \(or holds tracked files\) and is not a handoff' -Because "$verb $spelling -> $($r.Out)"
             }
