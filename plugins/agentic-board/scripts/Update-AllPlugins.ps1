@@ -334,7 +334,9 @@ function Invoke-PluginUpdate {
     # How many builds of each plugin `clean` could actually free (none once it already ran): the advice
     # is only given when this is above zero - an installed or in-use build is never freed.
     $freeable = @{}
-    if ($plan.Ok -and -not $result.Cleanup.Ran) {
+    # After a clean, look again: a build that could not be deleted (a lock) is still freeable.
+    if ($plan.Ok -and $result.Cleanup.Ran) { $plan = Get-VersionCleanupPlan -ClaudeHome $ClaudeHome -GetProcess $GetProcess -GraceMinutes $GraceMinutes }
+    if ($plan.Ok) {
         foreach ($it in @($plan.Items | Where-Object { $_.Action -eq 'remove' })) { $k = "$($it.Marketplace)/$($it.Plugin)"; $freeable[$k] = 1 + [int]$freeable[$k] }
     }
     $result.CacheHeavy = @(Get-PluginCacheUsage -ClaudeHome $ClaudeHome |

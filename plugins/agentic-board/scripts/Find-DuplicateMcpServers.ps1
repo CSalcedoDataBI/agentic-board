@@ -42,10 +42,13 @@ param(
 
 # ---------------------------------------------------------------------------- what each plugin registers
 
-# The user config file: explicit path, else <CLAUDE_CONFIG_DIR>/.claude.json, else ~/.claude.json.
+# The user config file: explicit path, else <-ClaudeHome>/.claude.json (the home is taken like
+# CLAUDE_CONFIG_DIR, so plugins and projects come from the same profile), else
+# <CLAUDE_CONFIG_DIR>/.claude.json, else ~/.claude.json.
 function Get-ClaudeConfigPath {
-    param([string]$ConfigPath)
+    param([string]$ConfigPath, [string]$ClaudeHome)
     if ($ConfigPath) { return $ConfigPath }
+    if ($ClaudeHome) { return (Join-Path $ClaudeHome '.claude.json') }
     if ($env:CLAUDE_CONFIG_DIR) { return (Join-Path $env:CLAUDE_CONFIG_DIR '.claude.json') }
     return (Join-Path $HOME '.claude.json')
 }
@@ -377,6 +380,11 @@ trap {
     exit 1
 }
 
+# .NET file calls resolve relative paths against the process directory, not PowerShell's current one:
+# make every path absolute first, so the checks and the write look at the same file.
+$abs = { param($p) if ($p) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($p) } else { $p } }
+$ClaudeHome = & $abs $ClaudeHome; $ConfigPath = & $abs $ConfigPath; $BackupDir = & $abs $BackupDir
+
 $reg = Get-PluginMcpRegistrations -ClaudeHome $ClaudeHome
 if (-not $reg.Ok) { Write-Host "Could not read the installed plugins ($($reg.Reason))." -ForegroundColor Red; exit 1 }
 $unmatched = @(Get-UnmatchedKeep -Registrations $reg.Items -Keep $Keep)
@@ -385,7 +393,7 @@ if ($unmatched.Count -gt 0) {
     exit 1
 }
 $groups = @(Get-DuplicateMcpGroups -Registrations $reg.Items -Keep $Keep -PreferLocal:$PreferLocal)
-$cfgPath = Get-ClaudeConfigPath -ConfigPath $ConfigPath
+$cfgPath = Get-ClaudeConfigPath -ConfigPath $ConfigPath -ClaudeHome $ClaudeHome
 $cfg = Read-ClaudeConfig -Path $cfgPath
 $plan = if ($cfg.Ok -and $groups.Count -gt 0) { Get-McpDisablePlan -Config $cfg -Groups $groups } else { $null }
 $applied = $null

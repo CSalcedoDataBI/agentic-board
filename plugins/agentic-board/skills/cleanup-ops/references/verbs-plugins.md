@@ -137,7 +137,8 @@ plugin keeps working.
    **copied to the backups folder first** (`~/.agentic-board/backups/claude.json.<time>.bak`), written
    atomically with only `disabledMcpServers` touched (its Unix file mode kept), and read back to verify.
    A config that is a link is refused, and so is a write when a running session changed the file between
-   the read and the replace. With `-ClaudeHome`, `-Execute` also needs `-ConfigPath` and `-BackupDir`.
+   the read and the replace. With `-ClaudeHome` (another profile) the config defaults to `<home>/.claude.json`, and `-Execute` also
+   needs `-ConfigPath` and `-BackupDir` named explicitly. Relative paths are resolved from the current folder.
    Servers with no clear choice are named as needing `-Keep`; the report never calls them handled.
 
 Say the limits when you report: the setting is **per project** (a project opened later needs this run

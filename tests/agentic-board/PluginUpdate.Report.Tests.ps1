@@ -213,9 +213,10 @@ Describe 'the release-notice contract (one release file per plugin@marketplace)'
     It 'never opens a named pipe (it would block every prompt)' -Skip:$IsWindows {
         $fifo = Join-Path $script:Home_ 'plugin-releases' 'pipe@m.json'
         & mkfifo $fifo
-        # A writer opens and closes the pipe after 3 s (bounded by timeout), so a regression that opens
-        # it shows up as a slow call that then FAILS the assertion - never as a hung test run.
-        $writer = Start-Process -FilePath 'timeout' -ArgumentList '8', 'sh', '-c', "sleep 3; : > '$fifo'" -PassThru
+        # A writer opens and closes the pipe after 3 s, so a regression that opens it shows up as a slow
+        # call that then FAILS the assertion - never as a hung test run. One argument string: Start-Process
+        # does not re-quote list elements. If nothing reads, the writer waits and is killed below.
+        $writer = Start-Process -FilePath 'sh' -ArgumentList "-c `"sleep 3; : > '$fifo'`"" -PassThru
         try {
             $clock = [System.Diagnostics.Stopwatch]::StartNew()
             @(Get-ReleaseFixes -ClaudeHomeDir $script:Home_ -Plugin 'pipe' -Marketplace 'm' -Installed '1.0').Count | Should -Be 0
