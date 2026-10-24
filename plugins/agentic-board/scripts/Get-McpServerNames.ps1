@@ -99,7 +99,8 @@ $approveAll = $false
 $approved = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $rejected = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($src in @($projEntries) + @($settings)) {
-    if ($src['enableAllProjectMcpServers'] -eq $true) { $approveAll = $true }
+    # The most specific level that sets it decides (user < project < local), like enabledPlugins.
+    if ((Test-Map $src) -and $src.Contains('enableAllProjectMcpServers')) { $approveAll = $src['enableAllProjectMcpServers'] -eq $true }
     foreach ($n in (Get-List $src 'enabledMcpjsonServers'))  { [void]$approved.Add($n) }
     foreach ($n in (Get-List $src 'disabledMcpjsonServers')) { [void]$rejected.Add($n) }
 }

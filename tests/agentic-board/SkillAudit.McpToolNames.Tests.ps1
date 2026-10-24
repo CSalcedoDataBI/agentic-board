@@ -47,6 +47,9 @@ BeforeAll {
     New-Skill '.claude/skills/proj/multi' 'multi' 'Use `mcp__powerbi-modeling-mcp__table_operations`, `mcp__powerbi-modeling-mcp__column_operations` and `mcp__powerbi-modeling-mcp__measure_operations`.'
     # covers: hardcodes the bare form but also allows the working prefix in another form.
     New-Skill '.claude/skills/proj/covers' 'covers' 'allowed-tools: mcp__plugin_fabric-skills_powerbi-modeling-mcp. Then call `mcp__powerbi-modeling-mcp__dax_query_operations`.'
+    # beside: the wrong name sits in a markdown file next to SKILL.md.
+    New-Skill '.claude/skills/proj/beside' 'beside' 'See reference.md.'
+    'Call `mcp__powerbi-modeling-mcp__partition_operations`.' | Set-Content -LiteralPath (Join-Path $script:Root '.claude/skills/proj/beside/reference.md') -Encoding utf8
     # allowed: the bare mcp__<server> form allowed-tools uses for all of a server's tools.
     New-Skill '.claude/skills/proj/allowed' 'allowed' "Frontmatter would say allowed-tools: mcp__powerbi-modeling-mcp, Read."
 
@@ -94,6 +97,7 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $f = Get-McpFinding 'selfref'
         $f.Count | Should -Be 1                     # only the foreign pack-y prefix
         $f[0].detail | Should -Match 'plugin_pack-y_codegraph'
+        $f[0].detail | Should -Not -Match 'plugin_pack-z_'     # the own prefix never leaks into it
     }
     It 'does not flag a skill that already gives the working name too' {
         (Get-McpFinding 'both').Count | Should -Be 0
@@ -120,6 +124,7 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         @($x.result.findings | Where-Object type -eq 'mcp-tool-name').Count | Should -Be 0
         $x.result.summary.skillsAudited | Should -BeGreaterThan 0
         $x.warnings | Should -Match 'discovery failed'
+        $x.result.summary.mcpCheck | Should -Be 'discovery-failed'
     }
     It 'uses the discovered records when -McpServers is omitted' {
         $x = Invoke-StubbedAudit $script:StubPluginOnly
@@ -159,6 +164,13 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $f.Count | Should -Be 1
         $f[0].detail | Should -Match ([regex]::Escape('mcp__plugin_fabric-skills_powerbi-modeling-mcp__*'))
     }
+    It 'reads markdown files beside SKILL.md and says the check ran' {
+        (Get-McpFinding 'beside').Count | Should -Be 1
+        $script:Res.summary.mcpCheck | Should -Be 'ran'
+    }
+    It 'tells the owner how to fix a literal allowed-tools list' {
+        (Get-McpFinding 'allowed')[0].detail | Should -Match 'list both install forms'
+    }
     It 'routes the finding like every other one' {
         (Get-McpFinding 'bare')[0].filing | Should -Be 'file'
         (Get-McpFinding 'bare')[0].ownerRepo | Should -Be 'me/proj'
@@ -179,6 +191,7 @@ Describe 'Invoke-SkillAudit mcp-tool-name' {
         $x = Invoke-StubbedAudit $script:StubPluginOnly @{ McpServers = @() }
         @($x.result.findings | Where-Object type -eq 'mcp-tool-name').Count | Should -Be 0
         $x.result.summary.skillsAudited | Should -BeGreaterThan 0   # the audit did run
+        $x.result.summary.mcpCheck | Should -Be 'no-servers'
     }
 }
 
@@ -228,6 +241,14 @@ Describe 'Get-McpServerNames' {
         $script:Names.prefix | Should -Not -Contain 'switched-off'
         $script:Names.prefix | Should -Not -Contain 'plugin_pack-b_from-file'
     }
+    It 'lets the most specific settings level decide enableAllProjectMcpServers' {
+        $r4 = Join-Path $script:Root 'repo4'
+        Write-Json (Join-Path $r4 '.mcp.json') @{ mcpServers = @{ 'any-one' = @{} } }
+        Write-Json (Join-Path $r4 '.claude/settings.json') @{ enableAllProjectMcpServers = $true }
+        @(& $script:Discover -Root $r4 -UserHome $script:Home2).prefix | Should -Contain 'any-one'
+        Write-Json (Join-Path $r4 '.claude/settings.local.json') @{ enableAllProjectMcpServers = $false }
+        @(& $script:Discover -Root $r4 -UserHome $script:Home2).prefix | Should -Not -Contain 'any-one'
+    }
     It 'leaves out a project .mcp.json server that was never approved' {
         $script:Names.prefix | Should -Not -Contain 'unapproved'
     }
@@ -244,9 +265,10 @@ Describe 'Get-McpServerNames' {
     It 'never reads the other keys of ~/.claude.json or a project entry as servers' {
         $file = Join-Path $script:Home2 '.claude.json'
         $saved = Get-Content -LiteralPath $file -Raw
-        Write-Json $file @{ numStartups = 3; mcpServers = @{ 'real-one' = @{} }; projects = @{ 'C:/x' = @{ allowedTools = @() } } }
+        $xRoot = Join-Path $script:Root 'xroot'; New-Item -ItemType Directory -Path $xRoot -Force | Out-Null
+        Write-Json $file @{ numStartups = 3; mcpServers = @{ 'real-one' = @{} }; projects = @{ ($xRoot -replace '\\','/') = @{ allowedTools = @() } } }
         try {
-            $n = @(& $script:Discover -Root 'C:/x' -UserHome $script:Home2).prefix
+            $n = @(& $script:Discover -Root $xRoot -UserHome $script:Home2).prefix
             $n | Should -Not -Contain 'numStartups'
             $n | Should -Not -Contain 'projects'
             $n | Should -Not -Contain 'allowedTools'
@@ -265,10 +287,18 @@ Describe 'Get-McpServerNames' {
     It 'reads the config from CLAUDE_CONFIG_DIR when it is set and -UserHome is not' {
         $cfgDir = Join-Path $script:Root 'cfgdir'
         Write-Json (Join-Path $cfgDir '.claude.json') @{ mcpServers = @{ 'from-config-dir' = @{} } }
+        # plugins/ and settings.json must come from the config dir too, not from the live ~/.claude.
+        $pcfg = Join-Path $cfgDir 'p/cfg'; Write-Json (Join-Path $pcfg '.mcp.json') @{ 'cfg-server' = @{} }
+        Write-Json (Join-Path $cfgDir 'plugins/installed_plugins.json') @{ version = 2; plugins = @{ 'cfgpack@m' = @(@{ scope = 'user'; installPath = $pcfg; lastUpdated = '2026-01-01' }) } }
+        Write-Json (Join-Path $cfgDir 'settings.json') @{ enabledPlugins = @{ 'cfgpack@m' = $true } }
         $saved = $env:CLAUDE_CONFIG_DIR
         try {
             $env:CLAUDE_CONFIG_DIR = $cfgDir
-            @(& $script:Discover -Root $script:Repo2).prefix | Should -Contain 'from-config-dir'
+            $n = @(& $script:Discover -Root $script:Repo2).prefix
+            $n | Should -Contain 'from-config-dir'
+            $n | Should -Contain 'plugin_cfgpack_cfg-server'
+            # -UserHome still wins over the variable.
+            @(& $script:Discover -Root $script:Repo2 -UserHome $script:Home2).prefix | Should -Not -Contain 'from-config-dir'
         } finally {
             $env:CLAUDE_CONFIG_DIR = $saved
         }

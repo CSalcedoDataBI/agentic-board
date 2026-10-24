@@ -154,26 +154,28 @@ if ($PSBoundParameters.ContainsKey('McpServers')) {
     # Discovered records carry their server name, so a plugin whose name holds `_` is not split wrongly.
     # An optional check: a discovery failure costs this check only, never the rest of the audit.
     try   { $available = @(& $mcpNames -Root $Root | Where-Object { $_.prefix } | ForEach-Object { [pscustomobject]@{ prefix = [string]$_.prefix; server = [string]$_.server } }) }
-    catch { Write-Warning "MCP server discovery failed ($($_.Exception.Message)) - the mcp-tool-name check is skipped."; $available = @() }
+    catch { Write-Warning "MCP server discovery failed ($($_.Exception.Message)) - the mcp-tool-name check is skipped."; $available = @(); $mcpCheck = 'discovery-failed' }
 }
+# Said in the summary, so "no findings" is never mistaken for "not checked".
+if (-not $mcpCheck) { $mcpCheck = if ($available.Count) { 'ran' } else { 'no-servers' } }
 if ($available.Count) {
     $availableSet = [System.Collections.Generic.HashSet[string]]::new([string[]]@($available.prefix), [StringComparer]::OrdinalIgnoreCase)
-    # Longest first, so plugin_a_b-c resolves to server b-c before it could resolve to c.
-    $serverNames = @($available.server | Sort-Object -Unique | Sort-Object Length -Descending)
     function Resolve-RefServer {
-        # The server a referenced prefix names. plugin_<plugin>_<server> is ambiguous when the plugin
-        # name holds `_`, so the known server names decide where the plugin name ends.
+        # The server a referenced prefix names. A plugin prefix is split at the first `_` after plugin_
+        # (plugin names are kebab-case). No guess beyond that: matching a known server as a suffix would
+        # read plugin_acme_brave_search as server `search` and report a server that is not installed.
         param([string]$Prefix)
         if ($Prefix -notmatch '^plugin_') { return $Prefix }
-        foreach ($sv in $serverNames) {
-            if ($Prefix.Length -gt 8 + $sv.Length -and $Prefix.EndsWith("_$sv", [StringComparison]::OrdinalIgnoreCase)) { return $sv }
-        }
-        $null
+        $m = [regex]::Match($Prefix, '^plugin_[^_]+_(.+)$')
+        if ($m.Success) { $m.Groups[1].Value } else { $null }
     }
     $mcpGroups = [ordered]@{}
     foreach ($s in $skills) {
         $dir = Split-Path $s.path -Parent
         $files = @($s.path)
+        # The skill's own markdown: files beside SKILL.md (reference.md, forms.md…) and all of references/.
+        $files += @(Get-ChildItem -LiteralPath $dir -File -Filter '*.md' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne 'SKILL.md' } | ForEach-Object { $_.FullName })
         $refDir = Join-Path $dir 'references'
         if (Test-Path -LiteralPath $refDir -PathType Container) {
             $files += @(Get-ChildItem -LiteralPath $refDir -Recurse -File -Filter '*.md' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
@@ -228,7 +230,8 @@ if ($available.Count) {
         $working = ($g.alt | ForEach-Object { '`mcp__' + $_ + $suffix + '`' }) -join ' or '
         Add-Finding $members[0] 'med' 'mcp-tool-name' ("References $named`: here that server is " +
             "$working. Name the server and the operation instead of a hardcoded prefix " +
-            "(the $($g.server) $op), so the skill works however the server is installed.") $members
+            "(the $($g.server) $op), so the skill works however the server is installed; where a literal " +
+            "name is required (allowed-tools), list both install forms.") $members
         $foldedFindings += $members.Count - 1
     }
 }
@@ -241,6 +244,8 @@ $result = [pscustomobject]@{
         skillsAudited = @($skills).Count
         # Copies of one skill folded before the overlap pass (whole inventory, not filtered by -Name).
         copiesCollapsed = $inv.summary.collapsedCopies
+        # ran | no-servers (none known, nothing to compare) | discovery-failed (see the warning).
+        mcpCheck      = $mcpCheck
         # Description-lint and mcp-tool-name findings NOT emitted because the same skill (same name,
         # description and owner) was already reported through another copy: findings + this = the per-copy count.
         perCopyFindingsFolded = $foldedFindings
