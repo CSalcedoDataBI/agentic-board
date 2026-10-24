@@ -228,72 +228,119 @@ function Get-GroupingSetting {
 #      config.json that exists but cannot be parsed (-ConfigUnreadable) - resolves to 'user' with a
 #      warning, never to "let the files decide". The grouping preference can fall back to a default;
 #      the right to merge without asking cannot.
+#   5. -GitRef (what Board-Work passes: the default branch) reads the declaration as COMMITTED there,
+#      not from the checkout. At step 5d the checkout IS the PR under review, and a PR that adds an
+#      approved FICHA.md, loosens experto.md or writes "mergeAuthority": "expert" must not be judged
+#      by its own rules. So an 'expert' grant counts only from that ref, while an opt-out (or
+#      anything unreadable) counts from ANYWHERE - the local -Config included - because it can only
+#      make the flow ask more. A ref that does not resolve is unreadable: 'user'.
+#      Without -GitRef the files are read from -Root on disk (the unit tests' mode).
+function Read-DeclarationFile {
+    param([string]$Root, [string]$GitRef, [string]$RelPath)
+    if (-not $Root) { return $null }
+    if ($GitRef) {
+        $text = git -C $Root show "${GitRef}:$RelPath" 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        return (@($text) -join "`n")
+    }
+    $p = Join-Path $Root $RelPath
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return $null }
+    try { Get-Content -LiteralPath $p -Raw -ErrorAction Stop } catch { '' }
+}
+
+# 'user' / 'expert' / 'unreadable' / $null (nothing declared) for one config source.
+function Get-MergeAuthorityDeclaration {
+    param($Config)
+    if ($null -eq $Config -or $null -eq $Config['mergeAuthority']) { return $null }
+    $v = $Config['mergeAuthority']
+    $norm = if ($v -is [string]) { $v.Trim().ToLowerInvariant() } else { '' }
+    switch ($norm) {
+        'user'   { return 'user' }
+        'expert' { return 'expert' }
+        default  { return 'unreadable' }
+    }
+}
+
 function Get-MergeAuthority {
     [CmdletBinding()]
-    param($Config, [string]$Root, [switch]$ConfigUnreadable)
+    param($Config, [string]$Root, [switch]$ConfigUnreadable, [string]$GitRef)
 
     $agentRel = '.claude/agents/experto.md'
     $res = [ordered]@{
         authority = 'user'; source = 'default'; reason = 'the repo declares no expert'
-        expertAgent = ''; ficha = ''; fichaApproved = ''; warning = ''
+        expertAgent = ''; ficha = ''; fichaApproved = ''; warning = ''; ref = $GitRef
     }
+    $where = if ($GitRef) { " on $GitRef" } else { '' }
 
-    $agentPath = ''; $fichaPath = ''
-    if ($Root) {
-        $a = Join-Path $Root $agentRel
-        if (Test-Path -LiteralPath $a -PathType Leaf) { $agentPath = $a; $res.expertAgent = $a }
-        $f = Join-Path $Root 'FICHA.md'
-        if (Test-Path -LiteralPath $f -PathType Leaf) {
-            $fichaPath = $f; $res.ficha = $f
-            $text = try { Get-Content -LiteralPath $f -Raw -ErrorAction Stop } catch { '' }
-            # (?!\d), not \b: `_Aprobada: 2026-10-02_` puts a word character right after the date.
-            $m = [regex]::Match([string]$text, '(?im)^[\s>*_-]*Aprobada\s*[:*_]*\s*[*_]*\s*(\d{4}-\d{2}-\d{2})(?!\d)')
-            if ($m.Success) { $res.fichaApproved = $m.Groups[1].Value }
-        }
-    }
-
+    # Opt-outs first, from every source: each can only make the flow ask more.
     if ($ConfigUnreadable) {
         $res.source = 'config'; $res.reason = 'the repo config cannot be read'
         $res.warning = '.agentic-board/config.json exists but cannot be read, so it may hold an opt-out; the user confirms'
         return [pscustomobject]$res
     }
-
-    $declared = $null
-    if ($null -ne $Config -and $null -ne $Config['mergeAuthority']) {
-        $v = $Config['mergeAuthority']
-        $norm = if ($v -is [string]) { $v.Trim().ToLowerInvariant() } else { '' }
-        switch ($norm) {
-            'user'   { $declared = 'user' }
-            'expert' { $declared = 'expert' }
-            default {
-                $res.source = 'config'; $res.reason = 'the repo config holds a merge authority the tool cannot read'
-                $res.warning = "mergeAuthority '$v' in .agentic-board/config.json is not 'expert' or 'user'; the user confirms"
-                return [pscustomobject]$res
+    $local = Get-MergeAuthorityDeclaration $Config
+    $base  = $null
+    if ($GitRef) {
+        if (-not $Root -or -not (git -C $Root rev-parse --verify --quiet "${GitRef}^{commit}" 2>$null)) {
+            $res.reason = 'the default branch cannot be read'
+            $res.warning = "could not read '$GitRef' to check the committed declaration; the user confirms"
+            return [pscustomobject]$res
+        }
+        $rawCfg = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath '.agentic-board/config.json'
+        if ($null -ne $rawCfg) {
+            $parsed = try { $rawCfg | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+            if (-not (Test-IsJsonObject $parsed)) {
+                $base = 'unreadable'
+            } else {
+                $prop = $parsed.PSObject.Properties['mergeAuthority']
+                $base = Get-MergeAuthorityDeclaration @{ mergeAuthority = $(if ($prop) { $prop.Value } else { $null }) }
             }
         }
     }
-
-    if ($declared -eq 'user') {
-        $res.source = 'config'; $res.reason = 'the repo config says the user confirms every merge'
-        return [pscustomobject]$res
+    foreach ($d in @($local, $base)) {
+        if ($d -eq 'unreadable') {
+            $res.source = 'config'; $res.reason = 'the repo config holds a merge authority the tool cannot read'
+            $res.warning = "mergeAuthority in .agentic-board/config.json is not 'expert' or 'user'$where; the user confirms"
+            return [pscustomobject]$res
+        }
+        if ($d -eq 'user') {
+            $res.source = 'config'; $res.reason = 'the repo config says the user confirms every merge'
+            return [pscustomobject]$res
+        }
     }
-    if ($declared -eq 'expert') {
-        if ($agentPath) {
-            $res.authority = 'expert'; $res.source = 'config'
-            $res.reason = "the repo config declares an expert ($agentRel)"
+
+    $agentText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath $agentRel
+    if ($null -ne $agentText) { $res.expertAgent = $agentRel }
+    $fichaText = Read-DeclarationFile -Root $Root -GitRef $GitRef -RelPath 'FICHA.md'
+    if ($null -ne $fichaText) {
+        $res.ficha = 'FICHA.md'
+        # (?!\d), not \b: `_Aprobada: 2026-10-02_` puts a word character right after the date.
+        $m = [regex]::Match([string]$fichaText, '(?im)^[\s>*_-]*Aprobada\s*[:*_]*\s*[*_]*\s*(\d{4}-\d{2}-\d{2})(?!\d)')
+        if ($m.Success) { $res.fichaApproved = $m.Groups[1].Value }
+    }
+
+    # The grant: from the ref when there is one, else from the local config.
+    $grant = if ($GitRef) { $base } else { $local }
+    if ($grant -eq 'expert') {
+        $res.source = 'config'
+        if ($res.expertAgent) {
+            $res.authority = 'expert'
+            $res.reason = "the repo config declares an expert ($agentRel)$where"
         } else {
-            $res.source = 'config'
-            $res.warning = "the repo config declares an expert, but $agentRel does not exist; the user confirms"
+            $res.warning = "the repo config declares an expert, but $agentRel does not exist$where; the user confirms"
             $res.reason = 'declared expert is missing'
         }
         return [pscustomobject]$res
     }
+    if ($local -eq 'expert' -and $GitRef) {
+        $res.warning = "mergeAuthority 'expert' is only in the local config; it counts once it is committed to $GitRef"
+    }
 
-    if ($fichaPath -and $res.fichaApproved -and $agentPath) {
+    if ($res.ficha -and $res.fichaApproved -and $res.expertAgent) {
         $res.authority = 'expert'; $res.source = 'files'
-        $res.reason = "FICHA.md approved $($res.fichaApproved) + $agentRel"
-    } elseif ($fichaPath -and $agentPath) {
-        $res.warning = "FICHA.md has no 'Aprobada: YYYY-MM-DD' line, so it is a draft; the user confirms"
+        $res.reason = "FICHA.md approved $($res.fichaApproved) + $agentRel$where"
+    } elseif ($res.ficha -and $res.expertAgent -and -not $res.warning) {
+        $res.warning = "FICHA.md has no 'Aprobada: YYYY-MM-DD' line$where, so it is a draft; the user confirms"
     }
     [pscustomobject]$res
 }

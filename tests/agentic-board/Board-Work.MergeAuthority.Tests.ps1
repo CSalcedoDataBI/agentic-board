@@ -29,6 +29,20 @@ BeforeAll {
     function Add-Ficha([string]$Root, [string]$Body) {
         Set-Content -LiteralPath (Join-Path $Root 'FICHA.md') -Value $Body -Encoding UTF8
     }
+    # Commit everything and point origin/main at it: the default branch Board-Work reads the
+    # declaration from (#797). Without it, the throw-away repo has no default branch to trust.
+    function Publish-Main([string]$Root) {
+        git -C $Root add -A 2>&1 | Out-Null
+        git -C $Root -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m base 2>&1 | Out-Null
+        git -C $Root update-ref refs/remotes/origin/main HEAD 2>&1 | Out-Null
+    }
+    function New-NorteRepo([string]$Name) {
+        $root = New-ThrowawayRepo $Name
+        Add-Expert $root
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        Publish-Main $root
+        $root
+    }
     function Invoke-BoardWork([string]$Dir, [hashtable]$Params) {
         $saved = $env:GH_TOKEN
         $env:GH_TOKEN = ''
@@ -144,6 +158,70 @@ Describe 'Get-MergeAuthority: deterministic detection' {
     }
 }
 
+Describe 'Get-MergeAuthority -GitRef: the PR under review cannot grant itself the merge' {
+    It 'files committed on the default branch -> expert' {
+        $root = New-NorteRepo 'ref-main'
+        $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
+        $a.authority | Should -Be 'expert'
+        $a.source    | Should -Be 'files'
+    }
+    It 'a PR branch that ADDS an approved FICHA.md + experto.md -> user' {
+        $root = New-ThrowawayRepo 'ref-attack'
+        Publish-Main $root
+        git -C $root checkout -q -b issue-1-grant 2>&1 | Out-Null
+        Add-Expert $root
+        Add-Ficha $root "Aprobada: 2026-10-01"
+        git -C $root add -A 2>&1 | Out-Null
+        git -C $root -c user.name=t -c user.email=t@example.com commit -q -m grant 2>&1 | Out-Null
+        (Get-MergeAuthority -Config $null -Root $root).authority | Should -Be 'expert' -Because 'on disk the branch has the files'
+        (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main').authority | Should -Be 'user' -Because 'the default branch never approved them'
+    }
+    It 'a PR branch that drafts the committed FICHA does not revoke it either (the rules in force are main''s)' {
+        $root = New-NorteRepo 'ref-edit'
+        Add-Ficha $root "Aprobada: pendiente"
+        (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main').authority | Should -Be 'expert'
+    }
+    It 'mergeAuthority=expert only in the local config -> user, with a warning' {
+        $root = New-ThrowawayRepo 'ref-localexpert'
+        Add-Expert $root
+        Publish-Main $root
+        $a = Get-MergeAuthority -Config @{ mergeAuthority = 'expert' } -Root $root -GitRef 'origin/main'
+        $a.authority | Should -Be 'user'
+        $a.warning   | Should -Match 'once it is committed'
+    }
+    It 'mergeAuthority=expert committed on the default branch -> expert, from the config' {
+        $root = New-ThrowawayRepo 'ref-cfgexpert'
+        Add-Expert $root
+        New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '{ "mergeAuthority": "expert" }' -Encoding UTF8
+        Publish-Main $root
+        $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main'
+        $a.authority | Should -Be 'expert'
+        $a.source    | Should -Be 'config'
+    }
+    It 'a local opt-out wins over a committed grant' {
+        $root = New-NorteRepo 'ref-optout'
+        (Get-MergeAuthority -Config @{ mergeAuthority = 'user' } -Root $root -GitRef 'origin/main').authority | Should -Be 'user'
+    }
+    It 'a committed opt-out or unreadable committed config wins over the files' {
+        foreach ($body in @('{ "mergeAuthority": "user" }', '{ "mergeAuthority": "none" }', '{ not json')) {
+            $root = New-ThrowawayRepo ('ref-basecfg' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+            Add-Expert $root
+            Add-Ficha $root "Aprobada: 2026-10-01"
+            New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value $body -Encoding UTF8
+            Publish-Main $root
+            (Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/main').authority | Should -Be 'user' -Because "committed config '$body'"
+        }
+    }
+    It 'a ref that does not resolve -> user, with a warning' {
+        $root = New-NorteRepo 'ref-missing'
+        $a = Get-MergeAuthority -Config $null -Root $root -GitRef 'origin/nope'
+        $a.authority | Should -Be 'user'
+        $a.warning   | Should -Match 'could not read'
+    }
+}
+
 Describe 'Grouped PRs default to on when the repo declares an expert' {
     It 'nothing recorded + expert -> always, source expert' {
         Resolve-GroupingPosture (Get-BoardConfigDefaults) -ExpertDeclared | Should -Be 'always'
@@ -172,18 +250,14 @@ Describe '-MergeAuthority end to end (no token)' {
         $r.out  | Should -Match 'you confirm every merge'
     }
     It 'show in a NORTE repo -> expert, and the gate still runs' {
-        $root = New-ThrowawayRepo 'e2e-norte'
-        Add-Expert $root
-        Add-Ficha $root "Aprobada: 2026-10-01"
+        $root = New-NorteRepo 'e2e-norte'
         $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
         $r.code | Should -Be 0
         $r.out  | Should -Match 'Merge authority: expert \(FICHA.md \+ expert\)'
         $r.out  | Should -Match 'review gate still runs'
     }
     It 'records user, reads it back, and auto clears it again' {
-        $root = New-ThrowawayRepo 'e2e-write'
-        Add-Expert $root
-        Add-Ficha $root "Aprobada: 2026-10-01"
+        $root = New-NorteRepo 'e2e-write'
         $w = Invoke-BoardWork $root @{ MergeAuthority = 'user' }
         $w.code | Should -Be 0
         $w.out  | Should -Match 'In force now: user \(repo config\)'
@@ -195,27 +269,22 @@ Describe '-MergeAuthority end to end (no token)' {
         $c.out  | Should -Match 'In force now: expert \(FICHA.md \+ expert\)'
     }
     It 'the grouped-PR setting shows on (repo expert) in a NORTE repo' {
-        $root = New-ThrowawayRepo 'e2e-group'
-        Add-Expert $root
-        Add-Ficha $root "Aprobada: 2026-10-01"
+        $root = New-NorteRepo 'e2e-group'
         $r = Invoke-BoardWork $root @{ PreferGroupedPRs = 'show' }
         $r.code | Should -Be 0
         $r.out  | Should -Match 'Grouped PRs: on \(repo expert\)'
     }
     It 'show with an unreadable config.json in a NORTE repo -> user' {
-        $root = New-ThrowawayRepo 'e2e-corrupt'
-        Add-Expert $root
-        Add-Ficha $root "Aprobada: 2026-10-01"
+        $root = New-NorteRepo 'e2e-corrupt'
         New-Item -ItemType Directory -Path (Join-Path $root '.agentic-board') -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '{ "mergeAuthority": "user", }' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $root '.agentic-board' 'config.json') -Value '{ not json' -Encoding UTF8
         $r = Invoke-BoardWork $root @{ MergeAuthority = 'show' }
         $r.code | Should -Be 0
         $r.out  | Should -Match 'Merge authority: user \(repo config\)'
+        $r.out  | Should -Match 'cannot be read'
     }
     It '-PreferGroupedPRs auto in a NORTE repo is honoured as auto, not the expert default' {
-        $root = New-ThrowawayRepo 'e2e-auto'
-        Add-Expert $root
-        Add-Ficha $root "Aprobada: 2026-10-01"
+        $root = New-NorteRepo 'e2e-auto'
         $w = Invoke-BoardWork $root @{ PreferGroupedPRs = 'auto' }
         $w.code | Should -Be 0
         $r = Invoke-BoardWork $root @{ PreferGroupedPRs = 'show' }

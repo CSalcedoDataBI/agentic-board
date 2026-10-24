@@ -626,6 +626,19 @@ function Get-WorkingTreeRoot {
     "$top".Trim()
 }
 
+# The merge authority as Board-Work uses it (#797): the local config's opt-outs, plus the grant as
+# COMMITTED on the default branch - never the checkout's own files, because at step 5d the checkout
+# is the PR under review and must not be judged by rules it adds itself. No network: the ref is the
+# local origin/HEAD (or origin/main|master). Outside a repo: 'user (default)'. In a repo whose
+# default branch cannot be resolved: a ref that does not verify, i.e. 'user' with a warning.
+function Get-RepoMergeAuthority($Read) {
+    $root = Get-WorkingTreeRoot
+    if (-not $root) { return Get-MergeAuthority -Config $Read.config -ConfigUnreadable:(-not $Read.ok) }
+    $ref = Resolve-IssueBaseRef -NoFetch
+    if (-not $ref) { $ref = 'origin/HEAD' }
+    Get-MergeAuthority -Config $Read.config -Root $root -GitRef $ref -ConfigUnreadable:(-not $Read.ok)
+}
+
 function Show-GroupingOffer {
     [CmdletBinding()]
     param(
@@ -2771,7 +2784,7 @@ if ($RegisterSession) {
 # =======================================================================
 if ($MergeAuthority -eq 'show') {
     $read = Read-BoardConfig -Path (Get-BoardConfigPath)
-    $auth = Get-MergeAuthority -Config $read.config -Root (Get-WorkingTreeRoot) -ConfigUnreadable:(-not $read.ok)
+    $auth = Get-RepoMergeAuthority $read
     Write-Host ("Merge authority: " + (Format-MergeAuthorityLabel $auth))
     Write-Host "  $($auth.reason)" -ForegroundColor DarkGray
     if ($auth.warning)   { Write-Host "  $($auth.warning)" -ForegroundColor Yellow }
@@ -2800,7 +2813,7 @@ if ($MergeAuthority) {
         if ($check.error) { Write-Host "  $($check.error)" -ForegroundColor DarkGray }
         exit 1
     }
-    $auth = Get-MergeAuthority -Config $check.config -Root (Get-WorkingTreeRoot)
+    $auth = Get-RepoMergeAuthority $check
     Write-Host "=== Merge authority saved ===" -ForegroundColor Cyan
     Write-Host ""
     Write-Host ("  In force now: " + (Format-MergeAuthorityLabel $auth) + " - $($auth.reason).") -ForegroundColor Green
@@ -2814,7 +2827,7 @@ if ($PreferGroupedPRs -eq 'show') {
     # error: the default applies. An unreadable file is said out loud, never read as "no preference"
     # in silence - but the first line still carries the value the tool will actually use.
     $read    = Read-BoardConfig -Path (Get-BoardConfigPath)
-    $expert  = (Get-MergeAuthority -Config $read.config -Root (Get-WorkingTreeRoot) -ConfigUnreadable:(-not $read.ok)).authority -eq 'expert'
+    $expert  = (Get-RepoMergeAuthority $read).authority -eq 'expert'
     $setting = Get-GroupingSetting $read.config -ExpertDeclared:$expert
     Write-Host ("Grouped PRs: " + (Format-GroupingSettingLabel $setting))
     if (-not $read.ok) {
@@ -2840,7 +2853,7 @@ if ($PreferGroupedPRs) {
     # word itself, which the resolver reads as an explicit auto that beats the expert default.
     if ($PreferGroupedPRs -eq 'auto') {
         $pre = Read-BoardConfig -Path $cfgPath
-        if ((Get-MergeAuthority -Config $pre.config -Root (Get-WorkingTreeRoot) -ConfigUnreadable:(-not $pre.ok)).authority -eq 'expert') { $value = 'auto' }
+        if ((Get-RepoMergeAuthority $pre).authority -eq 'expert') { $value = 'auto' }
     }
     Set-BoardConfigValue -Path $cfgPath -Key 'preferGroupedPRs' -Value $value | Out-Null
 
@@ -3420,7 +3433,7 @@ if ($Start -le 0 -and $ToReview -le 0 -and $Parallel.Count -eq 0 -and $groupQueu
         Write-Host "Continuing with the default; I do not assume there is no preference." -ForegroundColor DarkGray
     }
     # A repo whose expert decides merges groups by default (#797); a recorded answer still wins.
-    $expertDeclared = (Get-MergeAuthority -Config $cfgRead.config -Root (Get-WorkingTreeRoot) -ConfigUnreadable:(-not $cfgRead.ok)).authority -eq 'expert'
+    $expertDeclared = (Get-RepoMergeAuthority $cfgRead).authority -eq 'expert'
     $posture = Resolve-GroupingPosture $cfgRead.config -ExpertDeclared:$expertDeclared
     # Not being in a clone is a SUPPORTED way to run this listing - the contract's step 1 says so
     # ("outside a repo, skip the scope question"). Get-RepoFromOrigin throws there, so it is
