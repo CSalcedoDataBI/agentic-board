@@ -92,7 +92,7 @@ A full worked example of each type is in [references/house-style.md](references/
 | Case | Use |
 |---|---|
 | Issue, PR, plan, handoff, `SKILL.md`, `KNOWLEDGE.md`: read on GitHub | Inline Mermaid with the header |
-| A README's headline diagram, or one that must look identical in light and dark, without zoom buttons | Generated SVG with `<picture>` |
+| A README's headline diagram, one people will open large, or one that must look identical in light and dark | Generated SVG with `<picture>` and the view / download links |
 | Brand / Material icons (`logos:`, `mdi:`) | Generated SVG (inline they render as "?") |
 | A diagram that won't fit vertically and GitHub shrinks it unreadable | Split it; if you can't, a generated SVG |
 | Goes to a website, a document or a slide | Generated SVG |
@@ -112,22 +112,34 @@ paths:
 
 ```html
 <p align="center">
-  <a href="diagrams/x-light.svg"><picture>
+  <a href="diagrams/x-light.svg?raw=true"><picture>
+
     <source media="(prefers-color-scheme: dark)" srcset="diagrams/x-dark.svg">
     <img alt="What the diagram shows, in one sentence" src="diagrams/x-light.svg">
   </picture></a>
 </p>
 
 <p align="center">
-  <a href="diagrams/x-light.svg">🔍 View full size</a> ·
+  <a href="diagrams/x-light.svg?raw=true">🔍 View full size</a> ·
   <a href="diagrams/x-light.svg?raw=true">⬇ Download SVG (light)</a> ·
   <a href="diagrams/x-dark.svg?raw=true">⬇ Download SVG (dark)</a>
 </p>
 ```
 
-The image links to the SVG so a click opens it full size, and the line under it is always there:
-view full size, then the raw file of each mode for download. Keep the links relative (`?raw=true`)
-so they work on every branch, not only after the file reaches `main`.
+The image and "View full size" open the raw SVG (`?raw=true`): the browser shows it alone,
+filling the window, and **Back** returns to the page. Do not link the plain file path: GitHub's
+file page shows the SVG as a small thumbnail inside its own UI. The two download links open the
+raw file of each mode; GitHub strips the `download` attribute and `target`, so the browser opens
+it and Save (Ctrl+S) keeps it. Keep the links relative so they work on every branch, not only
+after the file reaches `main`.
+
+**Inline Mermaid has its own enlarged viewer, and it can trap the reader** (checked on GitHub,
+light and dark, 2026-10-27). The viewer's X is at the top of a dialog that scrolls with the
+diagram: after clicking or scrolling inside a tall diagram, the X is out of view, and Esc stops
+working because focus is inside the diagram frame. What always closes it: **click outside the
+dialog**, or scroll the dialog back to the top and press the X. This is GitHub's viewer, not
+something a repo can fix. So a diagram people will open large (a README headline, anything
+taller than one screen) goes out as a generated SVG with "View full size", not inline.
 
 **Brand.** Every generated SVG carries the repo's mark in its bottom-right corner (a footer strip
 outside the `frame` card, in the mode's `brandColor`). Per repo, in `.github/diagram-brand.json`:

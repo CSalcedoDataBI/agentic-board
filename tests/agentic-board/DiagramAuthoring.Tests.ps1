@@ -187,7 +187,7 @@ Describe 'Diagram-Theme.ps1 stamps' {
         $readme = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'README.md') -Raw
         $readme | Should -Match 'prefers-color-scheme: dark\)" srcset="\.github/assets/diagrams/how-it-works-dark\.svg"'
         $readme | Should -Match 'src="\.github/assets/diagrams/how-it-works-light\.svg"'
-        $readme | Should -Match '<a href="\.github/assets/diagrams/how-it-works-light\.svg"><picture>'
+        $readme | Should -Match '<a href="\.github/assets/diagrams/how-it-works-light\.svg\?raw=true"><picture>'
         $readme | Should -Match 'how-it-works-light\.svg\?raw=true">⬇ Download SVG'
         $readme | Should -Match 'how-it-works-dark\.svg\?raw=true">⬇ Download SVG'
     }
