@@ -111,11 +111,34 @@ is **never** edited by hand — it carries a stamp that `check` verifies. Link i
 paths:
 
 ```html
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="diagrams/x-dark.svg">
-  <img alt="What the diagram shows, in one sentence" src="diagrams/x-light.svg">
-</picture>
+<p align="center">
+  <a href="diagrams/x-light.svg"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="diagrams/x-dark.svg">
+    <img alt="What the diagram shows, in one sentence" src="diagrams/x-light.svg">
+  </picture></a>
+</p>
+
+<p align="center">
+  <a href="diagrams/x-light.svg">🔍 View full size</a> ·
+  <a href="diagrams/x-light.svg?raw=true">⬇ Download SVG (light)</a> ·
+  <a href="diagrams/x-dark.svg?raw=true">⬇ Download SVG (dark)</a>
+</p>
 ```
+
+The image links to the SVG so a click opens it full size, and the line under it is always there:
+view full size, then the raw file of each mode for download. Keep the links relative (`?raw=true`)
+so they work on every branch, not only after the file reaches `main`.
+
+**Brand.** Every generated SVG carries the repo's mark in its bottom-right corner (a footer strip
+outside the `frame` card, in the mode's `brandColor`). Per repo, in `.github/diagram-brand.json`:
+
+```json
+{ "text": "my-repo · my-org", "icon": ".github/assets/diagrams/brand-icon.png" }
+```
+
+`icon` is a small PNG (64 px is plenty; it is embedded as base64) and is optional. Without the
+file, the mark is `<repo> · <owner>` from the `origin` remote. `{ "enabled": false }` turns it off.
+Changing the brand makes every SVG stale, so `check` asks to regenerate.
 
 ## 5. What GitHub draws (viewer on Mermaid 12.2.0)
 
@@ -155,7 +178,8 @@ ask.
 - [ ] No loose colors, no icon packs inline, no `layout: elk`.
 - [ ] The diagram reflects the real system (anti-invention rule).
 - [ ] When in doubt it parses, render once (a Claude artifact, or `generate`) before saving.
-- [ ] Generated SVGs: `check` passes, and the `<img>` has an `alt` that says what it shows.
+- [ ] Generated SVGs: `check` passes, the `<img>` has an `alt` that says what it shows, the
+      image links to full size, and the view / download line sits under it.
 
 ## Data flow
 

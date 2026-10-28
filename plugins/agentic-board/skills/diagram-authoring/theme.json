@@ -6,6 +6,7 @@
   "_text": "light.textColor is a mid tone (#5E7D75): architecture labels and loose text use it, and on GitHub dark mode they sit on the black page. Contrast 4.6:1 on white, about 4:1 on #0d1117.",
   "mermaidCli": "12.0.0",
   "light": {
+    "brandColor": "#5E7D75",
     "themeVariables": {
       "fontFamily": "Segoe UI, Roboto, Helvetica, Arial",
       "fontSize": "15px",
@@ -60,6 +61,7 @@
     }
   },
   "dark": {
+    "brandColor": "#93A8A2",
     "themeVariables": {
       "fontFamily": "Segoe UI, Roboto, Helvetica, Arial",
       "fontSize": "15px",

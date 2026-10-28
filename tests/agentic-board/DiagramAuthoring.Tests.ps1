@@ -183,10 +183,45 @@ Describe 'Diagram-Theme.ps1 stamps' {
         @(Test-DiagRepo -Root $script:RepoRoot.Path -Theme $script:Theme) | Should -BeNullOrEmpty
     }
 
-    It 'the README shows the how-it-works diagram in light and dark' {
+    It 'the README shows the how-it-works diagram in light and dark, with view and download links' {
         $readme = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'README.md') -Raw
         $readme | Should -Match 'prefers-color-scheme: dark\)" srcset="\.github/assets/diagrams/how-it-works-dark\.svg"'
         $readme | Should -Match 'src="\.github/assets/diagrams/how-it-works-light\.svg"'
+        $readme | Should -Match '<a href="\.github/assets/diagrams/how-it-works-light\.svg"><picture>'
+        $readme | Should -Match 'how-it-works-light\.svg\?raw=true">⬇ Download SVG'
+        $readme | Should -Match 'how-it-works-dark\.svg\?raw=true">⬇ Download SVG'
+    }
+
+    It 'adds the brand as a footer strip below the diagram' {
+        $brand = [pscustomobject]@{ Text = 'repo · <owner>'; Icon = 'data:image/png;base64,AAAA' }
+        $svg = Add-DiagBrand -Svg '<svg viewBox="-4 -4 100 50"><g/></svg>' -Brand $brand -Theme $script:Theme -Mode dark
+        $svg | Should -Match 'viewBox="-4 -4 100 80"'
+        $svg | Should -Match '<g class="diagram-brand"><image href="data:image/png;base64,AAAA"'
+        $svg | Should -Match ([regex]::Escape('repo · &lt;owner&gt;</text></g></svg>'))
+        $svg | Should -Match ([regex]::Escape("fill=""$($script:Theme.dark.brandColor)"""))
+    }
+
+    It 'a brand change makes the SVG stale' {
+        $a = Get-DiagSourceStamp -Body 'flowchart TB' -Theme $script:Theme -Mode light -Brand ([pscustomobject]@{ Text = 'a'; Icon = $null })
+        $b = Get-DiagSourceStamp -Body 'flowchart TB' -Theme $script:Theme -Mode light -Brand ([pscustomobject]@{ Text = 'b'; Icon = $null })
+        $a | Should -Not -Be $b
+    }
+
+    It 'the repo brand comes from .github/diagram-brand.json' {
+        $brand = Get-DiagBrand $script:RepoRoot.Path
+        $brand.Text | Should -Be 'agentic-board · CSalcedoDataBI'
+        $brand.Icon | Should -Match '^data:image/png;base64,'
+    }
+
+    It 'without a brand file the mark falls back to the origin remote' {
+        $repo = Join-Path $TestDrive 'r'
+        New-Item -ItemType Directory $repo | Out-Null
+        git -C $repo init -q 2>$null
+        git -C $repo remote add origin https://github.com/acme/widgets.git
+        (Get-DiagBrand $repo).Text | Should -Be 'widgets · acme'
+        New-Item -ItemType Directory (Join-Path $repo '.github') | Out-Null
+        Set-Content (Join-Path $repo '.github' 'diagram-brand.json') '{"enabled": false}'
+        Get-DiagBrand $repo | Should -BeNullOrEmpty
     }
 }
 

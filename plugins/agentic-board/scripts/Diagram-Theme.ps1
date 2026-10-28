@@ -18,7 +18,7 @@
                                       (source or theme changed) or edited by hand.
 
     The .mmd is the source and carries no theme: the script adds the init and the classes. Each
-    SVG starts with a stamp (hash of the themed source, and of the SVG itself), so 'check' needs
+    SVG carries the repo brand in its bottom-right corner (Get-DiagBrand) and starts with a stamp (hash of the themed source, and of the SVG itself), so 'check' needs
     neither Node nor a browser. An SVG is never edited by hand: change the .mmd and regenerate.
 
     Functions sit behind a dot-source guard ($env:ABIOS_DIAGRAMTHEME_DOTSOURCE) for the tests.
@@ -101,11 +101,62 @@ function Get-DiagThemedSource {
     $out -join "`n"
 }
 
+function Get-DiagBrand {
+    # The mark every generated SVG carries in its bottom-right corner. Per repo, from
+    # .github/diagram-brand.json: {"text": "...", "icon": "<repo-relative .png>"} or
+    # {"enabled": false}. Without that file: "<repo> · <owner>" from the origin remote, no icon.
+    param([string]$Root)
+    $cfgPath = Join-Path $Root '.github' 'diagram-brand.json'
+    $cfg = if (Test-Path -LiteralPath $cfgPath) { Get-Content -LiteralPath $cfgPath -Raw -Encoding utf8 | ConvertFrom-Json } else { $null }
+    if ($cfg -and $cfg.PSObject.Properties['enabled'] -and -not $cfg.enabled) { return $null }
+    $text = if ($cfg -and $cfg.text) { $cfg.text } else {
+        $url = git -C $Root remote get-url origin 2>$null
+        if ($LASTEXITCODE -eq 0 -and $url -match '[:/](?<owner>[^/:]+)/(?<repo>[^/]+?)(\.git)?/?$') { "$($matches.repo) · $($matches.owner)" }
+    }
+    if (-not $text) { return $null }
+    $icon = $null
+    if ($cfg -and $cfg.icon) {
+        $bytes = [IO.File]::ReadAllBytes((Join-Path $Root $cfg.icon))
+        $icon = 'data:image/png;base64,' + [Convert]::ToBase64String($bytes)
+    }
+    [pscustomobject]@{ Text = $text; Icon = $icon }
+}
+
+function Add-DiagBrand {
+    # Grows the viewBox by a footer strip and writes the brand there: text right-aligned, icon at
+    # the corner. The colors come from the theme mode, so it reads on both pages.
+    param([string]$Svg, $Brand, $Theme, [string]$Mode)
+    if (-not $Brand) { return $Svg }
+    $m = [regex]::Match($Svg, 'viewBox="(?<x>[-\d.]+) (?<y>[-\d.]+) (?<w>[-\d.]+) (?<h>[-\d.]+)"')
+    if (-not $m.Success) { throw 'The SVG has no viewBox to add the brand to.' }
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $x = [double]::Parse($m.Groups['x'].Value, $inv); $y = [double]::Parse($m.Groups['y'].Value, $inv)
+    $w = [double]::Parse($m.Groups['w'].Value, $inv); $h = [double]::Parse($m.Groups['h'].Value, $inv)
+    $strip = 30; $size = 18
+    $right = $x + $w - 4
+    $mid = $y + $h + $strip / 2
+    $color = $Theme.$Mode.brandColor
+    $font = $Theme.$Mode.themeVariables.fontFamily
+    $label = [Security.SecurityElement]::Escape($Brand.Text)
+    $parts = @()
+    if ($Brand.Icon) {
+        $right -= $size
+        $parts += '<image href="{0}" x="{1}" y="{2}" width="{3}" height="{3}"/>' -f $Brand.Icon, $right.ToString($inv), ($mid - $size / 2).ToString($inv), $size
+        $right -= 6
+    }
+    $parts += '<text x="{0}" y="{1}" text-anchor="end" dominant-baseline="central" font-family="{2}" font-size="12" fill="{3}">{4}</text>' -f $right.ToString($inv), $mid.ToString($inv), $font, $color, $label
+    $box = 'viewBox="{0} {1} {2} {3}"' -f $m.Groups['x'].Value, $m.Groups['y'].Value, $m.Groups['w'].Value, ($h + $strip).ToString($inv)
+    $Svg = $Svg.Remove($m.Index, $m.Length).Insert($m.Index, $box)
+    $end = $Svg.LastIndexOf('</svg>')
+    $Svg.Insert($end, '<g class="diagram-brand">' + ($parts -join '') + '</g>')
+}
+
 function Get-DiagSourceStamp {
     # What decides whether an SVG is current: the themed source (so a change in how the theme is
-    # applied also makes it stale), the mode and the pinned mermaid-cli version.
-    param([string]$Body, $Theme, [string]$Mode)
-    Get-DiagHash ("$Mode`n$($Theme.mermaidCli)`n" + (Get-DiagThemedSource -Body $Body -Theme $Theme -Mode $Mode))
+    # applied also makes it stale), the mode, the pinned mermaid-cli version and the brand.
+    param([string]$Body, $Theme, [string]$Mode, $Brand)
+    $mark = if ($Brand) { "$($Brand.Text)`n$(Get-DiagHash ([string]$Brand.Icon))" } else { '' }
+    Get-DiagHash ("$Mode`n$($Theme.mermaidCli)`n$mark`n" + (Get-DiagThemedSource -Body $Body -Theme $Theme -Mode $Mode))
 }
 
 function Set-DiagStamp {
@@ -129,15 +180,15 @@ function Find-DiagSources {
 
 function Test-DiagSvg {
     # Why the SVG is not valid, or $null when it is current.
-    param([string]$Mmd, [string]$Svg, $Theme, [string]$Mode)
+    param([string]$Mmd, [string]$Svg, $Theme, [string]$Mode, $Brand)
     if (-not (Test-Path -LiteralPath $Svg)) { return 'missing: run Diagram-Theme.ps1 generate' }
     $text = (Get-Content -LiteralPath $Svg -Raw -Encoding utf8) -replace "`r`n", "`n"
     $m = [regex]::Match($text, $script:DiagStampPattern)
     if (-not $m.Success) { return 'no stamp: not generated by Diagram-Theme.ps1' }
     if ((Get-DiagHash $text.Substring($m.Length)) -ne $m.Groups['svg'].Value) { return 'edited by hand: regenerate it, never edit it' }
     $body = Get-Content -LiteralPath $Mmd -Raw -Encoding utf8
-    if ((Get-DiagSourceStamp -Body $body -Theme $Theme -Mode $Mode) -ne $m.Groups['src'].Value) {
-        return 'stale: the source or the theme changed; regenerate'
+    if ((Get-DiagSourceStamp -Body $body -Theme $Theme -Mode $Mode -Brand $Brand) -ne $m.Groups['src'].Value) {
+        return 'stale: the source, the theme or the brand changed; regenerate'
     }
     $null
 }
@@ -145,10 +196,11 @@ function Test-DiagSvg {
 function Test-DiagRepo {
     # One line per SVG that is missing, stale or edited by hand.
     param([string]$Root, $Theme)
+    $brand = Get-DiagBrand $Root
     foreach ($f in Find-DiagSources $Root) {
         $outs = Get-DiagOutputs $f.FullName
         foreach ($mode in $outs.Keys) {
-            $why = Test-DiagSvg -Mmd $f.FullName -Svg $outs[$mode] -Theme $Theme -Mode $mode
+            $why = Test-DiagSvg -Mmd $f.FullName -Svg $outs[$mode] -Theme $Theme -Mode $mode -Brand $brand
             if ($why) { "$([IO.Path]::GetRelativePath($Root, $outs[$mode]) -replace '\\', '/'): $why" }
         }
     }
@@ -172,6 +224,7 @@ switch ($Action) {
     'header' { Get-DiagHeader -Theme $theme -Type $Type }
     'generate' {
         $rootPath = Resolve-DiagRoot $Root
+        $brand = Get-DiagBrand $rootPath
         $tmp = Join-Path ([IO.Path]::GetTempPath()) "diagram-theme-$PID"
         New-Item -ItemType Directory -Force $tmp | Out-Null
         try {
@@ -180,14 +233,15 @@ switch ($Action) {
                 $body = Get-Content -LiteralPath $f.FullName -Raw -Encoding utf8
                 $outs = Get-DiagOutputs $f.FullName
                 foreach ($mode in $outs.Keys) {
-                    if (-not (Test-DiagSvg -Mmd $f.FullName -Svg $outs[$mode] -Theme $theme -Mode $mode)) { continue }
+                    if (-not (Test-DiagSvg -Mmd $f.FullName -Svg $outs[$mode] -Theme $theme -Mode $mode -Brand $brand)) { continue }
                     $in = Join-Path $tmp "$mode.mmd"
                     $out = Join-Path $tmp "$mode.svg"
                     Set-Content -LiteralPath $in (Get-DiagThemedSource -Body $body -Theme $theme -Mode $mode) -NoNewline -Encoding utf8
                     $icons = @(foreach ($p in $theme.iconPacks) { '--iconPacksNamesAndUrls'; $p })
                     npx -y "@mermaid-js/mermaid-cli@$($theme.mermaidCli)" -q -i $in -o $out -b transparent @icons 2>&1 | Write-Verbose
                     if ($LASTEXITCODE -or -not (Test-Path -LiteralPath $out)) { throw "mermaid-cli failed on $($f.FullName)" }
-                    $svg = Set-DiagStamp -Svg (Get-Content -LiteralPath $out -Raw -Encoding utf8) -SourceStamp (Get-DiagSourceStamp -Body $body -Theme $theme -Mode $mode)
+                    $svg = Add-DiagBrand -Svg (Get-Content -LiteralPath $out -Raw -Encoding utf8) -Brand $brand -Theme $theme -Mode $mode
+                    $svg = Set-DiagStamp -Svg $svg -SourceStamp (Get-DiagSourceStamp -Body $body -Theme $theme -Mode $mode -Brand $brand)
                     Set-Content -LiteralPath $outs[$mode] $svg -NoNewline -Encoding utf8
                     Remove-Item -LiteralPath $out
                     Write-Host "  $([IO.Path]::GetRelativePath($rootPath, $outs[$mode]) -replace '\\', '/')"
