@@ -29,7 +29,9 @@
     pwsh Diagram-Theme.ps1 generate -Root .
 .EXAMPLE
     pwsh Diagram-Theme.ps1 check -Root .
+    Needs PowerShell 7: Windows PowerShell 5.1 writes utf8 with a BOM, which changes the SVG hash.
 #>
+#Requires -Version 7
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)][ValidateSet('header', 'generate', 'check')][string]$Action,
@@ -184,7 +186,7 @@ switch ($Action) {
                     Set-Content -LiteralPath $in (Get-DiagThemedSource -Body $body -Theme $theme -Mode $mode) -NoNewline -Encoding utf8
                     $icons = @(foreach ($p in $theme.iconPacks) { '--iconPacksNamesAndUrls'; $p })
                     npx -y "@mermaid-js/mermaid-cli@$($theme.mermaidCli)" -q -i $in -o $out -b transparent @icons 2>&1 | Write-Verbose
-                    if ($LASTEXITCODE -or -not (Test-Path -LiteralPath $out)) { Write-Error "mermaid-cli failed on $($f.FullName)"; exit 1 }
+                    if ($LASTEXITCODE -or -not (Test-Path -LiteralPath $out)) { throw "mermaid-cli failed on $($f.FullName)" }
                     $svg = Set-DiagStamp -Svg (Get-Content -LiteralPath $out -Raw -Encoding utf8) -SourceStamp (Get-DiagSourceStamp -Body $body -Theme $theme -Mode $mode)
                     Set-Content -LiteralPath $outs[$mode] $svg -NoNewline -Encoding utf8
                     Remove-Item -LiteralPath $out
