@@ -57,6 +57,174 @@ Describe 'diagram-authoring skill' {
     }
 }
 
+Describe 'diagram-authoring house theme' {
+    BeforeAll {
+        $script:ThemePath  = Join-Path $script:PluginRoot 'skills' 'diagram-authoring' 'theme.json'
+        $script:StylePath  = Join-Path $script:PluginRoot 'skills' 'diagram-authoring' 'references' 'house-style.md'
+        $script:ScriptPath = Join-Path $script:PluginRoot 'scripts' 'Diagram-Theme.ps1'
+        $env:ABIOS_DIAGRAMTHEME_DOTSOURCE = '1'
+        . $script:ScriptPath
+        Remove-Item Env:ABIOS_DIAGRAMTHEME_DOTSOURCE
+        $script:Theme = Get-DiagTheme -Path $script:ThemePath
+
+        function Get-MermaidBlocks([string]$Path) {
+            $text = (Get-Content -LiteralPath $Path -Raw) -replace "`r`n", "`n"
+            [regex]::Matches($text, '(?ms)^```mermaid\n(.*?)^```') | ForEach-Object { $_.Groups[1].Value }
+        }
+    }
+
+    It 'theme.json has the same classes in light and dark' {
+        $light = @($script:Theme.light.classes.PSObject.Properties.Name) | Sort-Object
+        $dark  = @($script:Theme.dark.classes.PSObject.Properties.Name) | Sort-Object
+        $light | Should -Be $dark
+        $light | Should -Contain 'frame'
+        $light | Should -Contain 'card'
+    }
+
+    It 'no class reuses a Mermaid SVG class name' {
+        foreach ($c in $script:Theme.light.classes.PSObject.Properties.Name) {
+            $c | Should -Not -BeIn @('root', 'node', 'nodes', 'cluster', 'clusters', 'edge', 'edgePaths', 'label') -Because 'classDef root also matches <g class="root"> and fills every arrow'
+        }
+    }
+
+    It 'the font names no hyphenated generic (Mermaid drops it and falls back to serif)' {
+        foreach ($mode in 'light', 'dark') {
+            $script:Theme.$mode.themeVariables.fontFamily | Should -Not -Match '(sans-serif|system-ui|-apple-system)'
+        }
+    }
+
+    It 'header for a flowchart carries the init and the classes' {
+        $h = Get-DiagHeader -Theme $script:Theme
+        $h | Should -Match '^%%\{init: \{"theme":"base"'
+        $h | Should -Match "`nflowchart TB`n"
+        $h | Should -Match 'classDef frame '
+        $h | Should -Not -Match 'themeCSS' -Because 'GitHub strips themeCSS from an inline init'
+    }
+
+    It 'header for another type carries no classDef' {
+        $h = Get-DiagHeader -Theme $script:Theme -Type 'sequenceDiagram'
+        $h | Should -Match "`nsequenceDiagram$"
+        $h | Should -Not -Match 'classDef'
+    }
+
+    It 'every mermaid block in the skill and its reference opens with the current header' {
+        $init = Get-DiagInit -Theme $script:Theme -Mode light
+        foreach ($path in $script:SkillMd, $script:StylePath) {
+            $blocks = @(Get-MermaidBlocks $path)
+            $blocks.Count | Should -BeGreaterThan 0
+            foreach ($b in $blocks) {
+                ($b -split "`n")[0] | Should -Be $init -Because "$path must use the theme from theme.json, not loose colors"
+            }
+        }
+    }
+
+    It 'flowchart blocks in the skill use only theme classes and a frame card' {
+        $known = @($script:Theme.light.classes.PSObject.Properties.Name)
+        foreach ($path in $script:SkillMd, $script:StylePath) {
+            foreach ($b in @(Get-MermaidBlocks $path) | Where-Object { $_ -match "`nflowchart " }) {
+                $b | Should -Match '(?m)^\s+class \S+ frame$'
+                foreach ($m in [regex]::Matches($b, '(?m)^\s+class \S+ (\w+)$')) { $m.Groups[1].Value | Should -BeIn $known }
+            }
+        }
+    }
+
+    It 'the skill covers type choice, inline vs SVG and the GitHub limits' {
+        $body = Get-Content -LiteralPath $script:SkillMd -Raw
+        foreach ($k in 'architecture-beta', 'mindmap', 'timeline', 'sequenceDiagram', '<picture>', 'Diagram-Theme.ps1', 'layout: elk') {
+            $body | Should -Match ([regex]::Escape($k))
+        }
+    }
+}
+
+Describe 'Diagram-Theme.ps1 stamps' {
+    BeforeAll {
+        $env:ABIOS_DIAGRAMTHEME_DOTSOURCE = '1'
+        . (Join-Path $script:PluginRoot 'scripts' 'Diagram-Theme.ps1')
+        Remove-Item Env:ABIOS_DIAGRAMTHEME_DOTSOURCE
+        $script:Theme = Get-DiagTheme -Path (Join-Path $script:PluginRoot 'skills' 'diagram-authoring' 'theme.json')
+    }
+
+    BeforeEach {
+        $script:Mmd = Join-Path $TestDrive 'x.mmd'
+        Set-Content -LiteralPath $script:Mmd "flowchart TB`n    a --> b" -NoNewline -Encoding utf8
+        $script:Light = Join-Path $TestDrive 'x-light.svg'
+        $stamp = Get-DiagSourceStamp -Body (Get-Content $script:Mmd -Raw) -Theme $script:Theme -Mode light
+        Set-Content -LiteralPath $script:Light (Set-DiagStamp -Svg '<svg>a</svg>' -SourceStamp $stamp) -NoNewline -Encoding utf8
+    }
+
+    It 'a freshly stamped SVG is current' {
+        Test-DiagSvg -Mmd $script:Mmd -Svg $script:Light -Theme $script:Theme -Mode light | Should -BeNullOrEmpty
+    }
+
+    It 'flags a missing SVG' {
+        Test-DiagSvg -Mmd $script:Mmd -Svg (Join-Path $TestDrive 'x-dark.svg') -Theme $script:Theme -Mode dark | Should -Match '^missing'
+    }
+
+    It 'flags an SVG edited by hand' {
+        (Get-Content $script:Light -Raw) -replace '>a<', '>b<' | Set-Content -LiteralPath $script:Light -NoNewline -Encoding utf8
+        Test-DiagSvg -Mmd $script:Mmd -Svg $script:Light -Theme $script:Theme -Mode light | Should -Match '^edited by hand'
+    }
+
+    It 'flags a stale SVG when the source changes' {
+        Set-Content -LiteralPath $script:Mmd "flowchart TB`n    a --> c" -NoNewline -Encoding utf8
+        Test-DiagSvg -Mmd $script:Mmd -Svg $script:Light -Theme $script:Theme -Mode light | Should -Match '^stale'
+    }
+
+    It 'the themed source puts the init first and the classes after the type line' {
+        $src = Get-DiagThemedSource -Body "%%{init: {}}%%`nflowchart TB`n    a --> b" -Theme $script:Theme -Mode dark
+        $lines = $src -split "`n"
+        $lines[0] | Should -Match '^%%\{init: .*"htmlLabels":false'
+        @($lines | Where-Object { $_ -match '^%%\{\s*init' }).Count | Should -Be 1 -Because "the .mmd's own init is dropped"
+        $lines[1] | Should -Be 'flowchart TB'
+        $lines[2] | Should -Match '^    classDef '
+    }
+
+    It 'every committed diagram SVG in the repo is current (what CI checks)' {
+        @(Test-DiagRepo -Root $script:RepoRoot.Path -Theme $script:Theme) | Should -BeNullOrEmpty
+    }
+
+    It 'the README shows the how-it-works diagram in light and dark, with view and download links' {
+        $readme = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'README.md') -Raw
+        $readme | Should -Match 'prefers-color-scheme: dark\)" srcset="\.github/assets/diagrams/how-it-works-dark\.svg"'
+        $readme | Should -Match 'src="\.github/assets/diagrams/how-it-works-light\.svg"'
+        $readme | Should -Match '<a href="\.github/assets/diagrams/how-it-works-light\.svg\?raw=true"><picture>'
+        $readme | Should -Match 'how-it-works-light\.svg\?raw=true">⬇ Download SVG'
+        $readme | Should -Match 'how-it-works-dark\.svg\?raw=true">⬇ Download SVG'
+    }
+
+    It 'adds the brand as a footer strip below the diagram' {
+        $brand = [pscustomobject]@{ Text = 'repo · <owner>'; Icon = 'data:image/png;base64,AAAA' }
+        $svg = Add-DiagBrand -Svg '<svg viewBox="-4 -4 100 50"><g/></svg>' -Brand $brand -Theme $script:Theme -Mode dark
+        $svg | Should -Match 'viewBox="-4 -4 100 80"'
+        $svg | Should -Match '<g class="diagram-brand"><image href="data:image/png;base64,AAAA"'
+        $svg | Should -Match ([regex]::Escape('repo · &lt;owner&gt;</text></g></svg>'))
+        $svg | Should -Match ([regex]::Escape("fill=""$($script:Theme.dark.brandColor)"""))
+    }
+
+    It 'a brand change makes the SVG stale' {
+        $a = Get-DiagSourceStamp -Body 'flowchart TB' -Theme $script:Theme -Mode light -Brand ([pscustomobject]@{ Text = 'a'; Icon = $null })
+        $b = Get-DiagSourceStamp -Body 'flowchart TB' -Theme $script:Theme -Mode light -Brand ([pscustomobject]@{ Text = 'b'; Icon = $null })
+        $a | Should -Not -Be $b
+    }
+
+    It 'the repo brand comes from .github/diagram-brand.json' {
+        $brand = Get-DiagBrand $script:RepoRoot.Path
+        $brand.Text | Should -Be 'agentic-board · CSalcedoDataBI'
+        $brand.Icon | Should -Match '^data:image/png;base64,'
+    }
+
+    It 'without a brand file the mark falls back to the origin remote' {
+        $repo = Join-Path $TestDrive 'r'
+        New-Item -ItemType Directory $repo | Out-Null
+        git -C $repo init -q 2>$null
+        git -C $repo remote add origin https://github.com/acme/widgets.git
+        (Get-DiagBrand $repo).Text | Should -Be 'widgets · acme'
+        New-Item -ItemType Directory (Join-Path $repo '.github') | Out-Null
+        Set-Content (Join-Path $repo '.github' 'diagram-brand.json') '{"enabled": false}'
+        Get-DiagBrand $repo | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Diagrams knowledge domain' {
     BeforeEach {
         $script:reg = Get-Content -LiteralPath $script:RegPath -Raw | ConvertFrom-Json

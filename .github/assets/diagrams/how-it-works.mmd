@@ -1,0 +1,27 @@
+flowchart TB
+    subgraph F["How agentic-board works"]
+        direction TB
+        U(["You ask: what's pending?<br/>or run /board work"])
+        subgraph P["Claude Code + agentic-board"]
+            direction LR
+            c1["/board<br/>work · plan · fill · move"] ~~~ c2["/scan<br/>untracked work to issues"] ~~~ c3["/expert<br/>runs a plan to evidence"] ~~~ c4["gh-account<br/>picks the GitHub account"]
+        end
+        B@{ shape: cyl, label: "GitHub Projects board<br/>issues · Status · Priority<br/>moved as the loop runs" }
+        subgraph L["The work loop: one issue, one worktree"]
+            direction TB
+            i1["Next issue<br/>to In Progress"] --> i2["Own branch + worktree<br/>an agent session works it"]
+            i2 --> i3["Pull request<br/>to In Review"]
+            i3 --> g{"Review gate<br/>review on head · CI · threads"}
+            g -- pass --> m["Merge<br/>to Done"]
+            g -- "changes asked" --> i2
+        end
+        U --> P
+        P <-- "gh CLI" --> B
+        B -- "next issue" --> L
+    end
+    class F frame
+    class P,L card
+    class U start
+    class B external
+    class c1,c2,c3,c4,i1,i2,i3,m leaf
+    class g branch

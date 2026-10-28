@@ -50,6 +50,27 @@ the rest is on the [roadmap](#module-roadmap).
 
 ---
 
+## How it works
+
+<p align="center">
+  <a href=".github/assets/diagrams/how-it-works-light.svg?raw=true"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/diagrams/how-it-works-dark.svg">
+    <img width="560" alt="How agentic-board works: you ask in plain language or run /board work; Claude Code with agentic-board (/board, /scan, /expert and gh-account) reads and moves your GitHub Projects board through the gh CLI; the board hands over the next issue to the work loop — In Progress, its own branch and worktree where an agent session works it, a pull request In Review, then a review gate (review on the head commit, CI, open threads) that either sends it back or merges it to Done" src=".github/assets/diagrams/how-it-works-light.svg">
+  </picture></a>
+</p>
+
+<p align="center">
+  <a href=".github/assets/diagrams/how-it-works-light.svg?raw=true">🔍 View full size</a> ·
+  <a href=".github/assets/diagrams/how-it-works-light.svg?raw=true">⬇ Download SVG (light)</a> ·
+  <a href=".github/assets/diagrams/how-it-works-dark.svg?raw=true">⬇ Download SVG (dark)</a>
+</p>
+
+The diagram is generated from [`how-it-works.mmd`](.github/assets/diagrams/how-it-works.mmd) in
+the plugin's own house diagram style — the one `diagram-authoring` applies to every plan, issue
+and README it writes.
+
+---
+
 ## Why
 
 Teams track their work on GitHub Projects, but the board work stays manual: creating fields,
