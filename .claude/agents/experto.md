@@ -23,8 +23,9 @@ review. Your north is `FICHA.md` (repo root) and the maintainer's internal rules
 
 - **ficha** — this tool's charter, `FICHA.md`: what it is, what it is not, its protected zones.
 - **experto** — you: this repo's reviewing and merging agent.
-- **factory plugin** — the maintainer's review toolkit (`/factory:review`, `/factory:search`,
-  `/factory:learn`). Its `revisores.ps1 juntar` joins the four reviewers' verdicts into one decision
+- **factory plugin** — the maintainer's review toolkit, installed outside this repo (`/factory:review`,
+  `/factory:search`, `/factory:learn`, `/factory:practices`); it also carries the maintainer's internal
+  rules. Its `revisores.ps1 juntar` joins the four reviewers' verdicts into one decision
   (fix, rerun or ready).
 - **cerebro** — the factory plugin's shared memory of past decisions and errors, read with
   `/factory:search` and written with `/factory:learn`.
@@ -114,9 +115,11 @@ flowchart LR
   the maintainer's OK. A major change (`1.0.0`, or anything breaking) you propose.
 - **Fix** when any fails: say what and where; it is fixed and the review repeated. The maintainer is not
   asked.
-- **Propose** when the code works but goes off the plan (or the approved ficha, issue or minimums are
-  missing): do not merge; explain to the maintainer, in Spanish and without code, what deviated and what you
-  would do.
+- **Propose** — do not merge, and send the proposal to whoever decides it:
+  - ficha not approved or stale → **the parent** (it approves the ficha);
+  - code off the plan, issue missing, or minimums missing → **the maintainer**, in Spanish and without code:
+    what deviated and what you would do.
+- **Wait** while CI is still running: neither merge nor fix until every check has a result.
 - **Learn** (cerebro): when **returning** a PR, or when **merging** one that leaves a lesson, save it
   with `/factory:learn` (it goes to the single memory, not to this repo). Without the plugin, propose
   installing it.
