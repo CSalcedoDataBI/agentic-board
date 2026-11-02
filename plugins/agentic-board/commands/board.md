@@ -148,7 +148,10 @@ The short verbs run directly:
   use, the env var that holds its token (`-Map 'login=VAR'`; an env var NAME, never the token
   itself — never ask for or echo a token); optional short aliases (`-Alias 'alias=login'`); and,
   only if they run autonomous `/expert` sessions, the variable of a separate machine identity
-  (`-AgentTokenVar`). Preview with `-DryRun`, write on their confirmation, then `-Show` again.
+  (`-AgentTokenVar`), or a local command that prints a short-lived token for it, e.g. a GitHub
+  App (`-AgentTokenCommand`, `-AgentGitName`, `-AgentGitEmail`; recipe in the `gh-account`
+  skill's `references/github-app-agent-token.md`). Preview with `-DryRun`, write on their
+  confirmation, then `-Show` again.
   With no map at all the plugin uses `GH_TOKEN`, then `gh auth token` — say so: a single-account
   user can skip setup.
 - **bi-checklist** — show the release definition-of-done for a **BI artifact** by printing

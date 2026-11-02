@@ -79,7 +79,9 @@ without arguments.
 
 - **Credentials.** Your GitHub token is read from `GH_TOKEN`, the stored `gh` login, or a variable
   named in your own `~/.agentic-board/accounts.json` (names only, never values). It is passed to
-  `gh`/`git` for the call and never written to disk by the plugin.
+  `gh`/`git` for the call and never written to disk by the plugin. Opt-in: if your map sets
+  `agentTokenCommand`, brake-armed runs execute that local command of yours to get a short-lived
+  agent token (a GitHub App installation token, say); its output is kept in memory, never printed.
 
 **Sends**
 

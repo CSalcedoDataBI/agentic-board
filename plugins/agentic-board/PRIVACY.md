@@ -31,7 +31,8 @@ on your machine or goes to the GitHub repositories and boards you point it at.
 The plugin reads your GitHub token from an environment variable: `GH_TOKEN`, the stored `gh`
 login, or a variable named in your own `~/.agentic-board/accounts.json`. That file stores variable
 **names**, never token values. The token is passed to `gh`/`git` for the call and is never written
-to disk by the plugin. A session launched by `/board work` gets only its model credential and one
+to disk by the plugin. If you set `agentTokenCommand` in that file, brake-armed runs execute that
+command (yours, on your machine) and keep its short-lived token in memory only. A session launched by `/board work` gets only its model credential and one
 GitHub identity: every other variable whose name contains `TOKEN`, `KEY`, `SECRET` or `PASSWORD`
 is removed first.
 

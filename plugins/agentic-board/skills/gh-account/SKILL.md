@@ -23,8 +23,10 @@ The default owner is the map's `defaultOwner`, else the login `gh` is signed in 
 
 Look for `.agentic-board/brake-armed.json` in the current directory **or any directory above it**.
 If it is there, this is a braked autonomous run, and the only valid identity is the agent's
-(the map's `agentTokenVar`, default `GITHUB_TOKEN_AGENT`). **If that variable is unset, STOP and
-say so — never fall back to the owner's token.** The owner's PAT authenticates *as the owner*,
+(the map's `agentTokenCommand` when set — a local command that prints one short-lived token, such
+as a GitHub App installation token — else its `agentTokenVar`, default `GITHUB_TOKEN_AGENT`).
+**If it gives no token, STOP and say so — never fall back to the owner's token.** Setting up an
+App for this: `references/github-app-agent-token.md`. The owner's PAT authenticates *as the owner*,
 and a `main` rule that exempts admins lets it push straight to `main`; a separate machine identity
 without admin is refused there (measured: HTTP 422 "Changes must be made through a pull request")
 while it can still create ordinary branches. Falling back would hand the run the one capability

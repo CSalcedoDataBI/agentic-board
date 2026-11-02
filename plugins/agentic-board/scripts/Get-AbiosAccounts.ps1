@@ -13,11 +13,21 @@
           "owners":        { "your-login": "GITHUB_TOKEN_PERSONAL", "work-org": "GITHUB_TOKEN_WORK" },
           "accountIds":    { "12345": "GITHUB_TOKEN_PERSONAL" },   // optional, survives renames
           "aliases":       { "me": "your-login", "work": "work-org" },
-          "agentTokenVar": "GITHUB_TOKEN_AGENT"       // optional; the identity of brake-armed runs
+          "agentTokenVar": "GITHUB_TOKEN_AGENT",      // optional; the identity of brake-armed runs
+          "agentTokenCommand": ["pwsh", "-NoProfile", "-File", "~/path/to/app-token.ps1"],  // optional
+          "agentGitName":  "my-app[bot]",             // optional; git author of brake-armed runs
+          "agentGitEmail": "123+my-app[bot]@users.noreply.github.com"
         }
 
     Values are env var NAMES, never tokens. A missing or unreadable file is an empty map, not an
     error: with no map, every owner resolves to the ambient token (GH_TOKEN, then `gh auth token`).
+
+    AGENT TOKEN COMMAND (#808). A long-lived PAT for the agent identity expires and has to be
+    rotated by hand. `agentTokenCommand` is a local command whose stdout is ONE short-lived token -
+    a GitHub App installation token, say. When it is set it takes precedence over `agentTokenVar`;
+    when it is not, nothing changes. It is an argv list (a string is one executable with no
+    arguments), never a shell line, and a leading `~` is the home folder. Its output is captured,
+    never printed, and a failed or malformed run is no token: the armed run stops.
 
     TOKEN ORDER (Get-AbiosTokenValue). For a named variable: the Windows USER scope first (the
     session copy can be stale on Windows), then the process environment. With -AllowAmbient, and
@@ -50,6 +60,7 @@ function Get-AbiosAccountConfig {
     $cfg = [pscustomobject]@{
         path = $Path; exists = $false; error = ''
         defaultOwner = ''; owners = @{}; accountIds = @{}; aliases = @{}; agentTokenVar = 'GITHUB_TOKEN_AGENT'
+        agentTokenCommand = @(); agentGitName = ''; agentGitEmail = ''
     }
     if (-not (Test-Path -LiteralPath $Path)) { return $cfg }
     $cfg.exists = $true
@@ -69,7 +80,72 @@ function Get-AbiosAccountConfig {
         foreach ($k in @($m.Keys)) { if ($m[$k] -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { $m.Remove($k) } }
     }
     if ($cfg.agentTokenVar -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { $cfg.agentTokenVar = 'GITHUB_TOKEN_AGENT' }
+    if ($j.PSObject.Properties['agentTokenCommand']) {
+        $cmd = ConvertTo-AbiosCommand $j.agentTokenCommand
+        # A malformed command is an error, not a silent fallback to the PAT: the user asked for it.
+        if ($null -eq $cmd) { $cfg.error = "agentTokenCommand in $Path must be a string or a list of strings, one line each" }
+        else { $cfg.agentTokenCommand = $cmd }
+    }
+    foreach ($f in 'agentGitName', 'agentGitEmail') {
+        if ($j.PSObject.Properties[$f] -and $j.$f) {
+            $v = "$($j.$f)".Trim()
+            if ($v -notmatch '[\r\n\x00]') { $cfg.$f = $v }
+        }
+    }
     return $cfg
+}
+
+# The JSON value of agentTokenCommand -> a clean argv array, or $null when it is malformed. Pure.
+# A leading '~' (alone or followed by a separator) is the home folder, so the map stays portable.
+function ConvertTo-AbiosCommand([object]$Node) {
+    if ($null -eq $Node) { return @() }
+    $items = @($Node)
+    $out = @()
+    foreach ($i in $items) {
+        if ($i -isnot [string]) { return $null }
+        $s = $i.Trim()
+        if (-not $s) { continue }
+        if ($s -match '[\r\n\x00]') { return $null }
+        if ($s -eq '~' -or $s -match '^~[\\/]') {
+            $home_ = if ($HOME) { $HOME } else { [Environment]::GetFolderPath('UserProfile') }
+            $s = $home_ + $s.Substring(1)
+        }
+        $out += $s
+    }
+    return , $out
+}
+
+<#  Run the agent token command and return its token, or '' (#808). Never prints the token and
+    never throws: a missing executable, a non-zero exit, stderr noise or an output that is not ONE
+    token all read as "no token", which an armed run treats as a stop.  #>
+function Get-AbiosCommandToken {
+    param([string[]]$Command)
+    $argv = @($Command | Where-Object { $_ })
+    if ($argv.Count -eq 0) { return '' }
+    $exe = $argv[0]; $rest = @($argv | Select-Object -Skip 1)
+    try {
+        $global:LASTEXITCODE = 0
+        $raw = (& $exe @rest 2>$null | Out-String)
+        if ($LASTEXITCODE -ne 0) { return '' }
+    } catch { return '' }
+    $t = "$raw".Trim()
+    if ($t -notmatch '^[A-Za-z0-9_.\-]{20,}$') { return '' }
+    return $t
+}
+
+# The agent identity's token: the command when the map sets one, else the agentTokenVar variable.
+# Never the ambient token - a brake-armed run with no agent token must stop, not continue as you.
+function Get-AbiosAgentToken {
+    param([object]$Config = (Get-AbiosAccountConfig))
+    if (@($Config.agentTokenCommand).Count -gt 0) { return (Get-AbiosCommandToken -Command $Config.agentTokenCommand) }
+    return (Get-AbiosEnvValue -VarName $Config.agentTokenVar)
+}
+
+# How to name the agent identity in a message: the variable, or "agentTokenCommand". Names only.
+function Get-AbiosAgentIdentityLabel {
+    param([object]$Config = (Get-AbiosAccountConfig))
+    if (@($Config.agentTokenCommand).Count -gt 0) { return 'agentTokenCommand' }
+    return $Config.agentTokenVar
 }
 
 # Read one named variable: Windows USER scope first, then the process. '' when unset.
