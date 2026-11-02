@@ -53,6 +53,8 @@ function Import-AbiosAccountMaps {
     param([object]$Config = (Get-AbiosAccountConfig))
     $script:AbiosAccountConfig = $Config
     $script:AgentTokenVar      = $Config.agentTokenVar
+    # What a message calls the agent identity: the variable, or agentTokenCommand when set (#808).
+    $script:AgentIdentity      = Get-AbiosAgentIdentityLabel -Config $Config
     $script:OwnerTokenVar      = $Config.owners
     $script:AccountIdTokenVar  = $Config.accountIds
     $script:AccountAlias       = $Config.aliases
@@ -112,12 +114,12 @@ function Resolve-GhTokenVar {
     }
     if (-not $AgentTokenPresent) {
         return @{ var = ''; fail = $true; mapped = $true
-                  reason = "BRAKED run and $script:AgentTokenVar is not in the environment. Not " +
+                  reason = "BRAKED run and the agent identity ($script:AgentIdentity) gave no token. Not " +
                            "continuing with the owner's token: it is admin and the main rule " +
                            "exempts it, so continuing would hand back exactly what the brake takes away." }
     }
     return @{ var = $script:AgentTokenVar; fail = $false; mapped = $true
-              reason = "braked run - agent identity ($script:AgentTokenVar): no admin, " +
+              reason = "braked run - agent identity ($script:AgentIdentity): no admin, " +
                        "GitHub rejects its push to main" }
 }
 
@@ -292,7 +294,7 @@ function Get-GhTokenForContext {
     $armed = Test-InBrakedRun -StartDir $StartDir
     if (-not (Test-ExplicitVarAllowed -IsArmed $armed -ExplicitVar $ExplicitVar)) {
         throw ("BRAKED run: -TokenVar '$ExplicitVar' is not allowed here. Inside a run " +
-               "with the brake armed the only valid identity is $script:AgentTokenVar; the owner's " +
+               "with the brake armed the only valid identity is $script:AgentIdentity; the owner's " +
                "token is admin and the main rule exempts it, so accepting it would hand back exactly " +
                "the capability the brake removes.")
     }
@@ -321,10 +323,11 @@ function Get-GhTokenForContext {
 # token value never has to pass through the tested surface.
 # The agent identity never falls back to the ambient token: a braked run with no agent token must
 # stop, not continue as the owner (#550). Every other variable may (#762: cross-platform, and no
-# registry required).
+# registry required). With an agentTokenCommand in the map, the agent token is minted by it (#808).
 function Get-GhTokenValue {
     param([Parameter(Mandatory)][string]$VarName, [switch]$NoAmbient)
     if (-not $VarName) { return '' }
+    if ($VarName -eq $script:AgentTokenVar) { return (Get-AbiosAgentToken -Config $script:AbiosAccountConfig) }
     $ambient = (-not $NoAmbient) -and ($VarName -ne $script:AgentTokenVar)
     return (Get-AbiosTokenValue -VarName $VarName -AllowAmbient:$ambient)
 }

@@ -242,11 +242,22 @@ function New-FleetSessionMarker([int]$IssueNum, [string]$RunId) {
 #   - $GhTokenVar = 'GH_TOKEN'           -> unarmed run: the GH_TOKEN it inherited, unchanged.
 #   - $GhTokenVar = 'GITHUB_TOKEN_AGENT' -> brake-armed run: the agent identity, never the owner's.
 #   - $GhTokenVar = ''                   -> no GH_TOKEN: gh falls back to its own stored login.
+#   - $GhTokenCommand = argv (#808)      -> brake-armed run whose map sets agentTokenCommand: the
+#     command runs INSIDE the launch script, before the scrub (it may need the user's own secrets
+#     to mint), and its stdout becomes GH_TOKEN. It wins over $GhTokenVar. No token, or anything
+#     that is not one token, stops the script before the CLI starts. Plain `git push` to github.com
+#     then goes through `gh auth git-credential` (that GH_TOKEN), not the owner's stored credential,
+#     and $GitName/$GitEmail, when given, author the run's commits.
 # Values are captured from the process first, then the Windows USER scope (null elsewhere), and
 # only NAMES ever reach the script text - never a value. Pure -> unit-testable.
 # STATED LIMIT: this removes what the session INHERITS. A process running as the same user can
-# still read the user's own stores (HKCU\Environment on Windows, a keyring, a dotfile).
-function Get-SecretScrubScript([string[]]$Keep = @(), [string]$GhTokenVar = 'GH_TOKEN') {
+# still read the user's own stores (HKCU\Environment on Windows, a keyring, a dotfile). A minted
+# token is as short-lived as its source made it (an App installation token: one hour): GH_TOKEN is
+# set once, while plugin scripts inside the run mint a fresh one per call.
+function Get-SecretScrubScript([string[]]$Keep = @(), [string]$GhTokenVar = 'GH_TOKEN', [string[]]$GhTokenCommand = @(),
+                               [string]$GitName = '', [string]$GitEmail = '') {
+    $cmd = @($GhTokenCommand | Where-Object { $_ })
+    if ($cmd.Count -gt 0) { $GhTokenVar = '' }
     $names = @(@($Keep) + @($GhTokenVar) | Where-Object { $_ } | Select-Object -Unique)
     foreach ($n in $names) {
         if ($n -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { throw "Scrub allowlist entry '$n' is not a valid environment variable name." }
@@ -254,16 +265,39 @@ function Get-SecretScrubScript([string[]]$Keep = @(), [string]$GhTokenVar = 'GH_
     $list = ($names | ForEach-Object { "'$_'" }) -join ','
     $lines = @(
         ('$abiosKeep = @{{}}; foreach ($n in @({0})) {{ $v = [Environment]::GetEnvironmentVariable($n); if (-not $v) {{ $v = [Environment]::GetEnvironmentVariable($n, ''User'') }}; if ($v) {{ $abiosKeep[$n] = $v }} }}' -f $list)
+    )
+    if ($cmd.Count -gt 0) {
+        # Each argv element is a single-quoted literal (quotes doubled): data, never code. stderr is
+        # dropped and the value only ever lands in a variable - nothing echoes it to the transcript.
+        $lit = { param($s) "'" + [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($s) + "'" }
+        $argv = ($cmd | ForEach-Object { & $lit $_ }) -join ' '
+        $lines += ('$abiosAgentTok = ''''; try {{ $global:LASTEXITCODE = 0; $abiosAgentTok = (& {0} 2>$null | Out-String).Trim(); if ($LASTEXITCODE -ne 0) {{ $abiosAgentTok = '''' }} }} catch {{ $abiosAgentTok = '''' }}' -f $argv)
+    }
+    $lines += @(
         'Get-ChildItem Env: | Where-Object { $_.Name -match ''TOKEN|KEY|SECRET|PASSWORD'' } | ForEach-Object { Remove-Item -LiteralPath (''Env:'' + $_.Name) -ErrorAction SilentlyContinue }'
         # The identity variable comes back ONLY as GH_TOKEN, never under its own name as well.
         ('foreach ($n in $abiosKeep.Keys) {{ if ($n -notin @(''GH_TOKEN'', ''{0}'')) {{ Set-Item -LiteralPath (''Env:'' + $n) -Value $abiosKeep[$n] }} }}' -f $GhTokenVar)
     )
     if ($GhTokenVar) { $lines += ('if ($abiosKeep[''{0}'']) {{ $env:GH_TOKEN = $abiosKeep[''{0}''] }}' -f $GhTokenVar) }
-    $lines += 'Remove-Variable abiosKeep, n, v -ErrorAction SilentlyContinue'
+    if ($cmd.Count -gt 0) {
+        # Fail closed: no token means no run - never the owner's credential in its place.
+        $lines += 'if ($abiosAgentTok -notmatch ''^[A-Za-z0-9_.\-]{20,}$'') { Remove-Variable abiosKeep, abiosAgentTok, n, v -ErrorAction SilentlyContinue; Write-Host ''STOP: agentTokenCommand gave no token (see ~/.agentic-board/accounts.json). The brake-armed session is not started.'' -ForegroundColor Red; return }'
+        $lines += '$env:GH_TOKEN = $abiosAgentTok'
+        # git push to github.com: drop every stored helper for that host and ask gh, which reads GH_TOKEN.
+        $lines += '$env:GIT_CONFIG_COUNT = ''2''; $env:GIT_CONFIG_KEY_0 = ''credential.https://github.com.helper''; $env:GIT_CONFIG_VALUE_0 = ''''; $env:GIT_CONFIG_KEY_1 = ''credential.https://github.com.helper''; $env:GIT_CONFIG_VALUE_1 = ''!gh auth git-credential'''
+    }
+    foreach ($g in @(@('NAME', $GitName), @('EMAIL', $GitEmail))) {
+        if (-not $g[1]) { continue }
+        if ($g[1] -match '[\r\n\x00]') { throw "Git $($g[0].ToLower()) for the agent identity must be one line." }
+        $v = "'" + [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($g[1]) + "'"
+        $lines += ('$env:GIT_AUTHOR_{0} = {1}; $env:GIT_COMMITTER_{0} = {1}' -f $g[0], $v)
+    }
+    $lines += $(if ($cmd.Count -gt 0) { 'Remove-Variable abiosKeep, abiosAgentTok, n, v -ErrorAction SilentlyContinue' }
+                else { 'Remove-Variable abiosKeep, n, v -ErrorAction SilentlyContinue' })
     return ($lines -join "`r`n")
 }
 
-function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefingFile, [string]$windowName = "abios-parallel", [string]$claudeAuthVar = "ANTHROPIC_API_KEY", [string]$Cli = 'claude', [string]$fleetSession = '', [string]$logPath = '', [bool]$allowBypass = $false, [string]$ghTokenVar = 'GH_TOKEN') {
+function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefingFile, [string]$windowName = "abios-parallel", [string]$claudeAuthVar = "ANTHROPIC_API_KEY", [string]$Cli = 'claude', [string]$fleetSession = '', [string]$logPath = '', [bool]$allowBypass = $false, [string]$ghTokenVar = 'GH_TOKEN', [string[]]$ghTokenCommand = @(), [string]$gitName = '', [string]$gitEmail = '') {
     $tabTitle  = "issue-$issueNum"
     # Defense-in-depth: this name is interpolated into the spawned launch script,
     # so it MUST be a bare env-var identifier - never let ';'/quotes/spaces through.
@@ -319,7 +353,7 @@ function Build-WorktreeLaunch([int]$issueNum, [string]$workPath, [string]$briefi
     # Scrub inherited secrets before the CLI starts (#769): the model credential this adapter
     # authenticates with and one GitHub identity survive, nothing else matching the pattern does.
     $keep = @($claudeAuthVar) + @($adapter.KeepEnv | Where-Object { $_ })
-    $launchScript = ((Get-SecretScrubScript -Keep $keep -GhTokenVar $ghTokenVar), $launchScript) -join "`r`n"
+    $launchScript = ((Get-SecretScrubScript -Keep $keep -GhTokenVar $ghTokenVar -GhTokenCommand $ghTokenCommand -GitName $gitName -GitEmail $gitEmail), $launchScript) -join "`r`n"
     # Stamp the reaper fingerprint FIRST (adapter-agnostic prefix), so it is in the
     # environment for the whole script and inherited by the CLI child + grandchild. The
     # marker is validated to a bare token so it can never break out of the '...' literal.
@@ -447,9 +481,18 @@ function Start-WorktreeSession {
     $logPath = Get-SessionLogPath $IssueNum
     # GitHub identity the session keeps after the secret scrub (#769): a brake-armed run gets the
     # agent identity only (never the owner's token the main rule exempts); an unarmed run keeps
-    # the GH_TOKEN it inherited, as before.
-    $ghVar = if ($StopAtPR) { 'GITHUB_TOKEN_AGENT' } else { 'GH_TOKEN' }
-    $plan  = Build-WorktreeLaunch $IssueNum $WorkPath $briefingFile "abios-parallel" $ClaudeAuthVar $Cli $FleetSession $logPath ([bool]$AllowPermissionBypass) $ghVar
+    # the GH_TOKEN it inherited, as before. The agent identity is the map's (#808): its
+    # agentTokenCommand when set (a short-lived token minted in the launch script), else its
+    # agentTokenVar - no longer a hardcoded variable name.
+    $ghVar = 'GH_TOKEN'; $ghCmd = @(); $gitName = ''; $gitEmail = ''
+    if ($StopAtPR) {
+        $acct = Get-AbiosAccountConfig
+        $ghVar = $acct.agentTokenVar
+        if (@($acct.agentTokenCommand).Count -gt 0) {
+            $ghCmd = @($acct.agentTokenCommand); $gitName = $acct.agentGitName; $gitEmail = $acct.agentGitEmail
+        }
+    }
+    $plan  = Build-WorktreeLaunch $IssueNum $WorkPath $briefingFile "abios-parallel" $ClaudeAuthVar $Cli $FleetSession $logPath ([bool]$AllowPermissionBypass) $ghVar $ghCmd $gitName $gitEmail
     # The CLI that will actually start (#773: a refused low-trust choice became claude above).
     $plan | Add-Member -NotePropertyName cli -NotePropertyValue $Cli -Force
 

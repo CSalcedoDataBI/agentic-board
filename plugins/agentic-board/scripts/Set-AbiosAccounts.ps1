@@ -19,6 +19,9 @@
     ./Set-AbiosAccounts.ps1 -DefaultOwner my-login -Map 'my-login=GITHUB_TOKEN_PERSONAL'
     ./Set-AbiosAccounts.ps1 -Map 'my-org=GITHUB_TOKEN_WORK' -Alias 'work=my-org'
     ./Set-AbiosAccounts.ps1 -AgentTokenVar GITHUB_TOKEN_AGENT
+    ./Set-AbiosAccounts.ps1 -AgentTokenCommand pwsh,-NoProfile,-File,~/path/to/app-token.ps1 `
+                            -AgentGitName 'my-app[bot]' -AgentGitEmail '123+my-app[bot]@users.noreply.github.com'
+    ./Set-AbiosAccounts.ps1 -ClearAgentTokenCommand
     ./Set-AbiosAccounts.ps1 -Remove my-org
 #>
 [CmdletBinding()]
@@ -32,6 +35,12 @@ param(
     # alias=login pairs
     [string[]]$Alias = @(),
     [string]$AgentTokenVar = '',
+    # argv of a local command whose stdout is ONE short-lived agent token (#808); wins over -AgentTokenVar
+    [string[]]$AgentTokenCommand = @(),
+    [switch]$ClearAgentTokenCommand,
+    # git author/committer of brake-armed runs that use the command (a GitHub App's bot identity)
+    [string]$AgentGitName = '',
+    [string]$AgentGitEmail = '',
     # logins (and aliases pointing at them) to drop from the map
     [string[]]$Remove = @(),
     [switch]$DryRun,
@@ -56,7 +65,9 @@ function ConvertFrom-AbiosPair([string]$Pair, [string]$KeyRx, [string]$ValueRx, 
 # Merge the requested changes into a config object and return the JSON-ready shape. Pure.
 function Merge-AbiosAccounts {
     param([object]$Config, [string]$DefaultOwner, [string[]]$Map, [string[]]$AccountId,
-          [string[]]$Alias, [string]$AgentTokenVar, [string[]]$Remove)
+          [string[]]$Alias, [string]$AgentTokenVar, [string[]]$Remove,
+          [string[]]$AgentTokenCommand = @(), [bool]$ClearAgentTokenCommand = $false,
+          [string]$AgentGitName = '', [string]$AgentGitEmail = '')
     $owners = @{} + $Config.owners; $ids = @{} + $Config.accountIds; $aliases = @{} + $Config.aliases
     $default = $Config.defaultOwner; $agent = $Config.agentTokenVar
     foreach ($p in $Map)       { $kv = ConvertFrom-AbiosPair $p $loginRx $varRx 'map entry';     $owners[$kv.key]  = $kv.value }
@@ -70,6 +81,18 @@ function Merge-AbiosAccounts {
         if ($AgentTokenVar -notmatch $varRx) { throw "Invalid -AgentTokenVar '$AgentTokenVar'." }
         $agent = $AgentTokenVar
     }
+    $cmd = @($Config.agentTokenCommand); $gitName = $Config.agentGitName; $gitEmail = $Config.agentGitEmail
+    if ($ClearAgentTokenCommand) { $cmd = @(); $gitName = ''; $gitEmail = '' }
+    if (@($AgentTokenCommand | Where-Object { $_ }).Count -gt 0) {
+        # Stored as given (a leading ~ stays ~, portable); never run here.
+        # `pwsh -File` cannot pass an array, so one comma-separated value is split into the argv.
+        $parts = if (@($AgentTokenCommand).Count -eq 1) { "$($AgentTokenCommand[0])" -split ',' } else { $AgentTokenCommand }
+        $cmd = @($parts | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        if (@($cmd | Where-Object { $_ -match '[\r\n\x00]' }).Count) { throw 'Invalid -AgentTokenCommand: one line per element.' }
+    }
+    foreach ($g in @($AgentGitName, $AgentGitEmail)) { if ($g -match '[\r\n\x00]') { throw "Invalid agent git identity '$g'." } }
+    if ($AgentGitName)  { $gitName  = $AgentGitName.Trim() }
+    if ($AgentGitEmail) { $gitEmail = $AgentGitEmail.Trim() }
     foreach ($r in $Remove) {
         $owners.Remove($r)
         foreach ($a in @($aliases.Keys)) { if ($a -eq $r -or $aliases[$a] -eq $r) { $aliases.Remove($a) } }
@@ -82,6 +105,9 @@ function Merge-AbiosAccounts {
     $out.accountIds    = & $sorted $ids
     $out.aliases       = & $sorted $aliases
     $out.agentTokenVar = $agent
+    if ($cmd.Count -gt 0) { $out.agentTokenCommand = @($cmd) }
+    if ($gitName)  { $out.agentGitName  = $gitName }
+    if ($gitEmail) { $out.agentGitEmail = $gitEmail }
     return $out
 }
 
@@ -97,7 +123,14 @@ function Format-AbiosAccountsReport([System.Collections.IDictionary]$Shape, [str
     foreach ($k in $Shape.accountIds.Keys) { $lines += ('  id {0,-11}: {1}' -f $k, $Shape.accountIds[$k]) }
     foreach ($k in $Shape.aliases.Keys)    { $lines += ('  alias {0,-8}: {1}' -f $k, $Shape.aliases[$k]) }
     $a = $Shape.agentTokenVar
-    $lines += ('  agent identity: {0} [{1}]' -f $a, $(if (Get-AbiosEnvValue -VarName $a) { 'set' } else { 'not set - brake-armed runs will refuse to start' }))
+    if ($Shape.Contains('agentTokenCommand') -and @($Shape.agentTokenCommand).Count -gt 0) {
+        # The command is shown (a local path, not a secret) but never run: -Show must not mint tokens.
+        $lines += ('  agent identity: agentTokenCommand [{0}] - wins over {1}' -f (@($Shape.agentTokenCommand) -join ' '), $a)
+        $lines += ('  agent git     : {0} <{1}>' -f $(if ($Shape.agentGitName) { $Shape.agentGitName } else { '(your git config)' }),
+                                                  $(if ($Shape.agentGitEmail) { $Shape.agentGitEmail } else { '-' }))
+    } else {
+        $lines += ('  agent identity: {0} [{1}]' -f $a, $(if (Get-AbiosEnvValue -VarName $a) { 'set' } else { 'not set - brake-armed runs will refuse to start' }))
+    }
     return $lines
 }
 
@@ -107,8 +140,11 @@ $path = Get-AbiosAccountsPath
 $cfg  = Get-AbiosAccountConfig -Path $path
 if ($cfg.error) { throw "$($cfg.error). Fix or delete the file, then re-run." }
 $shape = Merge-AbiosAccounts -Config $cfg -DefaultOwner $DefaultOwner -Map $Map -AccountId $AccountId `
-                             -Alias $Alias -AgentTokenVar $AgentTokenVar -Remove $Remove
-$changing = $DefaultOwner -or $Map -or $AccountId -or $Alias -or $AgentTokenVar -or $Remove
+                             -Alias $Alias -AgentTokenVar $AgentTokenVar -Remove $Remove `
+                             -AgentTokenCommand $AgentTokenCommand -ClearAgentTokenCommand ([bool]$ClearAgentTokenCommand) `
+                             -AgentGitName $AgentGitName -AgentGitEmail $AgentGitEmail
+$changing = $DefaultOwner -or $Map -or $AccountId -or $Alias -or $AgentTokenVar -or $Remove -or
+            $AgentTokenCommand -or $ClearAgentTokenCommand -or $AgentGitName -or $AgentGitEmail
 
 if ($changing -and -not $DryRun) {
     $dir = Split-Path -Parent $path
