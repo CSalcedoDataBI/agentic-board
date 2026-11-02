@@ -1,9 +1,11 @@
 # Ficha — agentic-board
 
-> Ficha of this tool. Its experto (`.claude/agents/experto.md`) reads it on every PR.
-> Maintained with the maintainer's internal rules.
-> The parent tool or the maintainer approves it in the `Approved:` line: the date first, then an optional
-> parenthesis with who approved. Changing the ficha requires a new approval.
+> The ficha is this tool's charter. Its experto (`.claude/agents/experto.md`, the agent that reviews and
+> merges PRs) reads it on every PR. Maintained with the maintainer's internal rules.
+> **The parent** (the portfolio agent that directs the maintainer's tool repos) approves it in the
+> `Approved:` line: the date first, then an optional parenthesis with who approved. Changing the ficha
+> requires a new approval. **The maintainer** is Cristóbal, the human owner: only the maintainer gives the
+> OK to publish.
 
 ## What it is
 
@@ -66,4 +68,4 @@ What is not touched without a plan step that names it:
 
 ## Approval
 
-Approved: 2026-11-01 (parent, by delegation)
+Approved: 2026-11-01 (parent, by delegation, after review round 1)
