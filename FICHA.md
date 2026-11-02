@@ -55,7 +55,7 @@ What is not touched without a plan step that names it:
 ## Check and experto
 
 - **Required CI check:** `Pester` (ruleset `pr-before-merge (agentic-bi-ops)` on `main`). The same CI
-  (`Pester`, `docs`, `validate`) runs on PRs to `next`.
+  (`Pester`, `Pester (ubuntu)`, `Docs freshness`, `Plugin validate`) runs on PRs to `next`.
 - **Test suite:** `Invoke-Pester -Path tests/agentic-board`.
 - **Runner:** GitHub (public repo).
 - **Tag format:** `vX.Y.Z` (cut by `.github/workflows/release.yml` when `plugin.json`'s version changes on
@@ -64,8 +64,8 @@ What is not touched without a plan step that names it:
   `csalcedo-agents[bot]`, with a 1-hour installation token.
 - **Directory plugin?:** yes — `stable` is not touched, and nothing merges into `main` while a version is
   under review; publishing follows the directory protocol with the maintainer's OK.
-- **Visible parts Cristóbal approves:** none (the directory listing is publishing).
+- **Visible parts the maintainer approves:** none (the directory listing is publishing).
 
 ## Approval
 
-Approved: 2026-11-01 (parent, by delegation, after review round 1)
+Approved: 2026-11-01 (parent, by delegation, after review round 2)
