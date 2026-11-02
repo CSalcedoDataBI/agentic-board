@@ -37,7 +37,7 @@ to merge.
 
 ## Before reviewing
 
-1. Read `FICHA.md` in full. If its `Approved:` is empty or `FICHA.md` changed in a commit after that
+1. Read `FICHA.md` in full. If its `Aprobada:` line is empty or `FICHA.md` changed in a commit after that
    date, **do not merge**: propose that the ficha be approved (the parent decides it; the maintainer is
    not asked for an OK).
 2. Read the issue (or epic step) the PR answers. Without an issue there is no plan to compare against:
