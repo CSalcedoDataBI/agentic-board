@@ -529,6 +529,13 @@ function Start-WorktreeSession {
         # can only enforce what the marker records, and a launch whose contract does not brake on
         # merge still deserves its time limit. -StopAtPR without a budget arms exactly as before.
         $armIntent = ([bool]$StopAtPR) -or ($SessionBudgetMinutes -gt 0)
+        # The hook that enforces the marker ships in the companion plugin agentic-board-hooks (#768).
+        # A claude session without it would run unbraked under an 'ARMED' banner, so refuse here;
+        # the catch below turns this into FAIL + no launch.
+        if ($armIntent -and $Cli -eq 'claude') {
+            $brakeHook = Test-BrakeHookInstalled -WorkPath $WorkPath
+            if (-not $brakeHook.Ok) { throw $brakeHook.Reason }
+        }
         # A marker armed ONLY for the budget declares it (#565 round 6), so an intentionally
         # empty irreversible list stays empty instead of inheriting the anti-tamper full
         # vocabulary - the contract said this run may merge, and the budget must not unsay it.

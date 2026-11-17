@@ -1,7 +1,7 @@
-﻿<#  PluginStale-NoticeHook.ps1 - tell a running session that a plugin it loaded was updated since
+<#  PluginStale-NoticeHook.ps1 - tell a running session that a plugin it loaded was updated since
     (epic #711, task #714).
 
-    Wired as an auto-registered UserPromptSubmit hook (hooks/hooks.json). A session loads its plugins when
+    Wired as an auto-registered UserPromptSubmit hook (agentic-board-hooks/hooks/hooks.json, #768). A session loads its plugins when
     it starts; an update installs a newer build on disk but the open session keeps the old one, and nothing
     told the user. On each prompt this checks whether any plugin THIS session loaded now has a different
     installed build, and if so shows ONE plain-language notice per (session, plugin, new build):
@@ -17,7 +17,7 @@
     definition, running.
 
     COST: this runs before every prompt, and a pwsh start alone is about 2 s on the maintainer's machine.
-    So hooks.json calls PluginStale-NoticePreCheck.sh (same idea as Brake-PreCheck.sh, #572, #767), which
+    So the companion plugin's hooks.json calls PluginStale-NoticePreCheck.sh (same idea as Brake-PreCheck.sh, #572, #767), which
     reads only the session id from the first payload line and skips this script altogether while the
     installed list is unchanged since that session's last CONCLUSIVE check. This script writes the
     per-session stamp the shim reads (Write-ShimStamp: the installed list as this check read it) - only after a conclusive check, so an

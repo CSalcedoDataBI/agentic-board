@@ -1,3 +1,4 @@
 # Shell scripts must be LF on every checkout: sh reads a CR as part of the command. The plugin's
-# hook prechecks (Brake-PreCheck.sh, PluginStale-NoticePreCheck.sh) run under sh / Git Bash (#767).
+# hook prechecks (plugins/agentic-board-hooks: Brake-PreCheck.sh, PluginStale-NoticePreCheck.sh) run
+# under sh / Git Bash (#767, #768).
 *.sh text eol=lf

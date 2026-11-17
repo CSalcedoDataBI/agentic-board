@@ -15,7 +15,8 @@
 #   3. Compares Claude's installed_plugins.json with this session's stamp - a byte-for-byte copy taken
 #      at the hook's last CONCLUSIVE check (cmp). Identical -> nothing changed -> exit 0, no pwsh.
 #   4. Otherwise pwsh runs the real hook with -SessionId; its stdout (the systemMessage JSON) is
-#      passed through unchanged.
+#      passed through unchanged. The real hook stays in agentic-board; this file ships in the
+#      companion plugin agentic-board-hooks (#768), and Invoke-BoardHook.ps1 finds and runs it.
 #
 # FAIL DIRECTION: it only skips work when the stamp provably matches. Any doubt (no stamp, no
 # installed list, cmp reporting a difference or an error) runs pwsh. It always exits 0: a hook that
@@ -39,5 +40,5 @@ stamp="$home_dir/.agentic-board/plugin-check/$id/installed_plugins.json"
 if [ -f "$inst" ] && [ -f "$stamp" ] && cmp -s "$inst" "$stamp"; then
   exit 0
 fi
-pwsh -NoProfile -File "$(dirname "$0")/PluginStale-NoticeHook.ps1" -SessionId "$id"
+pwsh -NoProfile -File "$(dirname "$0")/Invoke-BoardHook.ps1" -Hook PluginStale -SessionId "$id"
 exit 0

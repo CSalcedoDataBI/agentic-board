@@ -1,4 +1,4 @@
-﻿#Requires -Modules Pester
+#Requires -Modules Pester
 <#  Tests for cross-repo issues in the fleet (#487).
 
     The fleet assumed 1 issue = 1 repo = 1 worktree = 1 PR. These pin the safe minimum the issue
@@ -288,6 +288,9 @@ Describe 'a launched session is briefed from the registry row written at start (
         $work = Join-Path $TestDrive 'launch-work'
         New-Item -ItemType Directory -Path $work -Force | Out-Null
         Mock Start-Process { $null }
+        # -StopAtPR arms the brake, which needs the companion hook plugin (#768); not what this tests.
+        $env:ABIOS_BRAKEGUARD_DOTSOURCE = '1'; . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-Guard.ps1'); $env:ABIOS_BRAKEGUARD_DOTSOURCE = ''
+        Mock Test-BrakeHookInstalled { @{ Ok = $true; Key = 'agentic-board-hooks@agentic-board'; Reason = '' } }
         Push-Location $r6
         try {
             Write-SessionRegistryEntry -IssueNum 271 -Branch 'issue-271-x' -WorkPath $work -Repo 'home/site' -SessionPid 4242 -Via 'pwsh' -TargetRepos @('o/a') -CrossRepo $true

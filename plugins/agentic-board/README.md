@@ -12,7 +12,11 @@ Full guide, screenshots and roadmap: <https://github.com/CSalcedoDataBI/agentic-
 ```
 /plugin marketplace add CSalcedoDataBI/agentic-board
 /plugin install agentic-board@agentic-board
+/plugin install agentic-board-hooks@agentic-board
 ```
+
+The second line is optional: it adds the hooks (the autonomy brake that brake-armed runs need, and
+the session notices). See "What this plugin runs, sends and fetches".
 
 ## Requirements
 
@@ -37,16 +41,13 @@ without arguments.
 **Runs on your machine**
 
 - PowerShell scripts from this plugin's `scripts/` folder, plus `gh` and `git`.
-- Hooks registered automatically when the plugin is enabled (the two cheap prechecks are POSIX
-  `sh` scripts, run by Claude Code with Git Bash on Windows and `sh` elsewhere):
-  - `SessionStart`: a one-time welcome banner, a handoff notice after a compaction, and a sweep that
-    removes *empty* orphan folders under the current repo's `.claude/worktrees/`.
-  - `PreToolUse` (Bash, PowerShell, Edit, Write, NotebookEdit, MultiEdit): refuses merge, deploy,
-    publish and delete commands **only** inside a worktree that an autonomous run armed with a brake
-    marker. Everywhere else it allows the call.
-  - `UserPromptSubmit`: tells you when a plugin this session loaded has been updated on disk.
-  - `PreCompact`: appends one line (time, repo, session id, transcript path and size) to
-    `~/.claude/agentic-board/compact-markers.jsonl`.
+- **No hooks.** This plugin registers no hooks: nothing of it runs unless you type a command or a
+  skill of it is used. The optional hooks (the autonomy brake for brake-armed runs, a one-time
+  welcome banner, a handoff notice after a compaction, a sweep of *empty* orphan worktree folders,
+  a stale-plugin notice and a compaction marker) live in the separate plugin
+  [`agentic-board-hooks`](https://github.com/CSalcedoDataBI/agentic-board/tree/main/plugins/agentic-board-hooks),
+  installed from this repository's marketplace. A run armed with the brake (`-StopAtPR` or a time
+  budget) refuses to launch unless that plugin is installed and enabled.
 - With `/board work ... -Launch` or `-Fleet` only: it opens one terminal session per started issue
   and runs a coding CLI in it (`claude`, and with `-Fleet` also `codex`, `copilot`, `agy` or `jules`).
 - **`dsh` (DeepSeek Harness, pilot)** with `-Fleet` only, and only for Docs/Chore issues of a

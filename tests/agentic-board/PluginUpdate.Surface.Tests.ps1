@@ -1,4 +1,4 @@
-﻿#Requires -Modules Pester
+#Requires -Modules Pester
 <#  The plugin-update verb is reachable and documented (epic #711, docs half of #716).
 
     A verb nobody can find does not exist: /board must list it, route it to its reference, the reference
@@ -92,7 +92,9 @@ Describe 'the reference tells the truth about the code' {
     It 'every script it names exists' {
         $names = [regex]::Matches($script:Ref, 'scripts/([A-Za-z][A-Za-z0-9-]+\.(?:ps1|sh))') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique
         @($names).Count | Should -BeGreaterOrEqual 4  # the four verb scripts and the sh shim
-        foreach ($n in $names) { Test-Path -LiteralPath (Join-Path $script:Plugin 'scripts' $n) | Should -BeTrue -Because "$n is named in verbs-plugins.md" }
+        # The sh shim ships in the companion plugin agentic-board-hooks (#768).
+        $companion = Join-Path (Split-Path $script:Plugin -Parent) 'agentic-board-hooks' 'scripts'
+        foreach ($n in $names) { ((Test-Path -LiteralPath (Join-Path $script:Plugin 'scripts' $n)) -or (Test-Path -LiteralPath (Join-Path $companion $n))) | Should -BeTrue -Because "$n is named in verbs-plugins.md" }
     }
     It 'every flag it documents is a real parameter of its script' {
         $flags = @{
@@ -119,7 +121,7 @@ Describe 'the reference tells the truth about the code' {
         $script:Ref | Should -Match '(?i)cmp -s'
         $script:Ref | Should -Match '(?i)only ever \*skips\* work when the stamp provably'
         $script:Ref | Should -Match '(?i)inconclusive check .* is never\s+remembered'
-        Test-Path -LiteralPath (Join-Path $script:Plugin 'scripts' 'PluginStale-NoticePreCheck.sh') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path (Split-Path $script:Plugin -Parent) 'agentic-board-hooks' 'scripts' 'PluginStale-NoticePreCheck.sh') | Should -BeTrue
     }
     It 'says -AcceptMarketplaceCommands is off by default' {
         $script:Ref | Should -Match '(?i)off by default'

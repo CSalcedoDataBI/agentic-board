@@ -948,6 +948,69 @@ function Send-RunSignal {
     } catch { }
 }
 
+<#
+    Will a session launched in $WorkPath load the brake hook? (#768)
+
+    The PreToolUse hook that enforces the marker ships in the companion plugin agentic-board-hooks,
+    not in agentic-board: a directory-listed plugin whose hooks start pwsh is held for review on
+    every version. So the marker alone is no longer a control - without the companion, an armed
+    run would run unbraked while the launcher printed 'brake ARMED' (the #440 failure). The launcher
+    asks this first and refuses to arm when the answer is no.
+
+    Yes = an `agentic-board-hooks@<marketplace>` entry in Claude's installed_plugins.json whose scope
+    applies to $WorkPath (user, or a project/local install whose project contains it), and no
+    `enabledPlugins` entry set to false for that key in the user settings or the worktree's project
+    settings. Reads files only. Returns @{ Ok; Key; Reason }.
+#>
+function Test-BrakeHookInstalled {
+    param(
+        [Parameter(Mandatory)][string]$WorkPath,
+        [string]$ClaudeHome = $(if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude' })
+    )
+    $install = 'install it with: /plugin install agentic-board-hooks@agentic-board'
+    $file = Join-Path (Join-Path $ClaudeHome 'plugins') 'installed_plugins.json'
+    $doc = $null
+    if (Test-Path -LiteralPath $file -PathType Leaf) {
+        try { $doc = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json } catch { $doc = $null }
+    }
+    if (-not $doc -or -not $doc.plugins) {
+        return @{ Ok = $false; Key = ''; Reason = "the brake hook plugin agentic-board-hooks is not installed ($install)" }
+    }
+    $cmp = if ($IsWindows -or $env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    $full = { param($p) ([IO.Path]::GetFullPath($p)).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar }
+    $work = & $full $WorkPath
+    $keys = @()
+    foreach ($p in $doc.plugins.PSObject.Properties) {
+        if ($p.Name -notmatch '^agentic-board-hooks@') { continue }
+        foreach ($e in @($p.Value)) {
+            if (-not $e) { continue }
+            $scope = "$($e.scope)"
+            $applies = ($scope -in @('user', 'managed')) -or
+                       (($scope -in @('project', 'local')) -and $e.projectPath -and $work.StartsWith((& $full "$($e.projectPath)"), $cmp))
+            if ($applies) { $keys += $p.Name; break }
+        }
+    }
+    if ($keys.Count -eq 0) {
+        return @{ Ok = $false; Key = ''; Reason = "the brake hook plugin agentic-board-hooks is not installed for this repository ($install)" }
+    }
+    $settings = @(
+        (Join-Path $ClaudeHome 'settings.json'),
+        (Join-Path (Join-Path $WorkPath '.claude') 'settings.json'),
+        (Join-Path (Join-Path $WorkPath '.claude') 'settings.local.json')
+    )
+    foreach ($key in $keys) {
+        $disabled = $false
+        foreach ($s in $settings) {
+            if (-not (Test-Path -LiteralPath $s -PathType Leaf)) { continue }
+            try { $j = Get-Content -LiteralPath $s -Raw | ConvertFrom-Json } catch { continue }
+            if ($j -and $j.enabledPlugins -and ($j.enabledPlugins.PSObject.Properties.Name -contains $key) -and
+                ($j.enabledPlugins.$key -eq $false)) { $disabled = $true }
+        }
+        if (-not $disabled) { return @{ Ok = $true; Key = $key; Reason = '' } }
+    }
+    return @{ Ok = $false; Key = $keys[0]; Reason = "the brake hook plugin $($keys[0]) is installed but disabled (enable it with: /plugin enable $($keys[0]))" }
+}
+
 # Dot-source guard: tests set $env:ABIOS_BRAKEGUARD_DOTSOURCE to load the pure core only.
 if ($env:ABIOS_BRAKEGUARD_DOTSOURCE) { return }
 

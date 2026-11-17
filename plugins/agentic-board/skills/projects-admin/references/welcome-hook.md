@@ -5,8 +5,8 @@ banner **exactly once**, right after they install the plugin — so the real exp
 the README demo GIF.
 
 Unlike the handoff hook (which is opt-in), this one is **auto-registered** via
-`hooks/hooks.json` and needs no setup: the whole point is that it "just works" after
-`/plugin install`.
+`agentic-board-hooks/hooks/hooks.json` and needs no setup beyond installing that companion plugin: it "just works" after
+`/plugin install agentic-board-hooks@agentic-board`.
 
 ## Why a hook (and not the install screen)
 
@@ -31,7 +31,7 @@ resumed or compacted session) **and only when a global marker is absent**:
 
 ## Registration (already wired)
 
-`hooks/hooks.json` at the plugin root:
+`agentic-board-hooks/hooks/hooks.json` of the companion plugin `agentic-board-hooks`:
 
 ```json
 {

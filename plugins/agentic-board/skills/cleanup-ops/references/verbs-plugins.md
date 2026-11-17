@@ -166,14 +166,14 @@ agents and hooks → `/reload-plugins`; a plugin with an MCP server → a new se
 
 ## The in-session notice (automatic, not typed)
 
-`hooks/hooks.json` registers a `UserPromptSubmit` hook. When a plugin the session loaded has a newer
+`agentic-board-hooks/hooks/hooks.json` registers a `UserPromptSubmit` hook. When a plugin the session loaded has a newer
 installed build it shows **once per (session, plugin, new build)**, in plain language, either "type
 /reload-plugins" or "open a new session (it has MCP servers)". It is silent otherwise, bounded by a 10 s
 timeout and its own time budget, swallows its own errors, and always exits 0. State: `plugin-notices.json`
 under the shared state directory (`Get-AbiosStateDir -Root $HOME`).
 
 **Cost, and the sh shim.** The hook runs before every prompt of every session and a `pwsh` start alone is
-about 2 s on the maintainer's machine, so hooks.json calls `scripts/PluginStale-NoticePreCheck.sh` (the
+about 2 s on the maintainer's machine, so the companion's hooks.json calls `scripts/PluginStale-NoticePreCheck.sh` (the
 same idea as `Brake-PreCheck.sh`, #572). It is POSIX `sh`, so it runs wherever Claude Code runs hooks:
 `sh -c` on macOS/Linux and Git Bash on Windows (#767).
 

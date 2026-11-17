@@ -1,4 +1,4 @@
-﻿#Requires -Modules Pester
+#Requires -Modules Pester
 <#  In-session stale-plugin notice (epic #711, task #714).
 
     The hook decides from a FABRICATED Claude home (sessions/<pid>.json + cache markers + installed list)
@@ -327,7 +327,7 @@ Describe 'the real hook script over real stdin' {
 }
 
 Describe 'hooks.json wiring' {
-    BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
+    BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-hooks' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
     It 'registers the notice on UserPromptSubmit (the only event that fires after an update, in a session that is already open)' {
         $cmds = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks } | ForEach-Object { $_.command })
         ($cmds -join ' ') | Should -Match 'PluginStale-NoticePreCheck\.sh'

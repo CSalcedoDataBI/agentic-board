@@ -34,7 +34,7 @@ mirrored. The ledger only carries what the board cannot.
 
 ## The hook contract
 
-`Handoff-SessionStartHook.ps1` (matcher `compact` in `hooks/hooks.json`):
+`Handoff-SessionStartHook.ps1` (matcher `compact` in `agentic-board-hooks/hooks/hooks.json`):
 
 - Reads **only** the local `active-run.json` marker — **never** the network (a SessionStart
   hook runs on every session and must stay fast).
@@ -109,9 +109,9 @@ To rebuild a session that died without saving, see `Board-Handoff.ps1 -Recover`
 ## Enable / disable
 
 The `compact` re-injection and the PreCompact marker ship enabled in the plugin
-`hooks/hooks.json`. Both are strict no-ops outside an active run, so there is nothing to
+`agentic-board-hooks/hooks/hooks.json`. Both are strict no-ops outside an active run, so there is nothing to
 disable for normal sessions. To turn them off entirely, remove the `compact` `SessionStart`
-entry and the `PreCompact` entry from `hooks/hooks.json`.
+entry and the `PreCompact` entry from `agentic-board-hooks/hooks/hooks.json`.
 
 The `resume`-source handoff surfacing remains **opt-in** via your own `settings.json` (see
 [handoff-hook.md](handoff-hook.md)) — this feature does not change that.

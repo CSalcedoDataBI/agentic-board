@@ -7,6 +7,10 @@
 # parents - the same four places Brake-PreToolUseHook.ps1 starts from - and only when one exists
 # does it hand stdin (the hook payload) to the real hook with exec.
 #
+# This file ships in the companion plugin agentic-board-hooks (#768): the real hook,
+# Brake-PreToolUseHook.ps1, stays in agentic-board, and Invoke-BoardHook.ps1 finds it there. When it
+# cannot, the dispatcher denies - same fail direction as a missing pwsh below.
+#
 # POSIX sh, so the same file runs everywhere Claude Code runs hooks: `sh -c` on macOS/Linux and
 # Git Bash on Windows (it replaced Brake-PreCheck.cmd, which only ran on Windows).
 #
@@ -26,7 +30,7 @@ while [ "$n" -lt 4 ] && [ -n "$d" ]; do
       printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"BRAKE: this run is brake-armed but pwsh (PowerShell 7) is not on PATH, so the brake cannot decide. Refusing."}}'
       exit 0
     fi
-    exec pwsh -NoProfile -File "$(dirname "$0")/Brake-PreToolUseHook.ps1"
+    exec pwsh -NoProfile -File "$(dirname "$0")/Invoke-BoardHook.ps1" -Hook Brake
   fi
   [ "$d" = "/" ] && break
   d=${d%/*}
