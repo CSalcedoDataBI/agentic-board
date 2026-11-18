@@ -73,4 +73,4 @@ What is not touched without a plan step that names it:
 
 ## Approval
 
-Aprobada: 2026-11-01 (parent, by delegation, after review round 4)
+Aprobada: 2026-11-18 (AI-Factory, por delegación; decisiones de Cristóbal del 2026-11-17 citadas en la PR)
