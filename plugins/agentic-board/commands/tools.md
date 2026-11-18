@@ -2,6 +2,12 @@
 description: The project's referenced external tools in one catalog — verbs browse/research/install/install --all (a skill-clone keeps its LICENSE).
 argument-hint: "[browse|research|install <id>|install --all]"
 ---
+
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
 You are running the agentic-board /tools command.
 
 **If $ARGUMENTS is empty or only whitespace, do NOT run anything yet.** Show this menu, translated

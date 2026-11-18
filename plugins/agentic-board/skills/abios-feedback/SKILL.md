@@ -4,6 +4,12 @@ description: "Use when a bug or improvement is found in the agentic-board plugin
 user-invocable: false
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # abios-feedback — improvements flow back, private data never leaks
 
 ## How to invoke
@@ -60,7 +66,7 @@ ABIOS_EOF_BODY
 The same defect was filed three times in a row (#654, #658, #667) and once as a month-old duplicate
 (#661). Before creating anything, run the duplicate check on the **sanitized** title and body files:
 ```bash
-pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/Find-DuplicateIssue.ps1" -TitleFile "$work/title.txt" -BodyFile "$work/body.md"
+pwsh -NoProfile -File "<tools>/scripts/Find-DuplicateIssue.ps1" -TitleFile "$work/title.txt" -BodyFile "$work/body.md"
 ```
 It searches the tool's open issues plus those closed in the last 30 days (a recently closed twin is a
 recurrence, not a new defect) and acts on its exit code:
@@ -74,7 +80,7 @@ recurrence, not a new defect) and acts on its exit code:
 
 ## Step 2 — Capture as a sanitized issue on the tool's own board (PRIMARY, path-independent)
 ```bash
-tok=$(pwsh -NoProfile -Command '(& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1").Token')
+tok=$(pwsh -NoProfile -Command '(& "<tools>/scripts/Get-GhAccount.ps1").Token')
 GH_TOKEN=$tok gh issue create --repo CSalcedoDataBI/agentic-board \
   --label tool-improvement --title "$(cat "$work/title.txt")" --body-file "$work/body.md"
 # Maintainers only: add it to the tool's roadmap board. Anyone else skips this line - it needs

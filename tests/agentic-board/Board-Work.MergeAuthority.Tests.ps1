@@ -9,7 +9,7 @@
     git repo with NO token reachable, like the #662/#681 tests. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
@@ -515,7 +515,7 @@ Describe 'verbs-work.md step 5d documents the expert branch' {
     }
     It 'step 5d reads the merge authority first' {
         # Anchored on the step-5d block itself, not the summary table further down.
-        $script:Doc | Should -Match '(?s)\*\*Who decides the merge \(#797\)\.\*\*\s+Before step d, run `scripts/Board-Work\.ps1 -MergeAuthority\s+show`'
+        $script:Doc | Should -Match '(?s)\*\*Who decides the merge \(#797\)\.\*\*\s+Before step d, run `<tools>/scripts/Board-Work\.ps1 -MergeAuthority\s+show`'
     }
     It 'says the review gate always runs and repos that declare nothing keep the user confirmation' {
         $script:Doc | Should -Match '(?s)declares nothing.{0,200}(today|unchanged)'

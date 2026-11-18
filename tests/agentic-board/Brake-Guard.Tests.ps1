@@ -6,7 +6,7 @@
     matter are the ones asserting a REFUSAL happens, not that a string was rendered. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-Guard.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Brake-Guard.ps1' | Resolve-Path
     $env:ABIOS_BRAKEGUARD_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BRAKEGUARD_DOTSOURCE = $null
@@ -20,7 +20,7 @@ Describe 'Test-IsBrakedCommand — the merge paths that actually happened (#440)
             Should -Be 'merge'
     }
     It 'denies the tool''s own merge script' {
-        Test-IsBrakedCommand -Command 'pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR 490' -Irreversible $script:AllIrr |
+        Test-IsBrakedCommand -Command 'pwsh plugins/agentic-board-tools/scripts/Board-Merge.ps1 -PR 490' -Irreversible $script:AllIrr |
             Should -Be 'merge'
     }
     It 'denies the REST merge endpoint used directly' {
@@ -420,7 +420,7 @@ Describe 'New-BrakeDenyJson — the payload the hook contract requires' {
 
 Describe 'Brake-PreToolUseHook — end to end through the real hook contract' {
     BeforeAll {
-        $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
+        $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
         $script:HRoot  = Join-Path ([IO.Path]::GetTempPath()) ("brakehook-" + [Guid]::NewGuid().ToString('N'))
         $script:HArmed = Join-Path $script:HRoot 'armed'
         $script:HPlain = Join-Path $script:HRoot 'plain'
@@ -668,7 +668,7 @@ Describe 'Test-IsBrakedCommand — an ORDERED run is refused exactly like an uno
     }
     It 'refuses it however the path is spelled' {
         foreach ($c in @(
-            'pwsh plugins/agentic-board/scripts/Board-Merge.ps1 -PR 5'
+            'pwsh plugins/agentic-board-tools/scripts/Board-Merge.ps1 -PR 5'
             'pwsh ./board-merge.ps1 -PR 5'
             'pwsh -File C:\plug .29.0\scripts\Board-Merge.ps1 -PR 5'
             'cd C:\ ; pwsh C:\plug .29.0\scripts\Board-Merge.ps1 -PR 5'

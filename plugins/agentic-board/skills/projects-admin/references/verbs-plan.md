@@ -19,7 +19,7 @@ Loaded on demand by /board (#573).
   genuinely novel and no search makes sense, pass `-NoPriorArt` instead — the skip is written into
   the epic body so the omission is visible rather than invisible (same shape as `-Rationale` in
   `/board triage`). The script throws if neither is supplied.
-  Then run `scripts/Board-Plan.ps1 -Title "plan: <feature>" -Tasks "A","B",... -Description "..." -PriorArt "<block>"`
+  Then run `<tools>/scripts/Board-Plan.ps1 -Title "plan: <feature>" -Tasks "A","B",... -Description "..." -PriorArt "<block>"`
   (or `-NoPriorArt` in place of `-PriorArt "<block>"` for genuinely novel work) — it ensures
   plan/plan-task labels, creates the epic (with the prior-art block in the body), reuses
   Board-Breakdown for NATIVE sub-issues, resolves the repo board with Resolve-Board (never a

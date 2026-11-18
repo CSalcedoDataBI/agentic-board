@@ -2,6 +2,12 @@
 description: Machine housekeeping for Claude Code, apart from board work — verbs sessions/transcripts/disk/plugins. Plans first, acts on one confirmation.
 argument-hint: "[sessions|transcripts|disk|plugins] [args]"
 ---
+
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
 You are running the agentic-board /cleanup command.
 
 **If $ARGUMENTS is empty or only whitespace, do NOT run anything yet.** Show this menu, **translated
@@ -31,11 +37,11 @@ through the Skill tool.
 When they answer (number or name), read and follow the **cleanup-ops** engine at `${CLAUDE_PLUGIN_ROOT}/skills/cleanup-ops/SKILL.md`, then READ the verb's contract from
 its `references/` directory and follow it exactly. Do not improvise the recipe from this summary:
 
-- **sessions** — `references/verbs-sessions.md` (runs `scripts/Cleanup-Sessions.ps1`). Default scope is
+- **sessions** — `references/verbs-sessions.md` (runs `<tools>/scripts/Cleanup-Sessions.ps1`). Default scope is
   the CURRENT repo; it never reaches into another repo or another session's work. Parking pushes and
   opens a PR, so it needs the GitHub account step below.
-- **transcripts** — `references/verbs-transcripts.md` (`scripts/Cleanup-Transcripts.ps1`). No token.
-- **disk** — `references/verbs-disk.md` (`scripts/Cleanup-Disk.ps1`). No token.
+- **transcripts** — `references/verbs-transcripts.md` (`<tools>/scripts/Cleanup-Transcripts.ps1`). No token.
+- **disk** — `references/verbs-disk.md` (`<tools>/scripts/Cleanup-Disk.ps1`). No token.
 - **plugins** — `references/verbs-plugins.md` (`Update-AllPlugins.ps1`, `Get-PluginSessionMap.ps1`,
   `Remove-OldPluginVersions.ps1`, `Find-DuplicateMcpServers.ps1`). No token.
 

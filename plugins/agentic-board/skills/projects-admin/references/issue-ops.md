@@ -54,7 +54,7 @@ gh project item-add <num> --owner <owner> --url <issueUrl>
 them with GraphQL `addSubIssue` (it refuses a CLOSED parent):
 
 ```powershell
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Board-Breakdown.ps1" -Parent 10 -Tasks "first piece","second piece"
+& "<tools>/scripts/Board-Breakdown.ps1" -Parent 10 -Tasks "first piece","second piece"
 ```
 
 To link an issue that already exists, use the REST endpoint. It takes the child's REST `.id`
@@ -73,8 +73,8 @@ gh api -X POST repos/<owner>/<repo>/issues/<parent_issue_number>/sub_issues -F s
 blockers. To WRITE them, use the script - never the raw endpoint:
 
 ```powershell
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36,37,38          # 40 waits for 36, 37, 38
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36 -DryRun         # resolve + validate, write nothing
+& "<tools>/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36,37,38          # 40 waits for 36, 37, 38
+& "<tools>/scripts/Board-Depend.ps1" -Issue 40 -BlockedBy 36 -DryRun         # resolve + validate, write nothing
 ```
 
 Why not `gh api .../dependencies/blocked_by --input {"issue_id": N}`: `issue_id` is the issue's

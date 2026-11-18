@@ -4,7 +4,7 @@ Loaded on demand by /cleanup (#734). Formerly `/board close-cycle --all`.
 
 
 For when the sidebar is full of old sessions and nobody remembers which one still holds work. It runs
-`scripts/Cleanup-Sessions.ps1`, which reuses the `/board doctor` inventory. For each local branch
+`<tools>/scripts/Cleanup-Sessions.ps1`, which reuses the `/board doctor` inventory. For each local branch
 it chooses **one** disposition, and then decides which host-app sessions may be archived.
 
 **Recipe (follow in order):**

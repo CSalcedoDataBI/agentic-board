@@ -5,16 +5,22 @@ user-invocable: false
 disable-model-invocation: true
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # skills-create - one pipeline for a new skill or a better one
 
 The pieces already exist: `skill-creator` writes, `writing-skills` pressure-tests, `skills-audit`
 finds what is wrong, `skill-improver` fixes it. What was missing is the order, the checks before
-writing, and a gate that says "done". `scripts/Skill-Pipeline.ps1` owns the deterministic parts.
+writing, and a gate that says "done". `<tools>/scripts/Skill-Pipeline.ps1` owns the deterministic parts.
 
 ## /skills create <name> "<what it should do>"
 
 1. **Plan** (read-only):
-   `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/Skill-Pipeline.ps1" -Mode create -Name <name> -Description "<draft trigger text>" [-Topic "<search words>"]`
+   `pwsh -NoProfile -File "<tools>/scripts/Skill-Pipeline.ps1" -Mode create -Name <name> -Description "<draft trigger text>" [-Topic "<search words>"]`
    It prints the toolkit status, overlapping installed skills, public prior art (stars, last push,
    license), the proposed scope with its reason, the target folder, and the stages.
 2. **Stop and ask when the plan says so**, in the user's language:

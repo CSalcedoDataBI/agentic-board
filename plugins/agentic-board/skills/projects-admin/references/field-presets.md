@@ -8,9 +8,9 @@ Presets live at `presets/fields.<lang>.json` (`en` default, `es` available). All
 ```powershell
 # from the plugin root; existing fields are skipped, only missing ones are created,
 # and legacy option names (Todo, P2 Medium, …) are renamed onto the canonical ones
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Lang en
+& "<tools>/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Lang en
 # Spanish governance:
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Lang es
+& "<tools>/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Lang es
 ```
 
 Standard set (EN): **Status, Priority, Size, Task Type, Area, Estimate, Target**.
@@ -19,7 +19,7 @@ Standard set (ES): **Estado, Prioridad, Tamaño, Tipo, Área, Estimado, Objetivo
 > **`Task Type`, not `Type` (#671).** GitHub reserves the field name `Type` — `field-create` answers
 > "Name cannot have a reserved value" — so the English preset names its type field `Task Type`.
 > Boards created before the reservation keep their working `Type` field and are left alone.
-> **Field names are never spelled by hand in a script**: `scripts/Get-BoardVocabulary.ps1` maps each
+> **Field names are never spelled by hand in a script**: `<tools>/scripts/Get-BoardVocabulary.ps1` maps each
 > key (`Status`, `Priority`, `Size`, `Type`, `Area`, `Estimate`, `Target`) to every name a board may use
 > for it (`Type` → `Type` / `Task Type` / `Tipo`, in that preference order), and `Board-Fill`,
 > `Board-Triage`, `Board-Changelog`, `Fleet-Plan` and `Apply-FieldPreset` all resolve through it. A
@@ -32,8 +32,8 @@ A rename touches every item assigned to the option at once, so the plan is **pri
 first. Answering `n` skips the standardizing and applies the rest of the preset.
 
 ```powershell
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -DryRun  # preview
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Yes     # CI / pre-approved
+& "<tools>/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -DryRun  # preview
+& "<tools>/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Yes     # CI / pre-approved
 ```
 
 ## Standardizing a board born from GitHub's template
@@ -52,7 +52,7 @@ path through this script that produces a duplicate.
 
 The rename is sent with the option's **existing id** and the canonical name, so **every item keeps its
 assignment** — no bulk item rewrite, no orphans. The legacy→canonical map lives in
-`scripts/Get-BoardVocabulary.ps1` (`Todo`→`Backlog`, `P2 Medium`→`P2`, …); an option name that is not
+`<tools>/scripts/Get-BoardVocabulary.ps1` (`Todo`→`Backlog`, `P2 Medium`→`P2`, …); an option name that is not
 in it is left alone rather than guessed. Idempotent: on an already-canonical board it plans nothing.
 
 Verified on a scratch board created from GitHub's default template: `Todo`→`Backlog` renamed, the item

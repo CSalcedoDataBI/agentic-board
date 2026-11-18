@@ -5,6 +5,12 @@ user-invocable: false
 disable-model-invocation: true
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # cleanup-ops — machine housekeeping (sessions · transcripts · disk · plugins)
 
 `/board` administers GitHub: issues, the board, PRs. What fills a MACHINE is a different job, so it

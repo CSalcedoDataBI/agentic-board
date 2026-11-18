@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Tests for Brake-PreToolUseHook.ps1 — the half of the brake that does not depend on the agent's
     cooperation (#516), taught the end-to-end order in #536.
 
@@ -12,7 +12,7 @@
       - marker + anything unclear -> deny. Inside an armed run, "I could not tell" is not a yes. #>
 
 BeforeAll {
-    $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
+    $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
     $script:Root = Join-Path ([System.IO.Path]::GetTempPath()) ("brakehook-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
 
@@ -243,8 +243,8 @@ Describe 'Budget-only marker - a contract that does not brake on merge still get
 
 Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767, #768)' {
     BeforeAll {
-        $script:PreCheck = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-hooks' 'scripts' 'Brake-PreCheck.sh' | Resolve-Path
-        $script:HooksJson = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-hooks' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json
+        $script:PreCheck = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Brake-PreCheck.sh' | Resolve-Path
+        $script:HooksJson = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json
     }
 
     It 'hooks.json routes PreToolUse through the sh shim, not straight into pwsh' {
@@ -258,7 +258,7 @@ Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767, #
         $body | Should -Match ([regex]::Escape('while [ "$n" -lt 4 ]'))
         $body | Should -Match ([regex]::Escape('$d/.agentic-board/brake-armed.json'))
         # It hands over to the companion's dispatcher, which runs agentic-board's own hook (#768).
-        $body | Should -Match 'Invoke-BoardHook\.ps1" -Hook Brake'
+        $body | Should -Match 'Brake-PreToolUseHook\.ps1"'
         # The directory validator blocks a plugin command that spells a path above the plugin.
         ($body -split "`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n" | Should -Not -Match '\.\.'
     }

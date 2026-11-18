@@ -3,9 +3,9 @@
     install sets (skill-clone by name, plugin by detect/marketplace). #>
 
 BeforeAll {
-    $script:Gaps      = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-SkillGaps.ps1' | Resolve-Path
-    $script:Quality   = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'toolkits' 'quality.json' | Resolve-Path
-    $script:Bi        = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'toolkits' 'bi.json' | Resolve-Path
+    $script:Gaps      = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Get-SkillGaps.ps1' | Resolve-Path
+    $script:Quality   = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'presets' 'toolkits' 'quality.json' | Resolve-Path
+    $script:Bi        = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'presets' 'toolkits' 'bi.json' | Resolve-Path
 }
 
 Describe 'Get-SkillGaps — profiles' {

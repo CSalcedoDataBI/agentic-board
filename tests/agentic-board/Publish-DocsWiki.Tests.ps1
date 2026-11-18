@@ -14,7 +14,7 @@
     code and architecture reference, route users to DeepWiki instead.
 #>
 BeforeAll {
-    $script:Engine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Publish-DocsWiki.ps1' | Resolve-Path
+    $script:Engine = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Publish-DocsWiki.ps1' | Resolve-Path
 
     # Helper: run the script in -PagesOnly mode and return a hashtable of page-name -> content
     function Invoke-PagesOnly {

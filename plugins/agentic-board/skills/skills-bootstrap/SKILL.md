@@ -5,6 +5,12 @@ user-invocable: false
 disable-model-invocation: true
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # skills-bootstrap — curated toolkits by profile, no duplicates
 
 Part of the **skills-ops** module. Detects gaps against what is actually installed, then
@@ -25,7 +31,7 @@ own public repos, or another developer's — always with attribution).
 ## Step 1 — Detect the gap (deterministic)
 
 ```powershell
-$g = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-SkillGaps.ps1" -Profile bi   # omit -Profile for 'quality'
+$g = & "<tools>/scripts/Get-SkillGaps.ps1" -Profile bi   # omit -Profile for 'quality'
 $g.summary
 "Installed:"; $g.installed | Select-Object name,owner,license | Format-Table
 "Gaps:";      $g.gaps      | Select-Object name,owner,repo,kind,license,purpose | Format-Table
@@ -43,7 +49,7 @@ Detection is deterministic and per-kind, so nothing is duplicated:
 **`skill-clone`** — clean clone, license preserved:
 
 ```powershell
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Install-SkillFromRepo.ps1" `
+& "<tools>/scripts/Install-SkillFromRepo.ps1" `
     -Repo <owner/name> -Path <subpath> -Name <skill-name>
 ```
 

@@ -4,6 +4,12 @@ description: "Use to administer a GitHub Projects (v2) board or its issues: crea
 user-invocable: false
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # projects-admin — GitHub Projects (v2) Board & Issue Admin
 
 This skill covers the full lifecycle of a GitHub Projects v2 board and its items: creation, field setup, issue management, bulk operations, CI automation, and gap detection/fill via `/board fill`.
@@ -19,8 +25,8 @@ This skill covers the full lifecycle of a GitHub Projects v2 board and its items
 **Before every operation in this skill, apply the `gh-account` skill** to load `GH_TOKEN` for the correct account: your account map's default owner (`/board setup`), or another account when the user names it or a board returns 403.
 
 ```powershell
-$env:GH_TOKEN = (& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1").Token              # default
-$env:GH_TOKEN = (& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1" -Account work).Token # another
+$env:GH_TOKEN = (& "<tools>/scripts/Get-GhAccount.ps1").Token              # default
+$env:GH_TOKEN = (& "<tools>/scripts/Get-GhAccount.ps1" -Account work).Token # another
 ```
 
 Every `gh project` and `gh issue` command below assumes `$env:GH_TOKEN` is already set for the correct account. Never run `gh auth switch` — it mutates global `gh` state.
@@ -109,7 +115,7 @@ follow it exactly:
 | **Standardize an EXISTING board onto the preset** (renames `Todo`→`Backlog` in place, keeps assignments) | `references/field-presets.md` | `Apply-FieldPreset.ps1` — default since #300 (preview with `-DryRun`, opt out with `-NoMigrate`) |
 | Board that ALREADY has both `Todo` and `Backlog` (moves items, then deletes the legacy option) | `references/field-presets.md` | `Apply-FieldPreset.ps1 -MergeConflicts` (preview with `-DryRun`) |
 | Set a field value on an item | `references/board-ops.md` | `gh project item-edit` |
-| Bulk-fill a custom field across ALL items (by rule) | `references/board-ops.md` | `scripts/Set-BoardField.ps1` |
+| Bulk-fill a custom field across ALL items (by rule) | `references/board-ops.md` | `<tools>/scripts/Set-BoardField.ps1` |
 | **Detect and fill board gaps** | `references/verbs-fill.md` | **`/board fill` / `--dry-run` / `--auto`** |
 | **See pending / in-flight work (state of play first, then the pending list) / start an issue** | `references/verbs-work.md` | **`Board-Work.ps1 -ListBoards` / `-ProjectNum` / `-Start`** |
 | Manage views / inspect board | `references/board-ops.md` | `gh project view`, `gh project item-list` |
@@ -143,7 +149,7 @@ These two rules are not optional and must be followed every time:
 Before `init`, `add`, or registering a plan, **resolve the existing board** instead of blindly
 creating one — duplicate boards are the most common mistake:
 ```powershell
-$num = & "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-Board.ps1" -Owner <owner> -Repo <owner>/<repo>
+$num = & "<tools>/scripts/Resolve-Board.ps1" -Owner <owner> -Repo <owner>/<repo>
 # reuses the repo's board (canonical title "<repo> — Roadmap" or one containing the repo name),
 # creating + linking + describing only if none exists. NEVER call `gh project create` directly.
 ```
@@ -151,7 +157,7 @@ $num = & "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-Board.ps1" -Owner <owner> -Repo 
 ### 2. Always back up before deleting (unconditional, do NOT ask)
 Any `gh project delete` MUST be preceded by a full backup — automatically, without asking:
 ```powershell
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Backup-Board.ps1" -Number <num> -Owner <owner>
+& "<tools>/scripts/Backup-Board.ps1" -Number <num> -Owner <owner>
 # writes a JSON snapshot (project+fields+items) AND a restorable live clone, THEN you may delete.
 ```
 The backup happens unconditionally; the **delete** itself still needs explicit user confirmation.

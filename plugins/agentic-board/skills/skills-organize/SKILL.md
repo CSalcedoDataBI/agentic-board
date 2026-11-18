@@ -5,10 +5,16 @@ user-invocable: false
 disable-model-invocation: true
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # skills-organize — catalog, health, and repo layout for Agent Skills
 
 Part of the **skills-ops** module. Two modes over one engine
-(`scripts/Get-SkillInventory.ps1`). Never touches the plugin cache or `~/.claude/skills`
+(`<tools>/scripts/Get-SkillInventory.ps1`). Never touches the plugin cache or `~/.claude/skills`
 — only the project skills inside the target repo. See `references/layout.md` for the
 canonical layout and the lint rules.
 
@@ -17,7 +23,7 @@ canonical layout and the lint rules.
 Answers "what skills do I have and are they healthy?". Run the engine and summarize.
 
 ```powershell
-$inv = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-SkillInventory.ps1" -Root . -Scope all
+$inv = & "<tools>/scripts/Get-SkillInventory.ps1" -Root . -Scope all
 ```
 
 Present, grouped by scope (plugin / personal / project):
@@ -44,13 +50,13 @@ Answers "put my scattered skills in order without mixing projects". Only relocat
 
 1. **Dry-run first (always):** show the from→to plan, change nothing.
    ```powershell
-   & "${CLAUDE_PLUGIN_ROOT}/scripts/Move-SkillsLayout.ps1" -Root .
+   & "<tools>/scripts/Move-SkillsLayout.ps1" -Root .
    ```
 2. **Confirm with the user.** Print the plan and ask (yes/no). If a skill's inferred
    project (its top-level folder) is wrong, pass `-Map @{ 'skill-name' = 'project' }`.
 3. **Apply** (requires a clean git tree — commit/stash first, or `-Force`):
    ```powershell
-   & "${CLAUDE_PLUGIN_ROOT}/scripts/Move-SkillsLayout.ps1" -Root . -Apply
+   & "<tools>/scripts/Move-SkillsLayout.ps1" -Root . -Apply
    ```
    Moves each skill's directory with `git mv` (history preserved), then writes
    `.claude/skills/skills-index.json`. The script prints the exact **revert** command.

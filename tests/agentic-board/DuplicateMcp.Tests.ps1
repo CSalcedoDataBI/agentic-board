@@ -7,7 +7,7 @@
     leave every other value of the config byte-for-byte equal in meaning.  #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' | Resolve-Path
     $script:Script = Join-Path $script:Scripts 'Find-DuplicateMcpServers.ps1'
     $env:ABIOS_DUPMCP_DOTSOURCE = '1'
     . $script:Script

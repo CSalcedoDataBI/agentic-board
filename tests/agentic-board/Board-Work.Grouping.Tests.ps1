@@ -10,7 +10,7 @@
     "does not group" case below is load-bearing. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
@@ -36,9 +36,9 @@ BeforeAll {
     }
 
     $script:Files = @(
-        'plugins/agentic-board/scripts/Board-ReviewGate.ps1',
-        'plugins/agentic-board/scripts/Apply-FieldPreset.ps1',
-        'plugins/agentic-board/scripts/Board-Work.ps1',
+        'plugins/agentic-board-tools/scripts/Board-ReviewGate.ps1',
+        'plugins/agentic-board-tools/scripts/Apply-FieldPreset.ps1',
+        'plugins/agentic-board-tools/scripts/Board-Work.ps1',
         'README.md'
     )
 }

@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  PluginStale-NoticePreCheck.sh - the cheap gate in front of the stale-plugin notice (epic #711, #714).
 
     The hook runs before EVERY prompt of EVERY session and a pwsh start alone costs about 2 s, so a sh shim
@@ -11,8 +11,8 @@
     session; anything else must reach pwsh. An invalid session id must stay silent.  #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
-    $script:Shim = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-hooks' 'scripts' 'PluginStale-NoticePreCheck.sh' | Resolve-Path   # the companion plugin (#768)
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' | Resolve-Path
+    $script:Shim = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'PluginStale-NoticePreCheck.sh' | Resolve-Path   # the companion plugin (#768)
     $script:Hook = Join-Path $script:Scripts 'PluginStale-NoticeHook.ps1'
     . (Join-Path $script:Scripts 'PluginState.ps1')
     $env:ABIOS_PLUGINNOTICE_DOTSOURCE = '1'
@@ -76,7 +76,7 @@ BeforeAll {
 }
 
 Describe 'hooks.json routes UserPromptSubmit through the shim' {
-    BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-hooks' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
+    BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
     It 'calls the .sh shim through sh, not pwsh directly, and keeps the 10 s timeout' {
         $h = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks })[0]
         $h.command | Should -Match '^sh '
@@ -93,7 +93,7 @@ Describe 'hooks.json routes UserPromptSubmit through the shim' {
     It 'the shim names the hook it starts, and passes the id, never the payload' {
         $body = Get-Content $script:Shim -Raw
         # The companion's dispatcher runs agentic-board's PluginStale-NoticeHook.ps1 (#768).
-        $body | Should -Match 'Invoke-BoardHook\.ps1" -Hook PluginStale'
+        $body | Should -Match 'PluginStale-NoticeHook\.ps1" -SessionId'
         $body | Should -Match '-SessionId "\$id"'
     }
 }
@@ -171,7 +171,7 @@ Describe 'the shim takes only a validated session id from the first line' {
 Describe 'the stamp decides whether pwsh runs' {
     It 'no stamp yet: pwsh runs' {
         $w = New-ShimWorld
-        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
     }
     It 'stamp equal to the installed list: pwsh is NOT started (proved by the recording pwsh) and stdout is empty' {
         $w = New-ShimWorld
@@ -186,7 +186,7 @@ Describe 'the stamp decides whether pwsh runs' {
         Set-Stamp $w
         Add-FakeBuild $w.Fx -Marketplace 'm' -Plugin 'p' -Version '3.0' | Out-Null
         Set-FakeInstalledBuild $w.Fx -Key 'p@m' -Version '3.0'
-        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
     }
     It 'same size, DIFFERENT content (a version bump of equal length) runs pwsh: the comparison is by content' {
         $w = New-ShimWorld
@@ -195,7 +195,7 @@ Describe 'the stamp decides whether pwsh runs' {
         $len = (Get-Item $ip).Length
         [System.IO.File]::WriteAllText($ip, ([System.IO.File]::ReadAllText($ip)).Replace('2.0', '3.0'))
         (Get-Item $ip).Length | Should -Be $len
-        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
     }
     It 'only the file TIME changed (identical bytes): nothing to re-check, pwsh is not started' {
         $w = New-ShimWorld
@@ -211,7 +211,7 @@ Describe 'the stamp decides whether pwsh runs' {
         $t = (Get-Item $ip).LastWriteTimeUtc
         [System.IO.File]::AppendAllText($ip, ' ')
         (Get-Item $ip).LastWriteTimeUtc = $t.AddHours(-5)
-        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
     }
     It 'the stamp holds the list as the check read it, so a rewrite during the check still makes the next prompt run pwsh' {
         $w = New-ShimWorld
@@ -219,24 +219,24 @@ Describe 'the stamp decides whether pwsh runs' {
         Add-FakeBuild $w.Fx -Marketplace 'm' -Plugin 'p' -Version '3.0' | Out-Null
         Set-FakeInstalledBuild $w.Fx -Key 'p@m' -Version '3.0'         # an update lands while it works
         Write-ShimStamp -StateDir $w.StateDir -SessionId $script:Id -Installed $atStart
-        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
     }
     It 'the stamp of ANOTHER session does not let this one skip' {
         $w = New-ShimWorld
         Set-Stamp $w 'aaaaaaaa-1111-2222-3333-444444444444'
-        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
     }
     It 'an unreadable or garbage stamp, a missing stamp folder or a missing installed list: pwsh runs' {
         $w = New-ShimWorld
         Set-Stamp $w
         [System.IO.File]::WriteAllText((Join-Path $w.StampDir $script:Id 'installed_plugins.json'), 'not the same bytes')
-        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
         $w2 = New-ShimWorld
-        (Invoke-Shim $w2 (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w2 (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
         $w3 = New-ShimWorld
         Set-Stamp $w3
         Remove-Item -LiteralPath (Join-Path $w3.Fx.Root 'plugins' 'installed_plugins.json') -Force
-        (Invoke-Shim $w3 (New-Payload) -FakePwsh).Ran | Should -Match 'Invoke-BoardHook\.ps1 -Hook PluginStale'
+        (Invoke-Shim $w3 (New-Payload) -FakePwsh).Ran | Should -Match 'PluginStale-NoticeHook\.ps1'
     }
     It 'is cheap: a skipped prompt returns well inside a pwsh start (generous CI bound)' {
         $w = New-ShimWorld

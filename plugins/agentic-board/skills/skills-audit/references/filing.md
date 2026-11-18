@@ -33,7 +33,7 @@ Load the tool account via `gh-account` and file to a CONSTANT target — never r
 current repo:
 
 ```powershell
-$env:GH_TOKEN = (& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1").Token   # your default account
+$env:GH_TOKEN = (& "<tools>/scripts/Get-GhAccount.ps1").Token   # your default account
 gh label create skill-eval --color 5319E7 --description "Skill failure found by skills-audit" --force `
   --repo CSalcedoDataBI/agentic-board
 $url = gh issue create --repo CSalcedoDataBI/agentic-board --label skill-eval `

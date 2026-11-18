@@ -1,6 +1,6 @@
 # Passive Stop hook (opt-in, suggest-only)
 
-`scripts/SkillAudit-StopHook.ps1` is a **Phase-2, opt-in** nudge. It is NOT enabled by
+`<tools>/scripts/SkillAudit-StopHook.ps1` is a **Phase-2, opt-in** nudge. It is NOT enabled by
 default — a hook that runs on every stop is noisy, so you turn it on deliberately.
 
 ## What it does
@@ -31,7 +31,7 @@ Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/SkillAudit-StopHook.ps1\" -Quiet"
+            "command": "pwsh -NoProfile -File \"<tools>/scripts/SkillAudit-StopHook.ps1\" -Quiet"
           }
         ]
       }

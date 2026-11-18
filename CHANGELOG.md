@@ -1,6 +1,40 @@
 ﻿# Changelog
 
 
+## [Unreleased]
+The plugin in the Anthropic directory is now Markdown only, and the expert moved to AI-Factory.
+### Removed
+- **BREAKING: `/agentic-board:expert` and the `board-expert` skill are gone (#768).** Their `config`
+  and `auto` recipes, the `Expert-*.ps1` scripts and their tests went with them. The expert now
+  lives in AI-Factory (`CSalcedoDataBI/AI-Factory`): use its specialist and experto agents.
+### Changed
+- **BREAKING: scripts, presets and hooks moved to the companion plugin `agentic-board-tools` (#768).**
+  `plugins/agentic-board/` now ships only commands, skills, plugin.json and the icon, so the
+  directory listing carries no scripts and no hooks. Install the companion from this repository's
+  marketplace: `/plugin install agentic-board-tools@agentic-board`. A `SessionStart` hook of the
+  companion writes its folder to `~/.agentic-board/tools-root` (and `AGENTIC_BOARD_TOOLS`); the
+  commands run `<tools>/scripts/<name>.ps1` from there and stop with the install line when it is
+  missing. A brake-armed launch refuses to start unless the companion is installed and enabled.
+- **The `stable` branch holds only the plugin folder (#768).** `scripts/Build-Stable.ps1` builds
+  each `stable` commit from `plugins/agentic-board/` alone, fast-forward from the previous one, and
+  refuses any file outside the directory's allowed types, any hook and any `#!` file. It never
+  pushes: the commit is measured first, then pushed by hand.
+### Added
+- **Declarative CLI adapter registry (#772).** `presets/adapters.json` with preset → user → repo
+  overrides; a cloned repo's file may only set `routing` and `reviewer`, never a command.
+- **Normalized probe codes (#770).** Every CLI probe ends in `OK | AUTH | RATE_LIMIT | QUOTA |
+  CONTEXT_WINDOW | ERROR`; unknown output is `ERROR`, never a false OK.
+- **Fail-closed run-ledger checkpoint and `Board-Handoff -Recover` (#771, #730).**
+- **dsh as a sandboxed fleet adapter, pilot (#773).** Only in a pinned Docker container, only for
+  Docs/Chore issues of public repos, session-log upload off.
+- **Per-user account map and `/board setup` (#762).** No author defaults ship in the plugin.
+- **Secret scrub for launched sessions (#769).**
+- `PRIVACY.md`, listing links, icon and command argument hints for the directory listing (#768).
+### Fixed
+- The brake fails closed when an armed run has no `pwsh` (#764).
+- The brake precheck no longer names a parent path (#768).
+- `abios-feedback` loads before asking for details (#764).
+
 ## [0.44.0] - 2026-09-29
 `/scan` goes from untracked work to a ready board in one command, `/skills` can create and improve a
 skill end to end, and the whole tool now speaks English: the agent translates for the user.

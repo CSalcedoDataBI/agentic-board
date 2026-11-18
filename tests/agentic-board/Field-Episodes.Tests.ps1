@@ -10,7 +10,7 @@
     one-directional suite while making the whole sweep worthless. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-FieldEpisodes.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Get-FieldEpisodes.ps1' | Resolve-Path
     $env:ABIOS_FIELDEPISODES_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_FIELDEPISODES_DOTSOURCE = ''
@@ -25,7 +25,7 @@ Describe 'Get-InvokedTool (what counts as using agentic-board)' {
 
     It 'recognises a plugin script by name regardless of the path in front of it' {
         Get-InvokedTool -Command 'pwsh -File "C:/long/cache/0.27.0/scripts/Board-Work.ps1" -Sessions' | Should -Be 'Board-Work.ps1'
-        Get-InvokedTool -Command 'pwsh plugins/agentic-board/scripts/Expert-Auto.ps1 -Issue 5'        | Should -Be 'Expert-Auto.ps1'
+        Get-InvokedTool -Command 'pwsh plugins/agentic-board-tools/scripts/Expert-Auto.ps1 -Issue 5'        | Should -Be 'Expert-Auto.ps1'
     }
 
     It 'recognises the typed command surface' {

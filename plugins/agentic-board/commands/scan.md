@@ -2,6 +2,12 @@
 description: Turn the current repo's untracked work (code TODOs, doc checklists, plans) into a ready board — issues, priorities, a plan epic — on one confirmation.
 argument-hint: "[apply] [-Rows n,...]"
 ---
+
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
 You are running the agentic-board /scan command.
 
 Your FIRST action: open the `project-scan` engine with the **Read** tool (it is a file, not a Skill-tool skill) at `${CLAUDE_PLUGIN_ROOT}/skills/project-scan/SKILL.md`, and follow it. It targets the CURRENT repo (`gh repo view --json nameWithOwner`),
@@ -9,7 +15,7 @@ never the tool's own repo (that is `abios-feedback`). Resolve the token for THAT
 the `gh-account` skill.
 
 **Flow - one plan, one confirmation, one apply:**
-1. `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/Scan-Project.ps1"` - read-only on GitHub.
+1. `pwsh -NoProfile -File "<tools>/scripts/Scan-Project.ps1"` - read-only on GitHub.
    It prints the proposal: every item with its type label, proposed Priority **and the reason**, what
    it is blocked by, the order, and the PR batches. Relay it as a table in the user's language.
 2. Ask ONE question: create all of it (board + labels + N issues + plan epic + fill), only some rows

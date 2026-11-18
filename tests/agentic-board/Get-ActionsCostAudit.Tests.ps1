@@ -13,7 +13,7 @@
       - the audit writes nothing: every gh call is a plain GET. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-ActionsCostAudit.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Get-ActionsCostAudit.ps1' | Resolve-Path
     $env:ABIOS_ACTIONSCOST_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_ACTIONSCOST_DOTSOURCE = ''
@@ -1016,7 +1016,7 @@ Describe 'Command surface - the verb is routed and documented (#614)' {
     It 'the reference names only scripts that exist, and states the two measurement traps and the read-only rule' {
         $ref = Get-Content $script:RefPath -Raw
         foreach ($m in [regex]::Matches($ref, '(?<![\w.-])([A-Z][A-Za-z]+-[A-Za-z]+)\.ps1')) {
-            Test-Path -LiteralPath (Join-Path $script:Plugin 'scripts' $m.Value) | Should -BeTrue -Because "$($m.Value) is named in verbs-actions-cost.md"
+            Test-Path -LiteralPath (Join-Path $script:Plugin '..' 'agentic-board-tools' 'scripts' $m.Value) | Should -BeTrue -Because "$($m.Value) is named in verbs-actions-cost.md"
         }
         $ref | Should -Match 'Get-ActionsCostAudit\.ps1'
         $ref | Should -Match '/timing'

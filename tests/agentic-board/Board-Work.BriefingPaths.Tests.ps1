@@ -1,7 +1,7 @@
 ﻿#Requires -Modules Pester
 <#  Tests for the plugin-script paths in the session briefing of Board-Work.ps1 (#480).
 
-    Get-SessionBriefing named its scripts `plugins/agentic-board/scripts/<name>`, a path relative to
+    Get-SessionBriefing named its scripts `plugins/agentic-board-tools/scripts/<name>`, a path relative to
     the session's working directory that exists in exactly one repository: this one. In every
     consumer project the commands pointed at nothing, the session improvised a bare `gh pr create`
     and the review gate never ran. These render the REAL briefing and check the paths against the
@@ -11,10 +11,10 @@
 # checkout of the repo itself? Absent when the tests run from an installed plugin cache, where
 # the layout is flatter.
 $discoveryRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..') -ErrorAction SilentlyContinue).Path
-$discoveryInThisRepo = [bool]($discoveryRepoRoot -and (Test-Path (Join-Path $discoveryRepoRoot 'plugins/agentic-board/scripts/New-BoardPR.ps1')))
+$discoveryInThisRepo = [bool]($discoveryRepoRoot -and (Test-Path (Join-Path $discoveryRepoRoot 'plugins/agentic-board-tools/scripts/New-BoardPR.ps1')))
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
@@ -52,7 +52,7 @@ Describe 'a briefing composed for a repo that is NOT this one (#480)' {
         } finally { Pop-Location }
     }
     It 'no longer emits the repo-relative form that only resolves in this repo' {
-        $script:Brief | Should -Not -Match 'pwsh plugins/agentic-board/scripts/'
+        $script:Brief | Should -Not -Match 'pwsh plugins/agentic-board-tools/scripts/'
     }
     It 'points at the folder of the script that composed it (the same install, so it exists by construction)' {
         $np = $script:Tokens | Where-Object { $_ -like '*New-BoardPR.ps1' } | Select-Object -First 1
@@ -72,10 +72,10 @@ Describe 'a briefing composed for a repo that is NOT this one (#480)' {
 Describe 'a briefing composed for THIS repo is unchanged (#480, the other direction)' {
     It 'keeps the repo-relative form, which resolves from the worktree''s own copy' -Skip:(-not $discoveryInThisRepo) {
         $b = Get-SessionBriefing 42 'CSalcedoDataBI/agentic-board' 'issue-42-x' $script:RepoRoot
-        $b | Should -Match 'pwsh plugins/agentic-board/scripts/New-BoardPR\.ps1 -Issue 42 '
-        $b | Should -Match 'pwsh plugins/agentic-board/scripts/Board-ReviewGate\.ps1 -PR <pr>'
-        $b | Should -Match 'pwsh plugins/agentic-board/scripts/Board-Merge\.ps1 -PR <pr>'
-        $b | Should -Match 'pwsh plugins/agentic-board/scripts/Fleet-Findings\.ps1 -List'
+        $b | Should -Match 'pwsh plugins/agentic-board-tools/scripts/New-BoardPR\.ps1 -Issue 42 '
+        $b | Should -Match 'pwsh plugins/agentic-board-tools/scripts/Board-ReviewGate\.ps1 -PR <pr>'
+        $b | Should -Match 'pwsh plugins/agentic-board-tools/scripts/Board-Merge\.ps1 -PR <pr>'
+        $b | Should -Match 'pwsh plugins/agentic-board-tools/scripts/Fleet-Findings\.ps1 -List'
         # ...and those relative paths really resolve from that folder
         foreach ($t in (Get-BriefingScriptTokens $b)) { (Test-Path -LiteralPath (Join-Path $script:RepoRoot $t)) | Should -BeTrue }
     }
@@ -120,10 +120,10 @@ Describe 'Resolve-BriefingScriptRef' {
     }
     It 'prefers the working copy''s own relative path when it carries the plugin' {
         $wc = Join-Path $TestDrive 'vendored'
-        New-Item -ItemType Directory -Path (Join-Path $wc 'plugins/agentic-board/scripts') -Force | Out-Null
-        Set-Content (Join-Path $wc 'plugins/agentic-board/scripts/New-BoardPR.ps1') '# stub'
+        New-Item -ItemType Directory -Path (Join-Path $wc 'plugins/agentic-board-tools/scripts') -Force | Out-Null
+        Set-Content (Join-Path $wc 'plugins/agentic-board-tools/scripts/New-BoardPR.ps1') '# stub'
         $r = Resolve-BriefingScriptRef -Name 'New-BoardPR.ps1' -WorkPath $wc -ScriptsDir $script:ScriptsDir
-        $r.ref   | Should -Be 'plugins/agentic-board/scripts/New-BoardPR.ps1'
+        $r.ref   | Should -Be 'plugins/agentic-board-tools/scripts/New-BoardPR.ps1'
         $r.found | Should -BeTrue
     }
     It 'reports found = $false when neither place has it' {

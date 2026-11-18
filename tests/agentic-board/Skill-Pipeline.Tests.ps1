@@ -6,7 +6,7 @@
     criteria, and the audit gate that ends the improve loop. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Skill-Pipeline.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Skill-Pipeline.ps1' | Resolve-Path
     $env:ABIOS_SKILLPIPE_DOTSOURCE = '1'
     try { . $script:Script } finally { $env:ABIOS_SKILLPIPE_DOTSOURCE = '' }
     function script:Sk([string]$Name, [string]$Desc, [string]$Scope = 'personal') {

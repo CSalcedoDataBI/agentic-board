@@ -3,7 +3,7 @@
 Loaded on demand by /board (#573).
 
 - **triage** — fill an item's triage fields from EVIDENCE and PROPOSE its Priority, via
-  `scripts/Board-Triage.ps1` (#306). Not a bulk default — a uniformly-filled board looks prioritised
+  `<tools>/scripts/Board-Triage.ps1` (#306). Not a bulk default — a uniformly-filled board looks prioritised
   without being so; the point is grounded values, not absence of blanks.
   - **`-Pending`** lists the pending items and which of Type/Area/Estimate/Priority are blank — the
     work-list to triage (the board's `Size` equivalent is **Estimate**; there is no Size field).

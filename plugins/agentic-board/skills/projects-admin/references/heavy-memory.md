@@ -1,7 +1,7 @@
 # Heavy-memory escalation (Basic Memory) - security-gated
 
 The default handoff is the lightweight, git-committed `HANDOFF.md`. For the **heavy case
-only** - persistent *semantic* memory across projects - `scripts/Suggest-HeavyMemory.ps1`
+only** - persistent *semantic* memory across projects - `<tools>/scripts/Suggest-HeavyMemory.ps1`
 proposes installing a reliable existing tool, **Basic Memory** (local Markdown + SQLite over
 MCP), instead of reinventing memory infrastructure. It is an **opt-in escalation**, never the
 default.
@@ -21,7 +21,7 @@ suggest-and-install-from-upstream pattern:
 **Default run = proposal only** (installs nothing):
 
 ```powershell
-pwsh -File scripts/Suggest-HeavyMemory.ps1
+pwsh -File <tools>/scripts/Suggest-HeavyMemory.ps1
 ```
 
 1. **Provenance** - live PyPI lookup of `basic-memory`: verifies the canonical package name
@@ -33,7 +33,7 @@ pwsh -File scripts/Suggest-HeavyMemory.ps1
 **Guarded install** (every control enforced before touching the system):
 
 ```powershell
-pwsh -File scripts/Suggest-HeavyMemory.ps1 -Install -AcceptAgpl -Version x.y.z
+pwsh -File <tools>/scripts/Suggest-HeavyMemory.ps1 -Install -AcceptAgpl -Version x.y.z
 ```
 
 The install **refuses** unless ALL hold:

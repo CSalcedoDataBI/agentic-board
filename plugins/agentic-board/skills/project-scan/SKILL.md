@@ -5,6 +5,12 @@ user-invocable: false
 disable-model-invocation: true
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # project-scan - from latent work to a ready board, in one command
 
 ## What it is (and is NOT)
@@ -18,7 +24,7 @@ project**, the opposite of `abios-feedback` (which targets the tool's own repo).
 2. **Account = that repo's owner**, via [[gh-account]] and your account map (`/board setup`). A 403
    means the owner maps to the wrong account: pass `--account <alias>` or map it.
 
-## The one script: `scripts/Scan-Project.ps1`
+## The one script: `<tools>/scripts/Scan-Project.ps1`
 
 **Plan (default, read-only on GitHub).** Writes only `<repo>/.agentic-board/scan-plan.json`.
 - Sources (tracked files only, via `git grep`, so `.gitignore` is honoured):

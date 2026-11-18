@@ -109,8 +109,10 @@ jobs:
           #     install count. The durable adoption measure is the traffic snapshot, not this.
           #
           # The test suite lives in tests/agentic-board/, outside the plugin folder (#768).
+          # Two plugins since #768: agentic-board (Markdown only, the one in the plugin directory) and
+          # agentic-board-tools (scripts, presets, hooks). One zip holds both, as an install needs both.
           set -euo pipefail
-          zip -q -r "agentic-board-$TAG.zip" plugins/agentic-board
+          zip -q -r "agentic-board-$TAG.zip" plugins/agentic-board plugins/agentic-board-tools
 
           # Assert rather than just print. This step runs BEFORE the release is created, so a
           # failure here means no release is published at all — which is the safe direction. Without
@@ -121,9 +123,12 @@ jobs:
           count=$(unzip -l "agentic-board-$TAG.zip" | tail -1 | awk '{print $2}')
           echo "asset: agentic-board-$TAG.zip  ${size} bytes  ${count} entries"
           [ "$size" -gt 100000 ] || { echo "::error::asset is only ${size} bytes - expected >100KB"; exit 1; }
-          # 50, not ~120 (the current real count): the assert exists to catch an empty or truncated
+          # 50, not ~300 (the current real count): the assert exists to catch an empty or truncated
           # archive, not to freeze the file count. A legitimately slimmer plugin must not fail here.
           [ "$count" -gt 50 ]    || { echo "::error::asset has only ${count} entries - expected >50"; exit 1; }
+          for p in plugins/agentic-board/.claude-plugin/plugin.json plugins/agentic-board-tools/.claude-plugin/plugin.json; do
+            unzip -l "agentic-board-$TAG.zip" | grep -q "$p" || { echo "::error::$p is missing from the asset"; exit 1; }
+          done
           if unzip -l "agentic-board-$TAG.zip" | grep -q '/tests/'; then
             echo "::error::tests/ leaked into the release asset"; exit 1
           fi
@@ -160,3 +165,7 @@ jobs:
           # rewriting the channel. Pushes made with GITHUB_TOKEN do not retrigger workflows.
           git push origin "$SHA:refs/heads/release"
           echo "::notice::release channel -> $SHA"
+
+      # `stable` (the branch the Anthropic plugin directory tracks) is NOT moved here (#768). Each
+      # commit on it is a new submission, so a person builds it with scripts/Build-Stable.ps1 (only
+      # plugins/agentic-board/, fast-forward of the previous stable), measures it, and pushes it.

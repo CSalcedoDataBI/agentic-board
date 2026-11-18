@@ -12,7 +12,7 @@
     tooling agreeing with a wrong claim.  #>
 
 BeforeAll {
-    $script:ScriptsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
+    $script:ScriptsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' | Resolve-Path
 
     $env:ABIOS_RELEASE_DOTSOURCE = '1'
     . (Join-Path $script:ScriptsDir 'New-Release.ps1')
@@ -127,17 +127,20 @@ Describe 'New-Release.ps1 end to end - the bump rule on a real run' {
         # the marketplace + CHANGELOG under the repo root, so a copy behaves exactly like the original.
         $script:Root = Join-Path ([System.IO.Path]::GetTempPath()) ('rel-' + [guid]::NewGuid().ToString('N'))
         $pluginDir = Join-Path $script:Root 'plugins' 'agentic-board'
-        New-Item -ItemType Directory -Path (Join-Path $pluginDir 'scripts') -Force | Out-Null
+        $toolsDir = Join-Path $script:Root 'plugins' 'agentic-board-tools'
+        New-Item -ItemType Directory -Path (Join-Path $toolsDir 'scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $toolsDir '.claude-plugin') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $pluginDir '.claude-plugin') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $script:Root '.claude-plugin') -Force | Out-Null
-        Copy-Item (Join-Path $script:ScriptsDir 'New-Release.ps1') (Join-Path $pluginDir 'scripts')
-        Copy-Item (Join-Path $script:ScriptsDir 'Board-Changelog.ps1') (Join-Path $pluginDir 'scripts')
-        $realPlugin = Join-Path $script:ScriptsDir '..' '.claude-plugin' 'plugin.json' | Resolve-Path
+        Copy-Item (Join-Path $script:ScriptsDir 'New-Release.ps1') (Join-Path $toolsDir 'scripts')
+        Copy-Item (Join-Path $script:ScriptsDir 'Board-Changelog.ps1') (Join-Path $toolsDir 'scripts')
+        Copy-Item (Join-Path $script:ScriptsDir '..' '.claude-plugin' 'plugin.json') (Join-Path $toolsDir '.claude-plugin')
+        $realPlugin = Join-Path $script:ScriptsDir '..' '..' 'agentic-board' '.claude-plugin' 'plugin.json' | Resolve-Path
         $realMarket = Join-Path $script:ScriptsDir '..' '..' '..' '.claude-plugin' 'marketplace.json' | Resolve-Path
         Copy-Item $realPlugin (Join-Path $pluginDir '.claude-plugin')
         Copy-Item $realMarket (Join-Path $script:Root '.claude-plugin')
         $script:PluginJson = Join-Path $pluginDir '.claude-plugin' 'plugin.json'
-        $script:Rel = Join-Path $pluginDir 'scripts' 'New-Release.ps1'
+        $script:Rel = Join-Path $toolsDir 'scripts' 'New-Release.ps1'
         $script:Cl = Join-Path $script:Root 'CHANGELOG.md'
         $script:Ver = ([regex]::Match([System.IO.File]::ReadAllText($script:PluginJson), '"version"\s*:\s*"([^"]+)"')).Groups[1].Value
 

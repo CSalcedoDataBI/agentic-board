@@ -2,7 +2,7 @@
 
 Loaded on demand by /board (#573).
 
-- **fill** — detect and fill ALL gaps across the board by running `scripts/Board-Fill.ps1`
+- **fill** — detect and fill ALL gaps across the board by running `<tools>/scripts/Board-Fill.ps1`
   (pass -Owner, -Repo, -ProjectNum for the current repo's board):
   - The script converts any draft notes to REAL issues in the repo first, then fills gaps:
     Assignees (owner), Status (from issue/PR state), Priority (P2 Medium), Size (M),
