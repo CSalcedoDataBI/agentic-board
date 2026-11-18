@@ -7,7 +7,7 @@
     effect. These tests exercise only those pure helpers - zero network, zero I/O. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Handoff.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Board-Handoff.ps1' | Resolve-Path
     $env:ABIOS_HANDOFF_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_HANDOFF_DOTSOURCE = ''
@@ -265,14 +265,14 @@ Describe 'Read-HandoffBodyFile (#419 - file-backed body parameters)' {
             Done        = @("[V] wrote save", "[V] wrote resume")
             OpenThreads = @("Decide on -NoMemo default")
             Traps       = @("Do not pass inline prose with /board")
-            KeyFiles    = @("plugins/agentic-board/scripts/Board-Handoff.ps1")
+            KeyFiles    = @("plugins/agentic-board-tools/scripts/Board-Handoff.ps1")
         } | ConvertTo-Json | Set-Content -Path $f
         $bd = Read-HandoffBodyFile $f
         $bd.NextStep    | Should -BeExactly "[V] Run the tests"
         $bd.Done.Count  | Should -Be 2
         $bd.OpenThreads | Should -Contain "Decide on -NoMemo default"
         $bd.Traps       | Should -Contain "Do not pass inline prose with /board"
-        $bd.KeyFiles    | Should -Contain "plugins/agentic-board/scripts/Board-Handoff.ps1"
+        $bd.KeyFiles    | Should -Contain "plugins/agentic-board-tools/scripts/Board-Handoff.ps1"
     }
 
     It 'returns empty defaults for sections absent from the JSON' {

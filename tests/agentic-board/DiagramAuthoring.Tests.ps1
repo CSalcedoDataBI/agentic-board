@@ -61,7 +61,7 @@ Describe 'diagram-authoring house theme' {
     BeforeAll {
         $script:ThemePath  = Join-Path $script:PluginRoot 'skills' 'diagram-authoring' 'theme.json'
         $script:StylePath  = Join-Path $script:PluginRoot 'skills' 'diagram-authoring' 'references' 'house-style.md'
-        $script:ScriptPath = Join-Path $script:PluginRoot 'scripts' 'Diagram-Theme.ps1'
+        $script:ScriptPath = Join-Path $script:PluginRoot '..' 'agentic-board-tools' 'scripts' 'Diagram-Theme.ps1'
         $env:ABIOS_DIAGRAMTHEME_DOTSOURCE = '1'
         . $script:ScriptPath
         Remove-Item Env:ABIOS_DIAGRAMTHEME_DOTSOURCE
@@ -139,7 +139,7 @@ Describe 'diagram-authoring house theme' {
 Describe 'Diagram-Theme.ps1 stamps' {
     BeforeAll {
         $env:ABIOS_DIAGRAMTHEME_DOTSOURCE = '1'
-        . (Join-Path $script:PluginRoot 'scripts' 'Diagram-Theme.ps1')
+        . (Join-Path $script:PluginRoot '..' 'agentic-board-tools' 'scripts' 'Diagram-Theme.ps1')
         Remove-Item Env:ABIOS_DIAGRAMTHEME_DOTSOURCE
         $script:Theme = Get-DiagTheme -Path (Join-Path $script:PluginRoot 'skills' 'diagram-authoring' 'theme.json')
     }

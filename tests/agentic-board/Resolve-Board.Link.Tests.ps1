@@ -15,7 +15,7 @@
     board and manufacturing its duplicate. #>
 
 BeforeAll {
-    $script:Script = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Resolve-Board.ps1' | Resolve-Path).Path
+    $script:Script = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Resolve-Board.ps1' | Resolve-Path).Path
     # Never the developer's own account map or token (#793): no map = the ambient (dummy) token.
     $script:SavedAccountsFile = $env:ABIOS_ACCOUNTS_FILE
     $script:SavedToken        = $env:GH_TOKEN

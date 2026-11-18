@@ -6,7 +6,8 @@
     The claude CLI is never run (the runner is a fake that answers "ok") and the Claude home is fabricated.  #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
+    . (Join-Path $PSScriptRoot 'PosixShell.TestKit.ps1'); Use-PosixShell
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . (Join-Path $script:Scripts 'Board-Work.ps1')
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''

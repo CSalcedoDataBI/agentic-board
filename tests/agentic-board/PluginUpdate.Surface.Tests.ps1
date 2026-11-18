@@ -35,7 +35,7 @@ Describe '/cleanup plugins is discoverable' {
         $script:Ref | Should -Match '(?m)^\|\s*`/cleanup plugins`'
     }
     It 'the README catalog is current with the command frontmatter' {
-        $out = pwsh -NoProfile -File (Join-Path $script:Plugin 'scripts' 'Update-Docs.ps1') -Check 2>&1 | Out-String
+        $out = pwsh -NoProfile -File (Join-Path $script:Plugin '..' 'agentic-board-tools' 'scripts' 'Update-Docs.ps1') -Check 2>&1 | Out-String
         $LASTEXITCODE | Should -Be 0 -Because $out
     }
 }
@@ -55,10 +55,10 @@ Describe 'dot-sourcing Board-Work.ps1 cannot silently reset a parameter of these
     # this test was widened: `Get-PluginSessionMap.ps1 -Json` still prints parseable JSON.
     It 'shares only SWITCH parameter names with Board-Work.ps1' {
         $common = [System.Management.Automation.Cmdlet]::CommonParameters + [System.Management.Automation.Cmdlet]::OptionalCommonParameters
-        $bwCmd = Get-Command (Join-Path $script:Plugin 'scripts' 'Board-Work.ps1')
+        $bwCmd = Get-Command (Join-Path $script:Plugin '..' 'agentic-board-tools' 'scripts' 'Board-Work.ps1')
         $bw = @($bwCmd.Parameters.Keys | Where-Object { $common -notcontains $_ })
         foreach ($n in 'Update-AllPlugins.ps1', 'Get-PluginSessionMap.ps1', 'Remove-OldPluginVersions.ps1') {
-            $ownCmd = Get-Command (Join-Path $script:Plugin 'scripts' $n)
+            $ownCmd = Get-Command (Join-Path $script:Plugin '..' 'agentic-board-tools' 'scripts' $n)
             $own = @($ownCmd.Parameters.Keys | Where-Object { $common -notcontains $_ })
             $shared = @($own | Where-Object { $bw -contains $_ })
             $notSwitch = @($shared | Where-Object {
@@ -72,7 +72,7 @@ Describe 'dot-sourcing Board-Work.ps1 cannot silently reset a parameter of these
         # Without this replay the switch half of the rule above is not enough: a caller who DID pass
         # -Json/-DryRun would silently lose it the moment Board-Work.ps1's param() block ran.
         foreach ($n in 'Update-AllPlugins.ps1', 'Get-PluginSessionMap.ps1', 'Remove-OldPluginVersions.ps1') {
-            $src = Get-Content (Join-Path $script:Plugin 'scripts' $n) -Raw
+            $src = Get-Content (Join-Path $script:Plugin '..' 'agentic-board-tools' 'scripts' $n) -Raw
             $src | Should -Match 'PSBoundParameters\.Keys' -Because "$n dot-sources Board-Work.ps1 and must replay what the caller passed"
         }
     }
@@ -80,7 +80,7 @@ Describe 'dot-sourcing Board-Work.ps1 cannot silently reset a parameter of these
 
 Describe 'no function is defined twice in a script (a leftover of an edit that silently shadows the first copy)' {
     It '<_> defines every function once' -ForEach @('PluginState.ps1', 'Update-AllPlugins.ps1', 'Get-PluginSessionMap.ps1', 'Remove-OldPluginVersions.ps1', 'PluginStale-NoticeHook.ps1') {
-        $path = Join-Path $script:Plugin 'scripts' $_
+        $path = Join-Path $script:Plugin '..' 'agentic-board-tools' 'scripts' $_
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
         $dups = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) |
             Group-Object Name | Where-Object Count -gt 1 | ForEach-Object Name)
@@ -92,7 +92,9 @@ Describe 'the reference tells the truth about the code' {
     It 'every script it names exists' {
         $names = [regex]::Matches($script:Ref, 'scripts/([A-Za-z][A-Za-z0-9-]+\.(?:ps1|sh))') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique
         @($names).Count | Should -BeGreaterOrEqual 4  # the four verb scripts and the sh shim
-        foreach ($n in $names) { Test-Path -LiteralPath (Join-Path $script:Plugin 'scripts' $n) | Should -BeTrue -Because "$n is named in verbs-plugins.md" }
+        # The sh shim ships in the companion plugin agentic-board-tools (#768).
+        $companion = Join-Path (Split-Path $script:Plugin -Parent) 'agentic-board-tools' 'scripts'
+        foreach ($n in $names) { ((Test-Path -LiteralPath (Join-Path $script:Plugin '..' 'agentic-board-tools' 'scripts' $n)) -or (Test-Path -LiteralPath (Join-Path $companion $n))) | Should -BeTrue -Because "$n is named in verbs-plugins.md" }
     }
     It 'every flag it documents is a real parameter of its script' {
         $flags = @{
@@ -101,7 +103,7 @@ Describe 'the reference tells the truth about the code' {
             'Get-PluginSessionMap.ps1'     = @('Json', 'ClaudeHome')
         }
         foreach ($script in $flags.Keys) {
-            $params = (Get-Command (Join-Path $script:Plugin 'scripts' $script)).Parameters.Keys
+            $params = (Get-Command (Join-Path $script:Plugin '..' 'agentic-board-tools' 'scripts' $script)).Parameters.Keys
             foreach ($f in $flags[$script]) { $params | Should -Contain $f -Because "$script must have -$f" }
         }
         foreach ($f in '-DryRun', '-Only', '-Clean', '-AcceptMarketplaceCommands', '-Execute', '-ShowKept', '-GraceMinutes') {
@@ -119,7 +121,7 @@ Describe 'the reference tells the truth about the code' {
         $script:Ref | Should -Match '(?i)cmp -s'
         $script:Ref | Should -Match '(?i)only ever \*skips\* work when the stamp provably'
         $script:Ref | Should -Match '(?i)inconclusive check .* is never\s+remembered'
-        Test-Path -LiteralPath (Join-Path $script:Plugin 'scripts' 'PluginStale-NoticePreCheck.sh') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path (Split-Path $script:Plugin -Parent) 'agentic-board-tools' 'scripts' 'PluginStale-NoticePreCheck.sh') | Should -BeTrue
     }
     It 'says -AcceptMarketplaceCommands is off by default' {
         $script:Ref | Should -Match '(?i)off by default'

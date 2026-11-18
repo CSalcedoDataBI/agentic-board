@@ -11,8 +11,9 @@
     session; anything else must reach pwsh. An invalid session id must stay silent.  #>
 
 BeforeAll {
-    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
-    $script:Shim = Join-Path $script:Scripts 'PluginStale-NoticePreCheck.sh'
+    . (Join-Path $PSScriptRoot 'PosixShell.TestKit.ps1'); Use-PosixShell
+    $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' | Resolve-Path
+    $script:Shim = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'PluginStale-NoticePreCheck.sh' | Resolve-Path   # the companion plugin (#768)
     $script:Hook = Join-Path $script:Scripts 'PluginStale-NoticeHook.ps1'
     . (Join-Path $script:Scripts 'PluginState.ps1')
     $env:ABIOS_PLUGINNOTICE_DOTSOURCE = '1'
@@ -76,7 +77,7 @@ BeforeAll {
 }
 
 Describe 'hooks.json routes UserPromptSubmit through the shim' {
-    BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
+    BeforeAll { $script:Hooks = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json }
     It 'calls the .sh shim through sh, not pwsh directly, and keeps the 10 s timeout' {
         $h = @($script:Hooks.hooks.UserPromptSubmit | ForEach-Object { $_.hooks })[0]
         $h.command | Should -Match '^sh '
@@ -92,7 +93,8 @@ Describe 'hooks.json routes UserPromptSubmit through the shim' {
     }
     It 'the shim names the hook it starts, and passes the id, never the payload' {
         $body = Get-Content $script:Shim -Raw
-        $body | Should -Match 'PluginStale-NoticeHook\.ps1'
+        # The companion's dispatcher runs agentic-board's PluginStale-NoticeHook.ps1 (#768).
+        $body | Should -Match 'PluginStale-NoticeHook\.ps1" -SessionId'
         $body | Should -Match '-SessionId "\$id"'
     }
 }

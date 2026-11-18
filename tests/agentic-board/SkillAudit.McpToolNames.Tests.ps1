@@ -4,8 +4,8 @@
     discovery script reads a fixture home (-UserHome), never the live machine's config. #>
 
 BeforeAll {
-    $script:Audit    = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Invoke-SkillAudit.ps1'  | Resolve-Path
-    $script:Discover = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Get-McpServerNames.ps1' | Resolve-Path
+    $script:Audit    = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Invoke-SkillAudit.ps1'  | Resolve-Path
+    $script:Discover = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Get-McpServerNames.ps1' | Resolve-Path
     $script:Root     = Join-Path ([System.IO.Path]::GetTempPath()) ("skillaudit-mcp-" + [guid]::NewGuid().ToString('N'))
 
     function New-Skill {

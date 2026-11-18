@@ -3,7 +3,7 @@
 Loaded on demand by /board (#573).
 
 - **doctor** — audit the local branches and worktrees against GIT REALITY by running
-  `scripts/Board-Doctor.ps1` (repo derived from origin, or `-Repo owner/name`). Read-only by
+  `<tools>/scripts/Board-Doctor.ps1` (repo derived from origin, or `-Repo owner/name`). Read-only by
   default: it prints every local branch classified as `merged` (a PR is MERGED **and** its
   `headRefOid` is the branch tip), `merged-advanced`, `in-review`, `closed-unmerged`, `active`,
   `dirty`, `stale` (no PR, tip older than `-StaleDays`, default 30) or `working`, plus any ghost
@@ -24,7 +24,7 @@ drops dead-PID entries from every read. So a branch whose agent crashed, a branc
 (`CONTRIBUTING.md` invites them), or a worktree left by a failed remove is invisible everywhere
 else. `/board doctor` looks at git instead, and the registry only ever *protects* a branch.
 
-Run `scripts/Board-Doctor.ps1`. Read-only unless `-Fix` is passed.
+Run `<tools>/scripts/Board-Doctor.ps1`. Read-only unless `-Fix` is passed.
 
 ### The one rule that matters: never use `git branch --merged`
 
@@ -102,7 +102,7 @@ branch already proven merged by its PR (#273/PR #275). The proof is the PR, not 
 ## State-dir garbage collection (#574)
 
 `/board doctor` audits git refs; the STATE dir (`.agentic-board/`) has its own reaper:
-`scripts/Clear-AbiosState.ps1` (plan only; `-Force` executes; `-MaxAgeDays`, default 14). It
+`<tools>/scripts/Clear-AbiosState.ps1` (plan only; `-Force` executes; `-MaxAgeDays`, default 14). It
 removes only regenerable per-run debris — briefings, launch scripts, expert briefs, per-issue
 logs, signal markers, compaction snapshots — never the durable records (sessions history, run
 ledger marker, contract, denial log, fleet files), never a live session's files, never anything

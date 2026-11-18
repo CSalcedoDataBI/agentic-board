@@ -13,7 +13,7 @@
       * /board setup stores the command and never runs it.  #>
 
 BeforeAll {
-    $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' | Resolve-Path
+    $script:ScriptDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' | Resolve-Path
     $script:SavedFile = $env:ABIOS_ACCOUNTS_FILE
     $env:ABIOS_ACCOUNTS_FILE = Join-Path $TestDrive 'no-accounts.json'
     $env:ABIOS_ADAPTERS_USER_FILE = Join-Path $TestDrive 'no-user-adapters.json'

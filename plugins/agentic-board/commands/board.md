@@ -2,10 +2,16 @@
 description: Run a GitHub Projects board — verbs work/plan/fill/init/add/move/field/bulk/automate/templates/labels/update/changelog/handoff/doctor/close-cycle/telemetry/triage/complete/bi-checklist/actions-cost/setup. No arguments shows the menu.
 argument-hint: "[work|plan|fill|init|add|move|field|bulk|automate|templates|labels|update|changelog|handoff|doctor|close-cycle|telemetry|triage|complete|bi-checklist|actions-cost|setup] [args]"
 ---
+
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, or `<tools>/scripts` is missing (a pointer left by an uninstall), agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
 You are running the agentic-board /board command.
 
 **If $ARGUMENTS is empty or only whitespace, do NOT start any work yet.** The one thing you run
-first is the read-only `scripts/Board-Work.ps1 -PreferGroupedPRs show` (no GitHub token, writes no
+first is the read-only `<tools>/scripts/Board-Work.ps1 -PreferGroupedPRs show` (no GitHub token, writes no
 preference): its first line is `Grouped PRs: <value> (<source>)`. Put that text in the sub-line under
 `1. work` below, in place of `<repo value>` (#681). If it fails or the cwd is not a git repo,
 print `auto (default)`. Then show this menu and wait for the user to pick (they can answer with
@@ -48,7 +54,6 @@ What do you want to do with the board?
 /skills     → Agent Skills lifecycle (organize / audit / bootstrap [bi] / freshness)
 /knowledge  → registry of external references by domain (add / harvest / wiki)
 /tools      → unified catalog of external tools: browse, research and install (one or all)
-/expert     → auto-expert: takes a plan and runs it ON ITS OWN (config = define the contract, auto = run autonomously)
 /cleanup    → machine housekeeping: sessions, transcripts, disk and plugins (not board work)
 
 ── feedback channel (NOT typed — it fires on its own) ──────────
@@ -87,7 +92,7 @@ improvise the recipe from this summary:
   standing answer with `-PreferGroupedPRs on|off|auto` (`show` reads the current value and where it
   came from; the menu above prints it). Full contract: `references/verbs-work.md`.
 - **plan** — turn a plan into a tracked epic + native sub-issues (interactive or from a doc),
-  with the enriched sections `/board expert auto` reads. Full contract: `references/verbs-plan.md`.
+  optionally with enriched sections (research, role seed, deliverables, test plan). Full contract: `references/verbs-plan.md`.
 - **fill** — detect and fill ALL board gaps (drafts→issues, assignees, Status, Priority, Size,
   Type), with `--dry-run` / `--auto` variants. Full contract: `references/verbs-fill.md`.
 - **field** — two DISTINCT scripts (apply a preset vs bulk-fill one field by rule), including
@@ -130,24 +135,24 @@ The short verbs run directly:
 - **bulk** — batch move/close/label across many items (references/issue-ops.md)
 - **automate** — install the actions/add-to-project CI workflow (references/automation.md)
 - **templates** — install issue forms + PR template into the current repo working copy by running
-  `scripts/Install-RepoTemplates.ps1` (default `-Path .`, repo derived from origin). Existing
+  `<tools>/scripts/Install-RepoTemplates.ps1` (default `-Path .`, repo derived from origin). Existing
   files are SKIPPED (never overwrite customized templates); `--force` overwrites. Ensures the
   labels the forms reference exist. Only touches the working copy.
 - **update** — post a board status update (Projects BP: share high-level progress) by running
-  `scripts/Post-BoardStatusUpdate.ps1 -ProjectNum <n>` (auto-generates the body from live counts
+  `<tools>/scripts/Post-BoardStatusUpdate.ps1 -ProjectNum <n>` (auto-generates the body from live counts
   + next pending by Priority; `-Status AT_RISK|OFF_TRACK|COMPLETE` and `-Body` override it).
-- **labels** — apply the label taxonomy preset by running `scripts/Apply-LabelPreset.ps1`
+- **labels** — apply the label taxonomy preset by running `<tools>/scripts/Apply-LabelPreset.ps1`
   (repo derived from origin, or `-Repo owner/name`). Idempotent; never deletes existing labels.
 - **complete** — verify the board is fully worked (0 PENDING items) by running
-  `scripts/Assert-BoardComplete.ps1 -ProjectNum <n> -Owner <o>`. "Pending" is the same definition
+  `<tools>/scripts/Assert-BoardComplete.ps1 -ProjectNum <n> -Owner <o>`. "Pending" is the same definition
   `work` lists from. Exit 0 = PASS/clear; exit 1 lists the pending items. Fails closed on a gh
   error (an unreadable board never reads as "complete").
 - **setup** — write or show the user's account map (`~/.agentic-board/accounts.json`, #762) by
-  running `scripts/Set-AbiosAccounts.ps1`. Start with `-Show`. Then ASK, one at a time: the
+  running `<tools>/scripts/Set-AbiosAccounts.ps1`. Start with `-Show`. Then ASK, one at a time: the
   default board owner (offer the login `gh api user --jq .login` returns); for each account they
   use, the env var that holds its token (`-Map 'login=VAR'`; an env var NAME, never the token
   itself — never ask for or echo a token); optional short aliases (`-Alias 'alias=login'`); and,
-  only if they run autonomous `/expert` sessions, the variable of a separate machine identity
+  only if they run brake-armed sessions (`/board work -Launch -StopAtPR`), the variable of a separate machine identity
   (`-AgentTokenVar`), or a local command that prints a short-lived token for it, e.g. a GitHub
   App (`-AgentTokenCommand`, `-AgentGitName`, `-AgentGitEmail`; recipe in the `gh-account`
   skill's `references/github-app-agent-token.md`). Preview with `-DryRun`, write on their
@@ -163,9 +168,9 @@ with the board URL so the user can open it in one click:
 `https://github.com/users/<owner>/projects/<num>` (or `/orgs/<org>/projects/<num>` for org boards).
 
 SAFETY (mandatory, see references/best-practices.md):
-- Before init/add/plan, **resolve-or-reuse** the repo's board with `scripts/Resolve-Board.ps1` —
+- Before init/add/plan, **resolve-or-reuse** the repo's board with `<tools>/scripts/Resolve-Board.ps1` —
   never create a duplicate board with a blind `gh project create`.
-- Before ANY board delete, **always run `scripts/Backup-Board.ps1` first** (JSON snapshot + live
+- Before ANY board delete, **always run `<tools>/scripts/Backup-Board.ps1` first** (JSON snapshot + live
   clone) — unconditionally, without asking. The delete itself still needs explicit confirmation.
 - For any destructive action (delete, bulk close/move), print a dry-run of exactly what would
   change and confirm BEFORE mutating.

@@ -12,11 +12,26 @@ Full guide, screenshots and roadmap: <https://github.com/CSalcedoDataBI/agentic-
 ```
 /plugin marketplace add CSalcedoDataBI/agentic-board
 /plugin install agentic-board@agentic-board
+/plugin install agentic-board-tools@agentic-board
 ```
+
+This plugin is Markdown only: its commands and skills. The scripts they run and the hooks live in
+the companion plugin `agentic-board-tools` (third line), installed from this repository's
+marketplace. Start a new session after installing it.
+
+### Without agentic-board-tools
+
+- The commands and skills load. `/board` stops with the install line instead of its menu, because the menu is read by a script.
+- The skills still answer questions about how the suite works (verbs, flags, the review gate,
+  the brake), because that text is Markdown in this plugin.
+- Every scripted verb (`/board work`, `fill`, `doctor`, `/scan`, `/skills`, `/knowledge`, `/docs`,
+  `/cleanup`) stops and asks you to install agentic-board-tools.
+- No hooks run: no welcome banner, no handoff after a compaction, no stale-plugin notice.
+- A brake-armed launch (`-StopAtPR` or a time budget) is refused, because the brake is a hook.
 
 ## Requirements
 
-- [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (`pwsh`), `git`, and the [`gh` CLI](https://cli.github.com/).
+- [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (`pwsh`), `git`, `sh` (on Windows, the one Git for Windows ships), and the [`gh` CLI](https://cli.github.com/).
 - A GitHub token with the `repo` and `project` scopes. With one account, `gh auth login` and
   `gh auth refresh --scopes project` are enough: the plugin falls back to `GH_TOKEN`, then
   `gh auth token`. With several accounts, `/board setup` writes `~/.agentic-board/accounts.json`,
@@ -29,24 +44,23 @@ Full guide, screenshots and roadmap: <https://github.com/CSalcedoDataBI/agentic-
 
 Type `/board` with no arguments for a menu, or ask in plain language ("what's pending?",
 "start issue #42", "move these to Done"). Typed commands: `/board`, `/scan`, `/skills`,
-`/knowledge`, `/tools`, `/docs`, `/expert`, `/cleanup`. Each one lists its verbs when run
+`/knowledge`, `/tools`, `/docs`, `/cleanup`. Each one lists its verbs when run
 without arguments.
 
 ## What this plugin runs, sends and fetches
 
 **Runs on your machine**
 
-- PowerShell scripts from this plugin's `scripts/` folder, plus `gh` and `git`.
-- Hooks registered automatically when the plugin is enabled (the two cheap prechecks are POSIX
-  `sh` scripts, run by Claude Code with Git Bash on Windows and `sh` elsewhere):
-  - `SessionStart`: a one-time welcome banner, a handoff notice after a compaction, and a sweep that
-    removes *empty* orphan folders under the current repo's `.claude/worktrees/`.
-  - `PreToolUse` (Bash, PowerShell, Edit, Write, NotebookEdit, MultiEdit): refuses merge, deploy,
-    publish and delete commands **only** inside a worktree that an autonomous run armed with a brake
-    marker. Everywhere else it allows the call.
-  - `UserPromptSubmit`: tells you when a plugin this session loaded has been updated on disk.
-  - `PreCompact`: appends one line (time, repo, session id, transcript path and size) to
-    `~/.claude/agentic-board/compact-markers.jsonl`.
+- PowerShell scripts from the `scripts/` folder of the companion plugin `agentic-board-tools`,
+  plus `gh` and `git`. This plugin itself ships no scripts.
+- **No hooks.** This plugin registers no hooks: nothing of it runs unless you type a command or a
+  skill of it is used. The hooks (the autonomy brake for brake-armed runs, a one-line pointer to
+  the scripts folder, a one-time welcome banner, a handoff notice after a compaction, a sweep of
+  *empty* orphan worktree folders, a stale-plugin notice and a compaction marker) live in the
+  separate plugin
+  [`agentic-board-tools`](https://github.com/CSalcedoDataBI/agentic-board/tree/main/plugins/agentic-board-tools),
+  installed from this repository's marketplace. A run armed with the brake (`-StopAtPR` or a time
+  budget) refuses to launch unless that plugin is installed and enabled.
 - With `/board work ... -Launch` or `-Fleet` only: it opens one terminal session per started issue
   and runs a coding CLI in it (`claude`, and with `-Fleet` also `codex`, `copilot`, `agy` or `jules`).
 - **`dsh` (DeepSeek Harness, pilot)** with `-Fleet` only, and only for Docs/Chore issues of a
@@ -117,4 +131,4 @@ Full privacy policy: [PRIVACY.md](PRIVACY.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE.md](LICENSE.md).

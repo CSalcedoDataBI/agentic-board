@@ -12,7 +12,8 @@
       - marker + anything unclear -> deny. Inside an armed run, "I could not tell" is not a yes. #>
 
 BeforeAll {
-    $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
+    . (Join-Path $PSScriptRoot 'PosixShell.TestKit.ps1'); Use-PosixShell
+    $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
     $script:Root = Join-Path ([System.IO.Path]::GetTempPath()) ("brakehook-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
 
@@ -241,10 +242,10 @@ Describe 'Budget-only marker - a contract that does not brake on merge still get
     }
 }
 
-Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767)' {
+Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767, #768)' {
     BeforeAll {
-        $script:PreCheck = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Brake-PreCheck.sh' | Resolve-Path
-        $script:HooksJson = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json
+        $script:PreCheck = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Brake-PreCheck.sh' | Resolve-Path
+        $script:HooksJson = Get-Content (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'hooks' 'hooks.json' | Resolve-Path) -Raw | ConvertFrom-Json
     }
 
     It 'hooks.json routes PreToolUse through the sh shim, not straight into pwsh' {
@@ -257,7 +258,8 @@ Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767)' 
         $body = Get-Content $script:PreCheck -Raw
         $body | Should -Match ([regex]::Escape('while [ "$n" -lt 4 ]'))
         $body | Should -Match ([regex]::Escape('$d/.agentic-board/brake-armed.json'))
-        $body | Should -Match 'Brake-PreToolUseHook\.ps1'
+        # It hands over to the companion's dispatcher, which runs agentic-board's own hook (#768).
+        $body | Should -Match 'Brake-PreToolUseHook\.ps1"'
         # The directory validator blocks a plugin command that spells a path above the plugin.
         ($body -split "`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n" | Should -Not -Match '\.\.'
     }
@@ -305,11 +307,17 @@ Describe 'Brake-PreCheck.sh - the cheap gate in front of the hook (#572, #767)' 
         $payloadFile = Join-Path $TestDrive 'payload.json'
         Set-Content -LiteralPath $payloadFile -Encoding UTF8 -Value $payload
         Push-Location $wt
+        # Hermetic: an empty Claude config, so the dispatcher finds the sibling checkout's
+        # agentic-board (this repo), not a copy installed on the machine running the tests.
+        $savedCfg = $env:CLAUDE_CONFIG_DIR
+        $env:CLAUDE_CONFIG_DIR = Join-Path $TestDrive 'empty-claude-config'
         try {
             $out = (Get-Content -LiteralPath $payloadFile -Raw | & sh "$($script:PreCheck)" 2>&1 | Out-String).Trim()
             $out | Should -Match '"permissionDecision":"deny"'
             $out | Should -Match 'BRAKE'
-        } finally { Pop-Location }
+            # The real guard's reason, not the dispatcher's "could not be found" fallback.
+            $out | Should -Not -Match 'could not be found'
+        } finally { $env:CLAUDE_CONFIG_DIR = $savedCfg; Pop-Location }
     }
     It 'WITH a marker but no pwsh on PATH it DENIES instead of failing open (#764)' {
         # exec pwsh would exit 127 there, a non-blocking hook error that lets the tool call through.

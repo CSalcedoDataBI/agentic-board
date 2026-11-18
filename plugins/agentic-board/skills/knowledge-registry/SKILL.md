@@ -4,6 +4,12 @@ description: "Use to add or list a project's knowledge references by domain (kno
 user-invocable: false
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, or `<tools>/scripts` is missing (a pointer left by an uninstall), agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # knowledge-registry
 
 Capture and read the per-project knowledge references registry. The source of truth is
@@ -27,7 +33,7 @@ unaffected.
 ## Add a reference
 Run the engine (never hand-edit the registry file):
 ```
-pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Add-KnowledgeRef.ps1 -Root . -Ref <url|path> -Domain <Domain> -Title "<title>" -Note "<one line>"
+pwsh -File <tools>/scripts/Add-KnowledgeRef.ps1 -Root . -Ref <url|path> -Domain <Domain> -Title "<title>" -Note "<one line>"
 # allow-list repo (.json blocked): add -Format yaml to init knowledge/registry.yaml instead
 ```
 - The domain must be declared in the registry. If it is new and intended, pass `-NewDomain`.
@@ -37,14 +43,14 @@ pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Add-KnowledgeRef.ps1 -Root . -Ref <url|
 
 ## List / read
 ```
-pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Get-KnowledgeInventory.ps1 -Root . -Json
+pwsh -File <tools>/scripts/Get-KnowledgeInventory.ps1 -Root . -Json
 ```
 Present the table grouped by domain. Surface health gently (broken paths, duplicates,
 orphan domains, missing notes) — report, do not block.
 
 ## Regenerate the table
 ```
-pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Write-KnowledgeTable.ps1 -Root .
+pwsh -File <tools>/scripts/Write-KnowledgeTable.ps1 -Root .
 ```
 
 ## Publish to the GitHub Wiki (`/knowledge wiki`)
@@ -53,7 +59,7 @@ the layer that anchors the registry to GitHub. The account is resolved from the 
 through your account map (`/board setup`); the token travels only through a
 one-shot credential helper, never the stored remote.
 ```
-pwsh -File ${CLAUDE_PLUGIN_ROOT}/scripts/Publish-KnowledgeWiki.ps1 -Root .
+pwsh -File <tools>/scripts/Publish-KnowledgeWiki.ps1 -Root .
 ```
 - Requires the repo's **Wiki** feature enabled (Settings → Features → Wikis); the engine says
   so if it is off. An empty wiki is initialized on the first publish.

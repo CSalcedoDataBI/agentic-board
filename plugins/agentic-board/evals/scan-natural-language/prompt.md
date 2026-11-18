@@ -1,6 +1,6 @@
 ---
 name: scan-natural-language
-tags: [activation, negative, project-scan, board-expert]
+tags: [activation, negative, project-scan]
 max_turns: 2
 timeout_seconds: 90
 ---

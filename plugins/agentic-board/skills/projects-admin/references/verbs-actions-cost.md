@@ -3,7 +3,7 @@
 Loaded on demand by /board (#573, #614).
 
 - **actions-cost** — report what a repo's GitHub Actions setup MEASURABLY costs and where its
-  workflow files break the cost rules, by running `scripts/Get-ActionsCostAudit.ps1` (repo derived
+  workflow files break the cost rules, by running `<tools>/scripts/Get-ActionsCostAudit.ps1` (repo derived
   from origin, or `-Repo owner/name`). It is **read-only**: every gh call is a plain GET, it
   writes nothing to the repo, the board or the disk, and it applies no fix. There is no `-Fix`.
   - `-Month yyyy-MM` picks the usage month (default: the current UTC month).

@@ -3,7 +3,7 @@
 Loaded on demand by /board (#573).
 
 - **changelog** — generate a Keep-a-Changelog version block from the board's Done issues by
-  running `scripts/Board-Changelog.ps1 -ProjectNum <n>`. Groups issues into Added/Changed/Fixed
+  running `<tools>/scripts/Board-Changelog.ps1 -ProjectNum <n>`. Groups issues into Added/Changed/Fixed
   by the board Type field (Feature→Added, Bug→Fixed, Docs/Refactor/Chore→Changed; label fallback).
   Includes an issue only when it is closed, was NOT closed as "not planned"/duplicate, was closed
   **by a merged PR** whose merge is on/after the last CHANGELOG entry (`closedByPullRequestsReferences`),

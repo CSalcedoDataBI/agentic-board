@@ -3,7 +3,7 @@
 Loaded on demand by /board (#573).
 
 - **close-cycle** (formerly `cerrar-ciclo`, still accepted as a deprecated alias, #733) — classify the CURRENT branch and PERFORM its next
-  disposition by running `scripts/Board-Work.ps1 -CloseLoop` (repo from origin, or `-Repo`). It is
+  disposition by running `<tools>/scripts/Board-Work.ps1 -CloseLoop` (repo from origin, or `-Repo`). It is
   NOT "merge": merging has the review gate, and "close the cycle" is ambiguous ("ship it" vs "stop for
   today") — that one step stays a human decision. Every other step it takes itself instead of
   printing a command to copy-paste (#650), asking a plain-language question first only where a

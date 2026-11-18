@@ -1,12 +1,12 @@
 # First-run welcome banner (SessionStart hook)
 
-`scripts/Welcome-SessionStartHook.ps1` greets the user with the elegant **AGENTIC BOARD**
+`<tools>/scripts/Welcome-SessionStartHook.ps1` greets the user with the elegant **AGENTIC BOARD**
 banner **exactly once**, right after they install the plugin — so the real experience matches
 the README demo GIF.
 
 Unlike the handoff hook (which is opt-in), this one is **auto-registered** via
-`hooks/hooks.json` and needs no setup: the whole point is that it "just works" after
-`/plugin install`.
+`agentic-board-tools/hooks/hooks.json` and needs no setup beyond installing that companion plugin: it "just works" after
+`/plugin install agentic-board-tools@agentic-board`.
 
 ## Why a hook (and not the install screen)
 
@@ -31,7 +31,7 @@ resumed or compacted session) **and only when a global marker is absent**:
 
 ## Registration (already wired)
 
-`hooks/hooks.json` at the plugin root:
+`agentic-board-tools/hooks/hooks.json` of the companion plugin `agentic-board-tools`:
 
 ```json
 {
@@ -42,7 +42,7 @@ resumed or compacted session) **and only when a global marker is absent**:
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/scripts/Welcome-SessionStartHook.ps1\""
+            "command": "pwsh -NoProfile -File \"<tools>/scripts/Welcome-SessionStartHook.ps1\""
           }
         ]
       }

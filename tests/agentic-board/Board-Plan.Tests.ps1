@@ -4,12 +4,12 @@
     Side-effecting (creates issues over gh), so it exposes a dot-source guard: with
     $env:ABIOS_BOARDPLAN_DOTSOURCE set it returns after defining the pure body formatter.
     These tests pin Format-EnrichedEpicBody — the enriched epic body that carries the four
-    standard items the /board expert auto-mode reads (Research, Role seed, Deliverables,
-    Test plan / DoD). An omitted section must render a detectable TBD placeholder so `auto`
-    can tell an enriched-but-unfilled plan from a filled one. #>
+    standard items an agent working the plan reads (Research, Role seed, Deliverables,
+    Test plan / DoD). An omitted section must render a detectable TBD placeholder, so an
+    enriched-but-unfilled plan can be told from a filled one. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Plan.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Board-Plan.ps1' | Resolve-Path
     $env:ABIOS_BOARDPLAN_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDPLAN_DOTSOURCE = ''

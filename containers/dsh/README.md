@@ -27,7 +27,7 @@ the image with `--pull=never`, so a missing image is reported, not downloaded.
 
 ## What the container gets
 
-The launch line comes from `plugins/agentic-board/presets/adapters.json` (`dsh` entry):
+The launch line comes from `plugins/agentic-board-tools/presets/adapters.json` (`dsh` entry):
 
 - the worktree, bind-mounted at `/work`, as the only writable mount;
 - a read-only root filesystem, plus `/tmp` as a tmpfs (512 MB). `DSH_HOME` is there, so dsh's

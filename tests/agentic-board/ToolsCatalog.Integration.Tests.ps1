@@ -8,12 +8,12 @@
 #>
 
 BeforeAll {
-    $script:ScriptsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts'
+    $script:ScriptsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts'
     $script:Resolver = Join-Path $script:ScriptsDir 'Get-ToolsCatalog.ps1'
     $script:Show     = Join-Path $script:ScriptsDir 'Show-ToolsCatalog.ps1'
     $script:Install  = Join-Path $script:ScriptsDir 'Install-ToolFromCatalog.ps1'
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path   # holds knowledge/registry.json
-    $script:PresetsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'presets' 'toolkits'
+    $script:PresetsDir = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'presets' 'toolkits'
 
     $script:Pin = @{ Root = $script:RepoRoot; InstalledNames = @(); InstalledPlugins = @() }
     $script:Cat = & $script:Resolver @script:Pin

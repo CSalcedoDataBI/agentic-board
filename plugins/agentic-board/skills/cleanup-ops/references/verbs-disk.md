@@ -1,6 +1,6 @@
 # /cleanup disk — one report of what fills the disk, one --force that cleans what is provably safe (full recipe)
 
-Loaded on demand by /cleanup (#737). Runs `scripts/Cleanup-Disk.ps1` and needs no GitHub token.
+Loaded on demand by /cleanup (#737). Runs `<tools>/scripts/Cleanup-Disk.ps1` and needs no GitHub token.
 
 **Recipe:**
 1. **Plan** (writes nothing): `Cleanup-Disk.ps1`. Tell the user what each of the four items would free,

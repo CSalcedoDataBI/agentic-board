@@ -57,7 +57,7 @@ option **colors** that `gh project field-create` cannot set (GitHub auto-assigns
 on create — the preset script fixes them afterward via GraphQL, preserving option IDs):
 
 ```powershell
-& "<plugin>/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Lang en   # or -Lang es
+& "<tools>/scripts/Apply-FieldPreset.ps1" -Number <num> -Owner <owner> -Lang en   # or -Lang es
 ```
 
 ### Canonical taxonomy (the standard — keep boards coherent)
@@ -174,14 +174,14 @@ and picks single-select vs text automatically:
 
 ```powershell
 # single-select by title-prefix map ("*" = fallback):
-& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Categoria `
+& "<tools>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Categoria `
   -PrefixMap '{"apps-":"apps","model-":"model","agent-":"agent","etl-":"etl","viz-":"viz","shared-":"shared","speckit-":"framework","*":"vendored"}'
 
 # text field by template ({title} -> the item's title):
-& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Ruta -TextTemplate ".claude/skills/{title}/SKILL.md"
+& "<tools>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Ruta -TextTemplate ".claude/skills/{title}/SKILL.md"
 
 # constant for all matching items:
-& "<plugin>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Status -Value Done
+& "<tools>/scripts/Set-BoardField.ps1" -Number 6 -Owner work-org -Field Status -Value Done
 ```
 
 `-Filter` (regex on the item title) defaults to the skill-name shape `^[a-z0-9]+(-[a-z0-9]+)*$`, so
@@ -216,7 +216,7 @@ long-titled tracking issues are skipped; pass your own to widen/narrow the set.
 
 ```bash
 # 1) MANDATORY, unconditional backup (do NOT ask) — JSON snapshot + restorable live clone:
-pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Backup-Board.ps1" -Number <num> -Owner <owner>
+pwsh -File "<tools>/scripts/Backup-Board.ps1" -Number <num> -Owner <owner>
 
 # 2) Then confirm with the user (destructive), then delete.
 #    gh project delete has NO --yes/-y flag — pipe a confirmation to stdin:
@@ -240,7 +240,7 @@ public repo's docs, set it Public (its items are already public-safe by the same
 ## Get-or-create the board (never duplicate)
 Always resolve the existing board before creating one:
 ```powershell
-$num = & "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-Board.ps1" -Owner <owner> -Repo <owner>/<repo>
+$num = & "<tools>/scripts/Resolve-Board.ps1" -Owner <owner> -Repo <owner>/<repo>
 ```
 It reuses the board GitHub has LINKED to the repo (whatever its title; `repository.projectsV2`), and
 only when the repo has none does it try title matching (canonical `<repo> — Roadmap`, or a non-backup

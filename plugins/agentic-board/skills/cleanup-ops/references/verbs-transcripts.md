@@ -4,7 +4,7 @@ Loaded on demand by /board (#736).
 
 Every Claude Code session writes `~/.claude/projects/<project>/<sessionId>.jsonl`, plus a companion
 `<sessionId>/` folder of tool results and subagents. Nothing removes them, so they fill the disk.
-This verb runs `scripts/Cleanup-Transcripts.ps1`. It needs no GitHub token.
+This verb runs `<tools>/scripts/Cleanup-Transcripts.ps1`. It needs no GitHub token.
 
 **Recipe:**
 

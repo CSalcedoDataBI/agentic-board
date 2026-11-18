@@ -122,6 +122,7 @@ jobs:
           claude --version
           claude plugin validate --strict .
           claude plugin validate --strict plugins/agentic-board
+          claude plugin validate --strict plugins/agentic-board-tools
           claude plugin validate --strict plugins/agentic-board/skills
           claude plugin validate --strict plugins/agentic-board/commands
 
@@ -140,10 +141,10 @@ jobs:
       - name: Fail if any derived region drifted from its sources
         shell: pwsh
         run: |
-          plugins/agentic-board/scripts/Update-Docs.ps1 -Check
+          plugins/agentic-board-tools/scripts/Update-Docs.ps1 -Check
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::A derived region is stale - regenerate and commit."
-            Write-Host "Fix it locally: run 'plugins/agentic-board/scripts/Update-Docs.ps1' and commit the result."
+            Write-Host "Fix it locally: run 'plugins/agentic-board-tools/scripts/Update-Docs.ps1' and commit the result."
             exit 1
           }
 
@@ -161,7 +162,7 @@ jobs:
         shell: pwsh
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'wiki-preview'
-          & plugins/agentic-board/scripts/Publish-DocsWiki.ps1 -Root . -PagesOnly -OutDir $out
+          & plugins/agentic-board-tools/scripts/Publish-DocsWiki.ps1 -Root . -PagesOnly -OutDir $out
           $pages = @(Get-ChildItem $out -Filter '*.md')
           if ($pages.Count -eq 0) {
             Write-Host '::error::Wiki doc generation produced no pages.'

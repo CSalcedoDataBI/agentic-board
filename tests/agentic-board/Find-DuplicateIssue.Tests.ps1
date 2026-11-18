@@ -9,8 +9,8 @@
         at every report about a popular script would be switched off within a week.  #>
 
 BeforeAll {
-    $script:ScriptPath = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Find-DuplicateIssue.ps1' | Resolve-Path
-    $script:LibPath    = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'IssueSearch.ps1' | Resolve-Path
+    $script:ScriptPath = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Find-DuplicateIssue.ps1' | Resolve-Path
+    $script:LibPath    = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'IssueSearch.ps1' | Resolve-Path
     . $script:LibPath
 
     function script:I { param([int]$N, [string]$T, [string]$S = 'CLOSED', [string]$R = 'NOT_PLANNED', [string]$B = '', $Closed = $null)

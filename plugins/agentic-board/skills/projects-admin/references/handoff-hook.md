@@ -1,6 +1,6 @@
 # SessionStart auto-load hook (opt-in)
 
-`scripts/Handoff-SessionStartHook.ps1` makes a saved handoff **surface itself** when you
+`<tools>/scripts/Handoff-SessionStartHook.ps1` makes a saved handoff **surface itself** when you
 **resume** a prior session, so you do not have to remember `Board-Handoff.ps1 -Resume`. It is
 **opt-in** - a hook that runs on session start should be a deliberate choice.
 
@@ -40,7 +40,7 @@ path of the installed plugin (`installPath` in `claude plugin list --json`). The
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"<plugin path>/scripts/Handoff-SessionStartHook.ps1\""
+            "command": "pwsh -NoProfile -File \"<tools>/scripts/Handoff-SessionStartHook.ps1\""
           }
         ]
       }

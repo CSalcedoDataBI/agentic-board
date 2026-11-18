@@ -97,10 +97,8 @@ Describe 'PowerShell source encoding' {
         $notForWinPs = @(
             # `??` null-coalescing and `? :` ternary are PowerShell 7 operators. 5.1 rejects them
             # BOM or no BOM: a deliberate version dependency, not an encoding fault.
-            'plugins/agentic-board/scripts/Expert-RoleSynthesis.ps1'
-            'plugins/agentic-board/scripts/Expert-Roles.ps1'
-            'plugins/agentic-board/scripts/KnowledgeRegistryIo.ps1'
-            'plugins/agentic-board/scripts/Resolve-SkillOwner.ps1'
+            'plugins/agentic-board-tools/scripts/KnowledgeRegistryIo.ps1'
+            'plugins/agentic-board-tools/scripts/Resolve-SkillOwner.ps1'
 
             # Different reason, same conclusion: these two keep a `#!/usr/bin/env pwsh` shebang
             # instead of a BOM (see the rule above), so 5.1 still reads them as ANSI. They are VHS

@@ -1,8 +1,14 @@
 ---
 name: gh-account
-description: "Use before any agentic-board GitHub Projects/issues operation: resolves the account for the repo owner and injects its token as GH_TOKEN per call, without gh auth switch. Not for general gh/git use outside agentic-board commands. Triggers — a /board, /scan or /expert GitHub call, a 403 on a board, INSUFFICIENT_SCOPES/read:project."
+description: "Use before any agentic-board GitHub Projects/issues operation: resolves the account for the repo owner and injects its token as GH_TOKEN per call, without gh auth switch. Not for general gh/git use outside agentic-board commands. Triggers — a /board or /scan GitHub call, a 403 on a board, INSUFFICIENT_SCOPES/read:project."
 user-invocable: false
 ---
+
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, or `<tools>/scripts` is missing (a pointer left by an uninstall), agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
 
 # gh-account — which GitHub identity, and its token
 
@@ -13,7 +19,7 @@ change the user's global `gh` state).
 ## The account map (#762)
 
 Which env var holds which account's token is the **user's own map**,
-`~/.agentic-board/accounts.json`, written by `/board setup` (`scripts/Set-AbiosAccounts.ps1`).
+`~/.agentic-board/accounts.json`, written by `/board setup` (`<tools>/scripts/Set-AbiosAccounts.ps1`).
 It stores env var NAMES, never tokens. With no map, every owner uses the ambient token: `GH_TOKEN`,
 then `gh auth token`. So a single-account user needs nothing beyond `gh auth login`.
 
@@ -35,8 +41,8 @@ the brake exists to remove.
 ## Get the token (preferred)
 
 ```powershell
-$acct = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1"                 # default owner
-$acct = & "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1" -Account work   # an alias or a login
+$acct = & "<tools>/scripts/Get-GhAccount.ps1"                 # default owner
+$acct = & "<tools>/scripts/Get-GhAccount.ps1" -Account work   # an alias or a login
 $env:GH_TOKEN = $acct.Token
 ```
 
@@ -46,7 +52,7 @@ falls back to `GH_TOKEN` / `gh auth token`, and checks the `project` scope. It r
 is missing or lacks `project`.
 
 Scripts that talk to GitHub resolve the identity themselves through `Get-GhTokenForContext`
-(`scripts/Resolve-GhTokenVar.ps1`), which applies the same map and the brake rule.
+(`<tools>/scripts/Resolve-GhTokenVar.ps1`), which applies the same map and the brake rule.
 
 ## Hard rules
 
@@ -66,7 +72,7 @@ Scripts that talk to GitHub resolve the identity themselves through `Get-GhToken
 
 `GH_TOKEN` covers `gh` only; `git push` uses git's credential machinery. **Never embed a token in
 the remote URL** (it leaks into `git remote -v`, shell history and copies of the config). Use
-`scripts/New-BoardPR.ps1 -Issue <n>`: it resolves the account from the repo owner, checks push
+`<tools>/scripts/New-BoardPR.ps1 -Issue <n>`: it resolves the account from the repo owner, checks push
 permission, pushes through a one-shot credential helper and opens the PR with `Closes #<n>`.
 `-TokenVar <VAR>` forces an identity outside a braked run.
 

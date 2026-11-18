@@ -15,6 +15,16 @@
         "ref": "release"
       },
       "description": "Run coding agents off your real GitHub Projects board: a quota-aware, review-gated coordinator, not another local Kanban."
+    },
+    {
+      "name": "agentic-board-tools",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/CSalcedoDataBI/agentic-board",
+        "path": "plugins/agentic-board-tools",
+        "ref": "release"
+      },
+      "description": "The scripts and hooks agentic-board runs (board operations, launches, review gate, autonomy brake). Install it next to agentic-board."
     }
   ]
 }

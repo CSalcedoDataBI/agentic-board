@@ -5,6 +5,12 @@ user-invocable: false
 disable-model-invocation: true
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, or `<tools>/scripts` is missing (a pointer left by an uninstall), agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # tools-catalog — unified referenced-tools catalog (browse · research · install)
 
 The single browsable surface for the external tools this project *references* and can *install*.
@@ -25,13 +31,13 @@ carrying: `name, domain, kind, url, installable, install-method, installed`.
 ## Sub-actions
 
 ### browse  (read-only, no token)
-Run `scripts/Show-ToolsCatalog.ps1` — it renders the unified catalog grouped by domain, each row
+Run `<tools>/scripts/Show-ToolsCatalog.ps1` — it renders the unified catalog grouped by domain, each row
 showing `[installed|available|reference]`, the id, the kind, and the URL. It reads
-`scripts/Get-ToolsCatalog.ps1` under the hood (registry + presets merged, installed-state via the
+`<tools>/scripts/Get-ToolsCatalog.ps1` under the hood (registry + presets merged, installed-state via the
 `Get-SkillGaps` rules); pass `-Json` to the resolver directly when you need the raw item model.
 
 ### research <id>  (read-only)
-Run `scripts/Show-ToolsCatalog.ps1 -Id <id>` — it surfaces ONE tool's name, source, URL, install
+Run `<tools>/scripts/Show-ToolsCatalog.ps1 -Id <id>` — it surfaces ONE tool's name, source, URL, install
 method and note so the user reads the reference before deciding. `<id>` matches the row id or the
 tool name (case-insensitive). Never installs anything.
 
@@ -44,7 +50,7 @@ MCP as the first probe** — before any clone or web fetch:
 This gives the user an authoritative, wiki-quality description in one call, with no cloning.
 
 ### install <id>  (confirm each; never duplicate)
-Run `scripts/Install-ToolFromCatalog.ps1 -Id <id>` — it resolves the item and installs by KIND:
+Run `<tools>/scripts/Install-ToolFromCatalog.ps1 -Id <id>` — it resolves the item and installs by KIND:
 - `skill-clone` → delegates to `Install-SkillFromRepo.ps1` (clean `--depth 1` clone, copy only the
   skill folder, **preserve LICENSE**). Skipped with a note when it already shows as installed.
 - `plugin` (e.g. `microsoft/skills-for-fabric`) → all-or-nothing: it SURFACES the install command for
@@ -55,7 +61,7 @@ Run `scripts/Install-ToolFromCatalog.ps1 -Id <id>` — it resolves the item and 
 Confirm before running; `-DryRun` previews. `<id>` matches the row id or the tool name.
 
 ### install --all  (one pass, one confirmation)
-Run `scripts/Install-ToolFromCatalog.ps1 -All` — it lists every MISSING installable, skill-clones and
+Run `<tools>/scripts/Install-ToolFromCatalog.ps1 -All` — it lists every MISSING installable, skill-clones and
 plugins SEPARATELY, and is a safe preview by default (installs nothing). Show that plan to the user,
 get ONE confirmation, then re-run with `-All -Yes` to clone the skill-clones; plugin entries are
 always surfaced (their install command printed) for the user to run, never installed blindly.

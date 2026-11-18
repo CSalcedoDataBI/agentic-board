@@ -19,16 +19,16 @@ Loaded on demand by /board (#573).
   genuinely novel and no search makes sense, pass `-NoPriorArt` instead — the skip is written into
   the epic body so the omission is visible rather than invisible (same shape as `-Rationale` in
   `/board triage`). The script throws if neither is supplied.
-  Then run `scripts/Board-Plan.ps1 -Title "plan: <feature>" -Tasks "A","B",... -Description "..." -PriorArt "<block>"`
+  Then run `<tools>/scripts/Board-Plan.ps1 -Title "plan: <feature>" -Tasks "A","B",... -Description "..." -PriorArt "<block>"`
   (or `-NoPriorArt` in place of `-PriorArt "<block>"` for genuinely novel work) — it ensures
   plan/plan-task labels, creates the epic (with the prior-art block in the body), reuses
   Board-Breakdown for NATIVE sub-issues, resolves the repo board with Resolve-Board (never a
   duplicate), and registers epic + children. Suggest `/board fill` for Priority/Size/Type and
   `/board work` to start the first task. Issues are created ONLY in the current repo (origin) —
   never elsewhere.
-  Optionally enrich the epic with the four standard items the **`/board expert`** auto-mode
-  reads: `-Research "<prior-art / docs found>"`, `-RoleSeed "<expert role objective>"`,
+  Optionally enrich the epic with the four standard items an agent working the plan reads:
+  `-Research "<prior-art / docs found>"`, `-RoleSeed "<role objective>"`,
   `-Deliverables "d1","d2"`, `-TestPlan "DoD1","DoD2"` (here `-Description` becomes the Goal).
-  Any omitted section renders a `_TBD - fill before /board expert auto_` placeholder, so a plan
-  can be created now and completed before running the expert. All four are optional — with none,
+  Any omitted section renders a `_TBD - fill before work starts_` placeholder, so a plan can be
+  created now and completed before work starts. All four are optional — with none,
   the epic body is rendered exactly as before.

@@ -90,7 +90,7 @@ what let a menu tell users to type `/abios-feedback`, a command that does not ex
   from its `description` when the work matches (account resolution, board admin, `abios-feedback`,
   `tmdl-review`, …). A user "runs" it by saying what they want in natural language, not `/<name>`.
 - **Engine** — an internal skill that ONLY a command reaches (`skills-*`, `cleanup-ops`,
-  `tools-catalog`, `project-scan`, `knowledge-harvest`, `board-expert`). It also carries
+  `tools-catalog`, `project-scan`, `knowledge-harvest`). It also carries
   `disable-model-invocation: true`, so its description never loads into a session (#763: this cut
   the always-on cost from ~2,810 to ~760 tokens). The model cannot reach it through the Skill tool,
   so its command must open it **by path** as its first action:
@@ -126,8 +126,8 @@ plugin.json). They live between `<!-- BEGIN:commands -->`/`<!-- END:commands -->
 `<!-- BEGIN:version -->`/`<!-- END:version -->` markers — edit the *source*, then regenerate:
 
 ```powershell
-plugins/agentic-board/scripts/Update-Docs.ps1            # rewrite the marked regions in place
-plugins/agentic-board/scripts/Update-Docs.ps1 -Check     # exit 1 if the README is stale (CI gate)
+plugins/agentic-board-tools/scripts/Update-Docs.ps1            # rewrite the marked regions in place
+plugins/agentic-board-tools/scripts/Update-Docs.ps1 -Check     # exit 1 if the README is stale (CI gate)
 ```
 
 Everything outside the markers stays hand-written. `-Check` is exit-code clean (0 fresh / 1 stale)
@@ -152,7 +152,7 @@ and #568 finally added the time dimension. With that in place, the standing poli
 2. **Before building a new self-control mechanism, ask what MEASUREMENT would make it
    unnecessary.** The run-ledger existed to survive compactions largely caused by a 72 KB
    instruction payload (#573 removed the weight); the evidence-×3 ceremony existed because
-   nothing verified runs (`Expert-RunVerify.ps1` now does, against ONE artifact).
+   nothing verified runs (a run verifier was later added for ONE artifact; the expert has since moved to AI-Factory).
 3. **Field evidence outranks introspection.** `/board telemetry` reads real sessions — with
    durations since #568. When choosing the next piece of work, an episode from the field ledger
    beats a hypothesis about the tool's own governance.
@@ -164,14 +164,15 @@ a judgement about where the next hour goes, made by whoever holds the roadmap.
 
 `plugins/agentic-board/.claude-plugin/plugin.json` is the **single source of truth** for the
 version; the plugin entry in `.claude-plugin/marketplace.json` mirrors its `name` + `description`
-(nothing restates the version). `scripts/New-Release.ps1` prepares a release and **stops before
+(nothing restates the version); `plugins/agentic-board-tools/.claude-plugin/plugin.json` carries the
+same version, in lockstep. `scripts/New-Release.ps1` prepares a release and **stops before
 committing** so you review the diff first:
 
 ```powershell
 # from the repo root
-plugins/agentic-board/scripts/New-Release.ps1 -Check          # validate manifests + semver (no writes)
-plugins/agentic-board/scripts/New-Release.ps1 -Bump minor -DryRun   # preview current -> next
-plugins/agentic-board/scripts/New-Release.ps1 -Bump patch     # bump plugin.json + fold the CHANGELOG
+plugins/agentic-board-tools/scripts/New-Release.ps1 -Check          # validate manifests + semver (no writes)
+plugins/agentic-board-tools/scripts/New-Release.ps1 -Bump minor -DryRun   # preview current -> next
+plugins/agentic-board-tools/scripts/New-Release.ps1 -Bump patch     # bump plugin.json + fold the CHANGELOG
 ```
 
 It bumps the version (targeted, so the rest of `plugin.json` is byte-preserved), folds the board's
@@ -199,6 +200,18 @@ workflow (`.github/workflows/release.yml`, #322) fires automatically and:
 So tagging and the release channel are **no longer manual**: land the version bump on `main` and CI
 does the rest. `plugin.json`'s `version` is still what drives `plugin update` detection for users, so
 it must change on every release (the bump commit is exactly that).
+
+The plugin directory tracks `stable`, and CI does **not** move it: every commit there is a new
+submission, so it moves only after a measurement. After the release, from the repo root:
+
+```powershell
+pwsh scripts/Build-Stable.ps1 -Rev vX.Y.Z    # builds, never pushes; prints the new commit
+# measure that commit with the plugin-directory measurer: 0 blocking, 0 held, or no push
+git push origin <sha>:refs/heads/stable      # a plain push: a non-fast-forward is refused
+```
+
+The commit holds `plugins/agentic-board/` and nothing else, and the script refuses to build it when
+the folder carries a script, a hook, a `#!` file or a type the directory does not accept.
 
 ## Good first issues
 

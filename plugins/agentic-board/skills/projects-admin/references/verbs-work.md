@@ -2,9 +2,9 @@
 
 Loaded on demand by /board (#573): this is the verb's complete contract — follow it exactly.
 
-- **work** — the daily driver: show pending work and start an issue, via `scripts/Board-Work.ps1`.
+- **work** — the daily driver: show pending work and start an issue, via `<tools>/scripts/Board-Work.ps1`.
   Conversational flow — steps 0 and 1 are QUESTIONS: ask, then WAIT for the answer before running:
-  0. **Account.** Read the account map: `scripts/Set-AbiosAccounts.ps1 -Show`. If it maps MORE
+  0. **Account.** Read the account map: `<tools>/scripts/Set-AbiosAccounts.ps1 -Show`. If it maps MORE
      than one owner, ask which to use (the default owner first) and pass that owner's
      `-TokenVar <VAR> -Owner <login>` to every Board-Work call. With one owner, or no map (the
      ambient `GH_TOKEN` / `gh auth token`), use it silently — do not ask.
@@ -126,7 +126,7 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
        one gate and one merge. This is the normal path for issues the offer grouped, not a
        special case — see step 3b for when to split them back out instead.
      - **Too big for one PR?** Break it down FIRST with
-       `scripts/Board-Breakdown.ps1 -Parent <issueNum> -Tasks "child A", "child B"` — creates
+       `<tools>/scripts/Board-Breakdown.ps1 -Parent <issueNum> -Tasks "child A", "child B"` — creates
        native sub-issues (Sub-issues progress fills itself) — then start one child. Use a
        checkbox task list in the parent body instead when the pieces are too small for issues.
      - **Triage it now** (#306). You have just read the full issue context, so this is the moment its
@@ -143,7 +143,7 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
      `New-BoardPR.ps1` also refuses to push a branch other than the one a live session registered
      for the issue in this working copy (`-AllowBranchMismatch` overrides on purpose). When the
      work is done:
-     a. Run `scripts/New-BoardPR.ps1 -Issue <issueNum>` — the cross-account push+PR step:
+     a. Run `<tools>/scripts/New-BoardPR.ps1 -Issue <issueNum>` — the cross-account push+PR step:
         it resolves the RIGHT account from the repo OWNER through the account map
         (`-TokenVar` forces one), verifies push permission, pushes
         the branch with a one-shot credential helper (the stored remote is never rewritten
@@ -154,11 +154,11 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         requests" column (a system column no API can write). This overrides any general
         commit-directly-to-main workflow rule for issues started via `work`.
      b. Move the board item into **In Review** (the review/testing stage) now that the PR is
-        open: `scripts/Board-Work.ps1 -ProjectNum <n> -ToReview <issueNum>`. If the board has no
+        open: `<tools>/scripts/Board-Work.ps1 -ProjectNum <n> -ToReview <issueNum>`. If the board has no
         In Review column yet, apply the field preset (`/board field apply en`) — it creates the
         canonical Status (Backlog·In Progress·In Review·Blocked·Done) with colors. On boards without
         it, `Board-Fill` keeps mapping open PRs to In Progress, so this step is a no-op — skip it.
-     c. Run `scripts/Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` — it requests a Copilot
+     c. Run `<tools>/scripts/Board-ReviewGate.ps1 -Repo <owner/name> -PR <n>` — it requests a Copilot
         code review when available, measures PR size (warns over 600 lines / 20 files and
         suggests `Board-Breakdown.ps1` — small PRs review better), and when the PR touches
         `*.tmdl` (a PBIP semantic model) runs the two **model-quality gates that BLOCK the merge**
@@ -184,7 +184,7 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         is stamped with the head commit — so record LAST: anything you push afterwards invalidates
         it, correctly, because nobody reviewed those lines. Only when a review genuinely buys
         nothing (a typo, a regenerated file) use `-AllowUnreviewed`, and say so in your report.
-     **Who decides the merge (#797).** Before step d, run `scripts/Board-Work.ps1 -MergeAuthority
+     **Who decides the merge (#797).** Before step d, run `<tools>/scripts/Board-Work.ps1 -MergeAuthority
      show` (no token, writes nothing), after a `git fetch origin`. **If that fetch fails, the
      authority is `user`** whatever `show` says: a stale ref may still carry a grant the owner has
      revoked. Its first line is `Merge authority: user (...)` or
@@ -257,7 +257,7 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
         moment right before an irreversible action, and its content is about THIS PR, not the
         whole session.
      e. Only after the gate passes AND the user confirms (or, under `Merge authority: expert`, the
-        expert said `merge` and its summary is on the PR): `scripts/Board-Merge.ps1 -PR <n>` — merges the PR (squash +
+        expert said `merge` and its summary is on the PR): `<tools>/scripts/Board-Merge.ps1 -PR <n>` — merges the PR (squash +
         delete-branch by default) and, if the repo's own `pr-before-merge` ruleset marks the PR
         `blocked`, retries with the `--admin` bypass the ruleset grants admins (announced honestly);
         a non-admin gets a clear blocked message instead of a raw error. The merge closes the issue,
@@ -268,7 +268,7 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
        `Board-Merge.ps1` handles the resulting `blocked` state for you (auto `--admin` when admin).
   - **Parallel (several independent issues at once).** When the user picks MORE THAN ONE
     independent pending issue, batch-start them instead of looping:
-    `scripts/Board-Work.ps1 -ProjectNum <n> -Parallel <n1,n2,...>` starts each (In Progress +
+    `<tools>/scripts/Board-Work.ps1 -ProjectNum <n> -Parallel <n1,n2,...>` starts each (In Progress +
     assign + claim) in its OWN worktree `../<repo>--issue-<n>` off the freshly fetched default
     branch (`origin/main` here — resolved, not assumed, so a `master` repo works too);
     blocked / claimed / closed issues are skipped with a reason (the batch never aborts).
@@ -307,7 +307,7 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
     (completion is a later channel — a host end-signal + `Fleet-Supervisor.ps1 -Check`, #710 phase
     3). `-Surface headless` is accepted (so callers can name it) but not yet implemented — it
     throws rather than silently falling back to a visible terminal.
-    Monitor the fleet with `scripts/Board-Work.ps1 -Sessions`, or `-Sessions -Watch -AutoClean`
+    Monitor the fleet with `<tools>/scripts/Board-Work.ps1 -Sessions`, or `-Sessions -Watch -AutoClean`
     to block until every session finishes (PR merged / issue closed / PID dead) and auto-remove
     each worktree + branch + registry entry as it completes (`-DryRun` previews the teardown).
     The teardown is merge-safe: a session whose PR MERGED is torn down as before (the work is
@@ -323,7 +323,7 @@ Loaded on demand by /board (#573): this is the verb's complete contract — foll
 ## Deep notes (tables, locks, registry, compaction survival)
 
 The daily driver: answers "¿qué hay pendiente?" and starts the chosen issue. Runs
-`scripts/Board-Work.ps1` in a conversational flow — steps 0–1 are questions the agent must ASK
+`<tools>/scripts/Board-Work.ps1` in a conversational flow — steps 0–1 are questions the agent must ASK
 and wait for; never assume the account or the scope:
 
 | Step | Command | What it does |
@@ -490,7 +490,7 @@ them instead of one-by-one (each still finishes through the same step 5):
 | `... -Parallel <nums> -Launch` | After starting, spawn ONE visible Claude session per worktree, each briefed to take its issue through step 5. Windows Terminal tab (grouped in one named window) when `wt` is on PATH; otherwise a standalone `pwsh` window per worktree |
 | `... -Parallel <nums> [-Launch] -DryRun` | Plan the whole batch (and, with `-Launch`, preview the exact launch commands) without mutating the board, touching git, or spawning anything |
 | `Board-Work.ps1 -Sessions` | Monitor the LIVE fleet from `sessions.json` (branch, worktree, launch method `via`, and the PR opened per branch). Dead-PID entries pruned on read; needs no `-ProjectNum` |
-| `Board-Work.ps1 -Sessions -Watch [-AutoClean]` | BLOCK polling each session until it finishes (PR MERGED / issue CLOSED / host PID dead), printing progress every `-WatchPollSec` (default 30s) up to `-WatchTimeoutSec` (default 1800s). With `-AutoClean`, tear each finished session down as it completes: kill the tab shell FIRST (the `pwsh -NoExit` left cwd'd in the worktree holds a handle → `git worktree remove` would fail), then `git worktree remove --force` + the branch delete + prune its `sessions.json` entry. The branch delete is merge-safe (#273): a session whose PR **MERGED** is force-deleted as before (the work is on the default branch; local ancestry can't prove this because the flow squash-merges), but one that finished **without** a merged PR (gate blocked, PR closed, agent crashed) is deleted with the safe `git branch -d` — git refuses it, the branch SURVIVES, and the teardown WARNs (in yellow) naming branch + issue instead of destroying the commits silently. Pass `-ForceDeleteBranch` to discard such a branch on purpose. The worktree removal is guarded the same way (#276): an unmerged session whose worktree still holds uncommitted/untracked files is NOT removed — the teardown WARNs with the file count and keeps worktree + branch + registry entry so a later run can retry; `-ForceRemoveWorktree` discards it on purpose. A merged session is torn down as before (its work landed) - EXCEPT a run that was brake-armed (`.agentic-board/brake-armed.json` in its worktree, merge on its contract): a merged PR there is either the human merge after review or the run merging past the brake (#440), and the marker + denial log the evidence would need live in the worktree the teardown deletes, so auto-clean refuses (#518), keeping worktree, branch and registry entry, and names why. Check who merged, then `-ForceRemoveWorktree` proceeds. `scripts/Fleet-Supervisor.ps1 -Check` reports the same situation from the record (marker + PR, with who merged and when) instead of asking the agent to self-report (#517). Also runs after `-Parallel <nums> -Launch/-Fleet -Watch`. `-DryRun` prints the teardown plan without touching git or killing anything (#135) |
+| `Board-Work.ps1 -Sessions -Watch [-AutoClean]` | BLOCK polling each session until it finishes (PR MERGED / issue CLOSED / host PID dead), printing progress every `-WatchPollSec` (default 30s) up to `-WatchTimeoutSec` (default 1800s). With `-AutoClean`, tear each finished session down as it completes: kill the tab shell FIRST (the `pwsh -NoExit` left cwd'd in the worktree holds a handle → `git worktree remove` would fail), then `git worktree remove --force` + the branch delete + prune its `sessions.json` entry. The branch delete is merge-safe (#273): a session whose PR **MERGED** is force-deleted as before (the work is on the default branch; local ancestry can't prove this because the flow squash-merges), but one that finished **without** a merged PR (gate blocked, PR closed, agent crashed) is deleted with the safe `git branch -d` — git refuses it, the branch SURVIVES, and the teardown WARNs (in yellow) naming branch + issue instead of destroying the commits silently. Pass `-ForceDeleteBranch` to discard such a branch on purpose. The worktree removal is guarded the same way (#276): an unmerged session whose worktree still holds uncommitted/untracked files is NOT removed — the teardown WARNs with the file count and keeps worktree + branch + registry entry so a later run can retry; `-ForceRemoveWorktree` discards it on purpose. A merged session is torn down as before (its work landed) - EXCEPT a run that was brake-armed (`.agentic-board/brake-armed.json` in its worktree, merge on its contract): a merged PR there is either the human merge after review or the run merging past the brake (#440), and the marker + denial log the evidence would need live in the worktree the teardown deletes, so auto-clean refuses (#518), keeping worktree, branch and registry entry, and names why. Check who merged, then `-ForceRemoveWorktree` proceeds. `<tools>/scripts/Fleet-Supervisor.ps1 -Check` reports the same situation from the record (marker + PR, with who merged and when) instead of asking the agent to self-report (#517). Also runs after `-Parallel <nums> -Launch/-Fleet -Watch`. `-DryRun` prints the teardown plan without touching git or killing anything (#135) |
 
 - **Only for INDEPENDENT issues.** Never parallelize a chain where one depends on another's
   merge — run those sequentially. The user picks which issues are safe to run together.
@@ -498,7 +498,7 @@ them instead of one-by-one (each still finishes through the same step 5):
   The briefing is written to `.agentic-board/briefing-<n>.txt` and read by the session, so no
   long prompt ever hits the command line. It names the plugin scripts (PR step, review gate,
   merge, fleet ledger) by a path the session can run in ANY repo: the repo-relative
-  `plugins/agentic-board/scripts/…` form when the session's working copy carries the plugin (this
+  `plugins/agentic-board-tools/scripts/…` form when the session's working copy carries the plugin (this
   repo), otherwise the absolute path of the install that composed it. A script that cannot be
   found is listed in a `WARNING` and the session is told to stop and report it — never to replace
   `New-BoardPR.ps1` with a bare `gh pr create` or to skip the review gate (#480).

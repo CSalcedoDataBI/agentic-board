@@ -11,8 +11,10 @@
 
 - **What it builds and for whom:** a Claude Code plugin that runs coding agents off a real GitHub
   Projects (v2) board — pick an issue, branch, build, review gate, PR and board moves — for anyone who
-  tracks work on a GitHub board. Also ships the `/skills`, `/knowledge`, `/scan`, `/expert`, `/cleanup`
-  and `/docs` modules.
+  tracks work on a GitHub board. Also ships the `/skills`, `/knowledge`, `/scan`, `/cleanup` and `/docs`
+  modules. Two plugins: `agentic-board` (Markdown only: commands and skills, the one listed in the
+  plugin directory) and `agentic-board-tools` (every script, preset and hook, installed from this
+  repository's marketplace only).
 - **Role:** tool.
 - **Public/private twin:** none.
 
@@ -32,11 +34,14 @@
 
 What is not touched without a plan step that names it:
 
-- `main` and `plugins/agentic-board/` on `main` — the plugin directory follows `main` and has a version
-  under review; every commit there replaces it. Feature PRs target `next`; `main` only receives the
-  release PR, and only under the directory protocol with the maintainer's OK.
+- `main` and `plugins/agentic-board/` — the plugin directory follows `stable`, which
+  `scripts/Build-Stable.ps1` builds from `plugins/agentic-board/` alone; every commit there replaces the version under
+  review. Feature PRs target `next`; `main` only receives the release PR, and only under the
+  directory protocol with the maintainer's OK. Nothing but Markdown, JSON and images goes in
+  `plugins/agentic-board/`: scripts and hooks belong in `plugins/agentic-board-tools/`.
 - `stable` and `release` branches and the `ref` in `.claude-plugin/marketplace.json` — they are what
-  installs fetch; they move only through the release workflow.
+  installs fetch; `release` moves only through the release workflow, `stable` only through
+  `scripts/Build-Stable.ps1` and a measured, plain push.
 - Internal state keys: the `.agentic-board/` state dir, `~/.agentic-board/backups`, the `ABIOS_*`
   environment variables and the `Get-AbiosStateDir` helper — on-disk identifiers on users' machines;
   renaming them orphans live sessions.
@@ -68,4 +73,4 @@ What is not touched without a plan step that names it:
 
 ## Approval
 
-Aprobada: 2026-11-01 (parent, by delegation, after review round 4)
+Aprobada: 2026-11-18 (AI-Factory, por delegación; decisiones de Cristóbal del 2026-11-17 citadas en la PR)

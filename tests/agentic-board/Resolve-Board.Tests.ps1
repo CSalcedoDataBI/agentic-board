@@ -14,7 +14,7 @@
     `-Exactly` is the assertion.) #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Resolve-Board.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Resolve-Board.ps1' | Resolve-Path
     # Resolve-Board picks its identity through the account map (#793). These tests must never read
     # the developer's own map or token: no map file means "ambient token", and the ambient token is
     # a dummy - gh is mocked, nothing leaves the process.

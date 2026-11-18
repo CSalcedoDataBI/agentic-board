@@ -3,7 +3,7 @@
 Loaded on demand by /board (#573).
 
 - **telemetry** — measure how the tool ACTUALLY behaved across the user's real sessions, by running
-  `scripts/Invoke-FieldScan.ps1`. Distinct from `doctor` (which audits this repo's branches) and
+  `<tools>/scripts/Invoke-FieldScan.ps1`. Distinct from `doctor` (which audits this repo's branches) and
   from `field` (which fills board columns): this reads local session transcripts and reports where
   agentic-board helped and where it got in the way.
   - **Incremental by watermark, never a `scanned` flag.** The ledger records how far each session
@@ -29,5 +29,5 @@ Loaded on demand by /board (#573).
     filed names that script. It reads GitHub (read-only) and files nothing; a failed read is reported
     and the sweep result is still printed. `-CandidatesFile <json>` matches against a local list
     instead (offline). The matching is the same code the feedback skill uses before filing
-    (`scripts/IssueSearch.ps1`). Only sessions swept in THIS run count: a second run that finds
+    (`<tools>/scripts/IssueSearch.ps1`). Only sessions swept in THIS run count: a second run that finds
     nothing new has no recurrence to report.

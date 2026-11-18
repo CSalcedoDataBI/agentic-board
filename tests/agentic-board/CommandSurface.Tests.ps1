@@ -17,7 +17,7 @@ $CommandCases = @(
         ForEach-Object { @{ Name = $_.Name; Path = $_.FullName } }
 )
 $ScriptCases = @(
-    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts') -Filter '*.ps1' |
+    Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts') -Filter '*.ps1' |
         Where-Object { $_.Name -ne 'Find-InternalVocabularyLeak.ps1' } |
         ForEach-Object { @{ Name = $_.Name; Path = $_.FullName } }
 )
@@ -35,7 +35,7 @@ BeforeAll {
     $script:CommandFiles = @(Get-ChildItem -Path $script:CommandsDir -Filter '*.md')
     $script:RealCommands = @($script:CommandFiles.BaseName)
     $env:ABIOS_VOCABLEAK_DOTSOURCE = '1'
-    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
+    . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Find-InternalVocabularyLeak.ps1' | Resolve-Path)
     $env:ABIOS_VOCABLEAK_DOTSOURCE = ''
     $script:InternalSkills = @(
         Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'skills') -Directory | ForEach-Object {
@@ -137,7 +137,7 @@ Describe 'Command surface — every command ends with the closing summary (#493)
         stops mid-thought. The expected headings are read from the renderer itself, so this test
         can never drift into being a second, stale copy of the contract. #>
     BeforeAll {
-        $summaryScript = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Summary.ps1' | Resolve-Path
+        $summaryScript = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Board-Summary.ps1' | Resolve-Path
         $prev = $env:ABIOS_BOARDSUMMARY_DOTSOURCE
         $env:ABIOS_BOARDSUMMARY_DOTSOURCE = '1'
         try { . $summaryScript } finally { $env:ABIOS_BOARDSUMMARY_DOTSOURCE = $prev }
@@ -241,7 +241,7 @@ Describe 'Command surface — verb and flag names are English (#733)' {
                     if ($l -match '^\s*\d+\.\s+([a-z][a-z0-9-]+)') { [pscustomobject]@{ Where = "$($cmd.Name) menu"; Name = $matches[1] } }
                 }
             }
-            foreach ($ps in (Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts') -Filter '*.ps1')) {
+            foreach ($ps in (Get-ChildItem -Path (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts') -Filter '*.ps1')) {
                 $ast = [System.Management.Automation.Language.Parser]::ParseFile($ps.FullName, [ref]$null, [ref]$null)
                 if ($ast.ParamBlock) {
                     foreach ($p in $ast.ParamBlock.Parameters) {

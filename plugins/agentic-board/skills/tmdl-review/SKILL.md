@@ -4,6 +4,12 @@ description: "Use when asked whether a Power BI or Fabric TMDL model change is s
 user-invocable: false
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, or `<tools>/scripts` is missing (a pointer left by an uninstall), agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # tmdl-review — detect breaking semantic-model changes
 
 PBIP repos store the Power BI / Fabric semantic model as **TMDL** (`*.tmdl`) text
@@ -11,7 +17,7 @@ files. A diff over those files is hard to read by eye: a dropped column, a chang
 `dataType`, or a deleted measure will break downstream reports, DAX, and refreshes,
 but looks the same in raw text as a harmless display-folder rename.
 
-`scripts/Tmdl-DiffReview.ps1` parses the model before/after a change and classifies
+`<tools>/scripts/Tmdl-DiffReview.ps1` parses the model before/after a change and classifies
 every schema change by severity.
 
 ## When to use
@@ -27,14 +33,14 @@ every schema change by severity.
 API, fetching base and head content by ref:
 
 ```powershell
-$env:GH_TOKEN = (& "${CLAUDE_PLUGIN_ROOT}/scripts/Get-GhAccount.ps1").Token   # see gh-account
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Tmdl-DiffReview.ps1" -Repo <owner/name> -PR <n>
+$env:GH_TOKEN = (& "<tools>/scripts/Get-GhAccount.ps1").Token   # see gh-account
+& "<tools>/scripts/Tmdl-DiffReview.ps1" -Repo <owner/name> -PR <n>
 ```
 
 **Local mode** — diffs `*.tmdl` with git in the current working copy:
 
 ```powershell
-& "${CLAUDE_PLUGIN_ROOT}/scripts/Tmdl-DiffReview.ps1" -Base main -Head HEAD
+& "<tools>/scripts/Tmdl-DiffReview.ps1" -Base main -Head HEAD
 ```
 
 ## Severity rules

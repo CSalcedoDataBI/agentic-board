@@ -1,0 +1,21 @@
+{
+  "name": "agentic-board-tools",
+  "displayName": "Agentic Board Tools",
+  "version": "0.44.0",
+  "description": "The scripts and hooks that agentic-board runs: board operations through gh, worktree launches, the review gate, the autonomy brake for brake-armed runs, and the session notices.",
+  "author": {
+    "name": "CSalcedoDataBI",
+    "email": "contacto@csalcedodatabi.com",
+    "url": "https://github.com/CSalcedoDataBI"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/CSalcedoDataBI/agentic-board",
+  "repository": "https://github.com/CSalcedoDataBI/agentic-board",
+  "keywords": [
+    "agentic-board",
+    "github-projects",
+    "scripts",
+    "hooks",
+    "autonomy-brake"
+  ]
+}

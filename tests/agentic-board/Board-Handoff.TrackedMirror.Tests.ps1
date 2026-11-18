@@ -13,8 +13,8 @@
     and is skipped on Linux; the gh-free hook test runs on both. #>
 
 BeforeAll {
-    $script:Script = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Handoff.ps1' | Resolve-Path).Path
-    $script:Hook   = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Handoff-SessionStartHook.ps1' | Resolve-Path).Path
+    $script:Script = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Board-Handoff.ps1' | Resolve-Path).Path
+    $script:Hook   = (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Handoff-SessionStartHook.ps1' | Resolve-Path).Path
     $env:ABIOS_HANDOFF_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_HANDOFF_DOTSOURCE = ''

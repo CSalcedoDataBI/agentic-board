@@ -118,7 +118,7 @@ verified: 8/10     # [V] claims / total claims
 
 ## Key files
 - plugins/agentic-board/skills/projects-admin/references/handoff.md
-- plugins/agentic-board/scripts/Board-Work.ps1 (sessions.json schema, ~L206)
+- plugins/agentic-board-tools/scripts/Board-Work.ps1 (sessions.json schema, ~L206)
 ```
 
 Frontmatter autofill maps directly from the `sessions.json` entry written by `Board-Work.ps1`
@@ -160,7 +160,7 @@ already wrote the transcript, on this machine, at
 `~/.claude/projects/<slug>/<session-id>.jsonl` (`<slug>` = the repo path with every
 non-alphanumeric character — `\`, `/`, `:` included — replaced by `-`).
 
-`scripts/Board-Handoff.ps1 -Recover`:
+`<tools>/scripts/Board-Handoff.ps1 -Recover`:
 
 1. Finds the **most recent transcript for this repo's slug**, excluding the running session
    (`-ExcludeSessionId`, default `$env:CLAUDE_CODE_SESSION_ID`; without an id, inside Claude Code,

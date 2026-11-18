@@ -8,7 +8,7 @@
     REAL sessions.json in a throwaway git repo; only gh is faked. #>
 
 BeforeAll {
-    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board' 'scripts' 'Board-Work.ps1' | Resolve-Path
+    $script:Script = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Board-Work.ps1' | Resolve-Path
     $env:ABIOS_BOARDWORK_DOTSOURCE = '1'
     . $script:Script
     $env:ABIOS_BOARDWORK_DOTSOURCE = ''
@@ -288,6 +288,9 @@ Describe 'a launched session is briefed from the registry row written at start (
         $work = Join-Path $TestDrive 'launch-work'
         New-Item -ItemType Directory -Path $work -Force | Out-Null
         Mock Start-Process { $null }
+        # -StopAtPR arms the brake, which needs the companion hook plugin (#768); not what this tests.
+        $env:ABIOS_BRAKEGUARD_DOTSOURCE = '1'; . (Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Brake-Guard.ps1'); $env:ABIOS_BRAKEGUARD_DOTSOURCE = ''
+        Mock Test-BrakeHookInstalled { @{ Ok = $true; Key = 'agentic-board-tools@agentic-board'; Reason = '' } }
         Push-Location $r6
         try {
             Write-SessionRegistryEntry -IssueNum 271 -Branch 'issue-271-x' -WorkPath $work -Repo 'home/site' -SessionPid 4242 -Via 'pwsh' -TargetRepos @('o/a') -CrossRepo $true

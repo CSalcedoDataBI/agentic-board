@@ -4,6 +4,12 @@ description: "Use when a diagram goes into a markdown artifact this plugin write
 user-invocable: false
 ---
 
+> **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
+> holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
+> one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
+> If neither exists, or `<tools>/scripts` is missing (a pointer left by an uninstall), agentic-board-tools is not installed: tell the user to run
+> `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
+
 # diagram-authoring — Mermaid in the house theme
 
 The single source of truth for **how this plugin draws diagrams**. The plugin writes markdown
@@ -23,8 +29,8 @@ Get the header from the plugin script (it prints the `%%{init}%%` line and, for 
 standard `classDef`s):
 
 ```powershell
-pwsh "${CLAUDE_PLUGIN_ROOT}/scripts/Diagram-Theme.ps1" header                       # flowchart TB
-pwsh "${CLAUDE_PLUGIN_ROOT}/scripts/Diagram-Theme.ps1" header -Type sequenceDiagram  # any other type
+pwsh "<tools>/scripts/Diagram-Theme.ps1" header                       # flowchart TB
+pwsh "<tools>/scripts/Diagram-Theme.ps1" header -Type sequenceDiagram  # any other type
 ```
 
 No PowerShell at hand? Copy the literal header from
@@ -100,8 +106,8 @@ A full worked example of each type is in [references/house-style.md](references/
 The SVG comes from an **unthemed `.mmd`** next to it (the script adds the theme):
 
 ```powershell
-pwsh "${CLAUDE_PLUGIN_ROOT}/scripts/Diagram-Theme.ps1" generate -Root .   # each x.mmd -> x-light.svg + x-dark.svg
-pwsh "${CLAUDE_PLUGIN_ROOT}/scripts/Diagram-Theme.ps1" check -Root .      # browser-free: exit 1 if one is stale or hand-edited
+pwsh "<tools>/scripts/Diagram-Theme.ps1" generate -Root .   # each x.mmd -> x-light.svg + x-dark.svg
+pwsh "<tools>/scripts/Diagram-Theme.ps1" check -Root .      # browser-free: exit 1 if one is stale or hand-edited
 ```
 
 `generate` needs Node (it runs `@mermaid-js/mermaid-cli` through `npx`, the version pinned in
