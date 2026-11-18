@@ -14,6 +14,7 @@
       5. the few scripts that read the Markdown plugin find it (BoardPluginRoot.ps1).  #>
 
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'PosixShell.TestKit.ps1'); Use-PosixShell
     $script:Repo  = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
     $script:Main  = Join-Path $script:Repo 'plugins' 'agentic-board'
     $script:Tools = Join-Path $script:Repo 'plugins' 'agentic-board-tools'

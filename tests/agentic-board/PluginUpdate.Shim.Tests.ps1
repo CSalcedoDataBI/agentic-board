@@ -11,6 +11,7 @@
     session; anything else must reach pwsh. An invalid session id must stay silent.  #>
 
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'PosixShell.TestKit.ps1'); Use-PosixShell
     $script:Scripts = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' | Resolve-Path
     $script:Shim = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'PluginStale-NoticePreCheck.sh' | Resolve-Path   # the companion plugin (#768)
     $script:Hook = Join-Path $script:Scripts 'PluginStale-NoticeHook.ps1'

@@ -12,6 +12,7 @@
       - marker + anything unclear -> deny. Inside an armed run, "I could not tell" is not a yes. #>
 
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'PosixShell.TestKit.ps1'); Use-PosixShell
     $script:Hook = Join-Path $PSScriptRoot '..' '..' 'plugins' 'agentic-board-tools' 'scripts' 'Brake-PreToolUseHook.ps1' | Resolve-Path
     $script:Root = Join-Path ([System.IO.Path]::GetTempPath()) ("brakehook-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
