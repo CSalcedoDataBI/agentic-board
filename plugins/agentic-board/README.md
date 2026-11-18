@@ -21,7 +21,7 @@ marketplace. Start a new session after installing it.
 
 ### Without agentic-board-tools
 
-- The commands and skills load, and `/board` still shows its menu and explains every verb.
+- The commands and skills load. `/board` stops with the install line instead of its menu, because the menu is read by a script.
 - The skills still answer questions about how the suite works (verbs, flags, the review gate,
   the brake), because that text is Markdown in this plugin.
 - Every scripted verb (`/board work`, `fill`, `doctor`, `/scan`, `/skills`, `/knowledge`, `/docs`,
@@ -31,7 +31,7 @@ marketplace. Start a new session after installing it.
 
 ## Requirements
 
-- [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (`pwsh`), `git`, and the [`gh` CLI](https://cli.github.com/).
+- [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (`pwsh`), `git`, `sh` (on Windows, the one Git for Windows ships), and the [`gh` CLI](https://cli.github.com/).
 - A GitHub token with the `repo` and `project` scopes. With one account, `gh auth login` and
   `gh auth refresh --scopes project` are enough: the plugin falls back to `GH_TOKEN`, then
   `gh auth token`. With several accounts, `/board setup` writes `~/.agentic-board/accounts.json`,

@@ -8,7 +8,7 @@ disable-model-invocation: true
 > **Scripts:** `<tools>` below is the folder of the companion plugin **agentic-board-tools**, which
 > holds every script and hook of this suite. Take it from `$AGENTIC_BOARD_TOOLS` (Bash), or read the
 > one line in `~/.agentic-board/tools-root` (PowerShell: `$tools = (Get-Content ~/.agentic-board/tools-root -TotalCount 1).Trim()`).
-> If neither exists, agentic-board-tools is not installed: tell the user to run
+> If neither exists, or `<tools>/scripts` is missing (a pointer left by an uninstall), agentic-board-tools is not installed: tell the user to run
 > `/plugin install agentic-board-tools@agentic-board`, start a new session, and stop.
 
 # skills-bootstrap — curated toolkits by profile, no duplicates
