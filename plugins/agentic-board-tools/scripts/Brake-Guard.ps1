@@ -3,7 +3,7 @@
     The irreversible brake, as a mechanical control (#440 / #516).
 
 .DESCRIPTION
-    `/board expert auto` brakes on the irreversible - merge, deploy, refresh, publish, delete.
+    A brake-armed run (`/board work -Launch -StopAtPR`, or one with a time budget) brakes on the irreversible - merge, deploy, refresh, publish, delete.
     Until now that brake was PROSE: a paragraph in the launch briefing asking the session not to
     merge. An observed run merged its own PR anyway, and the brake reported itself ARMED the whole
     time. Instruction alone is what drifted; the answer is a backstop that does not depend on the
@@ -14,10 +14,10 @@
     marker and REFUSES the tool call before it executes. The session cannot talk its way past a
     control it never gets to run.
 
-    POLARITY - deliberately the opposite of Expert-Autonomy.Test-IsIrreversible, and the
-    difference matters:
+    POLARITY - deliberately the opposite of an action-name classifier, and the difference
+    matters:
 
-      Expert-Autonomy classifies an ACTION NAME ('merge', 'deploy') from a closed vocabulary, so
+      An action-name classifier sorts an ACTION NAME ('merge', 'deploy') from a closed vocabulary, so
       an unknown verb fails SAFE -> treated as irreversible, stop and ask.
 
       This file classifies an arbitrary SHELL COMMAND STRING. The space of harmless commands is
@@ -118,7 +118,7 @@ $script:AmbiguousPushPatterns = @(
 $script:PlainCommandPattern = '^[A-Za-z0-9_./:=,+@ \t&|;<>-]+\z'
 
 # Command patterns that REACH an irreversible action, grouped by the contract's action vocabulary
-# (the same words Expert-Autonomy uses, so one contract drives both).
+# (merge, deploy, refresh, publish, delete).
 #
 # Every pattern is matched against a normalized command string (lowercased, whitespace collapsed).
 # They are deliberately specific: a pattern that over-matches blocks legitimate work and the run
@@ -504,7 +504,7 @@ function New-BrakeMarkerJson {
         repo         = "$Repo".Trim()
         branch       = $Branch
         host         = $HostName
-        note         = 'Written by /board expert auto. Removing this file disarms the brake for this worktree.'
+        note         = 'Written by a brake-armed /board work launch. Removing this file disarms the brake for this worktree.'
     } | ConvertTo-Json -Depth 5)
 }
 

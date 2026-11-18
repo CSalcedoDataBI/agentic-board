@@ -150,7 +150,7 @@
     its text - closing the hole where an autonomous run vouches for its own work. Off by default:
     the human /board work flow, including its own -RecordReview fallback on the SAME account when
     Copilot/claude-review are unavailable, is supervised and must keep working unchanged. Pass
-    this only from a context that KNOWS it is an unsupervised autonomous run (board-expert).
+    this only from a context that KNOWS it is an unsupervised autonomous run (a brake-armed launch).
 
 .PARAMETER TokenVar
     Windows USER env var holding the PAT. Defaults to GITHUB_TOKEN_PERSONAL.
@@ -208,7 +208,7 @@ param(
     # are unavailable) posts that record under their OWN account - the same account that opened
     # the PR on a solo repo. That is supervised and legitimate; blanket-rejecting it would break
     # the gate's main fallback path for exactly the reviewer-scarce situations it exists for.
-    # The hole this closes is different: an AUTONOMOUS board-expert run posting its own
+    # The hole this closes is different: an AUTONOMOUS run posting its own
     # [abios-review] with nobody watching. Only a caller that KNOWS it is that context (the
     # autonomous launcher) should pass this - it makes evidence authored by the PR's own account
     # not count, so the run cannot certify its own work no matter what text it posts.

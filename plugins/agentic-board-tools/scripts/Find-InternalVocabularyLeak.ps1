@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Reported first-hand by the product owner, a BI professional and not a programmer, after a
-    live `/expert auto` session: "me choca ver como esto Expert-Auto.ps1; PS1 no se para que" —
+    live autonomous session (the since-removed expert command): "me choca ver como esto Expert-Auto.ps1; PS1 no se para que" —
     seeing a raw script filename told them nothing and broke their trust that the tool was
     speaking to them, not at them (#491).
 

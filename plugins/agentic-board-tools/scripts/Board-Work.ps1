@@ -242,14 +242,14 @@ param(
     [switch]$IgnoreBlocked,
     [switch]$TakeOver,
     # Irreversible brake (#440): brief the launched session to stop at a reviewed PR instead of
-    # ordering the merge. Set by /expert auto when the contract marks `merge` as irreversible.
+    # ordering the merge. Set by a caller that must not merge (a brake-armed autonomous run).
     # When neither -StopAtPR nor -AllowMerge is specified, Resolve-LaunchBrake brakes by default (#598).
     [switch]$StopAtPR,
     # Explicit opt-in to autonomous merging (#598). A launched session NEVER merges on its own
     # unless the human passes this flag — the default is to stop at a reviewed PR. Pass
     # -AllowMerge only when a fully autonomous close is intentional and the issue has been reviewed.
     [switch]$AllowMerge,
-    # Path to the full brief for the launched session (e.g. .agentic-board/expert-brief-<n>.md),
+    # Path to the full brief for the launched session (e.g. .agentic-board/brief-<n>.md),
     # which it is told to read first and treat as overriding the generic steps.
     [string]$BriefFile     = "",
     # The contract's irreversible action list, recorded in the brake marker so the mechanical

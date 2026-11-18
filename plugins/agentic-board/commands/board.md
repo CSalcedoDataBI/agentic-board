@@ -92,7 +92,7 @@ improvise the recipe from this summary:
   standing answer with `-PreferGroupedPRs on|off|auto` (`show` reads the current value and where it
   came from; the menu above prints it). Full contract: `references/verbs-work.md`.
 - **plan** — turn a plan into a tracked epic + native sub-issues (interactive or from a doc),
-  with the enriched sections `/board expert auto` reads. Full contract: `references/verbs-plan.md`.
+  optionally with enriched sections (research, role seed, deliverables, test plan). Full contract: `references/verbs-plan.md`.
 - **fill** — detect and fill ALL board gaps (drafts→issues, assignees, Status, Priority, Size,
   Type), with `--dry-run` / `--auto` variants. Full contract: `references/verbs-fill.md`.
 - **field** — two DISTINCT scripts (apply a preset vs bulk-fill one field by rule), including

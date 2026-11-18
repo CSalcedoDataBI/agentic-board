@@ -62,8 +62,8 @@ function Resolve-BriefingScriptRef {
 # autonomy sentence per CLI without another signature change; Phase 1 keeps the
 # body text identical for every repl CLI.
 #
-# -StopAtPR is the irreversible brake (#440). The auto-expert's contract can mark `merge` as
-# irreversible, but that brake used to live ONLY in expert-brief-<n>.md - a file this launcher
+# -StopAtPR is the irreversible brake (#440). An autonomous caller's contract can mark `merge` as
+# irreversible, but that brake used to live ONLY in a separate brief file - a file this launcher
 # never read - while THIS briefing ordered the merge outright and made it the completion
 # condition. A session that merged to main was obeying its brief, not defying it. With the
 # brake on, the merge step is never emitted and the finish line moves to a reviewed PR.

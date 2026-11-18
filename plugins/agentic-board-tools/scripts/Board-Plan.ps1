@@ -36,7 +36,7 @@
     Enriched item: research / prior-art findings (what exists, what to reuse).
 
 .PARAMETER RoleSeed
-    Enriched item: the expert-role objective the /board expert auto-mode adopts.
+    Enriched item: the role objective the agent that works the plan adopts.
 
 .PARAMETER Deliverables
     Enriched item: one or more concrete deliverables (rendered as a bullet list).
@@ -113,9 +113,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ── Pure core (unit-tested via the dot-source guard) ────────────────────────────
-# Format-EnrichedEpicBody renders the four standard items the /board expert auto-mode
+# Format-EnrichedEpicBody renders the four standard items an agent working the plan
 # reads: Research/prior-art, Role seed, Deliverables, Test plan (DoD). An omitted section
-# renders a detectable TBD placeholder so `auto` can tell an unfilled plan from a filled one.
+# renders a detectable TBD placeholder, so an unfilled plan can be told from a filled one.
 function Format-EnrichedEpicBody {
     [CmdletBinding()]
     param(
@@ -125,7 +125,7 @@ function Format-EnrichedEpicBody {
         [string[]]$Deliverables = @(),
         [string[]]$TestPlan = @()
     )
-    $ph = '_TBD - fill before /board expert auto_'
+    $ph = '_TBD - fill before work starts_'
     $text = { param($s) if ([string]::IsNullOrWhiteSpace($s)) { $ph } else { $s.Trim() } }
     $bullets = {
         param($arr)

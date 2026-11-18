@@ -609,8 +609,8 @@ Describe 'Resolve-LaunchBrake — all fleet sessions brake on merge by default (
     It 'honours an explicit -StopAtPR:$true even without -AllowMerge' {
         Resolve-LaunchBrake -AllowMerge $false -StopAtPRBound $true -StopAtPR $true | Should -BeTrue
     }
-    It 'honours an explicit -StopAtPR:$false (an expert contract that allows merging)' {
-        # Expert-Auto.ps1 passes -StopAtPR:$false when the contract does not mark merge irreversible.
+    It 'honours an explicit -StopAtPR:$false (a caller that allows merging)' {
+        # An autonomous caller passes -StopAtPR:$false when its contract does not mark merge irreversible.
         # That explicit opt-out must be respected; the default brake must not override it.
         Resolve-LaunchBrake -AllowMerge $false -StopAtPRBound $true -StopAtPR $false | Should -BeFalse
     }

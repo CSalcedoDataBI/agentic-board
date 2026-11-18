@@ -1,6 +1,6 @@
 ---
 name: gh-account
-description: "Use before any agentic-board GitHub Projects/issues operation: resolves the account for the repo owner and injects its token as GH_TOKEN per call, without gh auth switch. Not for general gh/git use outside agentic-board commands. Triggers — a /board, /scan or /expert GitHub call, a 403 on a board, INSUFFICIENT_SCOPES/read:project."
+description: "Use before any agentic-board GitHub Projects/issues operation: resolves the account for the repo owner and injects its token as GH_TOKEN per call, without gh auth switch. Not for general gh/git use outside agentic-board commands. Triggers — a /board or /scan GitHub call, a 403 on a board, INSUFFICIENT_SCOPES/read:project."
 user-invocable: false
 ---
 

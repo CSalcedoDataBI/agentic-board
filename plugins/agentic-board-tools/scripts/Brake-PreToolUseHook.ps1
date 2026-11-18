@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Reads the PreToolUse payload on stdin, and when the current working directory sits inside a
-    worktree that `/board expert auto` armed (a .agentic-board/brake-armed.json marker exists),
+    worktree that a brake-armed `/board work` launch armed (a .agentic-board/brake-armed.json marker exists),
     denies commands that would merge / deploy / refresh / publish / delete.
 
     This is the half of the brake that does not depend on the agent's cooperation. The briefing

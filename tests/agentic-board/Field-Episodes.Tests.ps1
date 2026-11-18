@@ -25,11 +25,11 @@ Describe 'Get-InvokedTool (what counts as using agentic-board)' {
 
     It 'recognises a plugin script by name regardless of the path in front of it' {
         Get-InvokedTool -Command 'pwsh -File "C:/long/cache/0.27.0/scripts/Board-Work.ps1" -Sessions' | Should -Be 'Board-Work.ps1'
-        Get-InvokedTool -Command 'pwsh plugins/agentic-board-tools/scripts/Expert-Auto.ps1 -Issue 5'        | Should -Be 'Expert-Auto.ps1'
+        Get-InvokedTool -Command 'pwsh plugins/agentic-board-tools/scripts/Board-Fill.ps1 -Issue 5'         | Should -Be 'Board-Fill.ps1'
     }
 
     It 'recognises the typed command surface' {
-        Get-InvokedTool -Command '/agentic-board:expert auto 265' | Should -Be '/agentic-board:expert'
+        Get-InvokedTool -Command '/agentic-board:scan apply 265'  | Should -Be '/agentic-board:scan'
         Get-InvokedTool -Command '/board work'                    | Should -Be '/board'
     }
 
@@ -50,7 +50,7 @@ Describe 'Signal: repetition' {
     }
 
     It 'does not fire for two DIFFERENT scripts in sequence (a normal workflow)' {
-        $ev = @( (E 0 assistant 'Expert-Config.ps1'), (E 1 assistant 'Expert-Auto.ps1 -Issue 5') )
+        $ev = @( (E 0 assistant 'Board-Plan.ps1'), (E 1 assistant 'Board-Fill.ps1 -Issue 5') )
         $ep = @(Get-FieldEpisodes -Events $ev -Window 5)
         $ep[0].signals | Should -Not -Contain 'repetition'
     }

@@ -26,9 +26,9 @@ Loaded on demand by /board (#573).
   duplicate), and registers epic + children. Suggest `/board fill` for Priority/Size/Type and
   `/board work` to start the first task. Issues are created ONLY in the current repo (origin) —
   never elsewhere.
-  Optionally enrich the epic with the four standard items the **`/board expert`** auto-mode
-  reads: `-Research "<prior-art / docs found>"`, `-RoleSeed "<expert role objective>"`,
+  Optionally enrich the epic with the four standard items an agent working the plan reads:
+  `-Research "<prior-art / docs found>"`, `-RoleSeed "<role objective>"`,
   `-Deliverables "d1","d2"`, `-TestPlan "DoD1","DoD2"` (here `-Description` becomes the Goal).
-  Any omitted section renders a `_TBD - fill before /board expert auto_` placeholder, so a plan
-  can be created now and completed before running the expert. All four are optional — with none,
+  Any omitted section renders a `_TBD - fill before work starts_` placeholder, so a plan can be
+  created now and completed before work starts. All four are optional — with none,
   the epic body is rendered exactly as before.
