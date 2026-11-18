@@ -273,7 +273,7 @@
       "type": "repo",
       "title": "Ejemplo de harness Leader-Implementer-Reviewer",
       "ref": "https://github.com/betta-tech/ejemplo-harness-subagentes",
-      "note": "Demo del patron: 3 roles con limites explicitos (el reviewer nunca aprueba su propio trabajo), estado persistido en disco (progress/*.md) en vez de circular por chat (anti telefono-descompuesto), verificacion por tests reales. board-expert (skills/board-expert) ya aplica el estado-en-disco y la divulgacion progresiva, pero es UNA sola persona autonoma sin reviewer separado dentro de la sesion -- brecha real, ver issue de cierre.",
+      "note": "Demo del patron: 3 roles con limites explicitos (el reviewer nunca aprueba su propio trabajo), estado persistido en disco (progress/*.md) en vez de circular por chat (anti telefono-descompuesto), verificacion por tests reales. Se evaluo para el antiguo modo experto, que salio de agentic-board en 0.45.0 y ahora vive en AI-Factory.",
       "added": "2026-08-19"
     }
   ]
