@@ -73,7 +73,7 @@ BeforeAll {
 
     function script:PayloadFor {
         param([string]$Event, [string]$Cwd, [string]$Tool = 'Bash', [string]$ToolCommand = 'echo hi')
-        $sid = '0b7e6a52-1c2d-4e3f-8a9b-0c1d2e3f4a5b'
+        $sid = '00000000-0000-4000-8000-000000000812'
         $p = [ordered]@{ session_id = $sid; hook_event_name = $Event; cwd = $Cwd }
         switch ($Event) {
             'SessionStart'     { $p.source = 'startup' }
