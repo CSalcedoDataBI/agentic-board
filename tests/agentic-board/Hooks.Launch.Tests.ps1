@@ -1,4 +1,4 @@
-#Requires -Modules Pester
+﻿#Requires -Modules Pester
 <#  Every hooks.json command line, launched the way Claude Code launches it (#812).
 
     Claude Code puts the plugin root into the command text and runs it with `bash -c` (Git Bash on
@@ -35,9 +35,9 @@ BeforeAll {
     }
 
     # The root as Claude Code may write it. Forward-slash is the form that broke 0.44.0.
-    $script:Roots = if ($script:OnWindows) {
+    $script:Roots = @(if ($script:OnWindows) {
         @($script:PluginCopy.Replace('\', '/'), $script:PluginCopy)
-    } else { @($script:PluginCopy) }
+    } else { $script:PluginCopy })
 
     $script:HookHome = Join-Path $TestDrive 'home'
     New-Item -ItemType Directory -Path $script:HookHome -Force | Out-Null
