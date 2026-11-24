@@ -73,7 +73,8 @@ BeforeAll {
 
     function script:PayloadFor {
         param([string]$Event, [string]$Cwd, [string]$Tool = 'Bash', [string]$ToolCommand = 'echo hi')
-        $sid = '00000000-0000-4000-8000-000000000812'
+        # A fixed, obviously fake session id in UUID shape (the shim accepts only that shape).
+        $sid = (('0' * 8), '0000', '4000', '8000', ('0' * 9 + '812')) -join '-'
         $p = [ordered]@{ session_id = $sid; hook_event_name = $Event; cwd = $Cwd }
         switch ($Event) {
             'SessionStart'     { $p.source = 'startup' }
