@@ -15,8 +15,14 @@
 #
 # FAIL DIRECTION: with no marker it exits 0 (allow) - an ordinary session must never be slowed or
 # blocked. With a marker, whatever the real hook decides is the answer, exit code included - and
-# with a marker but no pwsh it DENIES (#764): exec failing would exit 127, which Claude Code treats
-# as a non-blocking error and lets the tool call through, so the armed run would fail open.
+# with a marker but no pwsh it DENIES (#764), and so it does when pwsh runs but the hook errors
+# (#812): any exit other than 0 or 2 is a non-blocking error to Claude Code, which would let the
+# tool call through, so the armed run would fail open.
+#
+# Launch (#812): hooks.json calls `sh "<root>/scripts/Brake-PreCheck.sh"`. Never `cmd /d /c "<root>"`:
+# under Git Bash a forward-slash root like C:/Users/<name> reaches cmd.exe with "/<first letter>" read
+# as a switch, and the hook never runs. tests/agentic-board/Hooks.Launch.Tests.ps1 runs every
+# hooks.json line the way Claude Code does, with such a root.
 #
 # The walk climbs with ${d%/*} from $PWD instead of naming parent paths literally: the directory
 # validator refuses a plugin command that spells a path above the plugin folder (#768), and this is
@@ -29,7 +35,18 @@ while [ "$n" -lt 4 ] && [ -n "$d" ]; do
       printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"BRAKE: this run is brake-armed but pwsh (PowerShell 7) is not on PATH, so the brake cannot decide. Refusing."}}'
       exit 0
     fi
-    exec pwsh -NoProfile -File "$(dirname "$0")/Brake-PreToolUseHook.ps1"
+    # Not exec (#812): if pwsh itself errors (the hook file missing, a crash before its own
+    # try/catch), its exit code would be a non-blocking hook error and the armed call would pass.
+    # Exit 0 or 2 is the real hook's answer and goes through unchanged; anything else is the
+    # brake failing to run, which inside an armed run is a refusal, said out loud.
+    out=$(pwsh -NoProfile -File "$(dirname "$0")/Brake-PreToolUseHook.ps1")
+    rc=$?
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
+      [ -n "$out" ] && printf '%s\n' "$out"
+      exit "$rc"
+    fi
+    printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"BRAKE: this run is brake-armed but the brake hook failed to run (pwsh exit $rc), so it cannot decide. Refusing.\"}}"
+    exit 0
   fi
   [ "$d" = "/" ] && break
   d=${d%/*}
